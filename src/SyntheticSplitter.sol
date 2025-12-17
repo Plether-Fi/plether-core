@@ -49,6 +49,9 @@ contract SyntheticSplitter is Ownable, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 7 days;
 
+    uint256 public harvestRewardPercent = 1;
+    uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
+
     // Liquidation State
     bool public isLiquidated; 
 
@@ -222,53 +225,36 @@ contract SyntheticSplitter is Ownable, Pausable {
     }
 
     // ==========================================
-    // 4. YIELD HARVESTING
+    // 4. HARVEST (Permissionless)
     // ==========================================
 
-    function harvestYield() external onlyOwner {
+    function harvestYield() external whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
         uint256 totalAssets = yieldAdapter.totalAssets();
-        // Add Local Buffer to Total Assets calculation for accuracy?
-        // No, yield is only generated inside the adapter.
-        // We compare Adapter Assets vs (Required Backing - Local Buffer)
-        // BUT simpler: We treat Local Buffer as part of Principal.
-        
-        // Correct Formula: 
-        // Total Holdings = AdapterAssets + LocalBuffer
-        // Required = TotalSupply * $2.00
-        // Surplus = Total Holdings - Required
-
         uint256 localBuffer = usdc.balanceOf(address(this));
         uint256 totalHoldings = totalAssets + localBuffer;
         
         uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
 
-        if (totalHoldings <= requiredBacking) {
-            revert Splitter__NoSurplus();
-        }
+        if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) revert Splitter__NoSurplus();
 
         uint256 surplus = totalHoldings - requiredBacking;
 
-        // We prefer to withdraw surplus from Adapter to keep Buffer full.
-        // If Adapter doesn't have enough (rare), we take from Buffer.
-        
+        // Withdraw from adapter
         if (totalAssets >= surplus) {
              yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
-             // Surplus exists but is largely in the buffer (weird edge case),
-             // just withdraw what we can from adapter or just use buffer.
-             // For simplicity, we assume yield comes from adapter.
-             yieldAdapter.withdraw(surplus, address(this), address(this));
+             yieldAdapter.withdraw(totalAssets, address(this), address(this));
         }
 
-        // Split Logic
-        uint256 treasuryShare = (surplus * 20) / 100;
-        uint256 stakingShare = surplus - treasuryShare;
+        uint256 callerCut = (surplus * harvestRewardPercent) / 100;
+        uint256 remaining = surplus - callerCut;
+        uint256 treasuryShare = (remaining * 20) / 100;
+        uint256 stakingShare = remaining - treasuryShare;
 
-        if (treasury != address(0)) {
-            usdc.safeTransfer(treasury, treasuryShare);
-        }
+        if (callerCut > 0) usdc.safeTransfer(msg.sender, callerCut);
+        if (treasury != address(0)) usdc.safeTransfer(treasury, treasuryShare);
 
         if (staking != address(0)) {
             usdc.safeTransfer(staking, stakingShare);
