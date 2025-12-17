@@ -49,6 +49,7 @@ contract SyntheticSplitter is Ownable, Pausable {
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant TIMELOCK_DELAY = 7 days;
+    uint256 public lastUnpauseTime;
 
     uint256 public harvestRewardPercent = 1;
     uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
@@ -77,6 +78,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     error Splitter__InvalidProposal();
     error Splitter__NoSurplus();
     error Splitter__StalePrice();
+    error Splitter__GovernanceLocked();
 
     constructor(
         address _oracle,
@@ -268,8 +270,17 @@ contract SyntheticSplitter is Ownable, Pausable {
     }
 
     // ==========================================
-    // 5. GOVERNANCE (Time-Locks)
+    // 5. GOVERNANCE
     // ==========================================
+
+    // --- Helper: Centralized Security Check ---
+    function _checkLiveness() internal view {
+        if (paused()) revert Splitter__GovernanceLocked();
+        // Using TIMELOCK_DELAY (7 days) as the Cooldown
+        if (block.timestamp < lastUnpauseTime + TIMELOCK_DELAY) {
+            revert Splitter__GovernanceLocked();
+        }
+    }
 
     // --- Fee Receivers ---
     function proposeFeeReceivers(address _treasury, address _staking) external onlyOwner {
@@ -282,6 +293,8 @@ contract SyntheticSplitter is Ownable, Pausable {
     function finalizeFeeReceivers() external onlyOwner {
         if (feesActivationTime == 0) revert Splitter__InvalidProposal();
         if (block.timestamp < feesActivationTime) revert Splitter__TimelockActive();
+
+        _checkLiveness();
 
         treasury = pendingFees.treasury;
         staking = pendingFees.staking;
@@ -302,6 +315,8 @@ contract SyntheticSplitter is Ownable, Pausable {
     function finalizeAdapter() external onlyOwner {
         if (pendingAdapter == address(0)) revert Splitter__InvalidProposal();
         if (block.timestamp < adapterActivationTime) revert Splitter__TimelockActive();
+
+        _checkLiveness();
 
         IERC4626 oldAdapter = yieldAdapter;
         IERC4626 newAdapter = IERC4626(pendingAdapter);
@@ -328,7 +343,10 @@ contract SyntheticSplitter is Ownable, Pausable {
     // ADMIN HELPERS
     // ==========================================
     function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function unpause() external onlyOwner {
+      lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
+      _unpause();
+    }
 
     function _getOraclePrice() internal view returns (uint256) {
         (

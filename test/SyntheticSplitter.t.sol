@@ -7,6 +7,7 @@ import "../src/YieldAdapter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
 
+// 6 Decimal USDC Mock
 contract MockUSDC is MockERC20 {
     constructor() MockERC20("USDC", "USDC") {}
     function decimals() public pure override returns (uint8) { return 6; }
@@ -15,29 +16,43 @@ contract MockUSDC is MockERC20 {
 contract SyntheticSplitterTest is Test {
     SyntheticSplitter splitter;
     YieldAdapter adapter;
+    
     MockUSDC usdc;
     MockAToken aUsdc;
     MockPool pool;
     MockOracle oracle;
 
     address alice = address(0x1);
+    address bob = address(0x2); // Keeper
     address treasury = address(0x999);
     address staking = address(0x888);
     
-    uint256 constant CAP = 200_000_000; // $2.00
+    uint256 constant CAP = 200_000_000; // $2.00 (8 decimals)
+    uint256 constant INITIAL_BALANCE = 100_000 * 1e6; 
 
     function setUp() public {
+
+        // We move to year 2025 to avoid underflow when subtracting 24 hours
+        vm.warp(1735689600);
+
+        // 1. Deploy Mocks
         usdc = new MockUSDC();
         aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc)); 
         pool = new MockPool(address(usdc), address(aUsdc));
-        oracle = new MockOracle(100_000_000, "Basket");
+        oracle = new MockOracle(100_000_000, "Basket"); // $1.00 Start
 
-        // Fund Pool and Alice
+        // 2. Fund Pool (So withdrawals work)
         usdc.mint(address(pool), 1_000_000 * 1e6);
-        usdc.mint(alice, 10_000 * 1e6);
 
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
+        // 3. Deploy Adapter
+        adapter = new YieldAdapter(
+            IERC20(address(usdc)), 
+            address(pool), 
+            address(aUsdc), 
+            address(this)
+        );
 
+        // 4. Deploy Splitter
         splitter = new SyntheticSplitter(
             address(oracle), 
             address(usdc), 
@@ -45,10 +60,17 @@ contract SyntheticSplitterTest is Test {
             CAP,
             treasury
         );
+
+        // 5. Setup Users
+        usdc.mint(alice, INITIAL_BALANCE);
+        usdc.mint(bob, INITIAL_BALANCE);
     }
 
-    // --- MINT WITH BUFFER ---
-    function test_Mint_SplitsToBuffer() public {
+    // ==========================================
+    // 1. CORE LOGIC (Mint/Burn/Buffer)
+    // ==========================================
+
+    function test_Mint_CorrectlySplitsFunds() public {
         uint256 mintAmount = 100 * 1e18; // 100 Tokens
         uint256 cost = 200 * 1e6;        // $200 USDC
 
@@ -57,98 +79,206 @@ contract SyntheticSplitterTest is Test {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
-        // 1. Check Splitter Buffer (10%)
-        // 10% of 200 = 20 USDC
-        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6);
-
-        // 2. Check Adapter Deposit (90%)
-        // 90% of 200 = 180 USDC
-        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6);
+        // Check Buffer (10% of 200 = 20)
+        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6, "Buffer Incorrect");
+        // Check Vault (90% of 200 = 180)
+        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Vault Incorrect");
+        
+        // Check Tokens
+        assertEq(splitter.tokenA().balanceOf(alice), mintAmount);
+        assertEq(splitter.tokenB().balanceOf(alice), mintAmount);
     }
 
-    // --- BURN WITH BUFFER ---
     function test_Burn_UsesBufferFirst() public {
-        // Setup: Mint 100 ($200 cost -> 20 in Buffer, 180 in Adapter)
+        // Setup: Mint 100 ($20 Buffer, 180 Vault)
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
 
         // Act: Burn 10 ($20 Refund)
-        // Since Buffer has 20, it should cover this entirely
+        // Buffer has 20. Should barely cover it without touching vault.
         splitter.burn(10 * 1e18);
         vm.stopPrank();
 
-        // Check:
-        // Buffer should now be 0
-        assertEq(usdc.balanceOf(address(splitter)), 0);
-        // Adapter should be untouched (still 180)
-        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6);
+        // Assertions
+        assertEq(usdc.balanceOf(address(splitter)), 0, "Buffer should be empty");
+        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Vault should be untouched");
+        assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 180 * 1e6); // Only spent 180 net
     }
 
-    function test_Burn_UsesAdapterIfBufferEmpty() public {
-        // Setup: Mint 100 ($20 Buffer, 180 Adapter)
+    function test_Burn_UsesVaultIfBufferInsufficient() public {
+        // Setup: Mint 100 ($20 Buffer, 180 Vault)
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
 
         // Act: Burn 50 ($100 Refund)
-        // Buffer (20) < Refund (100). 
-        // Logic: Pulls full 100 from Adapter.
+        // Buffer (20) < Refund (100). Must withdraw 100 from Vault.
         splitter.burn(50 * 1e18);
         vm.stopPrank();
 
-        // Check:
-        // Buffer remains 20 (untouched because logic chose path B)
-        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6);
-        // Adapter reduced by 100 (180 - 100 = 80)
-        assertEq(adapter.balanceOf(address(splitter)), 80 * 1e6);
+        // Assertions
+        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6, "Buffer should be ignored/preserved");
+        assertEq(adapter.balanceOf(address(splitter)), 80 * 1e6, "Vault should decrease by 100");
     }
 
-    // --- EJECTION SEAT ---
-    function test_EjectLiquidity() public {
-        // Setup: Mint 100 ($20 Buffer, 180 Adapter)
+    // ==========================================
+    // 2. SAFETY CHECKS (Oracle/Caps)
+    // ==========================================
+
+    function test_Revert_IfOracleStale() public {
+        // Make oracle old (25 hours ago)
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        
+        vm.expectRevert(SyntheticSplitter.Splitter__StalePrice.selector);
+        splitter.mint(10 * 1e18);
+        vm.stopPrank();
+    }
+
+    function test_Revert_IfLiquidationTriggered() public {
+        // Set price to $2.00 (CAP)
+        oracle.updatePrice(200_000_000);
+
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        splitter.mint(10 * 1e18);
+        vm.stopPrank();
+    }
+
+    function test_EmergencyRedeem_OnlyWorksIfLiquidated() public {
+        // Normal price
+        oracle.updatePrice(100_000_000);
+
+        vm.startPrank(alice);
+        vm.expectRevert(SyntheticSplitter.Splitter__NotLiquidated.selector);
+        splitter.emergencyRedeem(10 ether);
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // 3. YIELD HARVESTING (Keeper Pattern)
+    // ==========================================
+
+    function test_Harvest_RevertsBelowThreshold() public {
+        // 1. Mint
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 2000 * 1e6);
+        splitter.mint(1000 * 1e18);
+        vm.stopPrank();
+
+        // 2. Simulate Yield ($10 profit)
+        // Threshold is $50. This should fail.
+        aUsdc.mint(address(adapter), 10 * 1e6);
+
+        vm.expectRevert(SyntheticSplitter.Splitter__NoSurplus.selector);
+        splitter.harvestYield();
+    }
+
+    function test_Harvest_SuccessWithRewards() public {
+        // 1. Setup
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 2000 * 1e6);
+        splitter.mint(1000 * 1e18);
+        vm.stopPrank();
+
+        // Setup Treasury/Staking
+        splitter.proposeFeeReceivers(treasury, staking);
+        vm.warp(block.timestamp + 8 days);
+        splitter.finalizeFeeReceivers();
+
+        // 2. Simulate Yield ($100 profit)
+        // Threshold is $50. This should pass.
+        aUsdc.mint(address(adapter), 100 * 1e6);
+        
+        // 3. Bob (Keeper) calls it
+        vm.startPrank(bob);
+        splitter.harvestYield();
+        vm.stopPrank();
+
+        // --- MATH CHECK ---
+        // Surplus: 100 USDC
+        // 1. Bob Reward (1%): 1 USDC
+        // Remaining: 99 USDC
+        // 2. Treasury (20% of 99): 19.8 USDC -> 19_800_000
+        // 3. Staking (80% of 99): 79.2 USDC -> 79_200_000
+
+        assertEq(usdc.balanceOf(bob), INITIAL_BALANCE + 1 * 1e6);
+        assertEq(usdc.balanceOf(treasury), 19_800_000);
+        assertEq(usdc.balanceOf(staking), 79_200_000);
+    }
+
+    // ==========================================
+    // 4. GOVERNANCE (Hostage Defense)
+    // ==========================================
+
+    function test_HostageDefense_CannotFinalizeImmediatelyAfterUnpause() public {
+        // 1. Propose
+        splitter.proposeFeeReceivers(treasury, staking);
+        
+        // 2. Pause
+        splitter.pause();
+
+        // 3. Wait 8 days (Time lock ok, but Paused)
+        vm.warp(block.timestamp + 8 days);
+
+        // 4. Try finalize while paused -> Revert with Locked Error
+        // FIX: Expect the custom error, not the string
+        vm.expectRevert(SyntheticSplitter.Splitter__GovernanceLocked.selector);
+        splitter.finalizeFeeReceivers();
+
+        // 5. Unpause
+        splitter.unpause();
+
+        // 6. Try finalize immediately -> Revert with Locked Error (Liveness check)
+        vm.expectRevert(SyntheticSplitter.Splitter__GovernanceLocked.selector);
+        splitter.finalizeFeeReceivers();
+    }
+
+    function test_HostageDefense_SuccessAfterWait() public {
+        // ... Previous steps 1-5 ...
+        splitter.proposeFeeReceivers(treasury, staking);
+        splitter.pause();
+        vm.warp(block.timestamp + 8 days);
+        splitter.unpause();
+
+        // 6. Wait another 7 days (Liveness Check)
+        vm.warp(block.timestamp + 7 days);
+
+        // 7. Now it works
+        splitter.finalizeFeeReceivers();
+        assertEq(splitter.treasury(), treasury);
+    }
+
+    // ==========================================
+    // 5. EJECTION (Emergency)
+    // ==========================================
+
+    function test_EjectLiquidity_PausesAndSecuresFunds() public {
+        // 1. Mint
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
         vm.stopPrank();
 
-        // Emergency! Aave is scary.
+        // 2. Eject
         splitter.ejectLiquidity();
 
-        // Check:
-        // Adapter Balance = 0
-        assertEq(adapter.balanceOf(address(splitter)), 0);
-        // Splitter Balance = 200 (20 Buffer + 180 Ejected)
+        // Assert: Funds moved to splitter
         assertEq(usdc.balanceOf(address(splitter)), 200 * 1e6);
+        assertEq(adapter.balanceOf(address(splitter)), 0);
 
-        // User can still burn (uses local balance)
+        // Assert: Contract is Paused
+        assertTrue(splitter.paused());
+
+        // Assert: Minting disabled (via Pause)
+        vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
         vm.startPrank(alice);
-        splitter.burn(100 * 1e18);
+        splitter.mint(10 * 1e18);
         vm.stopPrank();
-        
-        assertEq(usdc.balanceOf(alice), 10_000 * 1e6); // Full refund
-    }
-
-    // --- YIELD HARVESTING ---
-    function test_Harvest_WithBufferIncluded() public {
-        // Setup: Mint 100 ($20 Buffer, 180 Adapter)
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 200 * 1e6);
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-
-        // Simulate Yield: Adapter gains 50 USDC.
-        // Adapter Assets: 180 + 50 = 230.
-        // Local Buffer: 20.
-        // Total Holdings: 250.
-        // Required: 200.
-        // Surplus: 50.
-        aUsdc.mint(address(adapter), 50 * 1e6);
-
-        splitter.harvestYield();
-
-        // 20% of 50 = 10 (Treasury)
-        // 80% of 50 = 40 (Staking -> Treasury Fallback if 0x0)
-        assertEq(usdc.balanceOf(treasury), 50 * 1e6); 
     }
 }

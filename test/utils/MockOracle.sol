@@ -39,6 +39,11 @@ contract MockOracle is AggregatorV3Interface {
         return (1, price, _updatedAt, _updatedAt, 1);
     }
 
+    // Helper to simulate stale data
+    function setUpdatedAt(uint256 _timestamp) external {
+        _updatedAt = _timestamp;
+    }
+
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (1, price, _updatedAt, _updatedAt, 1);
     }
