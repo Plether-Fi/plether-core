@@ -58,7 +58,8 @@ contract SyntheticSplitterTest is Test {
             address(usdc), 
             address(adapter),
             CAP,
-            treasury
+            treasury,
+            address(0)
         );
 
         // 5. Setup Users

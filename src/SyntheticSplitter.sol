@@ -57,6 +57,10 @@ contract SyntheticSplitter is Ownable, Pausable {
     // Liquidation State
     bool public isLiquidated; 
 
+    // Sequencer Feed
+    AggregatorV3Interface public immutable sequencerUptimeFeed;
+    uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
+
     // Events
     event Minted(address indexed user, uint256 amount);
     event Burned(address indexed user, uint256 amount);
@@ -79,13 +83,16 @@ contract SyntheticSplitter is Ownable, Pausable {
     error Splitter__NoSurplus();
     error Splitter__StalePrice();
     error Splitter__GovernanceLocked();
+    error Splitter__SequencerDown();
+    error Splitter__SequencerGracePeriod();
 
     constructor(
         address _oracle,
         address _usdc,
         address _yieldAdapter,
         uint256 _cap,
-        address _treasury
+        address _treasury,
+        address _sequencerUptimeFeed
     ) Ownable(msg.sender) {
         require(_oracle != address(0), "Invalid Oracle");
         require(_usdc != address(0), "Invalid USDC");
@@ -98,6 +105,7 @@ contract SyntheticSplitter is Ownable, Pausable {
         yieldAdapter = IERC4626(_yieldAdapter);
         CAP = _cap;
         treasury = _treasury;
+        sequencerUptimeFeed = AggregatorV3Interface(_sequencerUptimeFeed);
 
         tokenA = new SyntheticToken("Bear DXY", "mInvDXY", address(this));
         tokenB = new SyntheticToken("Bull DXY", "mDXY", address(this));
@@ -348,7 +356,35 @@ contract SyntheticSplitter is Ownable, Pausable {
       _unpause();
     }
 
+    // Sequencer Check Logic
+    function _checkSequencer() internal view {
+        // Skip check if no feed address is provided (e.g. Mainnet/Testnet without feed)
+        if (address(sequencerUptimeFeed) == address(0)) return;
+
+        (
+            /*uint80 roundID*/,
+            int256 answer,
+            uint256 startedAt,
+            /*uint256 updatedAt*/,
+            /*uint80 answeredInRound*/
+        ) = sequencerUptimeFeed.latestRoundData();
+
+        // Answer == 0: Sequencer is UP
+        // Answer == 1: Sequencer is DOWN
+        bool isSequencerUp = answer == 0;
+        if (!isSequencerUp) {
+            revert Splitter__SequencerDown();
+        }
+
+        // Check if Grace Period has passed since it came back up
+        // "startedAt" on the Sequencer Feed is the timestamp when the status changed
+        if (block.timestamp - startedAt < SEQUENCER_GRACE_PERIOD) {
+            revert Splitter__SequencerGracePeriod();
+        }
+    }
+
     function _getOraclePrice() internal view returns (uint256) {
+        _checkSequencer();
         (
             /* uint80 roundID */,
             int256 price,
