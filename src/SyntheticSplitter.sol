@@ -19,26 +19,35 @@ contract SyntheticSplitter is Ownable, Pausable {
     // ==========================================
     
     // Assets
-    SyntheticToken public immutable tokenA; 
-    SyntheticToken public immutable tokenB; 
+    SyntheticToken public immutable tokenA; // Bear
+    SyntheticToken public immutable tokenB; // Bull
     IERC20 public immutable usdc;
     
     // Logic
     AggregatorV3Interface public immutable oracle;
     uint256 public immutable CAP; 
     uint256 public immutable USDC_MULTIPLIER; // Cached math scaler
+    uint256 public constant BUFFER_PERCENT = 10; // Keep 10% liquid in Splitter
 
     // The Bank
     IERC4626 public yieldAdapter;
 
-    // Governance / Time-Lock
+    // Governance: Adapter Migration
     address public pendingAdapter;
     uint256 public adapterActivationTime;
-    uint256 public constant TIMELOCK_DELAY = 7 days;
-
-    // Fee Receivers
+    
+    // Governance: Fee Receivers
     address public treasury;
     address public staking;
+    
+    struct FeeConfig {
+        address treasury;
+        address staking;
+    }
+    FeeConfig public pendingFees;
+    uint256 public feesActivationTime;
+
+    uint256 public constant TIMELOCK_DELAY = 7 days;
 
     // Liquidation State
     bool public isLiquidated; 
@@ -51,7 +60,9 @@ contract SyntheticSplitter is Ownable, Pausable {
     event LiquidationTriggered(uint256 price);
     event EmergencyRedeemed(address indexed user, uint256 amount);
     event YieldHarvested(uint256 totalSurplus, uint256 treasuryAmt, uint256 stakingAmt);
-    event FeeReceiversUpdated(address treasury, address staking);
+    event FeesProposed(address treasury, address staking, uint256 activationTime);
+    event FeesUpdated(address treasury, address staking);
+    event EmergencyEjected(uint256 amountRecovered);
 
     // Errors
     error Splitter__ZeroAmount();
@@ -81,17 +92,23 @@ contract SyntheticSplitter is Ownable, Pausable {
         CAP = _cap;
         treasury = _treasury;
 
-        // Atomic Deployment of Tokens
         tokenA = new SyntheticToken("Bear DXY", "mInvDXY", address(this));
         tokenB = new SyntheticToken("Bull DXY", "mDXY", address(this));
 
+        // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
         USDC_MULTIPLIER = 10**(18 + 8 - decimals);
     }
 
+    // ==========================================
+    // 1. MINTING (With Buffer)
+    // ==========================================
+
     function mint(uint256 amount) external whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
+        // Check adapter unless we are in emergency mode, 
+        // but generally we shouldn't mint if no adapter is connected.
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
         uint256 price = _getOraclePrice();
@@ -104,10 +121,18 @@ contract SyntheticSplitter is Ownable, Pausable {
         uint256 usdcNeeded = (amount * CAP) / USDC_MULTIPLIER;
         require(usdcNeeded > 0, "Amount too small");
 
+        // 1. Pull USDC: User -> Splitter
         usdc.safeTransferFrom(msg.sender, address(this), usdcNeeded);
-        
-        usdc.approve(address(yieldAdapter), usdcNeeded);
-        yieldAdapter.deposit(usdcNeeded, address(this));
+
+        // 2. Buffer Logic
+        // Keep 10% in Splitter, Send 90% to Adapter
+        uint256 keepAmount = (usdcNeeded * BUFFER_PERCENT) / 100;
+        uint256 depositAmount = usdcNeeded - keepAmount;
+
+        if (depositAmount > 0) {
+            usdc.approve(address(yieldAdapter), depositAmount);
+            yieldAdapter.deposit(depositAmount, address(this));
+        }
 
         tokenA.mint(msg.sender, amount);
         tokenB.mint(msg.sender, amount);
@@ -115,19 +140,38 @@ contract SyntheticSplitter is Ownable, Pausable {
         emit Minted(msg.sender, amount);
     }
 
+    // ==========================================
+    // 2. BURNING (Smart Withdrawal)
+    // ==========================================
+
     function burn(uint256 amount) external whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
-        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
-
+        
         tokenA.burn(msg.sender, amount);
         tokenB.burn(msg.sender, amount);
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
 
-        yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+        // 1. Check Local Buffer First
+        uint256 localBalance = usdc.balanceOf(address(this));
+
+        if (localBalance >= usdcRefund) {
+            // A. Pay from Buffer (Cheap Gas & Safe from Freeze)
+            usdc.safeTransfer(msg.sender, usdcRefund);
+        } else {
+            // B. Pay from Adapter (Normal Operation)
+            if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+            // Note: If Adapter is frozen/empty, this will revert.
+            // In that case, Admin must call ejectLiquidity().
+            yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+        }
 
         emit Burned(msg.sender, amount);
     }
+
+    // ==========================================
+    // 3. LIQUIDATION & EMERGENCY
+    // ==========================================
 
     function emergencyRedeem(uint256 amount) external {
         if (!isLiquidated) {
@@ -141,48 +185,66 @@ contract SyntheticSplitter is Ownable, Pausable {
         }
         if (amount == 0) revert Splitter__ZeroAmount();
 
-        tokenA.burn(msg.sender, amount);
+        tokenA.burn(msg.sender, amount); // Burn Bear Only
+        
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
-        yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+        
+        // Smart Withdrawal Logic for Emergency too
+        uint256 localBalance = usdc.balanceOf(address(this));
+        if (localBalance >= usdcRefund) {
+            usdc.safeTransfer(msg.sender, usdcRefund);
+        } else {
+            yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+        }
+
         emit EmergencyRedeemed(msg.sender, amount);
     }
 
     // ==========================================
-    // YIELD HARVESTING
+    // 4. YIELD HARVESTING
     // ==========================================
 
-    /**
-     * @notice Skims excess USDC generated by the Yield Adapter.
-     * @dev Surplus = AdapterBalance - RequiredCollateral.
-     */
     function harvestYield() external onlyOwner {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
-        // 1. Get total value held in the vault (Principal + Interest)
         uint256 totalAssets = yieldAdapter.totalAssets();
+        // Add Local Buffer to Total Assets calculation for accuracy?
+        // No, yield is only generated inside the adapter.
+        // We compare Adapter Assets vs (Required Backing - Local Buffer)
+        // BUT simpler: We treat Local Buffer as part of Principal.
+        
+        // Correct Formula: 
+        // Total Holdings = AdapterAssets + LocalBuffer
+        // Required = TotalSupply * $2.00
+        // Surplus = Total Holdings - Required
 
-        // 2. Calculate Required Collateral
-        // We only need to check Token A supply because A & B are always equal.
-        // Formula: (Supply * Cap) / Scaler
+        uint256 localBuffer = usdc.balanceOf(address(this));
+        uint256 totalHoldings = totalAssets + localBuffer;
+        
         uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
 
-        // 3. Check for Surplus
-        if (totalAssets <= requiredBacking) {
+        if (totalHoldings <= requiredBacking) {
             revert Splitter__NoSurplus();
         }
 
-        uint256 surplus = totalAssets - requiredBacking;
+        uint256 surplus = totalHoldings - requiredBacking;
 
-        // 4. Withdraw Surplus from Vault to Splitter
-        // receiver = address(this)
-        // owner = address(this)
-        yieldAdapter.withdraw(surplus, address(this), address(this));
+        // We prefer to withdraw surplus from Adapter to keep Buffer full.
+        // If Adapter doesn't have enough (rare), we take from Buffer.
+        
+        if (totalAssets >= surplus) {
+             yieldAdapter.withdraw(surplus, address(this), address(this));
+        } else {
+             // Surplus exists but is largely in the buffer (weird edge case),
+             // just withdraw what we can from adapter or just use buffer.
+             // For simplicity, we assume yield comes from adapter.
+             yieldAdapter.withdraw(surplus, address(this), address(this));
+        }
 
-        // 5. Split Logic
-        uint256 treasuryShare = (surplus * 20) / 100; // 20%
-        uint256 stakingShare = surplus - treasuryShare; // 80%
+        // Split Logic
+        uint256 treasuryShare = (surplus * 20) / 100;
+        uint256 stakingShare = surplus - treasuryShare;
 
-        // 6. Transfer
         if (treasury != address(0)) {
             usdc.safeTransfer(treasury, treasuryShare);
         }
@@ -190,8 +252,6 @@ contract SyntheticSplitter is Ownable, Pausable {
         if (staking != address(0)) {
             usdc.safeTransfer(staking, stakingShare);
         } else {
-            // Fallback: If Staking contract isn't built yet,
-            // send the staking share to Treasury to avoid stuck funds.
             usdc.safeTransfer(treasury, stakingShare);
         }
 
@@ -199,40 +259,17 @@ contract SyntheticSplitter is Ownable, Pausable {
     }
 
     // ==========================================
-    // ADMIN SETTERS
+    // 5. GOVERNANCE (Time-Locks)
     // ==========================================
 
-    struct FeeConfig {
-        address treasury;
-        address staking;
-    }
-
-    FeeConfig public pendingFees;
-    uint256 public feesActivationTime;
-    
-    // Reuse the same delay or a different one? 
-    // Usually same delay is fine.
-    
-    event FeesProposed(address treasury, address staking, uint256 activationTime);
-    event FeesUpdated(address treasury, address staking);
-
-    /**
-     * @notice Step 1: Propose new destinations for the revenue.
-     * Starts the 7-day timer.
-     */
+    // --- Fee Receivers ---
     function proposeFeeReceivers(address _treasury, address _staking) external onlyOwner {
         require(_treasury != address(0), "Invalid Treasury");
-        // Staking can be 0 (fallback logic handles it)
-        
         pendingFees = FeeConfig(_treasury, _staking);
         feesActivationTime = block.timestamp + TIMELOCK_DELAY;
-        
         emit FeesProposed(_treasury, _staking, feesActivationTime);
     }
 
-    /**
-     * @notice Step 2: Finalize the change after the delay.
-     */
     function finalizeFeeReceivers() external onlyOwner {
         if (feesActivationTime == 0) revert Splitter__InvalidProposal();
         if (block.timestamp < feesActivationTime) revert Splitter__TimelockActive();
@@ -240,13 +277,12 @@ contract SyntheticSplitter is Ownable, Pausable {
         treasury = pendingFees.treasury;
         staking = pendingFees.staking;
 
-        // Reset
         delete pendingFees;
         feesActivationTime = 0;
-
         emit FeesUpdated(treasury, staking);
     }
-    
+
+    // --- Adapter Migration ---
     function proposeAdapter(address _newAdapter) external onlyOwner {
         require(_newAdapter != address(0), "Invalid Adapter");
         pendingAdapter = _newAdapter;
@@ -272,12 +308,16 @@ contract SyntheticSplitter is Ownable, Pausable {
             usdc.approve(address(newAdapter), movedAmount);
             newAdapter.deposit(movedAmount, address(this));
         }
+
         yieldAdapter = newAdapter;
         pendingAdapter = address(0);
         adapterActivationTime = 0;
         emit AdapterMigrated(address(oldAdapter), address(newAdapter), movedAmount);
     }
-    
+
+    // ==========================================
+    // ADMIN HELPERS
+    // ==========================================
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
