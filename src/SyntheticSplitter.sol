@@ -200,6 +200,24 @@ contract SyntheticSplitter is Ownable, Pausable {
         emit EmergencyRedeemed(msg.sender, amount);
     }
 
+    /**
+     * @notice "Ejection Seat": Pulls ALL funds from Aave to Splitter.
+     * @dev Bypasses timelock. Used if Aave is buggy or about to pause.
+     */
+    function ejectLiquidity() external onlyOwner {
+        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+
+        uint256 shares = yieldAdapter.balanceOf(address(this));
+        uint256 recovered = 0;
+
+        if (shares > 0) {
+            // Redeem Everything -> USDC moves to Splitter
+            recovered = yieldAdapter.redeem(shares, address(this), address(this));
+        }
+        
+        emit EmergencyEjected(recovered);
+    }
+
     // ==========================================
     // 4. YIELD HARVESTING
     // ==========================================

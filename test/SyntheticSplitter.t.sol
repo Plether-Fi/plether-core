@@ -104,6 +104,31 @@ contract SyntheticSplitterTest is Test {
         assertEq(adapter.balanceOf(address(splitter)), 80 * 1e6);
     }
 
+    // --- EJECTION SEAT ---
+    function test_EjectLiquidity() public {
+        // Setup: Mint 100 ($20 Buffer, 180 Adapter)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Emergency! Aave is scary.
+        splitter.ejectLiquidity();
+
+        // Check:
+        // Adapter Balance = 0
+        assertEq(adapter.balanceOf(address(splitter)), 0);
+        // Splitter Balance = 200 (20 Buffer + 180 Ejected)
+        assertEq(usdc.balanceOf(address(splitter)), 200 * 1e6);
+
+        // User can still burn (uses local balance)
+        vm.startPrank(alice);
+        splitter.burn(100 * 1e18);
+        vm.stopPrank();
+        
+        assertEq(usdc.balanceOf(alice), 10_000 * 1e6); // Full refund
+    }
+
     // --- YIELD HARVESTING ---
     function test_Harvest_WithBufferIncluded() public {
         // Setup: Mint 100 ($20 Buffer, 180 Adapter)
