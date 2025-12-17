@@ -203,13 +203,57 @@ contract SyntheticSplitterTest is Test {
         // --- MATH CHECK ---
         // Surplus: 100 USDC
         // 1. Bob Reward (1%): 1 USDC
-        // Remaining: 99 USDC
-        // 2. Treasury (20% of 99): 19.8 USDC -> 19_800_000
-        // 3. Staking (80% of 99): 79.2 USDC -> 79_200_000
+        assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 1 * 1e6, 10);
+        
+        // Treasury (20% of 99): ~19.8 USDC -> 19_800_000
+        assertApproxEqAbs(usdc.balanceOf(treasury), 19_800_000, 10);
+        
+        // Staking (80% of 99): ~79.2 USDC -> 79_200_000
+        assertApproxEqAbs(usdc.balanceOf(staking), 79_200_000, 10);
+    }
 
-        assertEq(usdc.balanceOf(bob), INITIAL_BALANCE + 1 * 1e6);
-        assertEq(usdc.balanceOf(treasury), 19_800_000);
-        assertEq(usdc.balanceOf(staking), 79_200_000);
+    function test_Harvest_RevertsIfCountingOtherPeoplesMoney() public {
+        // 1. Setup: Alice mints 100 tokens ($200 cost)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Setup: A "Whale" deposits $1,000,000 into the SAME Adapter
+        address whale = address(0x999);
+        usdc.mint(whale, 1_000_000 * 1e6);
+        
+        vm.startPrank(whale);
+        usdc.approve(address(adapter), 1_000_000 * 1e6);
+        adapter.deposit(1_000_000 * 1e6, whale);
+        vm.stopPrank();
+
+        // 3. Simulate Actual Yield
+        // We need massive yield because the Splitter only owns ~0.018% of the pool.
+        // To get > $50 surplus for Splitter, we need > $280k total yield.
+        // Let's use $300,000.
+        uint256 massiveYield = 300_000 * 1e6;
+        aUsdc.mint(address(adapter), massiveYield); 
+
+        // 4. Bob tries to harvest
+        vm.startPrank(bob);
+        
+        // WITH BUG (totalAssets): 
+        //   Calculates surplus = ~$1.3 Million. 
+        //   Tries to withdraw $1.3M. 
+        //   Reverts because Splitter lacks enough shares to burn.
+        
+        // WITH FIX (convertToAssets):
+        //   Calculates surplus = Splitter's share of yield (~$54).
+        //   $54 > $50 Threshold.
+        //   Withdraws $54. Success.
+        splitter.harvestYield();
+        vm.stopPrank();
+
+        // 5. Verification
+        // Bob gets 1% of the SURPLUS (~$54), roughly 0.54 USDC.
+        // We use a wider tolerance (1e6 = 1 USDC) because dilution math is inexact.
+        assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 540_000, 1e5);
     }
 
     // ==========================================

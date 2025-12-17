@@ -235,7 +235,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     function harvestYield() external whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
-        uint256 totalAssets = yieldAdapter.totalAssets();
+        uint256 totalAssets = yieldAdapter.convertToAssets(yieldAdapter.balanceOf(address(this)));
         uint256 localBuffer = usdc.balanceOf(address(this));
         uint256 totalHoldings = totalAssets + localBuffer;
         
