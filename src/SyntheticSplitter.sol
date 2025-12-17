@@ -185,16 +185,17 @@ contract SyntheticSplitter is Ownable, Pausable {
         // 1. Check Local Buffer First
         uint256 localBalance = usdc.balanceOf(address(this));
 
-        if (localBalance >= usdcRefund) {
-            // A. Pay from Buffer (Cheap Gas & Safe from Freeze)
-            usdc.safeTransfer(msg.sender, usdcRefund);
-        } else {
-            // B. Pay from Adapter (Normal Operation)
+        if (localBalance < usdcRefund) {
+            uint256 shortage = usdcRefund - localBalance;
+            // Check adapter just in case (though solvency check handles this usually)
             if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
-            // Note: If Adapter is frozen/empty, this will revert.
-            // In that case, Admin must call ejectLiquidity().
-            yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+            
+            // Withdraw shortage to THIS contract first
+            yieldAdapter.withdraw(shortage, address(this), address(this));
         }
+        
+        // Now localBalance is sufficient (Original + Withdrawn Shortage)
+        usdc.safeTransfer(msg.sender, usdcRefund);
 
         emit Burned(msg.sender, amount);
     }
@@ -221,11 +222,12 @@ contract SyntheticSplitter is Ownable, Pausable {
         
         // Smart Withdrawal Logic for Emergency too
         uint256 localBalance = usdc.balanceOf(address(this));
-        if (localBalance >= usdcRefund) {
-            usdc.safeTransfer(msg.sender, usdcRefund);
-        } else {
-            yieldAdapter.withdraw(usdcRefund, msg.sender, address(this));
+
+        if (localBalance < usdcRefund) {
+            uint256 shortage = usdcRefund - localBalance;
+            yieldAdapter.withdraw(shortage, address(this), address(this));
         }
+        usdc.safeTransfer(msg.sender, usdcRefund);
 
         emit EmergencyRedeemed(msg.sender, amount);
     }

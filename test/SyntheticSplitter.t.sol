@@ -119,8 +119,8 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // Assertions
-        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6, "Buffer should be ignored/preserved");
-        assertEq(adapter.balanceOf(address(splitter)), 80 * 1e6, "Vault should decrease by 100");
+        assertEq(usdc.balanceOf(address(splitter)), 0, "Buffer should be used first");
+        assertEq(adapter.balanceOf(address(splitter)), 100 * 1e6, "Vault should only cover the shortage");
     }
 
     function test_Burn_WorksWhilePaused_IfSolvent() public {
