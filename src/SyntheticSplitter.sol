@@ -159,8 +159,23 @@ contract SyntheticSplitter is Ownable, Pausable {
     // 2. BURNING (Smart Withdrawal)
     // ==========================================
 
-    function burn(uint256 amount) external whenNotPaused {
+    function burn(uint256 amount) external {
         if (amount == 0) revert Splitter__ZeroAmount();
+
+        if (paused()) {
+            // If paused, we strictly enforce 100% solvency.
+            // If we are even 1 USDC short, we keep the lock to prevent a race to exit.
+            
+            uint256 totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+            
+            // Calculate Total Assets (Local + Adapter)
+            // Note: We use the SAFE 'convertToAssets' calculation we fixed earlier
+            uint256 myShares = yieldAdapter.balanceOf(address(this));
+            uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
+            uint256 totalAssets = usdc.balanceOf(address(this)) + adapterValue;
+
+            require(totalAssets >= totalLiabilities, "Paused & Insolvent: Burn Locked");
+        }
         
         tokenA.burn(msg.sender, amount);
         tokenB.burn(msg.sender, amount);

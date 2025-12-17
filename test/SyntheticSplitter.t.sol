@@ -123,6 +123,60 @@ contract SyntheticSplitterTest is Test {
         assertEq(adapter.balanceOf(address(splitter)), 80 * 1e6, "Vault should decrease by 100");
     }
 
+    function test_Burn_WorksWhilePaused_IfSolvent() public {
+        // 1. Setup: Mint 100 Tokens ($200)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Admin Ejects Liquidity (Pauses + Moves funds to buffer)
+        splitter.ejectLiquidity(); 
+        assertTrue(splitter.paused());
+
+        // 3. Alice tries to burn while Paused
+        vm.startPrank(alice);
+        
+        // This should SUCCEED now (it used to revert)
+        // Solvency check passes: 200 USDC assets == 200 USDC liabilities
+        splitter.burn(50 * 1e18); 
+        
+        vm.stopPrank();
+
+        // Check balance: Alice got $100 back
+        assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 100 * 1e6);
+    }
+
+    function test_Burn_RevertsWhilePaused_IfInsolvent() public {
+        // 1. Setup: Mint 100 Tokens ($200)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Admin Pauses
+        splitter.pause();
+
+        // 3. Simulate Loss: Someone hacked the wallet/adapter and stole 1 USDC
+        // (We simulate this by burning 1 USDC from the splitter's local balance)
+        // Realistically this would happen via adapter loss
+        vm.mockCall(
+            address(adapter), 
+            abi.encodeWithSelector(IERC4626.convertToAssets.selector), 
+            abi.encode(179 * 1e6) // Adapter reports it lost $1
+        );
+
+        // 4. Alice tries to burn
+        vm.startPrank(alice);
+        
+        // Expect Revert due to Solvency Check
+        // Assets ($20 Buffer + $179 Adapter = $199) < Liabilities ($200)
+        vm.expectRevert(bytes("Paused & Insolvent: Burn Locked"));
+        splitter.burn(50 * 1e18);
+        
+        vm.stopPrank();
+    }
+
     // ==========================================
     // 2. SAFETY CHECKS (Oracle/Caps)
     // ==========================================
