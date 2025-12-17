@@ -47,6 +47,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     FeeConfig public pendingFees;
     uint256 public feesActivationTime;
 
+    uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant TIMELOCK_DELAY = 7 days;
 
     uint256 public harvestRewardPercent = 1;
@@ -75,6 +76,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     error Splitter__TimelockActive();
     error Splitter__InvalidProposal();
     error Splitter__NoSurplus();
+    error Splitter__StalePrice();
 
     constructor(
         address _oracle,
@@ -329,7 +331,15 @@ contract SyntheticSplitter is Ownable, Pausable {
     function unpause() external onlyOwner { _unpause(); }
 
     function _getOraclePrice() internal view returns (uint256) {
-        (, int256 price,,,) = oracle.latestRoundData();
+        (
+            /* uint80 roundID */,
+            int256 price,
+            /* uint startedAt */,
+            uint256 updatedAt,
+            /* uint80 answeredInRound */
+        ) = oracle.latestRoundData();
+
+        if (updatedAt < block.timestamp - ORACLE_TIMEOUT) revert Splitter__StalePrice();
         if (price <= 0) return 0;
         return uint256(price);
     }
