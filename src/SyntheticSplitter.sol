@@ -215,6 +215,9 @@ contract SyntheticSplitter is Ownable, Pausable {
             recovered = yieldAdapter.redeem(shares, address(this), address(this));
         }
         
+        // Auto-pause to prevent new deposits into broken adapter
+        _pause();
+        
         emit EmergencyEjected(recovered);
     }
 
