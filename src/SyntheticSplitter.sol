@@ -260,7 +260,8 @@ contract SyntheticSplitter is Ownable, Pausable {
     function harvestYield() external whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
-        uint256 totalAssets = yieldAdapter.convertToAssets(yieldAdapter.balanceOf(address(this)));
+        uint256 myShares = yieldAdapter.balanceOf(address(this));
+        uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
         uint256 localBuffer = usdc.balanceOf(address(this));
         uint256 totalHoldings = totalAssets + localBuffer;
         
@@ -271,10 +272,10 @@ contract SyntheticSplitter is Ownable, Pausable {
         uint256 surplus = totalHoldings - requiredBacking;
 
         // Withdraw from adapter
-        if (totalAssets >= surplus) {
+        if (totalAssets > surplus) {
              yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
-             yieldAdapter.withdraw(totalAssets, address(this), address(this));
+             yieldAdapter.redeem(myShares, address(this), address(this));
         }
 
         uint256 callerCut = (surplus * harvestRewardPercent) / 100;

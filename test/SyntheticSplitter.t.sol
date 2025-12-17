@@ -311,6 +311,47 @@ contract SyntheticSplitterTest is Test {
         assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 540_000, 1e5);
     }
 
+    function test_Harvest_UsesRedeemToAvoidRounding() public {
+        // 1. Setup: Mint 100 Tokens ($200 Liability)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. FORCE SURPLUS: Donate massive amount to Splitter Buffer
+        // Liability = $200. We add $1000 to buffer.
+        // Buffer = $1020. Adapter = $180.
+        // Total = $1200. Liability = $200. Surplus = $1000.
+        // Since Surplus ($1000) > Adapter Assets ($180), the logic MUST try to empty the adapter.
+        usdc.mint(address(splitter), 1000 * 1e6);
+
+        // 3. Setup Expectation
+        // We want to verify that 'redeem' is called, NOT 'withdraw'.
+        
+        vm.startPrank(bob);
+
+        // A. Simulate 'withdraw' reverting (The Bug)
+        // If the contract calls withdraw(180), we make it revert with the specific 4626 error
+        // indicating it asked for too many shares due to rounding.
+        vm.mockCallRevert(
+            address(adapter), 
+            abi.encodeWithSelector(IERC4626.withdraw.selector), 
+            abi.encodeWithSignature("ERC4626ExceededMaxWithdraw(address,uint256,uint256)", address(0), 0, 0)
+        );
+
+        // B. Expect 'redeem' to be called (The Fix)
+        // The contract should skip withdraw and call redeem instead.
+        vm.expectCall(
+            address(adapter), 
+            abi.encodeWithSelector(IERC4626.redeem.selector)
+        );
+
+        // 4. Execution
+        splitter.harvestYield();
+        
+        vm.stopPrank();
+    }
+
     // ==========================================
     // 4. GOVERNANCE (Hostage Defense)
     // ==========================================
