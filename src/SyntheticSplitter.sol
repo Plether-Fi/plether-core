@@ -145,7 +145,7 @@ contract SyntheticSplitter is Ownable, Pausable {
         uint256 depositAmount = usdcNeeded - keepAmount;
 
         if (depositAmount > 0) {
-            usdc.approve(address(yieldAdapter), depositAmount);
+            usdc.forceApprove(address(yieldAdapter), depositAmount);
             yieldAdapter.deposit(depositAmount, address(this));
         }
 
@@ -352,7 +352,7 @@ contract SyntheticSplitter is Ownable, Pausable {
             }
         }
         if (movedAmount > 0) {
-            usdc.approve(address(newAdapter), movedAmount);
+            usdc.forceApprove(address(newAdapter), movedAmount);
             newAdapter.deposit(movedAmount, address(this));
         }
 
