@@ -31,7 +31,7 @@ contract MorphoOracleTest is Test {
     function test_BearOracle_ReturnsBasketPrice() public {
         // Basket = $1.04
         uint256 price = bearOracle.price();
-        
+
         // Expected: 1.04 * 1e36
         // In code: 104_000_000 * 1e28
         uint256 expected = 104_000_000 * 1e28;
@@ -46,9 +46,9 @@ contract MorphoOracleTest is Test {
         // Basket = $1.04
         // Cap = $2.00
         // Expected Value = $0.96
-        
+
         uint256 price = bullOracle.price();
-        
+
         uint256 expected = 96_000_000 * 1e28; // ($0.96 scaled)
         assertEq(price, expected);
     }
@@ -59,7 +59,7 @@ contract MorphoOracleTest is Test {
 
         // Bull Token should go UP to $1.50 ($2.00 - $0.50)
         uint256 price = bullOracle.price();
-        
+
         uint256 expected = 150_000_000 * 1e28;
         assertEq(price, expected);
     }
@@ -70,9 +70,9 @@ contract MorphoOracleTest is Test {
     function test_BullOracle_ReturnsZero_IfCapBreached() public {
         // Market Shock: Basket pumps to $2.10 (Dollar Crash)
         // Cap is $2.00.
-        // Value would technically be -$0.10. 
+        // Value would technically be -$0.10.
         // Oracle must return 0.
-        
+
         basket.updatePrice(210_000_000);
 
         uint256 price = bullOracle.price();

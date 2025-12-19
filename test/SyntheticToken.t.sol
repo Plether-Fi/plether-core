@@ -9,19 +9,17 @@ import "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 contract MockFlashBorrower is IERC3156FlashBorrower {
     // Action to take: "APPROVE" means we play nice and approve payback
     // "STEAL" means we try to keep the money (and should fail)
-    string action; 
+    string action;
 
     function setAction(string memory _action) external {
         action = _action;
     }
 
-    function onFlashLoan(
-        address,
-        address token,
-        uint256 amount,
-        uint256 fee,
-        bytes calldata
-    ) external override returns (bytes32) {
+    function onFlashLoan(address, address token, uint256 amount, uint256 fee, bytes calldata)
+        external
+        override
+        returns (bytes32)
+    {
         // Verify we actually received the tokens
         require(SyntheticToken(token).balanceOf(address(this)) >= amount, "Did not receive tokens");
 
@@ -39,7 +37,7 @@ contract MockFlashBorrower is IERC3156FlashBorrower {
 contract SyntheticTokenTest is Test {
     SyntheticToken public token;
     MockFlashBorrower public borrower;
-    
+
     address public splitter = address(0x123);
     address public alice = address(0x1);
     address public hacker = address(0x999);
@@ -99,7 +97,7 @@ contract SyntheticTokenTest is Test {
     // ==========================================
     // 4. Flash Mint Tests (NEW)
     // ==========================================
-    
+
     function test_FlashMint_Success() public {
         // We want to flash mint 1,000,000 tokens (even though supply is 0)
         uint256 loanAmount = 1_000_000 ether;
@@ -109,12 +107,7 @@ contract SyntheticTokenTest is Test {
 
         // Execute Flash Loan
         // The token contract will Mint -> Call Borrower -> Burn
-        bool success = token.flashLoan(
-            IERC3156FlashBorrower(address(borrower)), 
-            address(token), 
-            loanAmount, 
-            ""
-        );
+        bool success = token.flashLoan(IERC3156FlashBorrower(address(borrower)), address(token), loanAmount, "");
 
         assertTrue(success);
         // Supply should be back to 0 (Minted then Burned)
@@ -123,18 +116,13 @@ contract SyntheticTokenTest is Test {
 
     function test_FlashMint_Revert_IfUserDoesNotApprove() public {
         uint256 loanAmount = 100 ether;
-        
+
         // Borrower tries to steal the tokens (does not approve repayment)
         borrower.setAction("STEAL");
 
         // Should fail because ERC20FlashMint cannot burn the tokens back
-        vm.expectRevert(); 
-        token.flashLoan(
-            IERC3156FlashBorrower(address(borrower)), 
-            address(token), 
-            loanAmount, 
-            ""
-        );
+        vm.expectRevert();
+        token.flashLoan(IERC3156FlashBorrower(address(borrower)), address(token), loanAmount, "");
     }
 
     function test_FlashFee_IsZero() public {

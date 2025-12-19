@@ -22,11 +22,15 @@ contract YieldAdapter is ERC4626, Ownable {
     IERC20 public immutable aToken; // The Aave receipt token (aUSDC)
 
     constructor(
-        IERC20 _asset,       // USDC
+        IERC20 _asset, // USDC
         address _aavePool,
         address _aToken,
         address _owner
-    ) ERC4626(_asset) ERC20("Yield Wrapper", "yUSDC") Ownable(_owner) {
+    )
+        ERC4626(_asset)
+        ERC20("Yield Wrapper", "yUSDC")
+        Ownable(_owner)
+    {
         aavePool = IAavePool(_aavePool);
         aToken = IERC20(_aToken);
 
@@ -50,12 +54,7 @@ contract YieldAdapter is ERC4626, Ownable {
     /**
      * @dev Hook called after user deposits USDC. We push it to Aave.
      */
-    function _deposit(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         // 1. OpenZeppelin's logic already pulled USDC from 'caller' to 'this'
         super._deposit(caller, receiver, assets, shares);
 
@@ -67,13 +66,10 @@ contract YieldAdapter is ERC4626, Ownable {
     /**
      * @dev Hook called before user withdraws. We pull from Aave.
      */
-    function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
+    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
+        internal
+        override
+    {
         // 1. Withdraw exact amount from Aave to 'this'
         aavePool.withdraw(asset(), assets, address(this));
 
@@ -91,7 +87,7 @@ contract YieldAdapter is ERC4626, Ownable {
     function rescueToken(address token, address to) external onlyOwner {
         require(token != asset(), "Cannot rescue Underlying");
         require(token != address(aToken), "Cannot rescue aTokens");
-        
+
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
     }
 }

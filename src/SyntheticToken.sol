@@ -17,11 +17,7 @@ contract SyntheticToken is ERC20, ERC20FlashMint {
         _;
     }
 
-    constructor(
-        string memory _name, 
-        string memory _symbol, 
-        address _splitter
-    ) ERC20(_name, _symbol) {
+    constructor(string memory _name, string memory _symbol, address _splitter) ERC20(_name, _symbol) {
         require(_splitter != address(0), "Invalid splitter address");
         splitter = _splitter;
     }

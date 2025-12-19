@@ -10,7 +10,7 @@ interface IMorphoOracle {
 
 contract MorphoOracle is IMorphoOracle {
     AggregatorV3Interface public immutable basketOracle;
-    uint256 public immutable CAP; 
+    uint256 public immutable CAP;
     bool public immutable isInverse; // True = Bull Token (Cap - Price)
 
     // Scaling: 8 decimals (Chainlink) -> 36 decimals (Morpho)
@@ -32,11 +32,11 @@ contract MorphoOracle is IMorphoOracle {
 
     function price() external view override returns (uint256) {
         // 1. Get Price from Basket (8 decimals)
-        (, int256 rawPrice, , , ) = basketOracle.latestRoundData();
-        
+        (, int256 rawPrice,,,) = basketOracle.latestRoundData();
+
         // Safety: Valid price and not stale (simple check, consumer can add strict staleness)
         if (rawPrice <= 0) revert MorphoOracle__InvalidPrice();
-        
+
         uint256 basketPrice = uint256(rawPrice);
         uint256 finalPrice;
 
@@ -44,7 +44,7 @@ contract MorphoOracle is IMorphoOracle {
         if (isInverse) {
             // Logic for Bull Token (mDXY)
             // Value = Cap - Basket
-            
+
             if (basketPrice >= CAP) {
                 // Scenario: Dollar crashed hard, or Basket pumped hard.
                 // The Bull token is effectively worthless (or negative, which implies 0).

@@ -17,15 +17,15 @@ contract SyntheticSplitter is Ownable, Pausable {
     // ==========================================
     // STATE
     // ==========================================
-    
+
     // Assets
     SyntheticToken public immutable tokenA; // Bear
     SyntheticToken public immutable tokenB; // Bull
     IERC20 public immutable usdc;
-    
+
     // Logic
     AggregatorV3Interface public immutable oracle;
-    uint256 public immutable CAP; 
+    uint256 public immutable CAP;
     uint256 public immutable USDC_MULTIPLIER; // Cached math scaler
     uint256 public constant BUFFER_PERCENT = 10; // Keep 10% liquid in Splitter
 
@@ -35,11 +35,11 @@ contract SyntheticSplitter is Ownable, Pausable {
     // Governance: Adapter Migration
     address public pendingAdapter;
     uint256 public adapterActivationTime;
-    
+
     // Governance: Fee Receivers
     address public treasury;
     address public staking;
-    
+
     struct FeeConfig {
         address treasury;
         address staking;
@@ -55,7 +55,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
 
     // Liquidation State
-    bool public isLiquidated; 
+    bool public isLiquidated;
 
     // Sequencer Feed
     AggregatorV3Interface public immutable sequencerUptimeFeed;
@@ -112,7 +112,7 @@ contract SyntheticSplitter is Ownable, Pausable {
 
         // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
-        USDC_MULTIPLIER = 10**(18 + 8 - decimals);
+        USDC_MULTIPLIER = 10 ** (18 + 8 - decimals);
     }
 
     // ==========================================
@@ -122,7 +122,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     function mint(uint256 amount) external whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
-        // Check adapter unless we are in emergency mode, 
+        // Check adapter unless we are in emergency mode,
         // but generally we shouldn't mint if no adapter is connected.
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
@@ -165,9 +165,9 @@ contract SyntheticSplitter is Ownable, Pausable {
         if (paused()) {
             // If paused, we strictly enforce 100% solvency.
             // If we are even 1 USDC short, we keep the lock to prevent a race to exit.
-            
+
             uint256 totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
-            
+
             // Calculate Total Assets (Local + Adapter)
             // Note: We use the SAFE 'convertToAssets' calculation we fixed earlier
             uint256 myShares = yieldAdapter.balanceOf(address(this));
@@ -176,7 +176,7 @@ contract SyntheticSplitter is Ownable, Pausable {
 
             require(totalAssets >= totalLiabilities, "Paused & Insolvent: Burn Locked");
         }
-        
+
         tokenA.burn(msg.sender, amount);
         tokenB.burn(msg.sender, amount);
 
@@ -189,11 +189,11 @@ contract SyntheticSplitter is Ownable, Pausable {
             uint256 shortage = usdcRefund - localBalance;
             // Check adapter just in case (though solvency check handles this usually)
             if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
-            
+
             // Withdraw shortage to THIS contract first
             yieldAdapter.withdraw(shortage, address(this), address(this));
         }
-        
+
         // Now localBalance is sufficient (Original + Withdrawn Shortage)
         usdc.safeTransfer(msg.sender, usdcRefund);
 
@@ -217,9 +217,9 @@ contract SyntheticSplitter is Ownable, Pausable {
         if (amount == 0) revert Splitter__ZeroAmount();
 
         tokenA.burn(msg.sender, amount); // Burn Bear Only
-        
+
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
-        
+
         // Smart Withdrawal Logic for Emergency too
         uint256 localBalance = usdc.balanceOf(address(this));
 
@@ -246,10 +246,10 @@ contract SyntheticSplitter is Ownable, Pausable {
             // Redeem Everything -> USDC moves to Splitter
             recovered = yieldAdapter.redeem(shares, address(this), address(this));
         }
-        
+
         // Auto-pause to prevent new deposits into broken adapter
         _pause();
-        
+
         emit EmergencyEjected(recovered);
     }
 
@@ -264,7 +264,7 @@ contract SyntheticSplitter is Ownable, Pausable {
         uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
         uint256 localBuffer = usdc.balanceOf(address(this));
         uint256 totalHoldings = totalAssets + localBuffer;
-        
+
         uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) revert Splitter__NoSurplus();
@@ -273,9 +273,9 @@ contract SyntheticSplitter is Ownable, Pausable {
 
         // Withdraw from adapter
         if (totalAssets > surplus) {
-             yieldAdapter.withdraw(surplus, address(this), address(this));
+            yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
-             yieldAdapter.redeem(myShares, address(this), address(this));
+            yieldAdapter.redeem(myShares, address(this), address(this));
         }
 
         uint256 callerCut = (surplus * harvestRewardPercent) / 100;
@@ -368,10 +368,13 @@ contract SyntheticSplitter is Ownable, Pausable {
     // ==========================================
     // ADMIN HELPERS
     // ==========================================
-    function pause() external onlyOwner { _pause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
     function unpause() external onlyOwner {
-      lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
-      _unpause();
+        lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
+        _unpause();
     }
 
     // Sequencer Check Logic

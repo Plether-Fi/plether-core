@@ -34,13 +34,7 @@ contract ZapRouter is IERC3156FlashBorrower {
     // Constants
     uint24 public constant POOL_FEE = 500; // 0.05% Uniswap Pool
 
-    constructor(
-        address _splitter,
-        address _mDXY,
-        address _mInvDXY,
-        address _usdc,
-        address _swapRouter
-    ) {
+    constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _swapRouter) {
         splitter = ISyntheticSplitter(_splitter);
         mDXY = _mDXY;
         mInvDXY = _mInvDXY;
@@ -57,13 +51,9 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @param usdcAmount The amount of USDC the user is sending.
      * @param minAmountOut Minimum amount of tokens to receive (Slippage protection).
      */
-    function zapMint(
-        address tokenWanted, 
-        uint256 usdcAmount, 
-        uint256 minAmountOut
-    ) external {
+    function zapMint(address tokenWanted, uint256 usdcAmount, uint256 minAmountOut) external {
         require(tokenWanted == mDXY || tokenWanted == mInvDXY, "Invalid token");
-        
+
         // 1. Pull USDC from User
         usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
@@ -71,26 +61,21 @@ contract ZapRouter is IERC3156FlashBorrower {
         address tokenToFlash = (tokenWanted == mDXY) ? mInvDXY : mDXY;
 
         // 3. Calculate how much to Flash Mint
-        // We estimate 1:1 price parity for the initial request. 
-        // 1 Pair costs 2 USDC (2e6). 
+        // We estimate 1:1 price parity for the initial request.
+        // 1 Pair costs 2 USDC (2e6).
         // 1 Token unit (1e18) roughly equals 1 USDC (1e6).
         // Formula: usdcAmount (6 decimals) -> 18 decimals
-        uint256 flashAmount = usdcAmount * 1e12; 
+        uint256 flashAmount = usdcAmount * 1e12;
 
         // 4. Initiate Flash Mint
         // We borrow the UNWANTED token, sell it, and use proceeds to mint the WANTED token.
         // We pass the user's usdcAmount in the data so the callback knows how much to combine.
         bytes memory data = abi.encode(tokenWanted, usdcAmount);
-        
-        IERC3156FlashLender(tokenToFlash).flashLoan(
-            this, 
-            tokenToFlash, 
-            flashAmount, 
-            data
-        );
+
+        IERC3156FlashLender(tokenToFlash).flashLoan(this, tokenToFlash, flashAmount, data);
 
         // 5. Final Transfer
-        // The flash loan callback handles the minting. 
+        // The flash loan callback handles the minting.
         // We just check if we got enough.
         uint256 balance = IERC20(tokenWanted).balanceOf(address(this));
         require(balance >= minAmountOut, "Slippage too high");
@@ -106,7 +91,11 @@ contract ZapRouter is IERC3156FlashBorrower {
         uint256 amount, // The amount borrowed
         uint256 fee,
         bytes calldata data
-    ) external override returns (bytes32) {
+    )
+        external
+        override
+        returns (bytes32)
+    {
         require(msg.sender == token, "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
@@ -115,7 +104,7 @@ contract ZapRouter is IERC3156FlashBorrower {
 
         // 1. Sell the Borrowed Token for USDC on Uniswap
         IERC20(token).approve(address(swapRouter), amount);
-        
+
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: token,
             tokenOut: address(usdc),
@@ -141,7 +130,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         // We must have at least 'amount + fee' (fee is 0).
         uint256 repayAmount = amount + fee;
         uint256 currentUnwantedBalance = IERC20(token).balanceOf(address(this));
-        
+
         require(currentUnwantedBalance >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
 
         // Approve repayment

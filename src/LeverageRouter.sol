@@ -91,11 +91,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @param minMDXY Minimum mDXY received from swap (Slippage).
      */
-    function openLeverage(
-        uint256 principal, 
-        uint256 leverage, 
-        uint256 minMDXY
-    ) external {
+    function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY) external {
         require(leverage > 1e18, "Leverage must be > 1x");
 
         // 1. Pull User Funds
@@ -125,7 +121,11 @@ contract LeverageRouter is IERC3156FlashBorrower {
         uint256 amount, // Loan Amount
         uint256 fee,
         bytes calldata data
-    ) external override returns (bytes32) {
+    )
+        external
+        override
+        returns (bytes32)
+    {
         require(msg.sender == address(lender), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
@@ -145,15 +145,15 @@ contract LeverageRouter is IERC3156FlashBorrower {
             amountOutMinimum: minMDXY,
             sqrtPriceLimitX96: 0
         });
-        
+
         uint256 mDXYReceived = swapRouter.exactInputSingle(params);
 
         // 3. Supply mDXY to Morpho on behalf of the USER
         // Note: User must have called `morpho.setAuthorization(address(this), true)` beforehand!
         morpho.supply(
-            marketParams, 
-            mDXYReceived, 
-            0, 
+            marketParams,
+            mDXYReceived,
+            0,
             user, // The position belongs to the User directly
             ""
         );
@@ -161,11 +161,11 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 4. Borrow USDC from Morpho on behalf of the USER
         // We borrow exactly enough to pay back the flash loan (+ fee)
         uint256 debtToIncur = amount + fee;
-        
+
         morpho.borrow(
-            marketParams, 
-            debtToIncur, 
-            0, 
+            marketParams,
+            debtToIncur,
+            0,
             user, // Debt is assigned to User
             address(this) // Money comes to Router to pay Flash Loan
         );

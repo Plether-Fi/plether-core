@@ -8,12 +8,15 @@ import "./utils/MockAave.sol";
 // Simple Mock USDC for testing (6 decimals standard)
 contract MockUSDC is MockERC20 {
     constructor() MockERC20("USDC", "USDC") {}
-    function decimals() public pure override returns (uint8) { return 6; }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
 }
 
 contract YieldAdapterTest is Test {
     YieldAdapter adapter;
-    
+
     // Mocks
     MockUSDC usdc;
     MockAToken aUsdc;
@@ -27,7 +30,7 @@ contract YieldAdapterTest is Test {
         // 1. Deploy Mocks
         usdc = new MockUSDC();
         // Note: MockAToken takes (name, symbol, underlyingAddress)
-        aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc)); 
+        aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc));
         pool = new MockPool(address(usdc), address(aUsdc));
 
         // 2. Fund the Pool (So it can pay back withdrawals)
@@ -35,12 +38,7 @@ contract YieldAdapterTest is Test {
 
         // 3. Deploy Adapter
         vm.prank(owner);
-        adapter = new YieldAdapter(
-            IERC20(address(usdc)), 
-            address(pool), 
-            address(aUsdc), 
-            owner
-        );
+        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), owner);
 
         // 4. Fund User
         usdc.mint(user, 1000 * 1e6); // $1000 USDC
@@ -54,13 +52,13 @@ contract YieldAdapterTest is Test {
         uint256 amount = 100 * 1e6;
 
         vm.startPrank(user);
-        
+
         // Approve adapter to spend user's USDC
         usdc.approve(address(adapter), amount);
-        
+
         // Act: Deposit into Vault
         uint256 shares = adapter.deposit(amount, user);
-        
+
         vm.stopPrank();
 
         // Check 1: User got shares (1:1 in this mock scenario)
@@ -184,7 +182,7 @@ contract YieldAdapterTest is Test {
 
     function test_RescueToken_OnlyOwner() public {
         MockERC20 randomToken = new MockERC20("Random", "RND");
-        
+
         vm.startPrank(hacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
         adapter.rescueToken(address(randomToken), hacker);

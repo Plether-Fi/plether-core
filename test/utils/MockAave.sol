@@ -28,7 +28,7 @@ contract MockAToken is ERC20 {
 // 2. Standard Mock Token (for USDC)
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-    
+
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
@@ -57,7 +57,7 @@ contract MockPool {
         // In reality, Aave burns the aToken. We simulate that here.
         // The Adapter holds the aTokens, so we burn from msg.sender (Adapter)
         aUsdc.burn(msg.sender, amount);
-        
+
         // Return the underlying USDC
         usdc.transfer(to, amount);
         return amount;

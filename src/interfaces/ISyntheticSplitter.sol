@@ -12,7 +12,11 @@ interface ISyntheticSplitter {
      * @param PAUSED Security pause. Minting disabled. Redemption may be restricted.
      * @param SETTLED End of life. Cap/Floor hit. Only Single-Sided Redemption enabled.
      */
-    enum Status { ACTIVE, PAUSED, SETTLED }
+    enum Status {
+        ACTIVE,
+        PAUSED,
+        SETTLED
+    }
 
     // ==========================================
     // EVENTS
@@ -21,7 +25,7 @@ interface ISyntheticSplitter {
     event Mint(address indexed user, uint256 collateralDeposited, uint256 tokensMinted);
     event RedeemPair(address indexed user, uint256 tokensBurned, uint256 collateralReturned);
     event RedeemSettled(address indexed user, address indexed token, uint256 tokensBurned, uint256 collateralReturned);
-    
+
     event ProtocolSettled(uint256 finalPrice, uint256 timestamp);
     event YieldSkimmed(address indexed treasury, uint256 amount);
     event VaultUpdated(address indexed oldVault, address indexed newVault);
@@ -80,7 +84,7 @@ interface ISyntheticSplitter {
     // ==========================================
 
     function currentStatus() external view returns (Status);
-    
+
     /**
      * @notice Returns the frozen settlement price.
      * @return price The price at which the protocol settled (0 if Active).

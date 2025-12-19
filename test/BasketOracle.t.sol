@@ -8,14 +8,14 @@ import "./utils/MockOracle.sol";
 // 2. The Test Suite
 contract BasketOracleTest is Test {
     BasketOracle public basket;
-    
+
     MockOracle public feedEUR;
     MockOracle public feedJPY;
 
     function setUp() public {
         // 1. Deploy Shared Mocks
         // EUR = $1.10 (8 decimals)
-        feedEUR = new MockOracle(110_000_000, "EUR/USD"); 
+        feedEUR = new MockOracle(110_000_000, "EUR/USD");
         // JPY = $0.01 (8 decimals)
         feedJPY = new MockOracle(1_000_000, "JPY/USD");
 
@@ -27,7 +27,7 @@ contract BasketOracleTest is Test {
         // Basket = "0.5 Euro + 50 Yen"
         uint256[] memory quantities = new uint256[](2);
         quantities[0] = 0.5 ether; // 0.5 units
-        quantities[1] = 50 ether;  // 50 units
+        quantities[1] = 50 ether; // 50 units
 
         basket = new BasketOracle(feeds, quantities);
     }
@@ -41,11 +41,11 @@ contract BasketOracleTest is Test {
         // Expected Math:
         // (PriceEUR * QtyEUR) + (PriceJPY * QtyJPY)
         // ($1.10 * 0.5) + ($0.01 * 50)
-        // $0.55 + $0.50 
+        // $0.55 + $0.50
         // = $1.05
 
         (, int256 answer,,,) = basket.latestRoundData();
-        
+
         // $1.05 in 8 decimals = 105,000,000
         assertEq(answer, 105_000_000);
     }
@@ -75,7 +75,7 @@ contract BasketOracleTest is Test {
     function test_Revert_LengthMismatch() public {
         address[] memory feeds = new address[](1);
         uint256[] memory quantities = new uint256[](2);
-        
+
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
         new BasketOracle(feeds, quantities);
     }

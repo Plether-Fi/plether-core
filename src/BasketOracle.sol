@@ -21,17 +21,11 @@ contract BasketOracle is AggregatorV3Interface {
     error BasketOracle__InvalidPrice(address feed);
     error BasketOracle__LengthMismatch();
 
-    constructor(
-        address[] memory _feeds,
-        uint256[] memory _quantities
-    ) {
+    constructor(address[] memory _feeds, uint256[] memory _quantities) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
-        
-        for (uint i = 0; i < _feeds.length; i++) {
-            components.push(Component({
-                feed: AggregatorV3Interface(_feeds[i]),
-                quantity: _quantities[i]
-            }));
+
+        for (uint256 i = 0; i < _feeds.length; i++) {
+            components.push(Component({feed: AggregatorV3Interface(_feeds[i]), quantity: _quantities[i]}));
         }
     }
 
@@ -39,14 +33,8 @@ contract BasketOracle is AggregatorV3Interface {
         int256 totalPrice = 0;
         uint256 minUpdatedAt = type(uint256).max;
 
-        for (uint i = 0; i < components.length; i++) {
-            (
-                , 
-                int256 price, 
-                , 
-                uint256 updatedAt, 
-                
-            ) = components[i].feed.latestRoundData();
+        for (uint256 i = 0; i < components.length; i++) {
+            (, int256 price,, uint256 updatedAt,) = components[i].feed.latestRoundData();
 
             // Safety: Price must be positive
             if (price <= 0) revert BasketOracle__InvalidPrice(address(components[i].feed));
@@ -63,21 +51,29 @@ contract BasketOracle is AggregatorV3Interface {
         }
 
         return (
-            uint80(1),          // Mock Round ID
-            totalPrice,         // The calculated Basket Price
-            minUpdatedAt,       // StartedAt
-            minUpdatedAt,       // UpdatedAt (Weakest Link)
-            uint80(1)           // Mock AnsweredInRound
+            uint80(1), // Mock Round ID
+            totalPrice, // The calculated Basket Price
+            minUpdatedAt, // StartedAt
+            minUpdatedAt, // UpdatedAt (Weakest Link)
+            uint80(1) // Mock AnsweredInRound
         );
     }
 
     // ==========================================
     // Boilerplate for Interface Compliance
     // ==========================================
-    function decimals() external pure returns (uint8) { return DECIMALS; }
-    function description() external pure returns (string memory) { return DESCRIPTION; }
-    function version() external pure returns (uint256) { return 1; }
-    
+    function decimals() external pure returns (uint8) {
+        return DECIMALS;
+    }
+
+    function description() external pure returns (string memory) {
+        return DESCRIPTION;
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+
     function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
         return this.latestRoundData();
     }
