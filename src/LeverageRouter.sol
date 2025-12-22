@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import "./interfaces/ISwapRouter.sol";
 
 // Morpho Blue Interface (Minimal)
 interface IMorpho {
@@ -22,21 +23,6 @@ interface IMorpho {
         address onBehalfOf,
         address receiver
     ) external returns (uint256 assetsBorrowed, uint256 sharesIssued);
-}
-
-// Uniswap Interface
-interface ISwapRouter {
-    struct ExactInputSingleParams {
-        address tokenIn;
-        address tokenOut;
-        uint24 fee;
-        address recipient;
-        uint256 deadline;
-        uint256 amountIn;
-        uint256 amountOutMinimum;
-        uint160 sqrtPriceLimitX96;
-    }
-    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
 // Morpho Structs
