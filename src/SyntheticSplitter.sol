@@ -7,11 +7,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import "./SyntheticToken.sol";
 import "./interfaces/AggregatorV3Interface.sol";
 
-contract SyntheticSplitter is Ownable, Pausable {
+contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ==========================================
@@ -85,6 +86,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     error Splitter__GovernanceLocked();
     error Splitter__SequencerDown();
     error Splitter__SequencerGracePeriod();
+    error Splitter__InsufficientHarvest();
 
     constructor(
         address _oracle,
@@ -119,7 +121,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     // 1. MINTING (With Buffer)
     // ==========================================
 
-    function mint(uint256 amount) external whenNotPaused {
+    function mint(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
         // Check adapter unless we are in emergency mode,
@@ -159,7 +161,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     // 2. BURNING (Smart Withdrawal)
     // ==========================================
 
-    function burn(uint256 amount) external {
+    function burn(uint256 amount) external nonReentrant {
         if (amount == 0) revert Splitter__ZeroAmount();
 
         if (paused()) {
@@ -204,7 +206,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     // 3. LIQUIDATION & EMERGENCY
     // ==========================================
 
-    function emergencyRedeem(uint256 amount) external {
+    function emergencyRedeem(uint256 amount) external nonReentrant {
         if (!isLiquidated) {
             uint256 price = _getOraclePrice();
             if (price >= CAP) {
@@ -257,7 +259,7 @@ contract SyntheticSplitter is Ownable, Pausable {
     // 4. HARVEST (Permissionless)
     // ==========================================
 
-    function harvestYield() external whenNotPaused {
+    function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
@@ -272,27 +274,34 @@ contract SyntheticSplitter is Ownable, Pausable {
         uint256 surplus = totalHoldings - requiredBacking;
 
         // Withdraw from adapter
+        uint256 expectedPull = totalAssets > surplus ? surplus : totalAssets;
+        uint256 balanceBefore = usdc.balanceOf(address(this));
         if (totalAssets > surplus) {
-            yieldAdapter.withdraw(surplus, address(this), address(this));
+          yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
-            yieldAdapter.redeem(myShares, address(this), address(this));
+          yieldAdapter.redeem(myShares, address(this), address(this));
         }
+        uint256 harvested = usdc.balanceOf(address(this)) - balanceBefore;
 
-        uint256 callerCut = (surplus * harvestRewardPercent) / 100;
-        uint256 remaining = surplus - callerCut;
+        // Safety check: Ensure we got at least 90% of expected (adjust threshold as needed)
+        if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
+
+        // Distribute based on actual harvested
+        uint256 callerCut = (harvested * harvestRewardPercent) / 100;
+        uint256 remaining = harvested - callerCut;
         uint256 treasuryShare = (remaining * 20) / 100;
         uint256 stakingShare = remaining - treasuryShare;
 
+        // Transfers (CEI: All calcs done before interactions)
         if (callerCut > 0) usdc.safeTransfer(msg.sender, callerCut);
         if (treasury != address(0)) usdc.safeTransfer(treasury, treasuryShare);
-
         if (staking != address(0)) {
             usdc.safeTransfer(staking, stakingShare);
         } else {
             usdc.safeTransfer(treasury, stakingShare);
         }
 
-        emit YieldHarvested(surplus, treasuryShare, stakingShare);
+        emit YieldHarvested(harvested, treasuryShare, stakingShare); // Update event to use harvested
     }
 
     // ==========================================
@@ -338,7 +347,7 @@ contract SyntheticSplitter is Ownable, Pausable {
         emit AdapterProposed(_newAdapter, adapterActivationTime);
     }
 
-    function finalizeAdapter() external onlyOwner {
+    function finalizeAdapter() external nonReentrant onlyOwner {
         if (pendingAdapter == address(0)) revert Splitter__InvalidProposal();
         if (block.timestamp < adapterActivationTime) revert Splitter__TimelockActive();
 
@@ -346,6 +355,7 @@ contract SyntheticSplitter is Ownable, Pausable {
 
         IERC4626 oldAdapter = yieldAdapter;
         IERC4626 newAdapter = IERC4626(pendingAdapter);
+        yieldAdapter = IERC4626(address(0));
 
         uint256 movedAmount = 0;
         if (address(oldAdapter) != address(0)) {
