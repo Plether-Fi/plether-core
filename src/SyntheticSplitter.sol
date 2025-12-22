@@ -277,9 +277,9 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 expectedPull = totalAssets > surplus ? surplus : totalAssets;
         uint256 balanceBefore = usdc.balanceOf(address(this));
         if (totalAssets > surplus) {
-          yieldAdapter.withdraw(surplus, address(this), address(this));
+            yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
-          yieldAdapter.redeem(myShares, address(this), address(this));
+            yieldAdapter.redeem(myShares, address(this), address(this));
         }
         uint256 harvested = usdc.balanceOf(address(this)) - balanceBefore;
 

@@ -35,7 +35,7 @@ contract YieldAdapter is ERC4626, Ownable {
         aToken = IERC20(_aToken);
 
         // Infinite approve Aave to take our USDC
-        _asset.approve(_aavePool, type(uint256).max);
+        _asset.safeIncreaseAllowance(_aavePool, type(uint256).max);
     }
 
     // ==========================================

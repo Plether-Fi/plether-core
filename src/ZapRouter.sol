@@ -28,7 +28,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         swapRouter = ISwapRouter(_swapRouter);
 
         // Pre-approve the Splitter to take our USDC
-        usdc.approve(_splitter, type(uint256).max);
+        usdc.safeIncreaseAllowance(_splitter, type(uint256).max);
     }
 
     /**
@@ -89,7 +89,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         (, uint256 userUsdcAmount) = abi.decode(data, (address, uint256));
 
         // 1. Sell the Borrowed Token for USDC on Uniswap
-        IERC20(token).approve(address(swapRouter), amount);
+        IERC20(token).safeIncreaseAllowance(address(swapRouter), amount);
 
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: token,
@@ -120,7 +120,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(currentUnwantedBalance >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
 
         // Approve repayment
-        IERC20(token).approve(msg.sender, repayAmount);
+        IERC20(token).safeIncreaseAllowance(msg.sender, repayAmount);
 
         return keccak256("ERC3156FlashBorrower.onFlashLoan");
     }
