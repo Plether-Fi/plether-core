@@ -88,6 +88,18 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     error Splitter__SequencerGracePeriod();
     error Splitter__InsufficientHarvest();
 
+    // Structs for Views
+    struct SystemStatus {
+        uint256 currentPrice;
+        uint256 capPrice;
+        bool isLiquidated;
+        bool isPaused;
+        uint256 totalAssets; // Local + Adapter
+        uint256 totalLiabilities; // Bear Supply * CAP
+        uint256 collateralRatio; // Basis points
+        uint256 adapterAPY; // Current adapter value
+    }
+
     constructor(
         address _oracle,
         address _usdc,
@@ -120,6 +132,33 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
     // 1. MINTING (With Buffer)
     // ==========================================
+
+    /**
+     * @notice Simulates a mint to see required USDC input
+     * @param mintAmount The amount of TokenA/B the user wants to mint
+     * @return usdcRequired Total USDC needed from user
+     * @return depositToAdapter Amount that will be sent to Yield Source
+     * @return keptInBuffer Amount that will stay in Splitter contract
+     */
+    function previewMint(uint256 mintAmount)
+        external
+        view
+        returns (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer)
+    {
+        if (mintAmount == 0) return (0, 0, 0);
+        if (isLiquidated) revert Splitter__LiquidationActive();
+
+        // Check Oracle Price to fail fast if over CAP
+        uint256 price = _getOraclePrice();
+        if (price >= CAP) revert Splitter__LiquidationActive();
+
+        // Calculate USDC required
+        usdcRequired = (mintAmount * CAP) / USDC_MULTIPLIER;
+
+        // Calculate Buffer Split
+        keptInBuffer = (usdcRequired * BUFFER_PERCENT) / 100;
+        depositToAdapter = usdcRequired - keptInBuffer;
+    }
 
     function mint(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
@@ -160,6 +199,47 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
     // 2. BURNING (Smart Withdrawal)
     // ==========================================
+
+    /**
+     * @notice Simulates a burn to see USDC return
+     * @param burnAmount The amount of TokenA/B the user wants to burn
+     * @return usdcToReturn Total USDC user will receive
+     * @return withdrawnFromAdapter Amount pulled from Yield Source to cover shortage
+     */
+    function previewBurn(uint256 burnAmount)
+        external
+        view
+        returns (uint256 usdcToReturn, uint256 withdrawnFromAdapter)
+    {
+        if (burnAmount == 0) return (0, 0);
+
+        // 1. Solvency Check (Simulates the paused logic)
+        if (paused()) {
+            uint256 totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+            uint256 myShares = yieldAdapter.balanceOf(address(this));
+            uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
+            uint256 totalAssets = usdc.balanceOf(address(this)) + adapterValue;
+
+            require(totalAssets >= totalLiabilities, "Paused & Insolvent");
+        }
+
+        // 2. Calculate Refund
+        usdcToReturn = (burnAmount * CAP) / USDC_MULTIPLIER;
+
+        // 3. Calculate Liquidity Source
+        uint256 localBalance = usdc.balanceOf(address(this));
+
+        if (localBalance < usdcToReturn) {
+            withdrawnFromAdapter = usdcToReturn - localBalance;
+
+            // Optional: Check if adapter actually has this liquidity
+            // logical constraint to warn frontend if withdrawal will fail
+            uint256 maxWithdraw = yieldAdapter.maxWithdraw(address(this));
+            require(maxWithdraw >= withdrawnFromAdapter, "Adapter Insufficient Liquidity");
+        } else {
+            withdrawnFromAdapter = 0;
+        }
+    }
 
     function burn(uint256 amount) external nonReentrant {
         if (amount == 0) revert Splitter__ZeroAmount();
@@ -258,6 +338,59 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
     // 4. HARVEST (Permissionless)
     // ==========================================
+
+    /**
+     * @notice Checks if there is yield to harvest and calculates distribution
+     * @return canHarvest True if surplus > MIN_SURPLUS_THRESHOLD
+     * @return totalSurplus Total surplus available (assets - liabilities)
+     * @return callerReward Amount sent to msg.sender
+     * @return treasuryShare Amount sent to treasury
+     * @return stakingShare Amount sent to staking
+     */
+    function previewHarvest()
+        external
+        view
+        returns (
+            bool canHarvest,
+            uint256 totalSurplus,
+            uint256 callerReward,
+            uint256 treasuryShare,
+            uint256 stakingShare
+        )
+    {
+        if (address(yieldAdapter) == address(0)) return (false, 0, 0, 0, 0);
+
+        // 1. Calculate Total Holdings
+        uint256 myShares = yieldAdapter.balanceOf(address(this));
+        uint256 adapterAssets = yieldAdapter.convertToAssets(myShares);
+        uint256 localBuffer = usdc.balanceOf(address(this));
+        uint256 totalHoldings = adapterAssets + localBuffer;
+
+        // 2. Calculate Liabilities
+        uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+
+        // 3. Determine Surplus
+        if (totalHoldings > requiredBacking) {
+            totalSurplus = totalHoldings - requiredBacking;
+        } else {
+            return (false, 0, 0, 0, 0);
+        }
+
+        if (totalSurplus < MIN_SURPLUS_THRESHOLD) {
+            return (false, totalSurplus, 0, 0, 0);
+        }
+
+        // 4. Calculate Splits
+        // Note: The actual harvest logic limits withdrawal to `adapterAssets` if surplus > adapterAssets.
+        uint256 harvestableAmount = (adapterAssets > totalSurplus) ? totalSurplus : adapterAssets;
+
+        callerReward = (harvestableAmount * harvestRewardPercent) / 100;
+        uint256 remaining = harvestableAmount - callerReward;
+        treasuryShare = (remaining * 20) / 100;
+        stakingShare = remaining - treasuryShare;
+
+        canHarvest = true;
+    }
 
     function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
@@ -385,6 +518,47 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     function unpause() external onlyOwner {
         lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
         _unpause();
+    }
+
+    // ==========================================
+    // VIEW HELPERS (DASHBOARD)
+    // ==========================================
+
+    /**
+     * @notice Returns high-level system metrics for UI dashboards
+     */
+    function getSystemStatus() external view returns (SystemStatus memory status) {
+        status.capPrice = CAP;
+        status.isLiquidated = isLiquidated;
+        status.isPaused = paused();
+
+        // Price might revert if sequencer is down, handle gracefully in UI,
+        // but here we try-catch or just call internal (view will revert entire call)
+        try oracle.latestRoundData() returns (uint80, int256 price, uint256, uint256, uint80) {
+            status.currentPrice = price > 0 ? uint256(price) : 0;
+        } catch {
+            status.currentPrice = 0; // Indicate error
+        }
+
+        // Assets/Liabilities
+        uint256 myShares = 0;
+        uint256 adapterVal = 0;
+        if (address(yieldAdapter) != address(0)) {
+            myShares = yieldAdapter.balanceOf(address(this));
+            adapterVal = yieldAdapter.convertToAssets(myShares);
+        }
+
+        status.totalAssets = usdc.balanceOf(address(this)) + adapterVal;
+        status.totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+
+        if (status.totalLiabilities > 0) {
+            status.collateralRatio = (status.totalAssets * 10000) / status.totalLiabilities;
+        } else {
+            status.collateralRatio = 0; // Infinite/Unset
+        }
+
+        // To help UI calc APY history
+        status.adapterAPY = adapterVal; // Actually returns total assets in adapter
     }
 
     // Sequencer Check Logic
