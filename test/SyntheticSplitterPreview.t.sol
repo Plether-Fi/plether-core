@@ -369,22 +369,149 @@ contract SyntheticSplitterFullTest is Test {
         vm.prank(user);
         splitter.mint(1e18);
 
-        // Set price above CAP
         oracle.setPrice(int256(201e8));
 
-        // Trigger the liquidation flag by attempting a mint (it will revert and set isLiquidated = true)
-        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
-        vm.prank(user);
-        splitter.mint(1e18);
+        splitter.triggerLiquidation(); // Now properly sets the flag
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertTrue(s.isLiquidated);
-        assertEq(s.currentPrice, 201e8); // Oracle returns the high price correctly
+        assertEq(s.currentPrice, 201e8);
     }
 
     function test_GetSystemStatus_OracleZeroPrice() public {
         oracle.setPrice(int256(0));
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertEq(s.currentPrice, 0);
+    }
+
+    // ====================== LIQUIDATION TRIGGER TESTS ======================
+
+    function test_TriggerLiquidation_SucceedsWhenPriceAboveCap() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        // Set price above CAP
+        oracle.setPrice(int256(201e8));
+
+        // Anyone can trigger
+        splitter.triggerLiquidation();
+
+        SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
+        assertTrue(s.isLiquidated);
+        assertEq(s.currentPrice, 201e8);
+    }
+
+    function test_TriggerLiquidation_PersistsAfterRevert() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        oracle.setPrice(int256(201e8));
+
+        // Trigger liquidation
+        splitter.triggerLiquidation();
+
+        // Subsequent mint should now revert with LiquidationActive (and NOT set flag again)
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        vm.prank(user);
+        splitter.mint(1e18);
+
+        // Flag remains true
+        assertTrue(splitter.isLiquidated());
+    }
+
+    function test_TriggerLiquidation_RevertsWhenPriceBelowCap() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        // Price still below CAP
+        oracle.setPrice(int256(199e8));
+
+        vm.expectRevert(SyntheticSplitter.Splitter__NotLiquidated.selector);
+        splitter.triggerLiquidation();
+    }
+
+    function test_TriggerLiquidation_RevertsIfAlreadyLiquidated() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        oracle.setPrice(int256(201e8));
+        splitter.triggerLiquidation();
+
+        // Calling again should revert
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        splitter.triggerLiquidation();
+    }
+
+    function test_TriggerLiquidation_CanBeCalledByAnyone() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        oracle.setPrice(int256(201e8));
+
+        // Call from a different address (not owner, not user)
+        address randomCaller = address(0x9999);
+        vm.prank(randomCaller);
+        splitter.triggerLiquidation();
+
+        assertTrue(splitter.isLiquidated());
+    }
+
+    function test_TriggerLiquidation_EmitsEvent() public {
+        vm.prank(user);
+        splitter.mint(5e18);
+
+        oracle.setPrice(int256(210e8));
+
+        vm.expectEmit(true, false, false, true);
+        emit SyntheticSplitter.LiquidationTriggered(210e8);
+
+        splitter.triggerLiquidation();
+    }
+
+    function test_TriggerLiquidation_UpdatesStatusCorrectly() public {
+        vm.prank(user);
+        splitter.mint(10e18);
+
+        oracle.setPrice(int256(CAP + 50000000)); // 200.05
+
+        splitter.triggerLiquidation();
+
+        SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
+        assertTrue(s.isLiquidated);
+        assertEq(s.currentPrice, CAP + 50000000);
+        assertEq(s.capPrice, CAP);
+    }
+
+    function test_Liquidation_IsIrreversible_EvenIfPriceRecovers() public {
+        // Step 1: Mint some tokens to have supply
+        vm.prank(user);
+        splitter.mint(10e18);
+
+        // Step 2: Push price above CAP and trigger liquidation
+        oracle.setPrice(int256(201e8));
+        splitter.triggerLiquidation();
+
+        // Verify liquidated state
+        assertTrue(splitter.isLiquidated());
+        SyntheticSplitter.SystemStatus memory s1 = splitter.getSystemStatus();
+        assertTrue(s1.isLiquidated);
+
+        // Step 3: Drop price back to safe level (well below CAP)
+        oracle.setPrice(int256(150e8));
+
+        // Verify price is now safe
+        SyntheticSplitter.SystemStatus memory s2 = splitter.getSystemStatus();
+        assertEq(s2.currentPrice, 150e8);
+
+        // Step 4: Attempt to mint again — should STILL revert because liquidation is irreversible
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        vm.prank(user);
+        splitter.mint(1e18);
+
+        // Final check: flag remains true
+        assertTrue(splitter.isLiquidated());
+        SyntheticSplitter.SystemStatus memory s3 = splitter.getSystemStatus();
+        assertTrue(s3.isLiquidated);
+        assertEq(s3.currentPrice, 150e8); // price updated correctly, but system stays dead
     }
 }

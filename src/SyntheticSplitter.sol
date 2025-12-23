@@ -169,8 +169,6 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         uint256 price = _getOraclePrice();
         if (price >= CAP) {
-            isLiquidated = true;
-            emit LiquidationTriggered(price);
             revert Splitter__LiquidationActive();
         }
 
@@ -285,6 +283,19 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
     // 3. LIQUIDATION & EMERGENCY
     // ==========================================
+
+    /**
+     * @notice Permissionless function to lock the protocol into Liquidated state.
+     * @dev Call this if Price >= CAP to prevent the system from "reviving" if price drops later.
+     */
+    function triggerLiquidation() external nonReentrant {
+        uint256 price = _getOraclePrice();
+        if (price < CAP) revert Splitter__NotLiquidated();
+        if (isLiquidated) revert Splitter__LiquidationActive();
+
+        isLiquidated = true;
+        emit LiquidationTriggered(price);
+    }
 
     function emergencyRedeem(uint256 amount) external nonReentrant {
         if (!isLiquidated) {
