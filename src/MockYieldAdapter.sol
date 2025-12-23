@@ -12,11 +12,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract MockYieldAdapter is ERC4626, Ownable {
     using SafeERC20 for IERC20;
 
-    constructor(IERC20 _asset, address _owner)
-        ERC4626(_asset)
-        ERC20("Mock Yield Wrapper", "mUSDC")
-        Ownable(_owner)
-    {}
+    constructor(IERC20 _asset, address _owner) ERC4626(_asset) ERC20("Mock Yield Wrapper", "mUSDC") Ownable(_owner) {}
 
     // Total assets = USDC balance in this contract (no yield accrual)
     function totalAssets() public view override returns (uint256) {

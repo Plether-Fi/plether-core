@@ -64,20 +64,20 @@ contract DeployToSepolia is Script {
         // Inline deployments to reduce local variables and avoid stack too deep
         address[] memory feeds = new address[](6);
         feeds[0] = address(new MockV3Aggregator(105000000)); // ~1.05 USD per EUR, 8 decimals
-        feeds[1] = address(new MockV3Aggregator(640000));    // ~0.0064 USD per JPY
+        feeds[1] = address(new MockV3Aggregator(640000)); // ~0.0064 USD per JPY
         feeds[2] = address(new MockV3Aggregator(125000000)); // ~1.25 USD per GBP
-        feeds[3] = address(new MockV3Aggregator(73000000));   // ~0.73 USD per CAD
-        feeds[4] = address(new MockV3Aggregator(9300000));    // ~0.093 USD per SEK
+        feeds[3] = address(new MockV3Aggregator(73000000)); // ~0.73 USD per CAD
+        feeds[4] = address(new MockV3Aggregator(9300000)); // ~0.093 USD per SEK
         feeds[5] = address(new MockV3Aggregator(113000000)); // ~1.13 USD per CHF
 
         // Prepare quantities based on DXY weights (scaled to 1e18 precision)
         uint256[] memory quantities = new uint256[](6);
-        quantities[0] = 576 * 10**15; // 57.6%
-        quantities[1] = 136 * 10**15; // 13.6%
-        quantities[2] = 119 * 10**15; // 11.9%
-        quantities[3] = 91 * 10**15;  // 9.1%
-        quantities[4] = 42 * 10**15;  // 4.2%
-        quantities[5] = 36 * 10**15;  // 3.6%
+        quantities[0] = 576 * 10 ** 15; // 57.6%
+        quantities[1] = 136 * 10 ** 15; // 13.6%
+        quantities[2] = 119 * 10 ** 15; // 11.9%
+        quantities[3] = 91 * 10 ** 15; // 9.1%
+        quantities[4] = 42 * 10 ** 15; // 4.2%
+        quantities[5] = 36 * 10 ** 15; // 3.6%
 
         // Deploy BasketOracle
         BasketOracle oracle = new BasketOracle(feeds, quantities);
@@ -100,7 +100,7 @@ contract DeployToSepolia is Script {
         MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer);
 
         // Set CAP (example: 2 with 8 decimals, adjust as needed)
-        uint256 cap = 2 * 10**8;
+        uint256 cap = 2 * 10 ** 8;
 
         // Treasury (using deployer as example)
         address treasury = deployer;
@@ -109,14 +109,8 @@ contract DeployToSepolia is Script {
         address sequencerUptimeFeed = address(0);
 
         // Deploy SyntheticSplitter
-        SyntheticSplitter splitter = new SyntheticSplitter(
-            address(oracle),
-            usdc,
-            address(mockAdapter),
-            cap,
-            treasury,
-            sequencerUptimeFeed
-        );
+        SyntheticSplitter splitter =
+            new SyntheticSplitter(address(oracle), usdc, address(mockAdapter), cap, treasury, sequencerUptimeFeed);
 
         // Output deployed addresses (console logs for reference)
         console.log("BasketOracle deployed at:", address(oracle));
