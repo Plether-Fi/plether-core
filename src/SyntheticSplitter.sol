@@ -109,8 +109,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         treasury = _treasury;
         sequencerUptimeFeed = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        tokenA = new SyntheticToken("Bear DXY", "mInvDXY", address(this));
-        tokenB = new SyntheticToken("Bull DXY", "mDXY", address(this));
+        tokenA = new SyntheticToken("Bear DXY", "plDXY-BEAR", address(this));
+        tokenB = new SyntheticToken("Bull DXY", "plDXY-BULL", address(this));
 
         // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
