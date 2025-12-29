@@ -6,12 +6,12 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20FlashMint.sol";
 
 contract SyntheticToken is ERC20, ERC20FlashMint {
     // The address of the Splitter contract that controls supply
-    address public immutable splitter;
+    address public immutable SPLITTER;
 
     error SyntheticToken__Unauthorized();
 
     modifier onlySplitter() {
-        if (msg.sender != splitter) {
+        if (msg.sender != SPLITTER) {
             revert SyntheticToken__Unauthorized();
         }
         _;
@@ -19,7 +19,7 @@ contract SyntheticToken is ERC20, ERC20FlashMint {
 
     constructor(string memory _name, string memory _symbol, address _splitter) ERC20(_name, _symbol) {
         require(_splitter != address(0), "Invalid splitter address");
-        splitter = _splitter;
+        SPLITTER = _splitter;
     }
 
     function mint(address to, uint256 amount) external onlySplitter {

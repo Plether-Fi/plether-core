@@ -35,11 +35,11 @@ struct MarketParams {
 contract LeverageRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;
     // Dependencies
-    IMorpho public immutable morpho;
-    ISwapRouter public immutable swapRouter;
-    IERC20 public immutable usdc;
-    IERC20 public immutable mDXY;
-    IERC3156FlashLender public immutable lender; // e.g., Aave or Balancer
+    IMorpho public immutable MORPHO;
+    ISwapRouter public immutable SWAP_ROUTER;
+    IERC20 public immutable USDC;
+    IERC20 public immutable M_DXY;
+    IERC3156FlashLender public immutable LENDER; // e.g., Aave or Balancer
     // Morpho Market ID Configuration
     MarketParams public marketParams;
 
@@ -51,19 +51,19 @@ contract LeverageRouter is IERC3156FlashBorrower {
         address _lender,
         MarketParams memory _marketParams
     ) {
-        morpho = IMorpho(_morpho);
-        swapRouter = ISwapRouter(_swapRouter);
-        usdc = IERC20(_usdc);
-        mDXY = IERC20(_mDXY);
-        lender = IERC3156FlashLender(_lender);
+        MORPHO = IMorpho(_morpho);
+        SWAP_ROUTER = ISwapRouter(_swapRouter);
+        USDC = IERC20(_usdc);
+        M_DXY = IERC20(_mDXY);
+        LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
         // Approvals (One-time)
         // 1. Allow SwapRouter to take USDC
-        usdc.safeIncreaseAllowance(_swapRouter, type(uint256).max);
+        USDC.safeIncreaseAllowance(_swapRouter, type(uint256).max);
         // 2. Allow Morpho to take mDXY
-        mDXY.safeIncreaseAllowance(_morpho, type(uint256).max);
+        M_DXY.safeIncreaseAllowance(_morpho, type(uint256).max);
         // 3. Allow Lender to take back USDC (Repayment)
-        usdc.safeIncreaseAllowance(_lender, type(uint256).max);
+        USDC.safeIncreaseAllowance(_lender, type(uint256).max);
     }
 
     /**
@@ -75,7 +75,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
     function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY) external {
         require(leverage > 1e18, "Leverage must be > 1x");
         // 1. Pull User Funds
-        usdc.safeTransferFrom(msg.sender, address(this), principal);
+        USDC.safeTransferFrom(msg.sender, address(this), principal);
         // 2. Calculate Flash Loan Amount
         // If User has $1000 and wants 3x ($3000 exposure):
         // We need to buy $3000 worth of mDXY.
@@ -86,7 +86,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         bytes memory data = abi.encode(principal, minMDXY, msg.sender);
         // 4. Initiate Flash Loan (Get the extra USDC)
         // NOTE: We are flash loaning USDC, not mDXY
-        lender.flashLoan(this, address(usdc), loanAmount, data);
+        LENDER.flashLoan(this, address(USDC), loanAmount, data);
     }
 
     /**
@@ -103,15 +103,15 @@ contract LeverageRouter is IERC3156FlashBorrower {
         override
         returns (bytes32)
     {
-        require(msg.sender == address(lender), "Untrusted lender");
+        require(msg.sender == address(LENDER), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
         (uint256 principal, uint256 minMDXY, address user) = abi.decode(data, (uint256, uint256, address));
         // 1. Total Capital = User Principal + Flash Loan
         uint256 totalUSDC = principal + amount;
         // 2. Swap ALL USDC -> mDXY
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(usdc),
-            tokenOut: address(mDXY),
+            tokenIn: address(USDC),
+            tokenOut: address(M_DXY),
             fee: 500, // 0.05% Pool
             recipient: address(this), // Keep mDXY here to supply to Morpho
             deadline: block.timestamp,
@@ -119,10 +119,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
             amountOutMinimum: minMDXY,
             sqrtPriceLimitX96: 0
         });
-        uint256 mDXYReceived = swapRouter.exactInputSingle(params);
+        uint256 mDXYReceived = SWAP_ROUTER.exactInputSingle(params);
         // 3. Supply mDXY to Morpho on behalf of the USER
         // Note: User must have called `morpho.setAuthorization(address(this), true)` beforehand!
-        morpho.supply(
+        MORPHO.supply(
             marketParams,
             mDXYReceived,
             0,
@@ -132,7 +132,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 4. Borrow USDC from Morpho on behalf of the USER
         // We borrow exactly enough to pay back the flash loan (+ fee)
         uint256 debtToIncur = amount + fee;
-        morpho.borrow(
+        MORPHO.borrow(
             marketParams,
             debtToIncur,
             0,

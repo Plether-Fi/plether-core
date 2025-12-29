@@ -116,8 +116,8 @@ contract DeployToSepolia is Script {
         console.log("BasketOracle deployed at:", address(oracle));
         console.log("mockAdapter deployed at:", address(mockAdapter));
         console.log("SyntheticSplitter deployed at:", address(splitter));
-        console.log("Bear Token (tokenA):", address(splitter.tokenA()));
-        console.log("Bull Token (tokenB):", address(splitter.tokenB()));
+        console.log("Bear Token (TOKEN_A):", address(splitter.TOKEN_A()));
+        console.log("Bull Token (TOKEN_B):", address(splitter.TOKEN_B()));
 
         vm.stopBroadcast();
     }

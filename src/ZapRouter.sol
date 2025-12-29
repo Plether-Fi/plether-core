@@ -11,24 +11,24 @@ contract ZapRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;
 
     // Immutable Dependencies
-    ISyntheticSplitter public immutable splitter;
-    address public immutable mDXY;
-    address public immutable mInvDXY;
-    IERC20 public immutable usdc;
-    ISwapRouter public immutable swapRouter;
+    ISyntheticSplitter public immutable SPLITTER;
+    address public immutable M_DXY;
+    address public immutable M_INV_DXY;
+    IERC20 public immutable USDC;
+    ISwapRouter public immutable SWAP_ROUTER;
 
     // Constants
     uint24 public constant POOL_FEE = 500; // 0.05% Uniswap Pool
 
     constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _swapRouter) {
-        splitter = ISyntheticSplitter(_splitter);
-        mDXY = _mDXY;
-        mInvDXY = _mInvDXY;
-        usdc = IERC20(_usdc);
-        swapRouter = ISwapRouter(_swapRouter);
+        SPLITTER = ISyntheticSplitter(_splitter);
+        M_DXY = _mDXY;
+        M_INV_DXY = _mInvDXY;
+        USDC = IERC20(_usdc);
+        SWAP_ROUTER = ISwapRouter(_swapRouter);
 
         // Pre-approve the Splitter to take our USDC
-        usdc.safeIncreaseAllowance(_splitter, type(uint256).max);
+        USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
     }
 
     /**
@@ -38,13 +38,13 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @param minAmountOut Minimum amount of tokens to receive (Slippage protection).
      */
     function zapMint(address tokenWanted, uint256 usdcAmount, uint256 minAmountOut) external {
-        require(tokenWanted == mDXY || tokenWanted == mInvDXY, "Invalid token");
+        require(tokenWanted == M_DXY || tokenWanted == M_INV_DXY, "Invalid token");
 
         // 1. Pull USDC from User
-        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
+        USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
         // 2. Identify which token we need to Flash Mint (The one we DON'T want)
-        address tokenToFlash = (tokenWanted == mDXY) ? mInvDXY : mDXY;
+        address tokenToFlash = (tokenWanted == M_DXY) ? M_INV_DXY : M_DXY;
 
         // 3. Calculate how much to Flash Mint
         // We estimate 1:1 price parity for the initial request.
@@ -89,11 +89,11 @@ contract ZapRouter is IERC3156FlashBorrower {
         (, uint256 userUsdcAmount) = abi.decode(data, (address, uint256));
 
         // 1. Sell the Borrowed Token for USDC on Uniswap
-        IERC20(token).safeIncreaseAllowance(address(swapRouter), amount);
+        IERC20(token).safeIncreaseAllowance(address(SWAP_ROUTER), amount);
 
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: token,
-            tokenOut: address(usdc),
+            tokenOut: address(USDC),
             fee: POOL_FEE,
             recipient: address(this),
             deadline: block.timestamp,
@@ -102,14 +102,14 @@ contract ZapRouter is IERC3156FlashBorrower {
             sqrtPriceLimitX96: 0
         });
 
-        uint256 swappedUsdc = swapRouter.exactInputSingle(params);
+        uint256 swappedUsdc = SWAP_ROUTER.exactInputSingle(params);
 
         // 2. Combine User USDC + Swapped USDC
         uint256 totalCollateral = userUsdcAmount + swappedUsdc;
 
         // 3. Mint Real Pairs from Core
         // This gives us 'mintedAmount' of mDXY AND 'mintedAmount' of mInvDXY
-        splitter.mint(totalCollateral);
+        SPLITTER.mint(totalCollateral);
 
         // 4. Repay the Flash Loan
         // We now have real tokens. We use the 'unwanted' side to pay back the loan.

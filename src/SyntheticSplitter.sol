@@ -20,12 +20,12 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
 
     // Assets
-    SyntheticToken public immutable tokenA; // Bear
-    SyntheticToken public immutable tokenB; // Bull
-    IERC20 public immutable usdc;
+    SyntheticToken public immutable TOKEN_A; // Bear
+    SyntheticToken public immutable TOKEN_B; // Bull
+    IERC20 public immutable USDC;
 
     // Logic
-    AggregatorV3Interface public immutable oracle;
+    AggregatorV3Interface public immutable ORACLE;
     uint256 public immutable CAP;
     uint256 public immutable USDC_MULTIPLIER; // Cached math scaler
     uint256 public constant BUFFER_PERCENT = 10; // Keep 10% liquid in Splitter
@@ -59,7 +59,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     bool public isLiquidated;
 
     // Sequencer Feed
-    AggregatorV3Interface public immutable sequencerUptimeFeed;
+    AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
 
     // Events
@@ -114,15 +114,15 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         require(_cap > 0, "Invalid Cap");
         require(_treasury != address(0), "Invalid Treasury");
 
-        oracle = AggregatorV3Interface(_oracle);
-        usdc = IERC20(_usdc);
+        ORACLE = AggregatorV3Interface(_oracle);
+        USDC = IERC20(_usdc);
         yieldAdapter = IERC4626(_yieldAdapter);
         CAP = _cap;
         treasury = _treasury;
-        sequencerUptimeFeed = AggregatorV3Interface(_sequencerUptimeFeed);
+        SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        tokenA = new SyntheticToken("Bear DXY", "plDXY-BEAR", address(this));
-        tokenB = new SyntheticToken("Bull DXY", "plDXY-BULL", address(this));
+        TOKEN_A = new SyntheticToken("Bear DXY", "plDXY-BEAR", address(this));
+        TOKEN_B = new SyntheticToken("Bull DXY", "plDXY-BULL", address(this));
 
         // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
@@ -176,7 +176,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         require(usdcNeeded > 0, "Amount too small");
 
         // 1. Pull USDC: User -> Splitter
-        usdc.safeTransferFrom(msg.sender, address(this), usdcNeeded);
+        USDC.safeTransferFrom(msg.sender, address(this), usdcNeeded);
 
         // 2. Buffer Logic
         // Keep 10% in Splitter, Send 90% to Adapter
@@ -184,12 +184,12 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 depositAmount = usdcNeeded - keepAmount;
 
         if (depositAmount > 0) {
-            usdc.forceApprove(address(yieldAdapter), depositAmount);
+            USDC.forceApprove(address(yieldAdapter), depositAmount);
             yieldAdapter.deposit(depositAmount, address(this));
         }
 
-        tokenA.mint(msg.sender, amount);
-        tokenB.mint(msg.sender, amount);
+        TOKEN_A.mint(msg.sender, amount);
+        TOKEN_B.mint(msg.sender, amount);
 
         emit Minted(msg.sender, amount);
     }
@@ -213,10 +213,10 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         // 1. Solvency Check (Simulates the paused logic)
         if (paused()) {
-            uint256 totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+            uint256 totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
             uint256 myShares = yieldAdapter.balanceOf(address(this));
             uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
-            uint256 totalAssets = usdc.balanceOf(address(this)) + adapterValue;
+            uint256 totalAssets = USDC.balanceOf(address(this)) + adapterValue;
 
             require(totalAssets >= totalLiabilities, "Paused & Insolvent");
         }
@@ -225,7 +225,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         usdcToReturn = (burnAmount * CAP) / USDC_MULTIPLIER;
 
         // 3. Calculate Liquidity Source
-        uint256 localBalance = usdc.balanceOf(address(this));
+        uint256 localBalance = USDC.balanceOf(address(this));
 
         if (localBalance < usdcToReturn) {
             withdrawnFromAdapter = usdcToReturn - localBalance;
@@ -246,24 +246,24 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             // If paused, we strictly enforce 100% solvency.
             // If we are even 1 USDC short, we keep the lock to prevent a race to exit.
 
-            uint256 totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+            uint256 totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
 
             // Calculate Total Assets (Local + Adapter)
             // Note: We use the SAFE 'convertToAssets' calculation we fixed earlier
             uint256 myShares = yieldAdapter.balanceOf(address(this));
             uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
-            uint256 totalAssets = usdc.balanceOf(address(this)) + adapterValue;
+            uint256 totalAssets = USDC.balanceOf(address(this)) + adapterValue;
 
             require(totalAssets >= totalLiabilities, "Paused & Insolvent: Burn Locked");
         }
 
-        tokenA.burn(msg.sender, amount);
-        tokenB.burn(msg.sender, amount);
+        TOKEN_A.burn(msg.sender, amount);
+        TOKEN_B.burn(msg.sender, amount);
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
 
         // 1. Check Local Buffer First
-        uint256 localBalance = usdc.balanceOf(address(this));
+        uint256 localBalance = USDC.balanceOf(address(this));
 
         if (localBalance < usdcRefund) {
             uint256 shortage = usdcRefund - localBalance;
@@ -275,7 +275,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         }
 
         // Now localBalance is sufficient (Original + Withdrawn Shortage)
-        usdc.safeTransfer(msg.sender, usdcRefund);
+        USDC.safeTransfer(msg.sender, usdcRefund);
 
         emit Burned(msg.sender, amount);
     }
@@ -309,18 +309,18 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         }
         if (amount == 0) revert Splitter__ZeroAmount();
 
-        tokenA.burn(msg.sender, amount); // Burn Bear Only
+        TOKEN_A.burn(msg.sender, amount); // Burn Bear Only
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
 
         // Smart Withdrawal Logic for Emergency too
-        uint256 localBalance = usdc.balanceOf(address(this));
+        uint256 localBalance = USDC.balanceOf(address(this));
 
         if (localBalance < usdcRefund) {
             uint256 shortage = usdcRefund - localBalance;
             yieldAdapter.withdraw(shortage, address(this), address(this));
         }
-        usdc.safeTransfer(msg.sender, usdcRefund);
+        USDC.safeTransfer(msg.sender, usdcRefund);
 
         emit EmergencyRedeemed(msg.sender, amount);
     }
@@ -374,11 +374,11 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         // 1. Calculate Total Holdings
         uint256 myShares = yieldAdapter.balanceOf(address(this));
         uint256 adapterAssets = yieldAdapter.convertToAssets(myShares);
-        uint256 localBuffer = usdc.balanceOf(address(this));
+        uint256 localBuffer = USDC.balanceOf(address(this));
         uint256 totalHoldings = adapterAssets + localBuffer;
 
         // 2. Calculate Liabilities
-        uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+        uint256 requiredBacking = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         // 3. Determine Surplus
         if (totalHoldings > requiredBacking) {
@@ -408,10 +408,10 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
         uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
-        uint256 localBuffer = usdc.balanceOf(address(this));
+        uint256 localBuffer = USDC.balanceOf(address(this));
         uint256 totalHoldings = totalAssets + localBuffer;
 
-        uint256 requiredBacking = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+        uint256 requiredBacking = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) revert Splitter__NoSurplus();
 
@@ -419,13 +419,13 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         // Withdraw from adapter
         uint256 expectedPull = totalAssets > surplus ? surplus : totalAssets;
-        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 balanceBefore = USDC.balanceOf(address(this));
         if (totalAssets > surplus) {
             yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
             yieldAdapter.redeem(myShares, address(this), address(this));
         }
-        uint256 harvested = usdc.balanceOf(address(this)) - balanceBefore;
+        uint256 harvested = USDC.balanceOf(address(this)) - balanceBefore;
 
         // Safety check: Ensure we got at least 90% of expected (adjust threshold as needed)
         if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
@@ -437,12 +437,12 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 stakingShare = remaining - treasuryShare;
 
         // Transfers (CEI: All calcs done before interactions)
-        if (callerCut > 0) usdc.safeTransfer(msg.sender, callerCut);
-        if (treasury != address(0)) usdc.safeTransfer(treasury, treasuryShare);
+        if (callerCut > 0) USDC.safeTransfer(msg.sender, callerCut);
+        if (treasury != address(0)) USDC.safeTransfer(treasury, treasuryShare);
         if (staking != address(0)) {
-            usdc.safeTransfer(staking, stakingShare);
+            USDC.safeTransfer(staking, stakingShare);
         } else {
-            usdc.safeTransfer(treasury, stakingShare);
+            USDC.safeTransfer(treasury, stakingShare);
         }
 
         emit YieldHarvested(harvested, treasuryShare, stakingShare); // Update event to use harvested
@@ -509,7 +509,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             }
         }
         if (movedAmount > 0) {
-            usdc.forceApprove(address(newAdapter), movedAmount);
+            USDC.forceApprove(address(newAdapter), movedAmount);
             newAdapter.deposit(movedAmount, address(this));
         }
 
@@ -545,7 +545,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         // Price might revert if sequencer is down, handle gracefully in UI,
         // but here we try-catch or just call internal (view will revert entire call)
-        try oracle.latestRoundData() returns (uint80, int256 price, uint256, uint256, uint80) {
+        try ORACLE.latestRoundData() returns (uint80, int256 price, uint256, uint256, uint80) {
             status.currentPrice = price > 0 ? uint256(price) : 0;
         } catch {
             status.currentPrice = 0; // Indicate error
@@ -559,8 +559,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             adapterVal = yieldAdapter.convertToAssets(myShares);
         }
 
-        status.totalAssets = usdc.balanceOf(address(this)) + adapterVal;
-        status.totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
+        status.totalAssets = USDC.balanceOf(address(this)) + adapterVal;
+        status.totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         if (status.totalLiabilities > 0) {
             status.collateralRatio = (status.totalAssets * 1e4) / status.totalLiabilities;
@@ -575,7 +575,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // Sequencer Check Logic
     function _checkSequencer() internal view {
         // Skip check if no feed address is provided (e.g. Mainnet/Testnet without feed)
-        if (address(sequencerUptimeFeed) == address(0)) return;
+        if (address(SEQUENCER_UPTIME_FEED) == address(0)) return;
 
         (
             /*uint80 roundID*/,
@@ -583,7 +583,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             uint256 startedAt,
             /*uint256 updatedAt*/,
             /*uint80 answeredInRound*/
-        ) = sequencerUptimeFeed.latestRoundData();
+        ) = SEQUENCER_UPTIME_FEED.latestRoundData();
 
         // Answer == 0: Sequencer is UP
         // Answer == 1: Sequencer is DOWN
@@ -607,7 +607,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             /* uint startedAt */,
             uint256 updatedAt,
             /* uint80 answeredInRound */
-        ) = oracle.latestRoundData();
+        ) = ORACLE.latestRoundData();
 
         if (updatedAt < block.timestamp - ORACLE_TIMEOUT) revert Splitter__StalePrice();
         if (price <= 0) return 0;

@@ -61,7 +61,7 @@ contract SyntheticSplitterFuzzTest is Test {
         splitter.mint(amount);
         vm.stopPrank();
 
-        uint256 totalLiabilities = (splitter.tokenA().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
+        uint256 totalLiabilities = (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
         uint256 localBuffer = usdc.balanceOf(address(splitter));
         uint256 adapterAssets = adapter.convertToAssets(adapter.balanceOf(address(splitter)));
         uint256 totalAssets = localBuffer + adapterAssets;
@@ -85,7 +85,7 @@ contract SyntheticSplitterFuzzTest is Test {
         splitter.burn(burnAmount);
         vm.stopPrank();
 
-        assertEq(splitter.tokenA().totalSupply(), splitter.tokenB().totalSupply(), "Token Parity Broken");
+        assertEq(splitter.TOKEN_A().totalSupply(), splitter.TOKEN_B().totalSupply(), "Token Parity Broken");
     }
 
     function testFuzz_BurnWhilePaused_IfSolvent(uint256 amount) public {
@@ -104,7 +104,7 @@ contract SyntheticSplitterFuzzTest is Test {
         splitter.burn(amount);
         vm.stopPrank();
 
-        assertEq(splitter.tokenA().balanceOf(alice), 0);
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 0);
     }
 
     function testFuzz_HarvestMath(uint96 poolLiquidity, uint96 yieldAmount) public {

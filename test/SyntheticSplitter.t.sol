@@ -82,8 +82,8 @@ contract SyntheticSplitterTest is Test {
         assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Vault Incorrect");
 
         // Check Tokens
-        assertEq(splitter.tokenA().balanceOf(alice), mintAmount);
-        assertEq(splitter.tokenB().balanceOf(alice), mintAmount);
+        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
+        assertEq(splitter.TOKEN_B().balanceOf(alice), mintAmount);
     }
 
     function test_Burn_UsesBufferFirst() public {
@@ -200,7 +200,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
         // 5. Verify the burn actually happened
         // Alice started with 100 Minted. Burned 10. Should have 90 left.
-        assertEq(splitter.tokenA().balanceOf(alice), 90 * 1e18, "Burn failed to execute during pause");
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 90 * 1e18, "Burn failed to execute during pause");
     }
 
     // ==========================================
@@ -293,9 +293,9 @@ contract SyntheticSplitterTest is Test {
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE, "Alice didn't get full payout");
 
         // Bear tokens burned
-        assertEq(splitter.tokenA().balanceOf(alice), 0);
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 0);
         // Bull tokens still in wallet (but worthless)
-        assertEq(splitter.tokenB().balanceOf(alice), 100 * 1e18);
+        assertEq(splitter.TOKEN_B().balanceOf(alice), 100 * 1e18);
 
         // Contract is marked liquidated
         assertTrue(splitter.isLiquidated());

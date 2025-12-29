@@ -18,8 +18,8 @@ interface IAavePool {
 contract YieldAdapter is ERC4626, Ownable {
     using SafeERC20 for IERC20;
 
-    IAavePool public immutable aavePool;
-    IERC20 public immutable aToken; // The Aave receipt token (aUSDC)
+    IAavePool public immutable AAVE_POOL;
+    IERC20 public immutable A_TOKEN; // The Aave receipt token (aUSDC)
 
     constructor(
         IERC20 _asset, // USDC
@@ -31,8 +31,8 @@ contract YieldAdapter is ERC4626, Ownable {
         ERC20("Yield Wrapper", "yUSDC")
         Ownable(_owner)
     {
-        aavePool = IAavePool(_aavePool);
-        aToken = IERC20(_aToken);
+        AAVE_POOL = IAavePool(_aavePool);
+        A_TOKEN = IERC20(_aToken);
 
         // Infinite approve Aave to take our USDC
         _asset.safeIncreaseAllowance(_aavePool, type(uint256).max);
@@ -48,7 +48,7 @@ contract YieldAdapter is ERC4626, Ownable {
      */
     function totalAssets() public view override returns (uint256) {
         // aToken balance grows automatically as interest accrues
-        return aToken.balanceOf(address(this));
+        return A_TOKEN.balanceOf(address(this));
     }
 
     /**
@@ -60,7 +60,7 @@ contract YieldAdapter is ERC4626, Ownable {
 
         // 2. We supply that USDC to Aave
         // 'onBehalfOf' is 'this' because the Wrapper holds the position
-        aavePool.supply(asset(), assets, address(this), 0);
+        AAVE_POOL.supply(asset(), assets, address(this), 0);
     }
 
     /**
@@ -71,7 +71,7 @@ contract YieldAdapter is ERC4626, Ownable {
         override
     {
         // 1. Withdraw exact amount from Aave to 'this'
-        aavePool.withdraw(asset(), assets, address(this));
+        AAVE_POOL.withdraw(asset(), assets, address(this));
 
         // 2. OpenZeppelin's logic sends USDC to 'receiver'
         super._withdraw(caller, receiver, owner, assets, shares);
@@ -86,7 +86,7 @@ contract YieldAdapter is ERC4626, Ownable {
      */
     function rescueToken(address token, address to) external onlyOwner {
         require(token != asset(), "Cannot rescue Underlying");
-        require(token != address(aToken), "Cannot rescue aTokens");
+        require(token != address(A_TOKEN), "Cannot rescue aTokens");
 
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
     }

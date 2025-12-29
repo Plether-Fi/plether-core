@@ -55,7 +55,7 @@ contract SyntheticTokenTest is Test {
     function test_InitialState() public {
         assertEq(token.name(), "Mock DXY");
         assertEq(token.symbol(), "mDXY");
-        assertEq(token.splitter(), splitter);
+        assertEq(token.SPLITTER(), splitter);
     }
 
     // ==========================================
