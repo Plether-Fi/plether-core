@@ -51,6 +51,29 @@ contract SplitterHandler is Test {
 
     uint256 constant CAP = 200_000_000; // $2.00
 
+    // Expected error selectors
+    bytes4 constant ERR_ZERO_AMOUNT = SyntheticSplitter.Splitter__ZeroAmount.selector;
+    bytes4 constant ERR_LIQUIDATION_ACTIVE = SyntheticSplitter.Splitter__LiquidationActive.selector;
+    bytes4 constant ERR_NOT_LIQUIDATED = SyntheticSplitter.Splitter__NotLiquidated.selector;
+    bytes4 constant ERR_STALE_PRICE = SyntheticSplitter.Splitter__StalePrice.selector;
+    bytes4 constant ERR_SEQUENCER_DOWN = SyntheticSplitter.Splitter__SequencerDown.selector;
+    bytes4 constant ERR_SEQUENCER_GRACE = SyntheticSplitter.Splitter__SequencerGracePeriod.selector;
+    bytes4 constant ERR_NO_SURPLUS = SyntheticSplitter.Splitter__NoSurplus.selector;
+    bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
+
+    /// @dev Reverts if error selector is not in the allowed list
+    function _assertExpectedError(bytes memory reason, bytes4[] memory allowed) internal pure {
+        if (reason.length < 4) revert("Unknown error (no selector)");
+        bytes4 selector = bytes4(reason);
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (selector == allowed[i]) return;
+        }
+        // Not an expected error - propagate it
+        assembly {
+            revert(add(reason, 32), mload(reason))
+        }
+    }
+
     modifier useActor(uint256 actorSeed) {
         currentActor = actors[actorSeed % actors.length];
         vm.startPrank(currentActor);
@@ -95,16 +118,20 @@ contract SplitterHandler is Test {
         // Skip if actor doesn't have enough USDC
         if (usdc.balanceOf(currentActor) < usdcRequired) return;
 
-        // Skip if liquidated or paused
+        // Skip if liquidated or paused (known to revert)
         if (splitter.isLiquidated() || splitter.paused()) return;
 
-        // Skip if oracle would cause revert
         try splitter.mint(amount) {
             ghost_totalMinted += amount;
             ghost_totalUsdcDeposited += usdcRequired;
             mintCalls++;
-        } catch {
-            // Expected failures (stale oracle, etc.)
+        } catch (bytes memory reason) {
+            // Only allow oracle-related errors (price can change between check and call)
+            bytes4[] memory allowed = new bytes4[](3);
+            allowed[0] = ERR_STALE_PRICE;
+            allowed[1] = ERR_SEQUENCER_DOWN;
+            allowed[2] = ERR_SEQUENCER_GRACE;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -112,11 +139,17 @@ contract SplitterHandler is Test {
         uint256 balance = splitter.TOKEN_A().balanceOf(currentActor);
         if (balance == 0) return;
 
-        // Bound to available balance
-        amount = bound(amount, 1, balance);
+        // Also need TOKEN_B balance for burn (burns both)
+        uint256 balanceB = splitter.TOKEN_B().balanceOf(currentActor);
+        if (balanceB == 0) return;
+
+        // Bound to minimum of both balances
+        uint256 maxBurn = balance < balanceB ? balance : balanceB;
+        amount = bound(amount, 1, maxBurn);
 
         bool wasLiquidated = splitter.isLiquidated();
 
+        // Burn can fail if paused AND insolvent
         try splitter.burn(amount) {
             ghost_totalBurned += amount;
             uint256 usdcReturned = (amount * CAP) / splitter.USDC_MULTIPLIER();
@@ -127,16 +160,36 @@ contract SplitterHandler is Test {
             if (wasLiquidated) {
                 ghost_burnedAfterLiquidation += amount;
             }
-        } catch {
-            // Expected failures
+        } catch (bytes memory reason) {
+            // Burn can fail if paused & insolvent (string error, not custom error)
+            // Just check it's not an unexpected custom error
+            if (reason.length >= 4) {
+                bytes4 selector = bytes4(reason);
+                // If it's a custom error, it should only be zero amount (which we prevent)
+                if (selector == ERR_ZERO_AMOUNT) return; // Shouldn't happen but allow it
+                // Any other custom error is unexpected
+                if (selector == ERR_LIQUIDATION_ACTIVE || selector == ERR_NOT_LIQUIDATED) {
+                    // These shouldn't happen for burn, propagate
+                    assembly {
+                        revert(add(reason, 32), mload(reason))
+                    }
+                }
+            }
+            // String error "Paused & Insolvent: Burn Locked" is expected
         }
     }
 
     function harvest(uint256 actorSeed) external useActor(actorSeed) {
+        // Skip if paused (will revert with Pausable error)
+        if (splitter.paused()) return;
+
         try splitter.harvestYield() {
             harvestCalls++;
-        } catch {
-            // Expected if no surplus
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](2);
+            allowed[0] = ERR_NO_SURPLUS;
+            allowed[1] = ERR_INSUFFICIENT_HARVEST;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -171,7 +224,12 @@ contract SplitterHandler is Test {
             try splitter.triggerLiquidation() {
                 ghost_wasEverLiquidated = true;
                 ghost_supplyAtLiquidation = splitter.TOKEN_A().totalSupply();
-            } catch {}
+            } catch (bytes memory reason) {
+                // Only expected error: already liquidated
+                bytes4[] memory allowed = new bytes4[](1);
+                allowed[0] = ERR_LIQUIDATION_ACTIVE;
+                _assertExpectedError(reason, allowed);
+            }
         }
     }
 
@@ -190,12 +248,10 @@ contract SplitterHandler is Test {
 
         amount = bound(amount, 1, bearBalance);
 
-        try splitter.emergencyRedeem(amount) {
-            ghost_totalEmergencyRedeemed += amount;
-            emergencyRedeemCalls++;
-        } catch {
-            // Expected failures
-        }
+        // With our preconditions, emergencyRedeem should always succeed
+        splitter.emergencyRedeem(amount);
+        ghost_totalEmergencyRedeemed += amount;
+        emergencyRedeemCalls++;
     }
 
     // ==========================================
