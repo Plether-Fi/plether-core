@@ -38,6 +38,7 @@ contract SplitterHandler is Test {
     uint256 public ghost_supplyAtLiquidation; // TOKEN_A supply when liquidation occurred
     uint256 public ghost_totalEmergencyRedeemed;
     uint256 public ghost_burnedAfterLiquidation; // Tracks burns via burn() after liquidation
+    uint256 public ghost_totalYieldSimulated; // Tracks yield added via simulateYield()
 
     // Actors
     address[] public actors;
@@ -161,21 +162,20 @@ contract SplitterHandler is Test {
                 ghost_burnedAfterLiquidation += amount;
             }
         } catch (bytes memory reason) {
-            // Burn can fail if paused & insolvent (string error, not custom error)
-            // Just check it's not an unexpected custom error
             if (reason.length >= 4) {
                 bytes4 selector = bytes4(reason);
-                // If it's a custom error, it should only be zero amount (which we prevent)
-                if (selector == ERR_ZERO_AMOUNT) return; // Shouldn't happen but allow it
-                // Any other custom error is unexpected
-                if (selector == ERR_LIQUIDATION_ACTIVE || selector == ERR_NOT_LIQUIDATED) {
-                    // These shouldn't happen for burn, propagate
-                    assembly {
-                        revert(add(reason, 32), mload(reason))
-                    }
+                // String error selector: Error(string) = 0x08c379a0
+                // Expected for "Paused & Insolvent: Burn Locked"
+                if (selector == bytes4(0x08c379a0)) return;
+                // ERR_ZERO_AMOUNT shouldn't happen (we bound > 0) but allow it
+                if (selector == ERR_ZERO_AMOUNT) return;
+                // Any other error is unexpected - propagate it
+                assembly {
+                    revert(add(reason, 32), mload(reason))
                 }
             }
-            // String error "Paused & Insolvent: Burn Locked" is expected
+            // Malformed error (< 4 bytes) - propagate
+            revert("Unknown error");
         }
     }
 
@@ -209,6 +209,7 @@ contract SplitterHandler is Test {
         // Add yield to adapter (simulates Aave interest)
         aUsdc.mint(address(adapter), yieldAmount);
         usdc.mint(address(adapter), yieldAmount); // Back the aTokens
+        ghost_totalYieldSimulated += yieldAmount;
     }
 
     function updatePrice(uint256 priceSeed) external {
@@ -336,8 +337,8 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         assertEq(supplyA, supplyB - emergencyRedeemed, "INVARIANT VIOLATED: Token supply relationship broken");
     }
 
-    /// @notice When not liquidated, total assets must be >= total liabilities
-    function invariant_solvency() public view {
+    /// @notice When not liquidated, total assets must be >= total liabilities (lower bound)
+    function invariant_solvencyLowerBound() public view {
         if (splitter.isLiquidated()) return; // Skip if liquidated
 
         uint256 totalAssets = handler.getTotalAssets();
@@ -347,6 +348,25 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         uint256 tolerance = (totalLiabilities / 1e6) + 10;
 
         assertGe(totalAssets + tolerance, totalLiabilities, "INVARIANT VIOLATED: System is insolvent");
+    }
+
+    /// @notice Assets should not exceed liabilities + yield + dust (upper bound / "stuck funds" check)
+    /// @dev If assets are way higher than expected, funds may be stuck or accounting is broken
+    function invariant_solvencyUpperBound() public view {
+        uint256 totalAssets = handler.getTotalAssets();
+        uint256 totalLiabilities = handler.getTotalLiabilities();
+        uint256 totalYield = handler.ghost_totalYieldSimulated();
+
+        // Maximum expected assets = liabilities + all yield ever generated + dust tolerance
+        // Dust tolerance: 1000 wei base + 100 wei per 1M USDC
+        uint256 dustTolerance = 1000 + (totalLiabilities * 100) / 1e6;
+        uint256 maxExpectedAssets = totalLiabilities + totalYield + dustTolerance;
+
+        assertLe(
+            totalAssets,
+            maxExpectedAssets,
+            "INVARIANT VIOLATED: Assets exceed expected max (stuck funds?)"
+        );
     }
 
     /// @notice Liquidation state is irreversible
