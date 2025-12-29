@@ -14,6 +14,48 @@ contract MockUSDC is MockERC20 {
     }
 }
 
+// Mock Reward Token
+contract MockRewardToken is MockERC20 {
+    constructor() MockERC20("Aave Token", "AAVE") {}
+}
+
+// Mock Aave RewardsController
+contract MockRewardsController is IRewardsController {
+    MockRewardToken public rewardToken;
+    uint256 public pendingRewards;
+
+    constructor(address _rewardToken) {
+        rewardToken = MockRewardToken(_rewardToken);
+    }
+
+    function setPendingRewards(uint256 amount) external {
+        pendingRewards = amount;
+    }
+
+    function getAllUserRewards(address[] calldata, address)
+        external
+        view
+        override
+        returns (address[] memory rewardsList, uint256[] memory unclaimedAmounts)
+    {
+        rewardsList = new address[](1);
+        rewardsList[0] = address(rewardToken);
+        unclaimedAmounts = new uint256[](1);
+        unclaimedAmounts[0] = pendingRewards;
+    }
+
+    function claimRewards(address[] calldata, uint256, address to, address)
+        external
+        override
+        returns (uint256)
+    {
+        uint256 amount = pendingRewards;
+        pendingRewards = 0;
+        rewardToken.mint(to, amount);
+        return amount;
+    }
+}
+
 contract YieldAdapterTest is Test {
     YieldAdapter adapter;
 
@@ -186,6 +228,124 @@ contract YieldAdapterTest is Test {
         vm.startPrank(hacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
         adapter.rescueToken(address(randomToken), hacker);
+        vm.stopPrank();
+    }
+
+    function test_Deposit_OnlySplitter() public {
+        // Hacker tries to deposit directly (inflation attack attempt)
+        usdc.mint(hacker, 1000 * 1e6);
+
+        vm.startPrank(hacker);
+        usdc.approve(address(adapter), 1000 * 1e6);
+
+        vm.expectRevert(YieldAdapter.YieldAdapter__OnlySplitter.selector);
+        adapter.deposit(1000 * 1e6, hacker);
+        vm.stopPrank();
+    }
+
+    function test_Splitter_IsImmutable() public view {
+        // Verify SPLITTER is set correctly and cannot be changed
+        assertEq(adapter.SPLITTER(), user);
+    }
+
+    // ==========================================
+    // 4. Rewards Tests
+    // ==========================================
+
+    function test_SetRewardsController_Success() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.prank(owner);
+        adapter.setRewardsController(address(controller));
+
+        assertEq(address(adapter.rewardsController()), address(controller));
+    }
+
+    function test_SetRewardsController_OnlyOwner() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.prank(hacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
+        adapter.setRewardsController(address(controller));
+    }
+
+    function test_GetPendingRewards_ReturnsEmptyIfNoController() public view {
+        (address[] memory rewardsList, uint256[] memory amounts) = adapter.getPendingRewards();
+
+        assertEq(rewardsList.length, 0);
+        assertEq(amounts.length, 0);
+    }
+
+    function test_GetPendingRewards_ReturnsRewardsIfSet() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.prank(owner);
+        adapter.setRewardsController(address(controller));
+
+        // Set pending rewards
+        controller.setPendingRewards(100 ether);
+
+        (address[] memory rewardsList, uint256[] memory amounts) = adapter.getPendingRewards();
+
+        assertEq(rewardsList.length, 1);
+        assertEq(rewardsList[0], address(rewardToken));
+        assertEq(amounts.length, 1);
+        assertEq(amounts[0], 100 ether);
+    }
+
+    function test_ClaimRewards_Success() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.prank(owner);
+        adapter.setRewardsController(address(controller));
+
+        // Set pending rewards
+        controller.setPendingRewards(100 ether);
+
+        address treasury = address(0x999);
+
+        vm.prank(owner);
+        uint256 claimed = adapter.claimRewards(address(rewardToken), treasury);
+
+        assertEq(claimed, 100 ether);
+        assertEq(rewardToken.balanceOf(treasury), 100 ether);
+
+        // Verify rewards are now 0
+        (address[] memory rewardsList, uint256[] memory amounts) = adapter.getPendingRewards();
+        assertEq(amounts[0], 0);
+    }
+
+    function test_ClaimRewards_OnlyOwner() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.prank(owner);
+        adapter.setRewardsController(address(controller));
+
+        vm.prank(hacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
+        adapter.claimRewards(address(rewardToken), hacker);
+    }
+
+    function test_ClaimRewards_RevertsIfNoController() public {
+        vm.prank(owner);
+        vm.expectRevert(YieldAdapter.YieldAdapter__InvalidAddress.selector);
+        adapter.claimRewards(address(0x123), owner);
+    }
+
+    function test_ClaimRewards_RevertsIfZeroRecipient() public {
+        MockRewardToken rewardToken = new MockRewardToken();
+        MockRewardsController controller = new MockRewardsController(address(rewardToken));
+
+        vm.startPrank(owner);
+        adapter.setRewardsController(address(controller));
+
+        vm.expectRevert(YieldAdapter.YieldAdapter__InvalidAddress.selector);
+        adapter.claimRewards(address(rewardToken), address(0));
         vm.stopPrank();
     }
 }
