@@ -52,7 +52,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     uint256 public constant TIMELOCK_DELAY = 7 days;
     uint256 public lastUnpauseTime;
 
-    uint256 public harvestRewardPercent = 1;
+    uint256 public constant HARVEST_REWARD_PERCENT = 1;
     uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
 
     // Liquidation State
@@ -395,7 +395,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         // Note: The actual harvest logic limits withdrawal to `adapterAssets` if surplus > adapterAssets.
         uint256 harvestableAmount = (adapterAssets > totalSurplus) ? totalSurplus : adapterAssets;
 
-        callerReward = (harvestableAmount * harvestRewardPercent) / 100;
+        callerReward = (harvestableAmount * HARVEST_REWARD_PERCENT) / 100;
         uint256 remaining = harvestableAmount - callerReward;
         treasuryShare = (remaining * 20) / 100;
         stakingShare = remaining - treasuryShare;
@@ -431,7 +431,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
 
         // Distribute based on actual harvested
-        uint256 callerCut = (harvested * harvestRewardPercent) / 100;
+        uint256 callerCut = (harvested * HARVEST_REWARD_PERCENT) / 100;
         uint256 remaining = harvested - callerCut;
         uint256 treasuryShare = (remaining * 20) / 100;
         uint256 stakingShare = remaining - treasuryShare;
@@ -563,7 +563,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         status.totalLiabilities = (tokenA.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         if (status.totalLiabilities > 0) {
-            status.collateralRatio = (status.totalAssets * 10000) / status.totalLiabilities;
+            status.collateralRatio = (status.totalAssets * 1e4) / status.totalLiabilities;
         } else {
             status.collateralRatio = 0; // Infinite/Unset
         }

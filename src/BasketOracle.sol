@@ -32,8 +32,9 @@ contract BasketOracle is AggregatorV3Interface {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         int256 totalPrice = 0;
         uint256 minUpdatedAt = type(uint256).max;
+        uint256 len = components.length;
 
-        for (uint256 i = 0; i < components.length; i++) {
+        for (uint256 i = 0; i < len; i++) {
             (, int256 price,, uint256 updatedAt,) = components[i].feed.latestRoundData();
 
             // Safety: Price must be positive
