@@ -97,7 +97,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 totalAssets; // Local + Adapter
         uint256 totalLiabilities; // Bear Supply * CAP
         uint256 collateralRatio; // Basis points
-        uint256 adapterAPY; // Current adapter value
+        uint256 adapterAssets; // USDC value held in yield adapter
     }
 
     constructor(
@@ -569,7 +569,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         }
 
         // To help UI calc APY history
-        status.adapterAPY = adapterVal; // Actually returns total assets in adapter
+        status.adapterAssets = adapterVal;
     }
 
     // Sequencer Check Logic
