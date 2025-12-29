@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "./interfaces/AggregatorV3Interface.sol";
+import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 
 interface IMorphoOracle {
     /// @notice Returns the price of 1 unit of collateral, quoted in the loan asset, scaled to 1e36.

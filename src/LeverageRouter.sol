@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import "./interfaces/ISwapRouter.sol";
+
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
+import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 
 // Morpho Blue Interface (Minimal)
 interface IMorpho {
