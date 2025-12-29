@@ -346,7 +346,7 @@ contract SyntheticSplitterFullTest is Test {
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertEq(s.currentPrice, 100e8);
         assertEq(s.capPrice, CAP);
-        assertFalse(s.isLiquidated);
+        assertFalse(s.liquidated);
         assertFalse(s.isPaused);
         assertEq(s.totalAssets, 0);
         assertEq(s.totalLiabilities, 0);
@@ -361,7 +361,7 @@ contract SyntheticSplitterFullTest is Test {
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertGt(s.totalAssets, s.totalLiabilities);
         assertGt(s.collateralRatio, 10000);
-        assertFalse(s.isLiquidated);
+        assertFalse(s.liquidated);
         assertFalse(s.isPaused);
     }
 
@@ -374,7 +374,7 @@ contract SyntheticSplitterFullTest is Test {
         splitter.triggerLiquidation(); // Now properly sets the flag
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
-        assertTrue(s.isLiquidated);
+        assertTrue(s.liquidated);
         assertEq(s.currentPrice, 201e8);
     }
 
@@ -397,7 +397,7 @@ contract SyntheticSplitterFullTest is Test {
         splitter.triggerLiquidation();
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
-        assertTrue(s.isLiquidated);
+        assertTrue(s.liquidated);
         assertEq(s.currentPrice, 201e8);
     }
 
@@ -477,7 +477,7 @@ contract SyntheticSplitterFullTest is Test {
         splitter.triggerLiquidation();
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
-        assertTrue(s.isLiquidated);
+        assertTrue(s.liquidated);
         assertEq(s.currentPrice, CAP + 50000000);
         assertEq(s.capPrice, CAP);
     }
@@ -494,7 +494,7 @@ contract SyntheticSplitterFullTest is Test {
         // Verify liquidated state
         assertTrue(splitter.isLiquidated());
         SyntheticSplitter.SystemStatus memory s1 = splitter.getSystemStatus();
-        assertTrue(s1.isLiquidated);
+        assertTrue(s1.liquidated);
 
         // Step 3: Drop price back to safe level (well below CAP)
         oracle.setPrice(int256(150e8));
@@ -511,7 +511,7 @@ contract SyntheticSplitterFullTest is Test {
         // Final check: flag remains true
         assertTrue(splitter.isLiquidated());
         SyntheticSplitter.SystemStatus memory s3 = splitter.getSystemStatus();
-        assertTrue(s3.isLiquidated);
+        assertTrue(s3.liquidated);
         assertEq(s3.currentPrice, 150e8); // price updated correctly, but system stays dead
     }
 }

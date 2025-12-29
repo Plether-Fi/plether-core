@@ -42,8 +42,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     address public staking;
 
     struct FeeConfig {
-        address treasury;
-        address staking;
+        address treasuryAddr;
+        address stakingAddr;
     }
     FeeConfig public pendingFees;
     uint256 public feesActivationTime;
@@ -92,7 +92,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     struct SystemStatus {
         uint256 currentPrice;
         uint256 capPrice;
-        bool isLiquidated;
+        bool liquidated;
         bool isPaused;
         uint256 totalAssets; // Local + Adapter
         uint256 totalLiabilities; // Bear Supply * CAP
@@ -475,8 +475,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         _checkLiveness();
 
-        treasury = pendingFees.treasury;
-        staking = pendingFees.staking;
+        treasury = pendingFees.treasuryAddr;
+        staking = pendingFees.stakingAddr;
 
         delete pendingFees;
         feesActivationTime = 0;
@@ -540,7 +540,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
      */
     function getSystemStatus() external view returns (SystemStatus memory status) {
         status.capPrice = CAP;
-        status.isLiquidated = isLiquidated;
+        status.liquidated = isLiquidated;
         status.isPaused = paused();
 
         // Price might revert if sequencer is down, handle gracefully in UI,
