@@ -41,11 +41,16 @@ contract SyntheticSplitterTest is Test {
         oracle = new MockOracle(100_000_000, "Basket"); // $1.00 Start
         // 2. Fund Pool (So withdrawals work)
         usdc.mint(address(pool), 1_000_000 * 1e6);
-        // 3. Deploy Adapter
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
-        // 4. Deploy Splitter
+        // 3. Predict Splitter address (deployed at nonce + 2: adapter is next, splitter after)
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+        // 4. Deploy Adapter with predicted Splitter address
+        adapter =
+            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
+        // 5. Deploy Splitter (will be at predictedSplitter address)
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
-        // 5. Setup Users
+        require(address(splitter) == predictedSplitter, "Address prediction failed");
+        // 6. Setup Users
         usdc.mint(alice, INITIAL_BALANCE);
         usdc.mint(bob, INITIAL_BALANCE);
     }
@@ -393,44 +398,22 @@ contract SyntheticSplitterTest is Test {
         assertApproxEqAbs(usdc.balanceOf(staking), 79_200_000, 10);
     }
 
-    function test_Harvest_RevertsIfCountingOtherPeoplesMoney() public {
-        // 1. Setup: Alice mints 100 tokens ($200 cost)
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 200 * 1e6);
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-        // 2. Setup: A "Whale" deposits $1,000,000 into the SAME Adapter
+    function test_Adapter_RejectsNonSplitterDeposits() public {
+        // This test verifies the inflation attack protection:
+        // Only the Splitter can deposit into the YieldAdapter
         address whale = address(0x999);
         usdc.mint(whale, 1_000_000 * 1e6);
 
         vm.startPrank(whale);
         usdc.approve(address(adapter), 1_000_000 * 1e6);
+
+        // Whale tries to deposit directly into adapter - should fail
+        vm.expectRevert(YieldAdapter.YieldAdapter__OnlySplitter.selector);
         adapter.deposit(1_000_000 * 1e6, whale);
         vm.stopPrank();
-        // 3. Simulate Actual Yield
-        // We need massive yield because the Splitter only owns ~0.018% of the pool.
-        // To get > $50 surplus for Splitter, we need > $280k total yield.
-        // Let's use $300,000.
-        uint256 massiveYield = 300_000 * 1e6;
-        aUsdc.mint(address(adapter), massiveYield);
-        // 4. Bob tries to harvest
-        vm.startPrank(bob);
 
-        // WITH BUG (totalAssets):
-        // Calculates surplus = ~$1.3 Million.
-        // Tries to withdraw $1.3M.
-        // Reverts because Splitter lacks enough shares to burn.
-
-        // WITH FIX (convertToAssets):
-        // Calculates surplus = Splitter's share of yield (~$54).
-        // $54 > $50 Threshold.
-        // Withdraws $54. Success.
-        splitter.harvestYield();
-        vm.stopPrank();
-        // 5. Verification
-        // Bob gets 1% of the SURPLUS (~$54), roughly 0.54 USDC.
-        // We use a wider tolerance (1e6 = 1 USDC) because dilution math is inexact.
-        assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 540_000, 1e5);
+        // Verify adapter is empty (only splitter can deposit)
+        assertEq(adapter.totalSupply(), 0);
     }
 
     function test_Harvest_UsesRedeemToAvoidRounding() public {
@@ -525,8 +508,9 @@ contract SyntheticSplitterTest is Test {
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
         vm.stopPrank();
-        // 2. Deploy NEW Adapter
-        YieldAdapter newAdapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
+        // 2. Deploy NEW Adapter (splitter already exists, so pass its address directly)
+        YieldAdapter newAdapter =
+            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), address(splitter));
         // 3. Propose & Wait
         splitter.proposeAdapter(address(newAdapter));
         vm.warp(block.timestamp + 8 days); // Pass TimeLock

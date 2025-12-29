@@ -41,10 +41,17 @@ contract SyntheticSplitterFuzzTest is Test {
 
         usdc.mint(address(pool), 10_000_000_000 * 1e6);
 
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
+        // Predict Splitter address before deploying Adapter
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+
+        adapter =
+            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
 
         splitter =
             new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(sequencer));
+
+        require(address(splitter) == predictedSplitter, "Address prediction failed");
 
         // Satisfy Sequencer Grace Period
         vm.warp(block.timestamp + 3601);

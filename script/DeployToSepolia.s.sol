@@ -2,12 +2,12 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
-import {BasketOracle} from "../src/BasketOracle.sol"; // Adjust path to your BasketOracle contract
-// import {YieldAdapter} from "../src/YieldAdapter.sol"; // Adjust path to your YieldAdapter contract
+import {BasketOracle} from "../src/BasketOracle.sol";
+import {YieldAdapter} from "../src/YieldAdapter.sol";
 import {MockYieldAdapter} from "../src/MockYieldAdapter.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol"; // Adjust path to your SyntheticSplitter contract
-import {SyntheticToken} from "../src/SyntheticToken.sol"; // Adjust path if needed (though deployed internally)
-import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol"; // Adjust path
+import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
@@ -92,13 +92,6 @@ contract DeployToSepolia is Script {
         // Aave V3 aUSDC on Sepolia
         address aUsdc = 0x16dA4541aD1807f4443d92D26044C1147406EB80;
 
-        // Cast USDC to IERC20 outside the constructor call to reduce stack depth
-        IERC20 usdcToken = IERC20(usdc);
-
-        // Deploy YieldAdapter
-        // YieldAdapter yieldAdapter = new YieldAdapter(usdcToken, aavePool, aUsdc, deployer);
-        MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer);
-
         // Set CAP (example: 2 with 8 decimals, adjust as needed)
         uint256 cap = 2 * 10 ** 8;
 
@@ -108,16 +101,70 @@ contract DeployToSepolia is Script {
         // Sequencer Uptime Feed (address(0) since Sepolia is L1, no sequencer)
         address sequencerUptimeFeed = address(0);
 
-        // Deploy SyntheticSplitter
+        // ============================================
+        // OPTION A: MockYieldAdapter (for testnet)
+        // ============================================
+        MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer);
+
         SyntheticSplitter splitter =
             new SyntheticSplitter(address(oracle), usdc, address(mockAdapter), cap, treasury, sequencerUptimeFeed);
 
-        // Output deployed addresses (console logs for reference)
         console.log("BasketOracle deployed at:", address(oracle));
-        console.log("mockAdapter deployed at:", address(mockAdapter));
+        console.log("MockAdapter deployed at:", address(mockAdapter));
         console.log("SyntheticSplitter deployed at:", address(splitter));
         console.log("Bear Token (TOKEN_A):", address(splitter.TOKEN_A()));
         console.log("Bull Token (TOKEN_B):", address(splitter.TOKEN_B()));
+
+        // ============================================
+        // OPTION B: Real YieldAdapter (for mainnet)
+        // Uses CREATE2 to predict Splitter address before deploying Adapter
+        // Uncomment below and comment out Option A for production
+        // ============================================
+        /*
+        bytes32 salt = keccak256("PlethSyntheticSplitterV1");
+
+        // Predict the Splitter address using CREATE2
+        // Note: The Splitter constructor args must match exactly
+        bytes memory splitterCreationCode = abi.encodePacked(
+            type(SyntheticSplitter).creationCode,
+            abi.encode(address(oracle), usdc, address(0), cap, treasury, sequencerUptimeFeed)
+        );
+
+        // This will be the Splitter address (we update adapter address in creationCode after computing)
+        address predictedSplitter = vm.computeCreate2Address(
+            salt,
+            keccak256(splitterCreationCode)
+        );
+
+        // Deploy YieldAdapter with the predicted Splitter address (immutable)
+        YieldAdapter yieldAdapter = new YieldAdapter(
+            IERC20(usdc),
+            aavePool,
+            aUsdc,
+            deployer,
+            predictedSplitter  // This will be the Splitter's address
+        );
+
+        // Now deploy Splitter with CREATE2 at the predicted address
+        // Update creation code with actual adapter address
+        SyntheticSplitter splitterProd = new SyntheticSplitter{salt: salt}(
+            address(oracle),
+            usdc,
+            address(yieldAdapter),
+            cap,
+            treasury,
+            sequencerUptimeFeed
+        );
+
+        // Verify deployment
+        require(address(splitterProd) == predictedSplitter, "CREATE2 address mismatch!");
+
+        console.log("BasketOracle deployed at:", address(oracle));
+        console.log("YieldAdapter deployed at:", address(yieldAdapter));
+        console.log("SyntheticSplitter deployed at:", address(splitterProd));
+        console.log("Bear Token (TOKEN_A):", address(splitterProd.TOKEN_A()));
+        console.log("Bull Token (TOKEN_B):", address(splitterProd.TOKEN_B()));
+        */
 
         vm.stopBroadcast();
     }

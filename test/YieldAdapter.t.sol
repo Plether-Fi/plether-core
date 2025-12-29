@@ -36,9 +36,9 @@ contract YieldAdapterTest is Test {
         // 2. Fund the Pool (So it can pay back withdrawals)
         usdc.mint(address(pool), 1_000_000 * 1e6);
 
-        // 3. Deploy Adapter
+        // 3. Deploy Adapter (user is set as splitter for testing deposits)
         vm.prank(owner);
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), owner);
+        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), owner, user);
 
         // 4. Fund User
         usdc.mint(user, 1000 * 1e6); // $1000 USDC

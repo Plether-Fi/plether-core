@@ -303,11 +303,18 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         // Fund pool for withdrawals
         usdc.mint(address(pool), 100_000_000 * 1e6);
 
-        // Deploy adapter
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
+        // Predict Splitter address before deploying Adapter
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+
+        // Deploy adapter with predicted splitter address
+        adapter =
+            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
 
         // Deploy splitter (no sequencer feed for simplicity)
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
+
+        require(address(splitter) == predictedSplitter, "Address prediction failed");
 
         // Deploy handler
         handler = new SplitterHandler(splitter, adapter, usdc, oracle, aUsdc);
@@ -362,11 +369,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         uint256 dustTolerance = 1000 + (totalLiabilities * 100) / 1e6;
         uint256 maxExpectedAssets = totalLiabilities + totalYield + dustTolerance;
 
-        assertLe(
-            totalAssets,
-            maxExpectedAssets,
-            "INVARIANT VIOLATED: Assets exceed expected max (stuck funds?)"
-        );
+        assertLe(totalAssets, maxExpectedAssets, "INVARIANT VIOLATED: Assets exceed expected max (stuck funds?)");
     }
 
     /// @notice Liquidation state is irreversible
@@ -443,9 +446,16 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
 
         usdc.mint(address(pool), 100_000_000 * 1e6);
 
-        adapter = new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this));
+        // Predict Splitter address before deploying Adapter
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+
+        adapter =
+            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
 
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
+
+        require(address(splitter) == predictedSplitter, "Address prediction failed");
 
         handler = new SplitterHandler(splitter, adapter, usdc, oracle, aUsdc);
 
