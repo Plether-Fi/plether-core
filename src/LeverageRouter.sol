@@ -52,6 +52,9 @@ struct MarketParams {
 contract LeverageRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;
 
+    // Constants
+    uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
+
     // Operation types for flash loan callback
     uint8 private constant OP_OPEN = 1;
     uint8 private constant OP_CLOSE = 2;
@@ -63,10 +66,17 @@ contract LeverageRouter is IERC3156FlashBorrower {
         uint256 leverage,
         uint256 loanAmount,
         uint256 mDXYReceived,
-        uint256 debtIncurred
+        uint256 debtIncurred,
+        uint256 maxSlippageBps
     );
 
-    event LeverageClosed(address indexed user, uint256 debtRepaid, uint256 collateralWithdrawn, uint256 usdcReturned);
+    event LeverageClosed(
+        address indexed user,
+        uint256 debtRepaid,
+        uint256 collateralWithdrawn,
+        uint256 usdcReturned,
+        uint256 maxSlippageBps
+    );
 
     // Transient state for passing values from callback to main function
     uint256 private _lastMDXYReceived;
@@ -114,52 +124,74 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @notice Open a Leveraged Position in one transaction.
      * @param principal Amount of USDC user sends.
      * @param leverage Multiplier (e.g. 3x = 3e18).
-     * @param minMDXY Minimum mDXY received from swap (Slippage).
+     * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY, uint256 deadline) external {
+    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline) external {
         require(block.timestamp <= deadline, "Transaction expired");
         require(leverage > 1e18, "Leverage must be > 1x");
+        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
+
         // 1. Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
+
         // 2. Calculate Flash Loan Amount
         // If User has $1000 and wants 3x ($3000 exposure):
         // We need to buy $3000 worth of mDXY.
         // We have $1000. We need to borrow $2000.
         // Formula: Loan = Principal * (Lev - 1)
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
-        // 3. Encode data for callback (operation type, user, deadline, and operation-specific data)
+
+        // 3. Calculate minimum mDXY output based on slippage tolerance
+        // Total USDC to swap = principal + loanAmount
+        // Expected mDXY at 1:1 parity = totalUSDC * 1e12 (6 decimals -> 18 decimals)
+        uint256 totalUSDC = principal + loanAmount;
+        uint256 expectedMDXY = totalUSDC * 1e12;
+        uint256 minMDXY = (expectedMDXY * (10000 - maxSlippageBps)) / 10000;
+
+        // 4. Encode data for callback (operation type, user, deadline, and operation-specific data)
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, minMDXY);
-        // 4. Initiate Flash Loan (Get the extra USDC)
+
+        // 5. Initiate Flash Loan (Get the extra USDC)
         // NOTE: We are flash loaning USDC, not mDXY
         LENDER.flashLoan(this, address(USDC), loanAmount, data);
 
-        // 5. Emit event for off-chain tracking and MEV analysis
-        emit LeverageOpened(msg.sender, principal, leverage, loanAmount, _lastMDXYReceived, _lastDebtIncurred);
+        // 6. Emit event for off-chain tracking and MEV analysis
+        emit LeverageOpened(
+            msg.sender, principal, leverage, loanAmount, _lastMDXYReceived, _lastDebtIncurred, maxSlippageBps
+        );
     }
 
     /**
      * @notice Close a Leveraged Position in one transaction.
      * @param debtToRepay Amount of USDC debt to repay (flash loaned).
-     * @param collateralToWithdraw Amount of mDXY collateral to withdraw (0 for max).
-     * @param minUsdcOut Minimum USDC to receive after swap (Slippage).
+     * @param collateralToWithdraw Amount of mDXY collateral to withdraw.
+     * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 minUsdcOut, uint256 deadline)
+    function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 deadline)
         external
     {
         require(block.timestamp <= deadline, "Transaction expired");
+        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
 
-        // 1. Encode data for callback (operation type, user, deadline, and operation-specific data)
+        // 1. Calculate minimum USDC output based on slippage tolerance
+        // Expected USDC at 1:1 parity = collateral / 1e12 (18 decimals -> 6 decimals)
+        uint256 expectedUSDC = collateralToWithdraw / 1e12;
+        uint256 minUsdcOut = (expectedUSDC * (10000 - maxSlippageBps)) / 10000;
+
+        // 2. Encode data for callback (operation type, user, deadline, and operation-specific data)
         bytes memory data = abi.encode(OP_CLOSE, msg.sender, deadline, collateralToWithdraw, minUsdcOut);
 
-        // 2. Flash loan USDC to repay the debt
+        // 3. Flash loan USDC to repay the debt
         LENDER.flashLoan(this, address(USDC), debtToRepay, data);
 
-        // 3. Emit event for off-chain tracking
-        emit LeverageClosed(msg.sender, debtToRepay, _lastCollateralWithdrawn, _lastUsdcReturned);
+        // 4. Emit event for off-chain tracking and MEV analysis
+        emit LeverageClosed(msg.sender, debtToRepay, _lastCollateralWithdrawn, _lastUsdcReturned, maxSlippageBps);
     }
 
     /**
@@ -209,7 +241,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(USDC),
             tokenOut: address(M_DXY),
-            fee: 500, // 0.05% Pool
+            fee: 500,
             recipient: address(this),
             deadline: deadline,
             amountIn: totalUSDC,
@@ -249,7 +281,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(M_DXY),
             tokenOut: address(USDC),
-            fee: 500, // 0.05% Pool
+            fee: 500,
             recipient: address(this),
             deadline: deadline,
             amountIn: withdrawnAssets,

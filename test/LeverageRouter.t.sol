@@ -45,13 +45,14 @@ contract LeverageRouterTest is Test {
     function test_OpenLeverage_3x_Success() public {
         uint256 principal = 1000 * 1e6; // $1,000
         uint256 leverage = 3 * 1e18; // 3x
+        uint256 maxSlippageBps = 100; // 1% slippage
 
         vm.startPrank(alice);
         usdc.approve(address(leverageRouter), principal);
 
         morpho.setAuthorization(address(leverageRouter), true);
 
-        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
@@ -62,6 +63,7 @@ contract LeverageRouterTest is Test {
     function test_OpenLeverage_EmitsLeverageOpenedEvent() public {
         uint256 principal = 1000 * 1e6; // $1,000
         uint256 leverage = 3 * 1e18; // 3x
+        uint256 maxSlippageBps = 50; // 0.5% slippage
         uint256 expectedLoanAmount = 2000 * 1e6; // principal * (leverage - 1) / 1e18
         uint256 expectedMDXYReceived = 3000 * 1e18; // (principal + loan) * 1e12
         uint256 expectedDebtIncurred = 2000 * 1e6; // loan + fee (fee is 0 in mock)
@@ -72,10 +74,10 @@ contract LeverageRouterTest is Test {
 
         vm.expectEmit(true, false, false, true);
         emit LeverageRouter.LeverageOpened(
-            alice, principal, leverage, expectedLoanAmount, expectedMDXYReceived, expectedDebtIncurred
+            alice, principal, leverage, expectedLoanAmount, expectedMDXYReceived, expectedDebtIncurred, maxSlippageBps
         );
 
-        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -88,7 +90,7 @@ contract LeverageRouterTest is Test {
         // Skip auth - router checks upfront before flash loan
 
         vm.expectRevert("LeverageRouter not authorized in Morpho");
-        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -104,7 +106,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(leverageRouter), false);
 
         vm.expectRevert("LeverageRouter not authorized in Morpho");
-        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -118,7 +120,21 @@ contract LeverageRouterTest is Test {
 
         // Try with expired deadline
         vm.expectRevert("Transaction expired");
-        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp - 1);
+        leverageRouter.openLeverage(principal, leverage, 50, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_Revert_SlippageTooHigh() public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Try with slippage exceeding MAX_SLIPPAGE_BPS (100)
+        vm.expectRevert("Slippage exceeds maximum");
+        leverageRouter.openLeverage(principal, leverage, 101, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -130,11 +146,12 @@ contract LeverageRouterTest is Test {
         // First open a leveraged position
         uint256 principal = 1000 * 1e6; // $1,000
         uint256 leverage = 3 * 1e18; // 3x
+        uint256 maxSlippageBps = 100; // 1% slippage
 
         vm.startPrank(alice);
         usdc.approve(address(leverageRouter), principal);
         morpho.setAuthorization(address(leverageRouter), true);
-        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
 
         // Verify position was opened
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
@@ -144,9 +161,8 @@ contract LeverageRouterTest is Test {
         // Now close the position
         uint256 debtToRepay = 2000 * 1e6;
         uint256 collateralToWithdraw = 3000 * 1e18;
-        uint256 minUsdcOut = 900 * 1e6; // Expect at least $900 back after repaying debt
 
-        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, minUsdcOut, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, maxSlippageBps, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position was closed
@@ -159,11 +175,12 @@ contract LeverageRouterTest is Test {
         // First open a leveraged position
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 3 * 1e18;
+        uint256 maxSlippageBps = 50; // 0.5% slippage
 
         vm.startPrank(alice);
         usdc.approve(address(leverageRouter), principal);
         morpho.setAuthorization(address(leverageRouter), true);
-        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
 
         // Now close the position and check event
         uint256 debtToRepay = 2000 * 1e6;
@@ -171,9 +188,11 @@ contract LeverageRouterTest is Test {
         uint256 expectedUsdcReturned = 1000 * 1e6; // 3000 mDXY -> 3000 USDC - 2000 debt = 1000
 
         vm.expectEmit(true, false, false, true);
-        emit LeverageRouter.LeverageClosed(alice, debtToRepay, collateralToWithdraw, expectedUsdcReturned);
+        emit LeverageRouter.LeverageClosed(
+            alice, debtToRepay, collateralToWithdraw, expectedUsdcReturned, maxSlippageBps
+        );
 
-        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 900 * 1e6, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, maxSlippageBps, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -185,7 +204,7 @@ contract LeverageRouterTest is Test {
         // Skip authorization
 
         vm.expectRevert("LeverageRouter not authorized in Morpho");
-        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 0, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -197,7 +216,20 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(leverageRouter), true);
 
         vm.expectRevert("Transaction expired");
-        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 0, block.timestamp - 1);
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 50, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    function test_CloseLeverage_Revert_SlippageTooHigh() public {
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Try with slippage exceeding MAX_SLIPPAGE_BPS (100)
+        vm.expectRevert("Slippage exceeds maximum");
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 101, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 }
