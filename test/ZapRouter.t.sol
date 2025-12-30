@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/ZapRouter.sol";
+import "../src/interfaces/ICurvePool.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
@@ -15,7 +16,7 @@ contract ZapRouterTest is Test {
     MockFlashToken public mDXY;
     MockFlashToken public mInvDXY;
     MockSplitter public splitter;
-    MockSwapRouter public swapRouter;
+    MockCurvePool public curvePool;
 
     address alice = address(0xA11ce);
 
@@ -25,11 +26,10 @@ contract ZapRouterTest is Test {
         mDXY = new MockFlashToken("mDXY", "mDXY");
         mInvDXY = new MockFlashToken("mInvDXY", "mInvDXY");
         splitter = new MockSplitter(address(mDXY), address(mInvDXY));
-        swapRouter = new MockSwapRouter();
+        curvePool = new MockCurvePool(address(usdc), address(mDXY));
 
         // 2. Deploy ZapRouter
-        zapRouter =
-            new ZapRouter(address(splitter), address(mDXY), address(mInvDXY), address(usdc), address(swapRouter));
+        zapRouter = new ZapRouter(address(splitter), address(mDXY), address(mInvDXY), address(usdc), address(curvePool));
 
         // 3. Setup Initial State
         usdc.mint(alice, 1000 * 1e6);
@@ -39,18 +39,19 @@ contract ZapRouterTest is Test {
     // 1. HAPPY PATHS
     // ==========================================
 
-    function test_ZapMint_mDXY_Success() public {
+    function test_ZapMint_Success() public {
         uint256 usdcInput = 100 * 1e6; // $100
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        // Expect ~200 units (100 from input + 100 from flash loan swap)
+        // Expect ~200 units of pldxy-bull (mInvDXY)
+        // Flash mint 100e18 mDXY, swap for 100 USDC, total 200 USDC, mint 200e18 pairs
         // Using 1% slippage tolerance (100 bps)
-        zapRouter.zapMint(address(mDXY), usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        assertGe(mDXY.balanceOf(alice), 190 * 1e18, "Alice didn't get enough mDXY");
+        assertGe(mInvDXY.balanceOf(alice), 190 * 1e18, "Alice didn't get enough mInvDXY");
         assertEq(usdc.balanceOf(alice), 900 * 1e6, "Alice spent wrong amount of USDC");
     }
 
@@ -61,33 +62,17 @@ contract ZapRouterTest is Test {
         usdc.approve(address(zapRouter), usdcInput);
 
         // Check event emission
-        vm.expectEmit(true, true, false, true);
+        vm.expectEmit(true, false, false, true);
         emit ZapRouter.ZapMint(
             alice,
-            address(mDXY),
             usdcInput,
             200 * 1e18, // tokensOut (at 100% rate: 100+100=200 USDC -> 200e18 tokens)
             100, // maxSlippageBps
             100 * 1e6 // actualSwapOut (at 100% rate)
         );
 
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
-    }
-
-    function test_ZapMint_mInvDXY_Success() public {
-        uint256 usdcInput = 100 * 1e6;
-
-        vm.startPrank(alice);
-        usdc.approve(address(zapRouter), usdcInput);
-
-        // Expect ~200 units of Bear token (mInvDXY)
-        // Using 1% slippage tolerance (100 bps)
-        zapRouter.zapMint(address(mInvDXY), usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        assertGe(mInvDXY.balanceOf(alice), 190 * 1e18, "Did not receive mInvDXY");
-        assertEq(mDXY.balanceOf(alice), 0, "Should not hold mDXY");
     }
 
     // ==========================================
@@ -97,30 +82,30 @@ contract ZapRouterTest is Test {
     function test_ZapMint_FinalSlippage_Reverts() public {
         uint256 usdcInput = 100 * 1e6;
 
-        // Configure Swap Router to give slightly bad rates (0.5% slippage)
-        swapRouter.setRate(9950);
+        // Configure Curve pool to give slightly bad rates (0.5% slippage)
+        curvePool.setRate(9950);
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
         // The user receives less than `minAmountOut` for final tokens
         vm.expectRevert("Slippage too high");
-        zapRouter.zapMint(address(mDXY), usdcInput, 200 * 1e18, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 200 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
     function test_ZapMint_SwapSlippage_Reverts() public {
         uint256 usdcInput = 100 * 1e6;
 
-        // Configure Swap Router to give bad rates (2% slippage)
-        swapRouter.setRate(9800);
+        // Configure Curve pool to give bad rates (2% slippage)
+        curvePool.setRate(9800);
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
         // User sets 1% tolerance but market moves 2% -> reverts
         vm.expectRevert("Too little received");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -132,56 +117,45 @@ contract ZapRouterTest is Test {
 
         // User tries to set 2% slippage (exceeds 1% max)
         vm.expectRevert("Slippage exceeds maximum");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 200, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 0, 200, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
     function test_ZapMint_SlippageAtMax_Succeeds() public {
         uint256 usdcInput = 100 * 1e6;
 
-        // Configure Swap Router to give 0.5% slippage
-        swapRouter.setRate(9950);
+        // Configure Curve pool to give 0.5% slippage
+        curvePool.setRate(9950);
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
         // User sets exactly 1% (100 bps) - at the max limit
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        assertGt(mDXY.balanceOf(alice), 0, "Should have received tokens");
+        assertGt(mInvDXY.balanceOf(alice), 0, "Should have received tokens");
     }
 
     function test_ZapMint_Insolvency_Reverts() public {
         uint256 usdcInput = 100 * 1e6;
 
         // Configure rate at 1% slippage (passes slippage check)
-        swapRouter.setRate(9900);
+        curvePool.setRate(9900);
 
         // Set a very high flash fee (200%) that causes insolvency
-        mInvDXY.setFeeBps(20000);
+        mDXY.setFeeBps(20000);
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
         vm.expectRevert("Insolvent Zap: Swap didn't cover mint cost");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
     // ==========================================
     // 3. SECURITY & INPUT VALIDATION
     // ==========================================
-
-    function test_ZapMint_InvalidToken_Reverts() public {
-        vm.startPrank(alice);
-        usdc.approve(address(zapRouter), 100 * 1e6);
-
-        // Try to zap into a random token (USDC is not a valid target)
-        vm.expectRevert("Invalid token");
-        zapRouter.zapMint(address(usdc), 100 * 1e6, 0, 100, block.timestamp + 1 hours);
-
-        vm.stopPrank();
-    }
 
     function test_ZapMint_Expired_Reverts() public {
         uint256 usdcInput = 100 * 1e6;
@@ -191,7 +165,7 @@ contract ZapRouterTest is Test {
 
         // Try with expired deadline
         vm.expectRevert("Transaction expired");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp - 1);
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -205,14 +179,14 @@ contract ZapRouterTest is Test {
     }
 
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
-        // We pretend to be the legitimate token calling the callback...
-        vm.startPrank(address(mInvDXY));
+        // We pretend to be the legitimate mDXY token calling the callback...
+        vm.startPrank(address(mDXY));
 
         // ...BUT the 'initiator' arg is Alice, not the ZapRouter itself.
         vm.expectRevert("Untrusted initiator");
         zapRouter.onFlashLoan(
             alice, // <--- Malicious initiator
-            address(mInvDXY),
+            address(mDXY),
             100,
             0,
             ""
@@ -270,25 +244,31 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
     }
 }
 
-contract MockSwapRouter is ISwapRouter {
+contract MockCurvePool is ICurvePool {
+    address public token0; // USDC (index 0)
+    address public token1; // mDXY (index 1)
     uint256 public rate = 10000; // 100.00%
+
+    constructor(address _token0, address _token1) {
+        token0 = _token0;
+        token1 = _token1;
+    }
 
     function setRate(uint256 _r) external {
         rate = _r;
     }
 
-    function exchange(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
-        external
-        override
-        returns (uint256 amountOut)
-    {
-        amountOut = (amountIn / 1e12) * rate / 10000;
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256 dy) {
+        // mDXY (18 decimals) -> USDC (6 decimals)
+        // Apply rate for slippage simulation
+        dy = (dx / 1e12) * rate / 10000;
 
         // MEV protection: revert if output below minimum
-        require(amountOut >= minAmountOut, "Too little received");
+        require(dy >= min_dy, "Too little received");
 
-        MockToken(tokenOut).mint(msg.sender, amountOut);
-        return amountOut;
+        address tokenOut = j == 0 ? token0 : token1;
+        MockToken(tokenOut).mint(msg.sender, dy);
+        return dy;
     }
 }
 

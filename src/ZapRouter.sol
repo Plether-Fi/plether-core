@@ -5,124 +5,106 @@ import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
+import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 
+/// @notice ZapRouter for acquiring pldxy-bull (M_INV_DXY) tokens efficiently.
+/// @dev For pldxy-bear (M_DXY), users should swap directly on Curve.
 contract ZapRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;
 
-    // Immutable Dependencies
-    ISyntheticSplitter public immutable SPLITTER;
-    address public immutable M_DXY;
-    address public immutable M_INV_DXY;
-    IERC20 public immutable USDC;
-    ISwapRouter public immutable SWAP_ROUTER;
-
     // Constants
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
+    int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
+    int128 public constant MDXY_INDEX = 1; // mDXY (pldxy-bear) index in Curve pool
+
+    // Immutable Dependencies
+    ISyntheticSplitter public immutable SPLITTER;
+    IERC20 public immutable M_DXY; // pldxy-bear
+    IERC20 public immutable M_INV_DXY; // pldxy-bull
+    IERC20 public immutable USDC;
+    ICurvePool public immutable CURVE_POOL;
 
     // Transient state for passing swap result from callback to main function
     uint256 private _lastSwapOut;
 
     // Events
     event ZapMint(
-        address indexed user,
-        address indexed tokenReceived,
-        uint256 usdcIn,
-        uint256 tokensOut,
-        uint256 maxSlippageBps,
-        uint256 actualSwapOut
+        address indexed user, uint256 usdcIn, uint256 tokensOut, uint256 maxSlippageBps, uint256 actualSwapOut
     );
 
-    constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _swapRouter) {
+    constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _curvePool) {
         SPLITTER = ISyntheticSplitter(_splitter);
-        M_DXY = _mDXY;
-        M_INV_DXY = _mInvDXY;
+        M_DXY = IERC20(_mDXY);
+        M_INV_DXY = IERC20(_mInvDXY);
         USDC = IERC20(_usdc);
-        SWAP_ROUTER = ISwapRouter(_swapRouter);
+        CURVE_POOL = ICurvePool(_curvePool);
 
         // Pre-approve the Splitter to take our USDC
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
+        // Pre-approve the Curve pool to take mDXY (for swapping)
+        IERC20(_mDXY).safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
     /**
-     * @notice Buy a specific synthetic token using USDC.
-     * @param tokenWanted The address of the token the user wants (mDXY or mInvDXY).
+     * @notice Buy pldxy-bull (M_INV_DXY) using USDC with flash mint efficiency.
+     * @dev For pldxy-bear (M_DXY), swap directly on Curve instead.
      * @param usdcAmount The amount of USDC the user is sending.
-     * @param minAmountOut Minimum amount of final tokens to receive (slippage protection).
+     * @param minAmountOut Minimum amount of pldxy-bull tokens to receive.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 100 = 1%).
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function zapMint(
-        address tokenWanted,
-        uint256 usdcAmount,
-        uint256 minAmountOut,
-        uint256 maxSlippageBps,
-        uint256 deadline
-    ) external {
+    function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline) external {
         require(block.timestamp <= deadline, "Transaction expired");
-        require(tokenWanted == M_DXY || tokenWanted == M_INV_DXY, "Invalid token");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
 
         // 1. Pull USDC from User
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // 2. Identify which token we need to Flash Mint (The one we DON'T want)
-        address tokenToFlash = (tokenWanted == M_DXY) ? M_INV_DXY : M_DXY;
-
-        // 3. Calculate how much to Flash Mint
+        // 2. Calculate how much mDXY to Flash Mint
         // We estimate 1:1 price parity for the initial request.
-        // 1 Pair costs 2 USDC (2e6).
         // 1 Token unit (1e18) roughly equals 1 USDC (1e6).
         // Formula: usdcAmount (6 decimals) -> 18 decimals
         uint256 flashAmount = usdcAmount * 1e12;
 
-        // 4. Calculate minimum swap output based on user's slippage tolerance
+        // 3. Calculate minimum swap output based on user's slippage tolerance
         // Expected output at 1:1 parity is usdcAmount
         uint256 minSwapOut = (usdcAmount * (10000 - maxSlippageBps)) / 10000;
 
-        // 5. Initiate Flash Mint
-        // We borrow the UNWANTED token, sell it, and use proceeds to mint the WANTED token.
-        bytes memory data = abi.encode(tokenWanted, usdcAmount, minSwapOut, deadline);
+        // 4. Initiate Flash Mint of mDXY (pldxy-bear)
+        // We borrow mDXY, sell it for USDC, mint pairs, keep mInvDXY, repay mDXY
+        bytes memory data = abi.encode(usdcAmount, minSwapOut);
 
-        IERC3156FlashLender(tokenToFlash).flashLoan(this, tokenToFlash, flashAmount, data);
+        IERC3156FlashLender(address(M_DXY)).flashLoan(this, address(M_DXY), flashAmount, data);
 
-        // 6. Final Transfer
+        // 5. Final Transfer
         // The flash loan callback handles the minting.
         // We just check if we got enough.
-        uint256 tokensOut = IERC20(tokenWanted).balanceOf(address(this));
+        uint256 tokensOut = M_INV_DXY.balanceOf(address(this));
         require(tokensOut >= minAmountOut, "Slippage too high");
-        IERC20(tokenWanted).safeTransfer(msg.sender, tokensOut);
+        M_INV_DXY.safeTransfer(msg.sender, tokensOut);
 
-        // 7. Emit event for off-chain tracking and MEV analysis
-        emit ZapMint(msg.sender, tokenWanted, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
+        // 6. Emit event for off-chain tracking and MEV analysis
+        emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
     }
 
     /**
-     * @dev The Callback Function called by the SyntheticToken during flashLoan.
+     * @dev The Callback Function called by mDXY token during flashLoan.
      */
-    function onFlashLoan(
-        address initiator,
-        address token, // This is the UNWANTED token (borrowed)
-        uint256 amount, // The amount borrowed
-        uint256 fee,
-        bytes calldata data
-    )
+    function onFlashLoan(address initiator, address token, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
         returns (bytes32)
     {
-        require(msg.sender == token, "Untrusted lender");
+        require(msg.sender == address(M_DXY), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params (deadline checked in main function, not needed here)
-        (, uint256 userUsdcAmount, uint256 minSwapOut,) = abi.decode(data, (address, uint256, uint256, uint256));
+        // Decode params
+        (uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (uint256, uint256));
 
-        // 1. Sell the Borrowed Token for USDC via Curve
-        IERC20(token).safeIncreaseAllowance(address(SWAP_ROUTER), amount);
-
-        uint256 swappedUsdc = SWAP_ROUTER.exchange(token, address(USDC), amount, minSwapOut);
+        // 1. Sell mDXY (pldxy-bear) for USDC via Curve
+        uint256 swappedUsdc = CURVE_POOL.exchange(MDXY_INDEX, USDC_INDEX, amount, minSwapOut);
 
         // Store for event emission in main function
         _lastSwapOut = swappedUsdc;
@@ -132,8 +114,8 @@ contract ZapRouter is IERC3156FlashBorrower {
 
         // 3. Repay the Flash Loan
         uint256 repayAmount = amount + fee;
-        require(IERC20(token).balanceOf(address(this)) >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
-        IERC20(token).safeIncreaseAllowance(msg.sender, repayAmount);
+        require(M_DXY.balanceOf(address(this)) >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
+        M_DXY.safeIncreaseAllowance(msg.sender, repayAmount);
 
         return keccak256("ERC3156FlashBorrower.onFlashLoan");
     }

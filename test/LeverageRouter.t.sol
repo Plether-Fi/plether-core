@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30; // Added Pragma
+pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/LeverageRouter.sol";
+import "../src/interfaces/ICurvePool.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
@@ -13,7 +14,7 @@ contract LeverageRouterTest is Test {
     MockToken public usdc;
     MockToken public mDXY;
     MockMorpho public morpho;
-    MockSwapRouter public swapRouter;
+    MockCurvePool public curvePool;
     MockFlashLender public lender;
 
     address alice = address(0xA11ce);
@@ -23,7 +24,7 @@ contract LeverageRouterTest is Test {
         usdc = new MockToken("USDC", "USDC", 6);
         mDXY = new MockToken("mDXY", "mDXY", 18);
         morpho = new MockMorpho();
-        swapRouter = new MockSwapRouter();
+        curvePool = new MockCurvePool(address(usdc), address(mDXY));
         lender = new MockFlashLender(address(usdc));
 
         params = MarketParams({
@@ -35,7 +36,7 @@ contract LeverageRouterTest is Test {
         });
 
         leverageRouter = new LeverageRouter(
-            address(morpho), address(swapRouter), address(usdc), address(mDXY), address(lender), params
+            address(morpho), address(curvePool), address(usdc), address(mDXY), address(lender), params
         );
 
         // Setup Alice
@@ -283,27 +284,34 @@ contract MockFlashLender is IERC3156FlashLender {
     }
 }
 
-contract MockSwapRouter is ISwapRouter {
-    function exchange(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
-        external
-        override
-        returns (uint256 amountOut)
-    {
+contract MockCurvePool is ICurvePool {
+    address public token0; // USDC (index 0)
+    address public token1; // mDXY (index 1)
+
+    constructor(address _token0, address _token1) {
+        token0 = _token0;
+        token1 = _token1;
+    }
+
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256 dy) {
+        address tokenIn = i == 0 ? token0 : token1;
+        address tokenOut = j == 0 ? token0 : token1;
+
         // Detect swap direction by checking decimals difference
         uint8 tokenInDecimals = MockToken(tokenIn).decimals();
         uint8 tokenOutDecimals = MockToken(tokenOut).decimals();
 
         if (tokenInDecimals < tokenOutDecimals) {
             // USDC (6) -> mDXY (18) : * 1e12
-            amountOut = amountIn * 1e12;
+            dy = dx * 1e12;
         } else {
             // mDXY (18) -> USDC (6) : / 1e12
-            amountOut = amountIn / 1e12;
+            dy = dx / 1e12;
         }
 
-        require(amountOut >= minAmountOut, "Too little received");
-        MockToken(tokenOut).mint(msg.sender, amountOut);
-        return amountOut;
+        require(dy >= min_dy, "Too little received");
+        MockToken(tokenOut).mint(msg.sender, dy);
+        return dy;
     }
 }
 

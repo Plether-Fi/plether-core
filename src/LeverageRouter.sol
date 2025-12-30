@@ -5,7 +5,7 @@ import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
+import {ICurvePool} from "./interfaces/ICurvePool.sol";
 
 // Morpho Blue Interface (Minimal)
 interface IMorpho {
@@ -54,6 +54,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
 
     // Constants
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
+    int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
+    int128 public constant MDXY_INDEX = 1; // mDXY index in Curve pool
 
     // Operation types for flash loan callback
     uint8 private constant OP_OPEN = 1;
@@ -86,7 +88,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
 
     // Dependencies
     IMorpho public immutable MORPHO;
-    ISwapRouter public immutable SWAP_ROUTER;
+    ICurvePool public immutable CURVE_POOL;
     IERC20 public immutable USDC;
     IERC20 public immutable M_DXY;
     IERC3156FlashLender public immutable LENDER; // e.g., Aave or Balancer
@@ -95,23 +97,23 @@ contract LeverageRouter is IERC3156FlashBorrower {
 
     constructor(
         address _morpho,
-        address _swapRouter,
+        address _curvePool,
         address _usdc,
         address _mDXY,
         address _lender,
         MarketParams memory _marketParams
     ) {
         MORPHO = IMorpho(_morpho);
-        SWAP_ROUTER = ISwapRouter(_swapRouter);
+        CURVE_POOL = ICurvePool(_curvePool);
         USDC = IERC20(_usdc);
         M_DXY = IERC20(_mDXY);
         LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
         // Approvals (One-time)
-        // 1. Allow SwapRouter to take USDC (for opening)
-        USDC.safeIncreaseAllowance(_swapRouter, type(uint256).max);
-        // 2. Allow SwapRouter to take mDXY (for closing)
-        M_DXY.safeIncreaseAllowance(_swapRouter, type(uint256).max);
+        // 1. Allow Curve pool to take USDC (for opening)
+        USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
+        // 2. Allow Curve pool to take mDXY (for closing)
+        M_DXY.safeIncreaseAllowance(_curvePool, type(uint256).max);
         // 3. Allow Morpho to take mDXY (for supplying collateral)
         M_DXY.safeIncreaseAllowance(_morpho, type(uint256).max);
         // 4. Allow Morpho to take USDC (for repaying debt)
@@ -236,7 +238,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         uint256 totalUSDC = principal + loanAmount;
 
         // 2. Swap ALL USDC -> mDXY via Curve
-        uint256 mDXYReceived = SWAP_ROUTER.exchange(address(USDC), address(M_DXY), totalUSDC, minMDXY);
+        uint256 mDXYReceived = CURVE_POOL.exchange(USDC_INDEX, MDXY_INDEX, totalUSDC, minMDXY);
         _lastMDXYReceived = mDXYReceived;
 
         // 3. Supply mDXY to Morpho on behalf of the USER
@@ -264,7 +266,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         _lastCollateralWithdrawn = withdrawnAssets;
 
         // 3. Swap mDXY -> USDC via Curve
-        uint256 usdcReceived = SWAP_ROUTER.exchange(address(M_DXY), address(USDC), withdrawnAssets, minUsdcOut);
+        uint256 usdcReceived = CURVE_POOL.exchange(MDXY_INDEX, USDC_INDEX, withdrawnAssets, minUsdcOut);
 
         // 4. Repay flash loan (loanAmount + fee)
         uint256 flashRepayment = loanAmount + fee;
