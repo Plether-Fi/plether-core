@@ -74,8 +74,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param principal Amount of USDC user sends.
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @param minMDXY Minimum mDXY received from swap (Slippage).
+     * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY) external {
+    function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY, uint256 deadline) external {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(leverage > 1e18, "Leverage must be > 1x");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
         // 1. Pull User Funds
@@ -87,7 +89,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // Formula: Loan = Principal * (Lev - 1)
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
         // 3. Encode data for callback
-        bytes memory data = abi.encode(principal, minMDXY, msg.sender);
+        bytes memory data = abi.encode(principal, minMDXY, msg.sender, deadline);
         // 4. Initiate Flash Loan (Get the extra USDC)
         // NOTE: We are flash loaning USDC, not mDXY
         LENDER.flashLoan(this, address(USDC), loanAmount, data);
@@ -109,7 +111,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
     {
         require(msg.sender == address(LENDER), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
-        (uint256 principal, uint256 minMDXY, address user) = abi.decode(data, (uint256, uint256, address));
+        (uint256 principal, uint256 minMDXY, address user, uint256 deadline) =
+            abi.decode(data, (uint256, uint256, address, uint256));
         // 1. Total Capital = User Principal + Flash Loan
         uint256 totalUSDC = principal + amount;
         // 2. Swap ALL USDC -> mDXY
@@ -118,7 +121,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
             tokenOut: address(M_DXY),
             fee: 500, // 0.05% Pool
             recipient: address(this), // Keep mDXY here to supply to Morpho
-            deadline: block.timestamp,
+            deadline: deadline,
             amountIn: totalUSDC,
             amountOutMinimum: minMDXY,
             sqrtPriceLimitX96: 0

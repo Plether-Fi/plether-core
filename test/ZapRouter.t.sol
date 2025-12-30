@@ -47,7 +47,7 @@ contract ZapRouterTest is Test {
 
         // Expect ~200 units (100 from input + 100 from flash loan swap)
         // Using 1% slippage tolerance (100 bps)
-        zapRouter.zapMint(address(mDXY), usdcInput, 190 * 1e18, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertGe(mDXY.balanceOf(alice), 190 * 1e18, "Alice didn't get enough mDXY");
@@ -71,7 +71,7 @@ contract ZapRouterTest is Test {
             100 * 1e6 // actualSwapOut (at 100% rate)
         );
 
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -83,7 +83,7 @@ contract ZapRouterTest is Test {
 
         // Expect ~200 units of Bear token (mInvDXY)
         // Using 1% slippage tolerance (100 bps)
-        zapRouter.zapMint(address(mInvDXY), usdcInput, 190 * 1e18, 100);
+        zapRouter.zapMint(address(mInvDXY), usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertGe(mInvDXY.balanceOf(alice), 190 * 1e18, "Did not receive mInvDXY");
@@ -105,7 +105,7 @@ contract ZapRouterTest is Test {
 
         // The user receives less than `minAmountOut` for final tokens
         vm.expectRevert("Slippage too high");
-        zapRouter.zapMint(address(mDXY), usdcInput, 200 * 1e18, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 200 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -120,7 +120,7 @@ contract ZapRouterTest is Test {
 
         // User sets 1% tolerance but market moves 2% -> reverts
         vm.expectRevert("Too little received");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -132,7 +132,7 @@ contract ZapRouterTest is Test {
 
         // User tries to set 2% slippage (exceeds 1% max)
         vm.expectRevert("Slippage exceeds maximum");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 200);
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 200, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -146,7 +146,7 @@ contract ZapRouterTest is Test {
         usdc.approve(address(zapRouter), usdcInput);
 
         // User sets exactly 1% (100 bps) - at the max limit
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertGt(mDXY.balanceOf(alice), 0, "Should have received tokens");
@@ -164,7 +164,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
         vm.expectRevert("Insolvent Zap: Swap didn't cover mint cost");
-        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100);
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -178,8 +178,20 @@ contract ZapRouterTest is Test {
 
         // Try to zap into a random token (USDC is not a valid target)
         vm.expectRevert("Invalid token");
-        zapRouter.zapMint(address(usdc), 100 * 1e6, 0, 100);
+        zapRouter.zapMint(address(usdc), 100 * 1e6, 0, 100, block.timestamp + 1 hours);
 
+        vm.stopPrank();
+    }
+
+    function test_ZapMint_Expired_Reverts() public {
+        uint256 usdcInput = 100 * 1e6;
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        // Try with expired deadline
+        vm.expectRevert("Transaction expired");
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100, block.timestamp - 1);
         vm.stopPrank();
     }
 

@@ -51,7 +51,7 @@ contract LeverageRouterTest is Test {
 
         morpho.setAuthorization(address(leverageRouter), true);
 
-        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18); // Slippage check
+        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
@@ -68,7 +68,7 @@ contract LeverageRouterTest is Test {
         // Skip auth - router checks upfront before flash loan
 
         vm.expectRevert("LeverageRouter not authorized in Morpho");
-        leverageRouter.openLeverage(principal, leverage, 0);
+        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -84,7 +84,21 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(leverageRouter), false);
 
         vm.expectRevert("LeverageRouter not authorized in Morpho");
-        leverageRouter.openLeverage(principal, leverage, 0);
+        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_Revert_Expired() public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Try with expired deadline
+        vm.expectRevert("Transaction expired");
+        leverageRouter.openLeverage(principal, leverage, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 }

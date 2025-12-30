@@ -53,8 +53,16 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @param minAmountOut Minimum amount of final tokens to receive (slippage protection).
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 100 = 1%).
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function zapMint(address tokenWanted, uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps) external {
+    function zapMint(
+        address tokenWanted,
+        uint256 usdcAmount,
+        uint256 minAmountOut,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external {
+        require(block.timestamp <= deadline, "Transaction expired");
         require(tokenWanted == M_DXY || tokenWanted == M_INV_DXY, "Invalid token");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
 
@@ -77,7 +85,7 @@ contract ZapRouter is IERC3156FlashBorrower {
 
         // 5. Initiate Flash Mint
         // We borrow the UNWANTED token, sell it, and use proceeds to mint the WANTED token.
-        bytes memory data = abi.encode(tokenWanted, usdcAmount, minSwapOut);
+        bytes memory data = abi.encode(tokenWanted, usdcAmount, minSwapOut, deadline);
 
         IERC3156FlashLender(tokenToFlash).flashLoan(this, tokenToFlash, flashAmount, data);
 
@@ -109,44 +117,35 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == token, "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params (now includes minSwapOut for MEV protection)
-        (, uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (address, uint256, uint256));
+        // Decode params (includes minSwapOut for MEV protection and deadline)
+        (, uint256 userUsdcAmount, uint256 minSwapOut, uint256 deadline) =
+            abi.decode(data, (address, uint256, uint256, uint256));
 
         // 1. Sell the Borrowed Token for USDC on Uniswap
         IERC20(token).safeIncreaseAllowance(address(SWAP_ROUTER), amount);
 
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: token,
-            tokenOut: address(USDC),
-            fee: POOL_FEE,
-            recipient: address(this),
-            deadline: block.timestamp,
-            amountIn: amount,
-            amountOutMinimum: minSwapOut, // MEV protection: revert if output below minimum
-            sqrtPriceLimitX96: 0
-        });
-
-        uint256 swappedUsdc = SWAP_ROUTER.exactInputSingle(params);
+        uint256 swappedUsdc = SWAP_ROUTER.exactInputSingle(
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: token,
+                tokenOut: address(USDC),
+                fee: POOL_FEE,
+                recipient: address(this),
+                deadline: deadline,
+                amountIn: amount,
+                amountOutMinimum: minSwapOut,
+                sqrtPriceLimitX96: 0
+            })
+        );
 
         // Store for event emission in main function
         _lastSwapOut = swappedUsdc;
 
-        // 2. Combine User USDC + Swapped USDC
-        uint256 totalCollateral = userUsdcAmount + swappedUsdc;
+        // 2. Mint Real Pairs from Core (userUsdcAmount + swappedUsdc)
+        SPLITTER.mint(userUsdcAmount + swappedUsdc);
 
-        // 3. Mint Real Pairs from Core
-        // This gives us 'mintedAmount' of mDXY AND 'mintedAmount' of mInvDXY
-        SPLITTER.mint(totalCollateral);
-
-        // 4. Repay the Flash Loan
-        // We now have real tokens. We use the 'unwanted' side to pay back the loan.
-        // We must have at least 'amount + fee' (fee is 0).
+        // 3. Repay the Flash Loan
         uint256 repayAmount = amount + fee;
-        uint256 currentUnwantedBalance = IERC20(token).balanceOf(address(this));
-
-        require(currentUnwantedBalance >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
-
-        // Approve repayment
+        require(IERC20(token).balanceOf(address(this)) >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
         IERC20(token).safeIncreaseAllowance(msg.sender, repayAmount);
 
         return keccak256("ERC3156FlashBorrower.onFlashLoan");
