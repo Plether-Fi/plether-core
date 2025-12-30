@@ -22,6 +22,19 @@ contract ZapRouter is IERC3156FlashBorrower {
     uint24 public constant POOL_FEE = 500; // 0.05% Uniswap Pool
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
 
+    // Transient state for passing swap result from callback to main function
+    uint256 private _lastSwapOut;
+
+    // Events
+    event ZapMint(
+        address indexed user,
+        address indexed tokenReceived,
+        uint256 usdcIn,
+        uint256 tokensOut,
+        uint256 maxSlippageBps,
+        uint256 actualSwapOut
+    );
+
     constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _swapRouter) {
         SPLITTER = ISyntheticSplitter(_splitter);
         M_DXY = _mDXY;
@@ -71,9 +84,12 @@ contract ZapRouter is IERC3156FlashBorrower {
         // 6. Final Transfer
         // The flash loan callback handles the minting.
         // We just check if we got enough.
-        uint256 balance = IERC20(tokenWanted).balanceOf(address(this));
-        require(balance >= minAmountOut, "Slippage too high");
-        IERC20(tokenWanted).safeTransfer(msg.sender, balance);
+        uint256 tokensOut = IERC20(tokenWanted).balanceOf(address(this));
+        require(tokensOut >= minAmountOut, "Slippage too high");
+        IERC20(tokenWanted).safeTransfer(msg.sender, tokensOut);
+
+        // 7. Emit event for off-chain tracking and MEV analysis
+        emit ZapMint(msg.sender, tokenWanted, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
     }
 
     /**
@@ -111,6 +127,9 @@ contract ZapRouter is IERC3156FlashBorrower {
         });
 
         uint256 swappedUsdc = SWAP_ROUTER.exactInputSingle(params);
+
+        // Store for event emission in main function
+        _lastSwapOut = swappedUsdc;
 
         // 2. Combine User USDC + Swapped USDC
         uint256 totalCollateral = userUsdcAmount + swappedUsdc;

@@ -54,6 +54,27 @@ contract ZapRouterTest is Test {
         assertEq(usdc.balanceOf(alice), 900 * 1e6, "Alice spent wrong amount of USDC");
     }
 
+    function test_ZapMint_EmitsEvent() public {
+        uint256 usdcInput = 100 * 1e6;
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        // Check event emission
+        vm.expectEmit(true, true, false, true);
+        emit ZapRouter.ZapMint(
+            alice,
+            address(mDXY),
+            usdcInput,
+            200 * 1e18, // tokensOut (at 100% rate: 100+100=200 USDC -> 200e18 tokens)
+            100, // maxSlippageBps
+            100 * 1e6 // actualSwapOut (at 100% rate)
+        );
+
+        zapRouter.zapMint(address(mDXY), usdcInput, 0, 100);
+        vm.stopPrank();
+    }
+
     function test_ZapMint_mInvDXY_Success() public {
         uint256 usdcInput = 100 * 1e6;
 
