@@ -37,6 +37,21 @@ struct MarketParams {
 
 contract LeverageRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;
+
+    // Events
+    event LeverageOpened(
+        address indexed user,
+        uint256 principal,
+        uint256 leverage,
+        uint256 loanAmount,
+        uint256 mDXYReceived,
+        uint256 debtIncurred
+    );
+
+    // Transient state for passing values from callback to main function
+    uint256 private _lastMDXYReceived;
+    uint256 private _lastDebtIncurred;
+
     // Dependencies
     IMorpho public immutable MORPHO;
     ISwapRouter public immutable SWAP_ROUTER;
@@ -93,6 +108,9 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 4. Initiate Flash Loan (Get the extra USDC)
         // NOTE: We are flash loaning USDC, not mDXY
         LENDER.flashLoan(this, address(USDC), loanAmount, data);
+
+        // 5. Emit event for off-chain tracking and MEV analysis
+        emit LeverageOpened(msg.sender, principal, leverage, loanAmount, _lastMDXYReceived, _lastDebtIncurred);
     }
 
     /**
@@ -127,6 +145,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
             sqrtPriceLimitX96: 0
         });
         uint256 mDXYReceived = SWAP_ROUTER.exactInputSingle(params);
+        // Store for event emission in main function
+        _lastMDXYReceived = mDXYReceived;
         // 3. Supply mDXY to Morpho on behalf of the USER
         MORPHO.supply(
             marketParams,
@@ -138,6 +158,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 4. Borrow USDC from Morpho on behalf of the USER
         // We borrow exactly enough to pay back the flash loan (+ fee)
         uint256 debtToIncur = amount + fee;
+        // Store for event emission in main function
+        _lastDebtIncurred = debtToIncur;
         MORPHO.borrow(
             marketParams,
             debtToIncur,

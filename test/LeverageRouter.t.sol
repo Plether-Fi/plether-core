@@ -59,6 +59,26 @@ contract LeverageRouterTest is Test {
         assertEq(borrowed, 2000 * 1e6, "Incorrect borrowed amount");
     }
 
+    function test_OpenLeverage_EmitsLeverageOpenedEvent() public {
+        uint256 principal = 1000 * 1e6; // $1,000
+        uint256 leverage = 3 * 1e18; // 3x
+        uint256 expectedLoanAmount = 2000 * 1e6; // principal * (leverage - 1) / 1e18
+        uint256 expectedMDXYReceived = 3000 * 1e18; // (principal + loan) * 1e12
+        uint256 expectedDebtIncurred = 2000 * 1e6; // loan + fee (fee is 0 in mock)
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        vm.expectEmit(true, false, false, true);
+        emit LeverageRouter.LeverageOpened(
+            alice, principal, leverage, expectedLoanAmount, expectedMDXYReceived, expectedDebtIncurred
+        );
+
+        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
     function test_OpenLeverage_Revert_NoAuth() public {
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 2 * 1e18;
