@@ -503,11 +503,13 @@ contract SyntheticSplitterTest is Test {
         splitter.proposeFeeReceivers(treasury, staking);
         vm.warp(block.timestamp + 8 days);
         splitter.finalizeFeeReceivers();
-        // 2. Simulate Yield ($100 profit)
+        // 2. Advance blocks to allow CAPO growth (~5.5% yield needs ~550 blocks)
+        vm.roll(block.number + 600);
+        // 3. Simulate Yield ($100 profit)
         // Threshold is $50. This should pass.
         aUsdc.mint(address(adapter), 100 * 1e6);
 
-        // 3. Bob (Keeper) calls it
+        // 4. Bob (Keeper) calls it
         vm.startPrank(bob);
         splitter.harvestYield();
         vm.stopPrank();
@@ -584,9 +586,11 @@ contract SyntheticSplitterTest is Test {
         splitter.proposeFeeReceivers(treasury, address(0));
         vm.warp(block.timestamp + 8 days);
         splitter.finalizeFeeReceivers();
-        // 3. Simulate Yield ($100 profit)
+        // 3. Advance blocks to allow CAPO growth (~55% yield needs ~5500 blocks)
+        vm.roll(block.number + 6000);
+        // 4. Simulate Yield ($100 profit)
         aUsdc.mint(address(adapter), 100 * 1e6);
-        // 4. Harvest
+        // 5. Harvest
         splitter.harvestYield();
         // Assert: stakingShare goes to treasury (total treasury = 20% + 80% = 99% of remaining after callerCut)
         assertApproxEqAbs(usdc.balanceOf(treasury), 99 * 1e6, 10); // Rough check

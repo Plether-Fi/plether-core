@@ -214,6 +214,9 @@ contract SplitterHandler is Test {
         yieldAmount = bound(yieldAmount, 0, maxYield);
         if (yieldAmount == 0) return;
 
+        // Advance blocks to allow CAPO growth (10% yield max needs ~1000 blocks)
+        vm.roll(block.number + 1100);
+
         // Add yield to adapter (simulates Aave interest)
         aUsdc.mint(address(adapter), yieldAmount);
         usdc.mint(address(adapter), yieldAmount); // Back the aTokens

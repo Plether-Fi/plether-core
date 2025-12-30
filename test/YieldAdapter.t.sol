@@ -168,15 +168,21 @@ contract YieldAdapterTest is Test {
         adapter.deposit(amount, user);
         vm.stopPrank();
 
-        // 2. Simulate Interest: Aave Pool gives 10 USDC yield
+        // 2. Advance blocks to allow CAPO growth (10% yield requires ~1M blocks at 0.01%/block)
+        // For testing, we advance enough blocks to allow the 10% growth
+        // MAX_GROWTH_PER_BLOCK = 1e14 (0.01% = 0.0001)
+        // To get 10% growth: 10% / 0.01% = 1000 blocks
+        vm.roll(block.number + 1000);
+
+        // 3. Simulate Interest: Aave Pool gives 10 USDC yield
         // We simulate this by minting aUSDC directly to the adapter
         // (In real life, Aave rebases everyone's balance up)
         aUsdc.mint(address(adapter), 10 * 1e6);
 
-        // Check: Total Assets should now be 110
+        // Check: Total Assets should now be 110 (within CAPO growth limit)
         assertEq(adapter.totalAssets(), 110 * 1e6);
 
-        // 3. User Withdraws Everything
+        // 4. User Withdraws Everything
         // Since shares are 100, but assets are 110, exchange rate changed.
         vm.startPrank(user);
         adapter.redeem(100 * 1e6, user, user);
@@ -343,5 +349,114 @@ contract YieldAdapterTest is Test {
         vm.expectRevert(YieldAdapter.YieldAdapter__InvalidAddress.selector);
         adapter.claimRewards(address(rewardToken), address(0));
         vm.stopPrank();
+    }
+
+    // ==========================================
+    // 5. CAPO (Donation Attack Protection) Tests
+    // ==========================================
+
+    function test_CAPO_DonationIsCappedInSameBlock() public {
+        uint256 amount = 100 * 1e6;
+
+        // 1. User Deposits
+        vm.startPrank(user);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, user);
+        vm.stopPrank();
+
+        // 2. Attacker donates aTokens directly (same block)
+        aUsdc.mint(address(adapter), 50 * 1e6); // 50% donation
+
+        // 3. rawTotalAssets shows actual balance, totalAssets is capped
+        assertEq(adapter.rawTotalAssets(), 150 * 1e6, "Raw should show donation");
+        assertEq(adapter.totalAssets(), 100 * 1e6, "CAPO should cap at last known");
+    }
+
+    function test_CAPO_GrowthAllowedOverBlocks() public {
+        uint256 amount = 100 * 1e6;
+
+        // 1. User Deposits
+        vm.startPrank(user);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, user);
+        vm.stopPrank();
+
+        // 2. Advance 500 blocks (allows 5% growth at 0.01%/block)
+        vm.roll(block.number + 500);
+
+        // 3. Donate 5% (within allowed growth)
+        aUsdc.mint(address(adapter), 5 * 1e6);
+
+        // 4. Should be within CAPO limit
+        assertEq(adapter.totalAssets(), 105 * 1e6, "5% growth should be allowed after 500 blocks");
+    }
+
+    function test_CAPO_ExcessGrowthCapped() public {
+        uint256 amount = 100 * 1e6;
+
+        // 1. User Deposits
+        vm.startPrank(user);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, user);
+        vm.stopPrank();
+
+        // 2. Advance 100 blocks (allows 1% growth)
+        vm.roll(block.number + 100);
+
+        // 3. Donate 10% (exceeds allowed 1% growth)
+        aUsdc.mint(address(adapter), 10 * 1e6);
+
+        // 4. Raw shows full donation, totalAssets capped
+        assertEq(adapter.rawTotalAssets(), 110 * 1e6, "Raw should show full donation");
+
+        // Expected cap: 100e6 + (100e6 * 1e14 * 100) / 1e18 = 100e6 + 1e6 = 101e6
+        assertEq(adapter.totalAssets(), 101 * 1e6, "CAPO should cap at 1% growth after 100 blocks");
+    }
+
+    function test_CAPO_WithdrawUpdatesBaseline() public {
+        uint256 amount = 100 * 1e6;
+
+        // 1. User Deposits
+        vm.startPrank(user);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, user);
+        vm.stopPrank();
+
+        // 2. Advance blocks and simulate yield
+        vm.roll(block.number + 500);
+        aUsdc.mint(address(adapter), 5 * 1e6);
+
+        // 3. Withdraw some funds (this updates the CAPO baseline)
+        vm.startPrank(user);
+        adapter.withdraw(50 * 1e6, user, user);
+        vm.stopPrank();
+
+        // 4. lastKnownAssets should now be the remaining balance
+        assertEq(adapter.lastKnownAssets(), 55 * 1e6, "Baseline should update after withdraw");
+    }
+
+    function test_CAPO_FlashLoanDonationAttackBlocked() public {
+        uint256 amount = 1_000_000 * 1e6; // 1M USDC
+
+        // Fund user for this test
+        usdc.mint(user, amount);
+
+        // 1. User Deposits (simulates normal protocol operation)
+        vm.startPrank(user);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, user);
+        vm.stopPrank();
+
+        // 2. Attacker flash loans and donates (same block attack)
+        // Simulating wUSDM-style attack: inflate exchange rate by 60%
+        aUsdc.mint(address(adapter), 600_000 * 1e6); // 60% donation
+
+        // 3. Verify attack is blocked
+        assertEq(adapter.rawTotalAssets(), 1_600_000 * 1e6, "Raw shows inflated balance");
+        assertEq(adapter.totalAssets(), 1_000_000 * 1e6, "CAPO blocks flash loan inflation");
+
+        // 4. Exchange rate is NOT manipulated
+        uint256 sharesForOneUSDC = adapter.convertToShares(1 * 1e6);
+        assertEq(sharesForOneUSDC, 1 * 1e6, "Exchange rate should be 1:1, not manipulated");
     }
 }

@@ -37,6 +37,12 @@ contract YieldAdapter is ERC4626, Ownable {
 
     IRewardsController public rewardsController;
 
+    // CAPO (Capped Asset Per Ownership) - Protection against donation attacks
+    uint256 public lastKnownAssets;
+    uint256 public lastUpdateBlock;
+    // Max growth: ~0.01% per block ≈ 52% APY at 12s blocks (conservative for Aave rates)
+    uint256 public constant MAX_GROWTH_PER_BLOCK = 1e14; // 0.0001 in 18 decimals
+
     error YieldAdapter__OnlySplitter();
     error YieldAdapter__InvalidAddress();
 
@@ -66,12 +72,38 @@ contract YieldAdapter is ERC4626, Ownable {
     // ==========================================
 
     /**
-     * @dev Total assets = Balance in Aave (Principal + Interest).
-     * This is the "source of truth" for the vault's value.
+     * @dev Total assets = Balance in Aave, capped by CAPO mechanism.
+     * Protects against donation attacks by limiting growth rate.
      */
     function totalAssets() public view override returns (uint256) {
-        // aToken balance grows automatically as interest accrues
+        uint256 rawAssets = A_TOKEN.balanceOf(address(this));
+
+        // Bootstrap: no prior state, return raw value
+        if (lastKnownAssets == 0) return rawAssets;
+
+        // Calculate maximum allowed growth since last update
+        uint256 blocksPassed = block.number - lastUpdateBlock;
+        uint256 maxGrowth = (lastKnownAssets * MAX_GROWTH_PER_BLOCK * blocksPassed) / 1e18;
+        uint256 maxAssets = lastKnownAssets + maxGrowth;
+
+        // Return the lesser of raw balance and capped maximum
+        return rawAssets > maxAssets ? maxAssets : rawAssets;
+    }
+
+    /**
+     * @dev Returns the raw aToken balance without CAPO cap (for diagnostics)
+     */
+    function rawTotalAssets() public view returns (uint256) {
         return A_TOKEN.balanceOf(address(this));
+    }
+
+    /**
+     * @dev Updates CAPO tracking after legitimate operations.
+     * Called after deposits and withdrawals to establish new baseline.
+     */
+    function _updateAssetTracking() internal {
+        lastKnownAssets = A_TOKEN.balanceOf(address(this));
+        lastUpdateBlock = block.number;
     }
 
     /**
@@ -87,6 +119,9 @@ contract YieldAdapter is ERC4626, Ownable {
         // 2. We supply that USDC to Aave
         // 'onBehalfOf' is 'this' because the Wrapper holds the position
         AAVE_POOL.supply(asset(), assets, address(this), 0);
+
+        // 3. Update CAPO tracking with new baseline
+        _updateAssetTracking();
     }
 
     /**
@@ -101,6 +136,9 @@ contract YieldAdapter is ERC4626, Ownable {
 
         // 2. OpenZeppelin's logic sends USDC to 'receiver'
         super._withdraw(caller, receiver, owner, assets, shares);
+
+        // 3. Update CAPO tracking with new baseline
+        _updateAssetTracking();
     }
 
     // ==========================================
