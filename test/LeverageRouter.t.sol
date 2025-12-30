@@ -271,6 +271,89 @@ contract LeverageRouterTest is Test {
         leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 101, block.timestamp + 1 hours);
         vm.stopPrank();
     }
+
+    // ==========================================
+    // FUZZ TESTS
+    // ==========================================
+
+    function testFuzz_OpenLeverage(uint256 principal, uint256 leverageMultiplier) public {
+        // Bound inputs to reasonable ranges
+        // Principal: $1 to $1M USDC
+        principal = bound(principal, 1e6, 1_000_000 * 1e6);
+        // Leverage: 1.1x to 10x (in 1e18 units)
+        leverageMultiplier = bound(leverageMultiplier, 1.1e18, 10e18);
+
+        // Mint enough USDC for alice
+        usdc.mint(alice, principal);
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        leverageRouter.openLeverage(principal, leverageMultiplier, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify invariants
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Expected values (at 1:1 mock rate):
+        // totalUSDC = principal + loanAmount = principal + principal * (leverage - 1) / 1e18
+        //           = principal * leverage / 1e18
+        // mDXY received = totalUSDC * 1e12 (decimal conversion)
+        uint256 expectedSupplied = (principal * leverageMultiplier / 1e18) * 1e12;
+        uint256 expectedBorrowed = principal * (leverageMultiplier - 1e18) / 1e18;
+
+        assertEq(supplied, expectedSupplied, "Supplied mDXY mismatch");
+        assertEq(borrowed, expectedBorrowed, "Borrowed USDC mismatch");
+    }
+
+    function testFuzz_OpenAndCloseLeverage(uint256 principal, uint256 leverageMultiplier) public {
+        // Bound inputs
+        principal = bound(principal, 1e6, 1_000_000 * 1e6);
+        leverageMultiplier = bound(leverageMultiplier, 1.1e18, 10e18);
+
+        usdc.mint(alice, principal);
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Open position
+        leverageRouter.openLeverage(principal, leverageMultiplier, 100, block.timestamp + 1 hours);
+
+        // Get position state
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Close entire position
+        leverageRouter.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify position is fully closed
+        (uint256 suppliedAfter, uint256 borrowedAfter) = morpho.positions(alice);
+        assertEq(suppliedAfter, 0, "Position not fully closed - supplied");
+        assertEq(borrowedAfter, 0, "Position not fully closed - borrowed");
+    }
+
+    function testFuzz_OpenLeverage_SlippageBound(uint256 slippageBps) public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2e18;
+
+        usdc.mint(alice, principal);
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        if (slippageBps > 100) {
+            vm.expectRevert("Slippage exceeds maximum");
+            leverageRouter.openLeverage(principal, leverage, slippageBps, block.timestamp + 1 hours);
+        } else {
+            leverageRouter.openLeverage(principal, leverage, slippageBps, block.timestamp + 1 hours);
+            (uint256 supplied,) = morpho.positions(alice);
+            assertGt(supplied, 0, "Position should be opened");
+        }
+        vm.stopPrank();
+    }
 }
 
 // ==========================================

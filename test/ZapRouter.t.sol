@@ -193,6 +193,78 @@ contract ZapRouterTest is Test {
         );
         vm.stopPrank();
     }
+
+    // ==========================================
+    // 4. FUZZ TESTS
+    // ==========================================
+
+    function testFuzz_ZapMint(uint256 usdcAmount) public {
+        // Bound inputs: $1 to $1M USDC
+        usdcAmount = bound(usdcAmount, 1e6, 1_000_000 * 1e6);
+
+        usdc.mint(alice, usdcAmount);
+
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify invariants:
+        // 1. User spent exactly usdcAmount
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore - usdcAmount, "Incorrect USDC spent");
+
+        // 2. User receives mInvDXY tokens
+        // At 1:1 mock rate: flash usdcAmount*1e12 mDXY, swap for usdcAmount USDC
+        // Total: 2*usdcAmount USDC -> mint 2*usdcAmount*1e12 of each token
+        uint256 expectedTokens = 2 * usdcAmount * 1e12;
+        assertEq(mInvDXY.balanceOf(alice), expectedTokens, "Incorrect mInvDXY received");
+
+        // 3. Router has no leftover mInvDXY (the output token)
+        assertEq(mInvDXY.balanceOf(address(zapRouter)), 0, "Router has leftover mInvDXY");
+    }
+
+    function testFuzz_ZapMint_SlippageBound(uint256 slippageBps) public {
+        uint256 usdcAmount = 100 * 1e6;
+
+        usdc.mint(alice, usdcAmount);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+
+        if (slippageBps > 100) {
+            vm.expectRevert("Slippage exceeds maximum");
+            zapRouter.zapMint(usdcAmount, 0, slippageBps, block.timestamp + 1 hours);
+        } else {
+            zapRouter.zapMint(usdcAmount, 0, slippageBps, block.timestamp + 1 hours);
+            assertGt(mInvDXY.balanceOf(alice), 0, "Should have received tokens");
+        }
+        vm.stopPrank();
+    }
+
+    function testFuzz_ZapMint_MinAmountOut(uint256 usdcAmount, uint256 minAmountOut) public {
+        // Bound inputs
+        usdcAmount = bound(usdcAmount, 1e6, 1_000_000 * 1e6);
+
+        // Expected output at 1:1 rate
+        uint256 expectedOutput = 2 * usdcAmount * 1e12;
+
+        usdc.mint(alice, usdcAmount);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+
+        if (minAmountOut > expectedOutput) {
+            vm.expectRevert("Slippage too high");
+            zapRouter.zapMint(usdcAmount, minAmountOut, 100, block.timestamp + 1 hours);
+        } else {
+            zapRouter.zapMint(usdcAmount, minAmountOut, 100, block.timestamp + 1 hours);
+            assertGe(mInvDXY.balanceOf(alice), minAmountOut, "Received less than minAmountOut");
+        }
+        vm.stopPrank();
+    }
 }
 
 // ==========================================
