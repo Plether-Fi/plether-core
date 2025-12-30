@@ -265,6 +265,46 @@ contract ZapRouterTest is Test {
         }
         vm.stopPrank();
     }
+
+    // ==========================================
+    // 5. VIEW FUNCTION TESTS
+    // ==========================================
+
+    function test_PreviewZapMint() public view {
+        uint256 usdcAmount = 100 * 1e6; // $100
+
+        (uint256 flashAmount, uint256 expectedSwapOut, uint256 totalUSDC, uint256 expectedTokensOut, uint256 flashFee) =
+            zapRouter.previewZapMint(usdcAmount);
+
+        // Flash mint $100 worth of mDXY = 100e18
+        assertEq(flashAmount, 100 * 1e18, "Incorrect flash amount");
+        // Expected swap output at 1:1 = $100
+        assertEq(expectedSwapOut, 100 * 1e6, "Incorrect expected swap out");
+        // Total USDC = $100 + $100 = $200
+        assertEq(totalUSDC, 200 * 1e6, "Incorrect total USDC");
+        // Expected tokens = $200 * 1e12 = 200e18
+        assertEq(expectedTokensOut, 200 * 1e18, "Incorrect expected tokens out");
+        // Flash fee is 0 in mock
+        assertEq(flashFee, 0, "Incorrect flash fee");
+    }
+
+    function test_PreviewZapMint_MatchesActual() public {
+        uint256 usdcAmount = 100 * 1e6;
+
+        // Get preview
+        (,,, uint256 expectedTokensOut,) = zapRouter.previewZapMint(usdcAmount);
+
+        // Execute actual operation
+        usdc.mint(alice, usdcAmount);
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify preview matches actual
+        uint256 actualTokensOut = mInvDXY.balanceOf(alice);
+        assertEq(actualTokensOut, expectedTokensOut, "Preview doesn't match actual");
+    }
 }
 
 // ==========================================

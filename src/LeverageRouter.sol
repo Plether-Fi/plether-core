@@ -279,4 +279,50 @@ contract LeverageRouter is IERC3156FlashBorrower {
             USDC.safeTransfer(user, usdcToReturn);
         }
     }
+
+    // ==========================================
+    // VIEW FUNCTIONS (for frontend)
+    // ==========================================
+
+    /**
+     * @notice Preview the result of opening a leveraged position.
+     * @param principal Amount of USDC user will send.
+     * @param leverage Multiplier (e.g. 3x = 3e18).
+     * @return loanAmount Amount of USDC to flash loan.
+     * @return totalUSDC Total USDC to swap (principal + loan).
+     * @return expectedMDXY Expected mDXY at 1:1 parity (before slippage).
+     * @return expectedDebt Expected debt incurred (loan + flash fee).
+     */
+    function previewOpenLeverage(uint256 principal, uint256 leverage)
+        external
+        view
+        returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedMDXY, uint256 expectedDebt)
+    {
+        require(leverage > 1e18, "Leverage must be > 1x");
+
+        loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        totalUSDC = principal + loanAmount;
+        expectedMDXY = totalUSDC * 1e12; // 6 decimals -> 18 decimals
+        uint256 flashFee = LENDER.flashFee(address(USDC), loanAmount);
+        expectedDebt = loanAmount + flashFee;
+    }
+
+    /**
+     * @notice Preview the result of closing a leveraged position.
+     * @param debtToRepay Amount of USDC debt to repay.
+     * @param collateralToWithdraw Amount of mDXY collateral to withdraw.
+     * @return expectedUSDC Expected USDC from swap at 1:1 parity (before slippage).
+     * @return flashFee Flash loan fee.
+     * @return expectedReturn Expected USDC returned to user after repaying flash loan.
+     */
+    function previewCloseLeverage(uint256 debtToRepay, uint256 collateralToWithdraw)
+        external
+        view
+        returns (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn)
+    {
+        expectedUSDC = collateralToWithdraw / 1e12; // 18 decimals -> 6 decimals
+        flashFee = LENDER.flashFee(address(USDC), debtToRepay);
+        uint256 totalRepayment = debtToRepay + flashFee;
+        expectedReturn = expectedUSDC > totalRepayment ? expectedUSDC - totalRepayment : 0;
+    }
 }

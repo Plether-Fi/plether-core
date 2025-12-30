@@ -354,6 +354,92 @@ contract LeverageRouterTest is Test {
         }
         vm.stopPrank();
     }
+
+    // ==========================================
+    // VIEW FUNCTION TESTS
+    // ==========================================
+
+    function test_PreviewOpenLeverage() public view {
+        uint256 principal = 1000 * 1e6; // $1,000
+        uint256 leverage = 3e18; // 3x
+
+        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedMDXY, uint256 expectedDebt) =
+            leverageRouter.previewOpenLeverage(principal, leverage);
+
+        // 3x leverage on $1000 = $2000 loan
+        assertEq(loanAmount, 2000 * 1e6, "Incorrect loan amount");
+        // Total = $1000 + $2000 = $3000
+        assertEq(totalUSDC, 3000 * 1e6, "Incorrect total USDC");
+        // mDXY at 1:1 = $3000 * 1e12 = 3000e18
+        assertEq(expectedMDXY, 3000 * 1e18, "Incorrect expected mDXY");
+        // Debt = loan + fee (fee is 0 in mock)
+        assertEq(expectedDebt, 2000 * 1e6, "Incorrect expected debt");
+    }
+
+    function test_PreviewOpenLeverage_MatchesActual() public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+
+        // Get preview
+        (,, uint256 expectedMDXY, uint256 expectedDebt) = leverageRouter.previewOpenLeverage(principal, leverage);
+
+        // Execute actual operation
+        usdc.mint(alice, principal);
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify preview matches actual
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertEq(supplied, expectedMDXY, "Preview mDXY doesn't match actual");
+        assertEq(borrowed, expectedDebt, "Preview debt doesn't match actual");
+    }
+
+    function test_PreviewCloseLeverage() public view {
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+
+        (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn) =
+            leverageRouter.previewCloseLeverage(debtToRepay, collateralToWithdraw);
+
+        // USDC from selling 3000e18 mDXY at 1:1 = $3000
+        assertEq(expectedUSDC, 3000 * 1e6, "Incorrect expected USDC");
+        // Flash fee is 0 in mock
+        assertEq(flashFee, 0, "Incorrect flash fee");
+        // Return = $3000 - $2000 debt - $0 fee = $1000
+        assertEq(expectedReturn, 1000 * 1e6, "Incorrect expected return");
+    }
+
+    function test_PreviewCloseLeverage_MatchesActual() public {
+        // First open a position
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+
+        usdc.mint(alice, principal);
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        // Get position
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Get preview for close
+        (,, uint256 expectedReturn) = leverageRouter.previewCloseLeverage(borrowed, supplied);
+
+        // Record balance before close
+        uint256 balanceBefore = usdc.balanceOf(alice);
+
+        // Execute close
+        leverageRouter.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify preview matches actual
+        uint256 actualReturn = usdc.balanceOf(alice) - balanceBefore;
+        assertEq(actualReturn, expectedReturn, "Preview return doesn't match actual");
+    }
 }
 
 // ==========================================

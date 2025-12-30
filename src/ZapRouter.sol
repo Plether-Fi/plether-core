@@ -119,4 +119,50 @@ contract ZapRouter is IERC3156FlashBorrower {
 
         return keccak256("ERC3156FlashBorrower.onFlashLoan");
     }
+
+    // ==========================================
+    // VIEW FUNCTIONS (for frontend)
+    // ==========================================
+
+    /**
+     * @notice Preview the result of a zapMint operation.
+     * @param usdcAmount The amount of USDC the user will send.
+     * @return flashAmount Amount of mDXY to flash mint.
+     * @return expectedSwapOut Expected USDC from selling flash-minted mDXY (at 1:1 parity).
+     * @return totalUSDC Total USDC for minting pairs (user + swap).
+     * @return expectedTokensOut Expected pldxy-bull tokens to receive.
+     * @return flashFee Flash mint fee (if any).
+     */
+    function previewZapMint(uint256 usdcAmount)
+        external
+        view
+        returns (
+            uint256 flashAmount,
+            uint256 expectedSwapOut,
+            uint256 totalUSDC,
+            uint256 expectedTokensOut,
+            uint256 flashFee
+        )
+    {
+        // Flash mint amount (USDC 6 decimals -> mDXY 18 decimals)
+        flashAmount = usdcAmount * 1e12;
+
+        // Expected USDC from swap at 1:1 parity
+        expectedSwapOut = usdcAmount;
+
+        // Total USDC for minting = user's USDC + swapped USDC
+        totalUSDC = usdcAmount + expectedSwapOut;
+
+        // Flash fee from mDXY token
+        flashFee = IERC3156FlashLender(address(M_DXY)).flashFee(address(M_DXY), flashAmount);
+
+        // Minting pairs: totalUSDC (6 decimals) -> tokens (18 decimals)
+        // Each USDC mints 1e12 of each token pair
+        // But we need to repay flashAmount + flashFee of mDXY
+        // So user keeps: totalUSDC * 1e12 - (flashAmount + flashFee) of mDXY... wait no
+        // Actually: mint gives us totalUSDC * 1e12 of EACH token
+        // We repay flashAmount + flashFee of mDXY
+        // User gets all the mInvDXY = totalUSDC * 1e12
+        expectedTokensOut = totalUSDC * 1e12;
+    }
 }
