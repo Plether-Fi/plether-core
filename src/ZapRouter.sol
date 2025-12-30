@@ -20,6 +20,7 @@ contract ZapRouter is IERC3156FlashBorrower {
 
     // Constants
     uint24 public constant POOL_FEE = 500; // 0.05% Uniswap Pool
+    uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
 
     constructor(address _splitter, address _mDXY, address _mInvDXY, address _usdc, address _swapRouter) {
         SPLITTER = ISyntheticSplitter(_splitter);
@@ -36,10 +37,13 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @notice Buy a specific synthetic token using USDC.
      * @param tokenWanted The address of the token the user wants (mDXY or mInvDXY).
      * @param usdcAmount The amount of USDC the user is sending.
-     * @param minAmountOut Minimum amount of tokens to receive (Slippage protection).
+     * @param minAmountOut Minimum amount of final tokens to receive (slippage protection).
+     * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 100 = 1%).
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      */
-    function zapMint(address tokenWanted, uint256 usdcAmount, uint256 minAmountOut) external {
+    function zapMint(address tokenWanted, uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps) external {
         require(tokenWanted == M_DXY || tokenWanted == M_INV_DXY, "Invalid token");
+        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
 
         // 1. Pull USDC from User
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
@@ -54,14 +58,17 @@ contract ZapRouter is IERC3156FlashBorrower {
         // Formula: usdcAmount (6 decimals) -> 18 decimals
         uint256 flashAmount = usdcAmount * 1e12;
 
-        // 4. Initiate Flash Mint
+        // 4. Calculate minimum swap output based on user's slippage tolerance
+        // Expected output at 1:1 parity is usdcAmount
+        uint256 minSwapOut = (usdcAmount * (10000 - maxSlippageBps)) / 10000;
+
+        // 5. Initiate Flash Mint
         // We borrow the UNWANTED token, sell it, and use proceeds to mint the WANTED token.
-        // We pass the user's usdcAmount in the data so the callback knows how much to combine.
-        bytes memory data = abi.encode(tokenWanted, usdcAmount);
+        bytes memory data = abi.encode(tokenWanted, usdcAmount, minSwapOut);
 
         IERC3156FlashLender(tokenToFlash).flashLoan(this, tokenToFlash, flashAmount, data);
 
-        // 5. Final Transfer
+        // 6. Final Transfer
         // The flash loan callback handles the minting.
         // We just check if we got enough.
         uint256 balance = IERC20(tokenWanted).balanceOf(address(this));
@@ -86,8 +93,8 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == token, "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params
-        (, uint256 userUsdcAmount) = abi.decode(data, (address, uint256));
+        // Decode params (now includes minSwapOut for MEV protection)
+        (, uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (address, uint256, uint256));
 
         // 1. Sell the Borrowed Token for USDC on Uniswap
         IERC20(token).safeIncreaseAllowance(address(SWAP_ROUTER), amount);
@@ -99,7 +106,7 @@ contract ZapRouter is IERC3156FlashBorrower {
             recipient: address(this),
             deadline: block.timestamp,
             amountIn: amount,
-            amountOutMinimum: 0, // In prod, calculate this!
+            amountOutMinimum: minSwapOut, // MEV protection: revert if output below minimum
             sqrtPriceLimitX96: 0
         });
 
