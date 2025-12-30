@@ -139,6 +139,44 @@ contract LeverageRouterTest is Test {
         vm.stopPrank();
     }
 
+    function test_OpenLeverage_Revert_LeverageTooLow() public {
+        uint256 principal = 1000 * 1e6;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Try with leverage = 1x (must be > 1x)
+        vm.expectRevert("Leverage must be > 1x");
+        leverageRouter.openLeverage(principal, 1e18, 50, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_OnFlashLoan_UntrustedLender_Reverts() public {
+        vm.startPrank(alice);
+
+        // Alice pretends to be a Flash Lender calling the callback
+        vm.expectRevert("Untrusted lender");
+        leverageRouter.onFlashLoan(address(leverageRouter), address(usdc), 1000 * 1e6, 0, "");
+        vm.stopPrank();
+    }
+
+    function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
+        // Pretend to be the legitimate lender calling the callback...
+        vm.startPrank(address(lender));
+
+        // ...BUT the 'initiator' arg is Alice, not the LeverageRouter itself.
+        vm.expectRevert("Untrusted initiator");
+        leverageRouter.onFlashLoan(
+            alice, // <--- Malicious initiator
+            address(usdc),
+            1000 * 1e6,
+            0,
+            ""
+        );
+        vm.stopPrank();
+    }
+
     // ==========================================
     // CLOSE LEVERAGE TESTS
     // ==========================================
