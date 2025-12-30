@@ -284,25 +284,25 @@ contract MockFlashLender is IERC3156FlashLender {
 }
 
 contract MockSwapRouter is ISwapRouter {
-    function exactInputSingle(ExactInputSingleParams calldata params)
+    function exchange(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
         external
-        payable
         override
         returns (uint256 amountOut)
     {
         // Detect swap direction by checking decimals difference
-        uint8 tokenInDecimals = MockToken(params.tokenIn).decimals();
-        uint8 tokenOutDecimals = MockToken(params.tokenOut).decimals();
+        uint8 tokenInDecimals = MockToken(tokenIn).decimals();
+        uint8 tokenOutDecimals = MockToken(tokenOut).decimals();
 
         if (tokenInDecimals < tokenOutDecimals) {
             // USDC (6) -> mDXY (18) : * 1e12
-            amountOut = params.amountIn * 1e12;
+            amountOut = amountIn * 1e12;
         } else {
             // mDXY (18) -> USDC (6) : / 1e12
-            amountOut = params.amountIn / 1e12;
+            amountOut = amountIn / 1e12;
         }
 
-        MockToken(params.tokenOut).mint(params.recipient, amountOut);
+        require(amountOut >= minAmountOut, "Too little received");
+        MockToken(tokenOut).mint(msg.sender, amountOut);
         return amountOut;
     }
 }

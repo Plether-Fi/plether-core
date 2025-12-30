@@ -277,18 +277,17 @@ contract MockSwapRouter is ISwapRouter {
         rate = _r;
     }
 
-    function exactInputSingle(ExactInputSingleParams calldata params)
+    function exchange(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
         external
-        payable
         override
         returns (uint256 amountOut)
     {
-        amountOut = (params.amountIn / 1e12) * rate / 10000;
+        amountOut = (amountIn / 1e12) * rate / 10000;
 
         // MEV protection: revert if output below minimum
-        require(amountOut >= params.amountOutMinimum, "Too little received");
+        require(amountOut >= minAmountOut, "Too little received");
 
-        MockToken(params.tokenOut).mint(params.recipient, amountOut);
+        MockToken(tokenOut).mint(msg.sender, amountOut);
         return amountOut;
     }
 }

@@ -211,13 +211,13 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(msg.sender == address(LENDER), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode common fields
-        (uint8 operation, address user, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
+        // Decode common fields (deadline checked in main function, not needed here)
+        (uint8 operation, address user,) = abi.decode(data, (uint8, address, uint256));
 
         if (operation == OP_OPEN) {
-            _executeOpen(amount, fee, user, deadline, data);
+            _executeOpen(amount, fee, user, data);
         } else if (operation == OP_CLOSE) {
-            _executeClose(amount, fee, user, deadline, data);
+            _executeClose(amount, fee, user, data);
         } else {
             revert("Invalid operation");
         }
@@ -228,27 +228,15 @@ contract LeverageRouter is IERC3156FlashBorrower {
     /**
      * @dev Execute open leverage operation in flash loan callback.
      */
-    function _executeOpen(uint256 loanAmount, uint256 fee, address user, uint256 deadline, bytes calldata data)
-        private
-    {
+    function _executeOpen(uint256 loanAmount, uint256 fee, address user, bytes calldata data) private {
         // Decode open-specific data: (op, user, deadline, principal, minMDXY)
         (,,, uint256 principal, uint256 minMDXY) = abi.decode(data, (uint8, address, uint256, uint256, uint256));
 
         // 1. Total Capital = User Principal + Flash Loan
         uint256 totalUSDC = principal + loanAmount;
 
-        // 2. Swap ALL USDC -> mDXY
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(USDC),
-            tokenOut: address(M_DXY),
-            fee: 500,
-            recipient: address(this),
-            deadline: deadline,
-            amountIn: totalUSDC,
-            amountOutMinimum: minMDXY,
-            sqrtPriceLimitX96: 0
-        });
-        uint256 mDXYReceived = SWAP_ROUTER.exactInputSingle(params);
+        // 2. Swap ALL USDC -> mDXY via Curve
+        uint256 mDXYReceived = SWAP_ROUTER.exchange(address(USDC), address(M_DXY), totalUSDC, minMDXY);
         _lastMDXYReceived = mDXYReceived;
 
         // 3. Supply mDXY to Morpho on behalf of the USER
@@ -263,9 +251,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
     /**
      * @dev Execute close leverage operation in flash loan callback.
      */
-    function _executeClose(uint256 loanAmount, uint256 fee, address user, uint256 deadline, bytes calldata data)
-        private
-    {
+    function _executeClose(uint256 loanAmount, uint256 fee, address user, bytes calldata data) private {
         // Decode close-specific data: (op, user, deadline, collateralToWithdraw, minUsdcOut)
         (,,, uint256 collateralToWithdraw, uint256 minUsdcOut) =
             abi.decode(data, (uint8, address, uint256, uint256, uint256));
@@ -277,18 +263,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
         (uint256 withdrawnAssets,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
         _lastCollateralWithdrawn = withdrawnAssets;
 
-        // 3. Swap mDXY -> USDC
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(M_DXY),
-            tokenOut: address(USDC),
-            fee: 500,
-            recipient: address(this),
-            deadline: deadline,
-            amountIn: withdrawnAssets,
-            amountOutMinimum: minUsdcOut,
-            sqrtPriceLimitX96: 0
-        });
-        uint256 usdcReceived = SWAP_ROUTER.exactInputSingle(params);
+        // 3. Swap mDXY -> USDC via Curve
+        uint256 usdcReceived = SWAP_ROUTER.exchange(address(M_DXY), address(USDC), withdrawnAssets, minUsdcOut);
 
         // 4. Repay flash loan (loanAmount + fee)
         uint256 flashRepayment = loanAmount + fee;

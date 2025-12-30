@@ -19,7 +19,6 @@ contract ZapRouter is IERC3156FlashBorrower {
     ISwapRouter public immutable SWAP_ROUTER;
 
     // Constants
-    uint24 public constant POOL_FEE = 500; // 0.05% Uniswap Pool
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
 
     // Transient state for passing swap result from callback to main function
@@ -117,25 +116,13 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == token, "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params (includes minSwapOut for MEV protection and deadline)
-        (, uint256 userUsdcAmount, uint256 minSwapOut, uint256 deadline) =
-            abi.decode(data, (address, uint256, uint256, uint256));
+        // Decode params (deadline checked in main function, not needed here)
+        (, uint256 userUsdcAmount, uint256 minSwapOut,) = abi.decode(data, (address, uint256, uint256, uint256));
 
-        // 1. Sell the Borrowed Token for USDC on Uniswap
+        // 1. Sell the Borrowed Token for USDC via Curve
         IERC20(token).safeIncreaseAllowance(address(SWAP_ROUTER), amount);
 
-        uint256 swappedUsdc = SWAP_ROUTER.exactInputSingle(
-            ISwapRouter.ExactInputSingleParams({
-                tokenIn: token,
-                tokenOut: address(USDC),
-                fee: POOL_FEE,
-                recipient: address(this),
-                deadline: deadline,
-                amountIn: amount,
-                amountOutMinimum: minSwapOut,
-                sqrtPriceLimitX96: 0
-            })
-        );
+        uint256 swappedUsdc = SWAP_ROUTER.exchange(token, address(USDC), amount, minSwapOut);
 
         // Store for event emission in main function
         _lastSwapOut = swappedUsdc;
