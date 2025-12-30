@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/YieldAdapter.sol";
 import "./utils/MockAave.sol";
@@ -74,6 +75,58 @@ contract SyntheticSplitterFuzzTest is Test {
         uint256 totalAssets = localBuffer + adapterAssets;
 
         assertGe(totalAssets + 1, totalLiabilities, "Solvency Broken");
+    }
+
+    /// @notice Verify that users pay at least fair price (catches rounding exploits)
+    /// @dev Uses small amounts where rounding has maximum impact
+    function testFuzz_Mint_UserPaysFairPrice(uint256 amount) public {
+        // Use smaller range to maximize rounding impact
+        amount = bound(amount, 1e15, 1e20);
+
+        // Calculate floor (actual) vs ceiling (fair) price
+        uint256 usdcActual = (amount * CAP) / splitter.USDC_MULTIPLIER();
+        uint256 usdcFair = Math.mulDiv(amount, CAP, splitter.USDC_MULTIPLIER(), Math.Rounding.Ceil);
+
+        usdc.mint(alice, usdcFair + 1e6);
+        uint256 aliceBalanceBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        splitter.mint(amount);
+        vm.stopPrank();
+
+        uint256 aliceBalanceAfter = usdc.balanceOf(alice);
+        uint256 actualPaid = aliceBalanceBefore - aliceBalanceAfter;
+
+        // User must pay at least the fair (ceiling) price
+        assertGe(actualPaid, usdcFair, "ROUNDING EXPLOIT: User paid less than fair price");
+    }
+
+    /// @notice Fuzz test with edge-case amounts designed to maximize rounding benefit
+    function testFuzz_Mint_EdgeCaseAmounts(uint256 multiplier) public {
+        // Generate amounts just below clean USDC boundaries
+        multiplier = bound(multiplier, 1, 1000);
+
+        uint256 usdcMultiplier = splitter.USDC_MULTIPLIER();
+        // Amount that costs exactly `multiplier` USDC
+        uint256 exactAmount = (multiplier * usdcMultiplier) / CAP;
+        // Amount just below the next USDC (maximizes rounding benefit)
+        uint256 exploitAmount = exactAmount + (usdcMultiplier / CAP) - 1;
+
+        if (exploitAmount == 0) return;
+
+        uint256 fairPrice = Math.mulDiv(exploitAmount, CAP, usdcMultiplier, Math.Rounding.Ceil);
+        usdc.mint(alice, fairPrice + 1e6);
+        uint256 balanceBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        splitter.mint(exploitAmount);
+        vm.stopPrank();
+
+        uint256 actualPaid = balanceBefore - usdc.balanceOf(alice);
+
+        assertGe(actualPaid, fairPrice, "ROUNDING EXPLOIT: Edge case amount exploited");
     }
 
     function testFuzz_MintBurn_TokenParity(uint256 mintAmount, uint256 burnAmount) public {

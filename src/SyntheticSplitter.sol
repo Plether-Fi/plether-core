@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -152,8 +153,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 price = _getOraclePrice();
         if (price >= CAP) revert Splitter__LiquidationActive();
 
-        // Calculate USDC required
-        usdcRequired = (mintAmount * CAP) / USDC_MULTIPLIER;
+        // Calculate USDC required (round UP to favor protocol)
+        usdcRequired = Math.mulDiv(mintAmount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
 
         // Calculate Buffer Split
         keptInBuffer = (usdcRequired * BUFFER_PERCENT) / 100;
@@ -172,7 +173,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             revert Splitter__LiquidationActive();
         }
 
-        uint256 usdcNeeded = (amount * CAP) / USDC_MULTIPLIER;
+        // Round UP to favor protocol (prevents rounding exploit)
+        uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
         require(usdcNeeded > 0, "Amount too small");
 
         // 1. Pull USDC: User -> Splitter

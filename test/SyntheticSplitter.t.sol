@@ -72,6 +72,97 @@ contract SyntheticSplitterTest is Test {
     }
 
     // ==========================================
+    // 0.5 MINT ROUNDING SECURITY TESTS
+    // ==========================================
+
+    /**
+     * @notice Verify that mint rounding favors the protocol (rounds UP)
+     * @dev Fixed implementation uses Math.mulDiv with Rounding.Ceil
+     *
+     * Math:
+     * - CAP = 2e8 ($2.00 in 8 decimals)
+     * - USDC_MULTIPLIER = 1e20 (10^(18+8-6))
+     * - usdcNeeded = ceil(amount * CAP / USDC_MULTIPLIER)
+     */
+    function test_Mint_RoundingFavorsProtocol() public {
+        uint256 usdcMultiplier = splitter.USDC_MULTIPLIER();
+
+        // Amount that would maximize rounding benefit if floor division was used
+        uint256 minAmountFor1Usdc = usdcMultiplier / CAP;
+        uint256 almostDoubleAmount = minAmountFor1Usdc * 2 - 1;
+
+        // Calculate fair price (ceiling division)
+        uint256 fairPrice = (almostDoubleAmount * CAP + usdcMultiplier - 1) / usdcMultiplier;
+
+        // Actually call the contract to see what it charges
+        address attacker = address(0xBAD);
+        usdc.mint(attacker, 1000 * 1e6);
+
+        vm.startPrank(attacker);
+        usdc.approve(address(splitter), type(uint256).max);
+        uint256 balanceBefore = usdc.balanceOf(attacker);
+        splitter.mint(almostDoubleAmount);
+        uint256 actualCharged = balanceBefore - usdc.balanceOf(attacker);
+        vm.stopPrank();
+
+        // Contract should charge the fair (ceiling) price
+        assertEq(actualCharged, fairPrice, "Mint should round UP to favor protocol");
+    }
+
+    /**
+     * @notice Verify that users cannot profit from rounding by minting many small amounts
+     * @dev With ceiling division, each mint charges at least the fair price
+     */
+    function test_Mint_NoRoundingExploit() public {
+        uint256 usdcMultiplier = splitter.USDC_MULTIPLIER();
+
+        // Amount that would maximize rounding benefit if floor division was used
+        uint256 exploitAmount = (usdcMultiplier / CAP) * 2 - 1;
+
+        address attacker = address(0xBAD);
+        usdc.mint(attacker, 1000 * 1e6);
+
+        vm.startPrank(attacker);
+        usdc.approve(address(splitter), type(uint256).max);
+
+        uint256 usdcBefore = usdc.balanceOf(attacker);
+        uint256 totalTokensMinted = 0;
+        uint256 iterations = 100;
+
+        for (uint256 i = 0; i < iterations; i++) {
+            splitter.mint(exploitAmount);
+            totalTokensMinted += exploitAmount;
+        }
+        vm.stopPrank();
+
+        uint256 usdcSpent = usdcBefore - usdc.balanceOf(attacker);
+
+        // Calculate fair cost (ceiling division)
+        uint256 fairCost = (totalTokensMinted * CAP + usdcMultiplier - 1) / usdcMultiplier;
+
+        // User should have paid at least the fair cost (no profit from rounding)
+        assertGe(usdcSpent, fairCost, "User should pay at least fair cost");
+
+        emit log_named_uint("Tokens minted (wei)", totalTokensMinted);
+        emit log_named_uint("USDC spent", usdcSpent);
+        emit log_named_uint("Fair cost (rounded up)", fairCost);
+    }
+
+    /**
+     * @notice Verify that previewMint returns the correct (ceiling) price
+     */
+    function test_PreviewMint_RoundsUp() public {
+        uint256 usdcMultiplier = splitter.USDC_MULTIPLIER();
+        uint256 exploitAmount = (usdcMultiplier / CAP) * 2 - 1;
+
+        (uint256 previewRequired,,) = splitter.previewMint(exploitAmount);
+        uint256 fairPrice = (exploitAmount * CAP + usdcMultiplier - 1) / usdcMultiplier;
+
+        // previewMint should return the fair (rounded UP) price
+        assertEq(previewRequired, fairPrice, "previewMint should round UP");
+    }
+
+    // ==========================================
     // 1. CORE LOGIC (Mint/Burn/Buffer)
     // ==========================================
     function test_Mint_CorrectlySplitsFunds() public {

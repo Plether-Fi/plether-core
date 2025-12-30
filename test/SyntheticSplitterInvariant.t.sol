@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "forge-std/StdInvariant.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/YieldAdapter.sol";
 import "./utils/MockAave.sol";
@@ -32,7 +33,8 @@ contract SplitterHandler is Test {
     // Ghost variables for tracking
     uint256 public ghost_totalMinted;
     uint256 public ghost_totalBurned;
-    uint256 public ghost_totalUsdcDeposited;
+    uint256 public ghost_totalUsdcDeposited; // Actual USDC deposited (buggy floor division)
+    uint256 public ghost_totalUsdcFairPrice; // Fair price (ceiling division) - what SHOULD be charged
     uint256 public ghost_totalUsdcWithdrawn;
     bool public ghost_wasEverLiquidated;
     uint256 public ghost_supplyAtLiquidation; // TOKEN_A supply when liquidation occurred
@@ -111,20 +113,26 @@ contract SplitterHandler is Test {
     // ==========================================
 
     function mint(uint256 actorSeed, uint256 amount) external useActor(actorSeed) {
-        // Bound amount to reasonable range
-        amount = bound(amount, 1e18, 100_000 * 1e18);
+        // Bound amount to reasonable range - include small amounts to catch rounding issues
+        amount = bound(amount, 1e15, 100_000 * 1e18);
 
-        uint256 usdcRequired = (amount * CAP) / splitter.USDC_MULTIPLIER();
+        // Fair price uses ceiling division (what the contract should charge)
+        uint256 usdcFair = Math.mulDiv(amount, CAP, splitter.USDC_MULTIPLIER(), Math.Rounding.Ceil);
 
         // Skip if actor doesn't have enough USDC
-        if (usdc.balanceOf(currentActor) < usdcRequired) return;
+        if (usdc.balanceOf(currentActor) < usdcFair) return;
 
         // Skip if liquidated or paused (known to revert)
         if (splitter.isLiquidated() || splitter.paused()) return;
 
+        // Track actual USDC balance change to know what contract really charged
+        uint256 balanceBefore = usdc.balanceOf(currentActor);
+
         try splitter.mint(amount) {
+            uint256 actualCharged = balanceBefore - usdc.balanceOf(currentActor);
             ghost_totalMinted += amount;
-            ghost_totalUsdcDeposited += usdcRequired;
+            ghost_totalUsdcDeposited += actualCharged;
+            ghost_totalUsdcFairPrice += usdcFair;
             mintCalls++;
         } catch (bytes memory reason) {
             // Only allow oracle-related errors (price can change between check and call)
@@ -402,6 +410,15 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
     function invariant_feeReceiversNotSelf() public view {
         assertTrue(splitter.treasury() != address(splitter), "INVARIANT VIOLATED: Treasury is splitter");
         assertTrue(splitter.staking() != address(splitter), "INVARIANT VIOLATED: Staking is splitter");
+    }
+
+    /// @notice Users must pay at least the fair price for tokens (no free tokens from rounding)
+    /// @dev This catches rounding vulnerabilities where floor division gives users a discount
+    function invariant_usersPaidFairPrice() public view {
+        uint256 actualPaid = handler.ghost_totalUsdcDeposited();
+        uint256 fairPrice = handler.ghost_totalUsdcFairPrice();
+
+        assertGe(actualPaid, fairPrice, "INVARIANT VIOLATED: Users paid less than fair price (rounding exploit)");
     }
 
     // ==========================================
