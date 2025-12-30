@@ -89,6 +89,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     error Splitter__SequencerDown();
     error Splitter__SequencerGracePeriod();
     error Splitter__InsufficientHarvest();
+    error Splitter__AdapterWithdrawFailed();
 
     // Structs for Views
     struct SystemStatus {
@@ -275,14 +276,39 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             // Check adapter just in case (though solvency check handles this usually)
             if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
-            // Withdraw shortage to THIS contract first
-            yieldAdapter.withdraw(shortage, address(this), address(this));
+            // Try withdraw first, fall back to redeem if it fails
+            _withdrawFromAdapter(shortage);
         }
 
         // Now localBalance is sufficient (Original + Withdrawn Shortage)
         USDC.safeTransfer(msg.sender, usdcRefund);
 
         emit Burned(msg.sender, amount);
+    }
+
+    /**
+     * @dev Internal helper to withdraw from adapter with redeem fallback.
+     * Tries withdraw() first, falls back to redeem() if withdraw fails.
+     * Reverts with Splitter__AdapterWithdrawFailed if both fail.
+     */
+    function _withdrawFromAdapter(uint256 amount) internal {
+        try yieldAdapter.withdraw(amount, address(this), address(this)) {
+        // Success via withdraw
+        }
+        catch {
+            // Fallback: try redeem with equivalent shares
+            uint256 sharesToRedeem = yieldAdapter.convertToShares(amount);
+            // Add 1 to handle rounding (ensure we get at least `amount`)
+            if (sharesToRedeem > 0) {
+                sharesToRedeem += 1;
+            }
+            try yieldAdapter.redeem(sharesToRedeem, address(this), address(this)) {
+            // Success via redeem
+            }
+            catch {
+                revert Splitter__AdapterWithdrawFailed();
+            }
+        }
     }
 
     // ==========================================
@@ -324,7 +350,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         if (localBalance < usdcRefund) {
             uint256 shortage = usdcRefund - localBalance;
-            yieldAdapter.withdraw(shortage, address(this), address(this));
+            _withdrawFromAdapter(shortage);
         }
         USDC.safeTransfer(msg.sender, usdcRefund);
 

@@ -132,36 +132,12 @@ contract MockPool {
 }
 
 // ==========================================
-// TEST ADAPTER
-// ==========================================
-
-contract LimitedWithdrawAdapter is YieldAdapter {
-    uint256 public maxWithdrawPerTx;
-
-    constructor(
-        IERC20 _asset,
-        address _aavePool,
-        address _aToken,
-        address _owner,
-        address _splitter,
-        uint256 _maxWithdrawPerTx
-    ) YieldAdapter(_asset, _aavePool, _aToken, _owner, _splitter) {
-        maxWithdrawPerTx = _maxWithdrawPerTx;
-    }
-
-    function maxWithdraw(address) public view override returns (uint256) {
-        return maxWithdrawPerTx;
-    }
-}
-
-// ==========================================
 // MAIN TEST
 // ==========================================
 
 contract SyntheticSplitterConcurrentTest is Test {
     SyntheticSplitter splitter;
     YieldAdapter unlimitedAdapter;
-    LimitedWithdrawAdapter limitedAdapter;
 
     MockUSDC usdc;
     MockAToken aUsdc;
@@ -279,25 +255,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         assertGe(totalAssets, totalLiabilities);
     }
 
-    function test_RevertWhen_ConcurrentBurns_LiquidityLimit() public {
-        vm.startPrank(owner);
-        uint256 nonce = vm.getNonce(owner);
-        address futureSplitterAddr = vm.computeCreateAddress(owner, nonce + 1);
-
-        limitedAdapter = new LimitedWithdrawAdapter(
-            IERC20(address(usdc)), address(pool), address(aUsdc), owner, futureSplitterAddr, 10_000 * 1e6
-        );
-
-        vm.stopPrank();
-        vm.prank(address(limitedAdapter));
-        usdc.approve(address(pool), type(uint256).max);
-        vm.startPrank(owner);
-
-        splitter = new SyntheticSplitter(
-            address(oracle), address(usdc), address(limitedAdapter), CAP, treasury, address(sequencer)
-        );
-        vm.stopPrank();
-
+    function test_RevertWhen_ConcurrentBurns_AdapterCompletelyBroken() public {
+        // This test verifies that when BOTH withdraw and redeem fail, burns revert
         uint256 mintAmount = 100_000 ether;
         uint256 burnAmount = 50_000 ether;
 
@@ -320,25 +279,88 @@ contract SyntheticSplitterConcurrentTest is Test {
         vm.prank(carol);
         splitter.mint(mintAmount);
 
+        // Mock BOTH withdraw and redeem to fail (simulates completely broken adapter)
+        vm.mockCallRevert(
+            address(unlimitedAdapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("ADAPTER_BROKEN")
+        );
+        vm.mockCallRevert(
+            address(unlimitedAdapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("ADAPTER_BROKEN")
+        );
+
+        // All burns should revert with Splitter__AdapterWithdrawFailed
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
         splitter.burn(burnAmount);
 
         vm.prank(bob);
-        vm.expectRevert();
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
         splitter.burn(burnAmount);
 
         vm.prank(carol);
-        vm.expectRevert();
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
         splitter.burn(burnAmount);
 
-        uint256 totalAssets = handlerLikeTotalAssets(limitedAdapter);
+        uint256 totalAssets = handlerLikeTotalAssets(unlimitedAdapter);
         uint256 totalLiabilities = (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
         assertGe(
             totalAssets,
             totalLiabilities,
-            "System should remain globally solvent despite individual burns reverting due to adapter liquidity limit"
+            "System should remain globally solvent despite individual burns reverting due to adapter failure"
         );
+    }
+
+    function test_ConcurrentBurns_SucceedWithRedeemFallback() public {
+        // This test verifies that when withdraw fails but redeem works, burns succeed
+        uint256 mintAmount = 100_000 ether;
+        uint256 burnAmount = 50_000 ether;
+
+        dealUsdc(alice, 1_000_000e6);
+        dealUsdc(bob, 1_000_000e6);
+        dealUsdc(carol, 1_000_000e6);
+
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(mintAmount);
+
+        vm.prank(bob);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(bob);
+        splitter.mint(mintAmount);
+
+        vm.prank(carol);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(carol);
+        splitter.mint(mintAmount);
+
+        // Mock only withdraw to fail (redeem still works as fallback)
+        vm.mockCallRevert(
+            address(unlimitedAdapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_FAILED")
+        );
+
+        uint256 expectedRefundEach = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        uint256 bobBefore = usdc.balanceOf(bob);
+        uint256 carolBefore = usdc.balanceOf(carol);
+
+        // All burns should succeed via redeem fallback
+        vm.prank(alice);
+        splitter.burn(burnAmount);
+
+        vm.prank(bob);
+        splitter.burn(burnAmount);
+
+        vm.prank(carol);
+        splitter.burn(burnAmount);
+
+        // Verify everyone got their refunds
+        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
+        assertEq(splitter.TOKEN_A().balanceOf(bob), mintAmount - burnAmount);
+        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount - burnAmount);
+
+        assertEq(usdc.balanceOf(alice) - aliceBefore, expectedRefundEach);
+        assertEq(usdc.balanceOf(bob) - bobBefore, expectedRefundEach);
+        assertEq(usdc.balanceOf(carol) - carolBefore, expectedRefundEach);
     }
 
     function handlerLikeTotalAssets(YieldAdapter currentAdapter) internal view returns (uint256) {

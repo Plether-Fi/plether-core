@@ -689,4 +689,231 @@ contract SyntheticSplitterTest is Test {
         vm.expectRevert(SyntheticSplitter.Splitter__TimelockActive.selector);
         splitter.finalizeAdapter();
     }
+
+    // ==========================================
+    // 7. ADAPTER WITHDRAWAL FAILURE TESTS
+    // ==========================================
+
+    /**
+     * @notice Test that burn() uses redeem fallback when withdraw reverts
+     * @dev Simulates scenarios like Aave withdraw failing but redeem working
+     */
+    function test_Burn_UsesRedeemFallbackWhenWithdrawReverts() public {
+        // 1. Setup: Mint 100 tokens ($20 Buffer, $180 Adapter)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Verify initial state
+        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6, "Buffer should be $20");
+        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Adapter should have $180");
+
+        // 2. Mock adapter withdraw to revert (simulates Aave withdraw issue)
+        // But redeem still works (fallback path)
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("AAVE_WITHDRAW_FAILED")
+        );
+
+        // 3. Alice burns 50 tokens ($100 refund needed)
+        // Buffer has $20, needs $80 from adapter - withdraw fails, redeem succeeds
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+
+        // 4. Verify Alice got her refund via redeem fallback
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 50 * 1e18, "Alice should have 50 tokens left");
+        // Alice started with 100k, spent 200, got 100 back = 99,900
+        assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 100 * 1e6, "Alice should have received $100 refund");
+    }
+
+    /**
+     * @notice Test that burn() succeeds when buffer is sufficient even if adapter is broken
+     * @dev Users can still exit using only the buffer
+     */
+    function test_Burn_SucceedsWithBufferOnlyWhenAdapterBroken() public {
+        // 1. Setup: Mint 100 tokens ($20 Buffer, $180 Adapter)
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Mock adapter withdraw to revert
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("AAVE_PAUSED")
+        );
+
+        // 3. Alice burns only 10 tokens ($20 refund = exactly buffer amount)
+        // This should succeed because we don't need the adapter
+        vm.startPrank(alice);
+        splitter.burn(10 * 1e18);
+        vm.stopPrank();
+
+        // Verify: Alice got her $20 back
+        assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 180 * 1e6, "Alice should have received refund from buffer");
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 90 * 1e18, "Alice should have 90 tokens left");
+    }
+
+    /**
+     * @notice Test that emergencyRedeem() uses redeem fallback when withdraw reverts
+     * @dev During liquidation, redeem fallback still works
+     */
+    function test_EmergencyRedeem_UsesRedeemFallbackWhenWithdrawReverts() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Trigger liquidation
+        oracle.updatePrice(int256(CAP));
+
+        // 3. Mock adapter withdraw to revert (but redeem still works)
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("AAVE_PAUSED")
+        );
+
+        // 4. Alice emergency redeems - should succeed via redeem fallback
+        vm.startPrank(alice);
+        splitter.emergencyRedeem(50 * 1e18); // Needs $100, buffer only has $20, redeem covers rest
+        vm.stopPrank();
+
+        // 5. Verify Alice got her refund
+        assertEq(splitter.TOKEN_A().balanceOf(alice), 50 * 1e18, "Alice should have 50 BEAR tokens left");
+    }
+
+    /**
+     * @notice Test that emergencyRedeem() fails when both withdraw and redeem fail
+     * @dev During liquidation, if adapter completely broken, users can't exit
+     */
+    function test_EmergencyRedeem_FailsWhenBothWithdrawAndRedeemFail() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Trigger liquidation
+        oracle.updatePrice(int256(CAP));
+
+        // 3. Mock BOTH withdraw and redeem to revert
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("ADAPTER_BROKEN")
+        );
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("ADAPTER_BROKEN")
+        );
+
+        // 4. Alice tries to emergency redeem - should fail with specific error
+        vm.startPrank(alice);
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
+        splitter.emergencyRedeem(50 * 1e18);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Test complete adapter failure - both withdraw AND redeem fail
+     * @dev This is the worst case scenario - reverts with specific error
+     */
+    function test_Burn_FailsWhenBothWithdrawAndRedeemFail() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Mock BOTH withdraw and redeem to revert
+        // This simulates a completely broken/compromised adapter
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("ADAPTER_BROKEN")
+        );
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("ADAPTER_BROKEN")
+        );
+
+        // 3. Alice tries to burn - should fail with specific error
+        vm.startPrank(alice);
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Test that ejectLiquidity can rescue funds when adapter is partially working
+     * @dev Owner can still call redeem to pull funds out
+     */
+    function test_EjectLiquidity_CanRescueFundsFromAdapter() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        uint256 adapterBalanceBefore = adapter.balanceOf(address(splitter));
+        assertEq(adapterBalanceBefore, 180 * 1e6, "Adapter should have $180");
+
+        // 2. Owner ejects liquidity (this uses redeem, not withdraw)
+        splitter.ejectLiquidity();
+
+        // 3. Verify all funds are now in splitter buffer
+        assertEq(usdc.balanceOf(address(splitter)), 200 * 1e6, "All funds should be in buffer");
+        assertEq(adapter.balanceOf(address(splitter)), 0, "Adapter should be empty");
+        assertTrue(splitter.paused(), "Contract should be paused");
+
+        // 4. Now users can exit using only the buffer
+        vm.startPrank(alice);
+        splitter.burn(100 * 1e18);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(alice), INITIAL_BALANCE, "Alice should have full refund");
+    }
+
+    /**
+     * @notice Test that ejectLiquidity fails when adapter redeem fails
+     * @dev If adapter is completely broken, even owner can't rescue funds
+     */
+    function test_EjectLiquidity_FailsWhenAdapterRedeemFails() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Mock redeem to fail (ejectLiquidity uses redeem, not withdraw)
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("ADAPTER_COMPLETELY_BROKEN")
+        );
+
+        // 3. Owner tries to eject - should fail
+        vm.expectRevert();
+        splitter.ejectLiquidity();
+
+        // 4. Funds are stuck in adapter
+        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Funds stuck in adapter");
+    }
+
+    /**
+     * @notice Test partial withdrawal scenario - adapter has less liquidity than needed
+     * @dev Simulates a bank run on Aave where there's not enough USDC to withdraw
+     */
+    function test_Burn_FailsWhenAdapterHasInsufficientLiquidity() public {
+        // 1. Setup: Mint 100 tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Drain the mock pool to simulate Aave bank run
+        // Pool has the USDC that backs the aTokens
+        uint256 poolBalance = usdc.balanceOf(address(pool));
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolBalance - 10 * 1e6); // Leave only $10
+
+        // 3. Alice tries to burn 50 tokens ($100 refund)
+        // Buffer has $20, adapter would need $80, but pool only has $10
+        vm.startPrank(alice);
+        vm.expectRevert(); // Should fail due to insufficient pool liquidity
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+    }
 }
