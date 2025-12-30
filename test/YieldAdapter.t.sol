@@ -44,11 +44,7 @@ contract MockRewardsController is IRewardsController {
         unclaimedAmounts[0] = pendingRewards;
     }
 
-    function claimRewards(address[] calldata, uint256, address to, address)
-        external
-        override
-        returns (uint256)
-    {
+    function claimRewards(address[] calldata, uint256, address to, address) external override returns (uint256) {
         uint256 amount = pendingRewards;
         pendingRewards = 0;
         rewardToken.mint(to, amount);
