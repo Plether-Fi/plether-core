@@ -77,6 +77,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
     // Errors
     error Splitter__ZeroAmount();
+    error Splitter__ZeroRefund();
     error Splitter__AdapterNotSet();
     error Splitter__LiquidationActive();
     error Splitter__NotLiquidated();
@@ -225,6 +226,7 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
 
         // 2. Calculate Refund
         usdcToReturn = (burnAmount * CAP) / USDC_MULTIPLIER;
+        if (usdcToReturn == 0) revert Splitter__ZeroRefund();
 
         // 3. Calculate Liquidity Source
         uint256 localBalance = USDC.balanceOf(address(this));
@@ -259,10 +261,11 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
             require(totalAssets >= totalLiabilities, "Paused & Insolvent: Burn Locked");
         }
 
+        uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
+        if (usdcRefund == 0) revert Splitter__ZeroRefund();
+
         TOKEN_A.burn(msg.sender, amount);
         TOKEN_B.burn(msg.sender, amount);
-
-        uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
 
         // 1. Check Local Buffer First
         uint256 localBalance = USDC.balanceOf(address(this));
@@ -311,9 +314,10 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         }
         if (amount == 0) revert Splitter__ZeroAmount();
 
-        TOKEN_A.burn(msg.sender, amount); // Burn Bear Only
-
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
+        if (usdcRefund == 0) revert Splitter__ZeroRefund();
+
+        TOKEN_A.burn(msg.sender, amount); // Burn Bear Only
 
         // Smart Withdrawal Logic for Emergency too
         uint256 localBalance = USDC.balanceOf(address(this));

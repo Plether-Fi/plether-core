@@ -224,7 +224,8 @@ contract SyntheticSplitterFullTest is Test {
     function testFuzz_PreviewBurn_Standard(uint256 mintAmount, uint256 burnAmount) public {
         uint256 minAmount = splitter.USDC_MULTIPLIER() / splitter.CAP() + 1;
         vm.assume(mintAmount > minAmount && mintAmount < 1_000_000e18);
-        vm.assume(burnAmount > 0 && burnAmount <= mintAmount);
+        // burnAmount must be large enough for non-zero USDC refund
+        vm.assume(burnAmount >= minAmount && burnAmount <= mintAmount);
 
         vm.prank(user);
         splitter.mint(mintAmount);

@@ -132,8 +132,9 @@ contract SyntheticSplitterFuzzTest is Test {
     function testFuzz_MintBurn_TokenParity(uint256 mintAmount, uint256 burnAmount) public {
         mintAmount = bound(mintAmount, 1 ether, MAX_MINT_AMOUNT);
 
-        // FIX 1: Don't allow 0 burn, and don't burn more than mint
-        burnAmount = bound(burnAmount, 1, mintAmount);
+        // Minimum burn amount for non-zero USDC refund: USDC_MULTIPLIER / CAP = 5e11
+        uint256 minBurnForRefund = splitter.USDC_MULTIPLIER() / CAP;
+        burnAmount = bound(burnAmount, minBurnForRefund, mintAmount);
 
         uint256 cost = (mintAmount * CAP) / splitter.USDC_MULTIPLIER();
         usdc.mint(alice, cost + 1e6);

@@ -405,9 +405,9 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
         // Update to CAP
         oracle.updatePrice(int256(CAP));
-        // Trigger set via successful redeem (small amount)
+        // Trigger set via successful redeem (must be large enough for non-zero USDC refund)
         vm.startPrank(alice);
-        splitter.emergencyRedeem(1); // Sets isLiquidated, succeeds
+        splitter.emergencyRedeem(1e12); // Sets isLiquidated, succeeds
         vm.stopPrank();
         assertTrue(splitter.isLiquidated());
         // Now mint reverts on isLiquidated check
@@ -421,6 +421,40 @@ contract SyntheticSplitterTest is Test {
         oracle.updatePrice(int256(CAP)); // Liquidate
         vm.expectRevert(SyntheticSplitter.Splitter__ZeroAmount.selector);
         splitter.emergencyRedeem(0);
+    }
+
+    function test_Burn_RevertsZeroRefund() public {
+        // Mint first
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+
+        // Try to burn amount too small for any USDC refund
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroRefund.selector);
+        splitter.burn(1); // 1 wei rounds to 0 USDC
+        vm.stopPrank();
+    }
+
+    function test_EmergencyRedeem_RevertsZeroRefund() public {
+        // Mint first
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Trigger liquidation
+        oracle.updatePrice(int256(CAP));
+
+        // Try to redeem amount too small for any USDC refund
+        vm.startPrank(alice);
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroRefund.selector);
+        splitter.emergencyRedeem(1); // 1 wei rounds to 0 USDC
+        vm.stopPrank();
+    }
+
+    function test_PreviewBurn_RevertsZeroRefund() public {
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroRefund.selector);
+        splitter.previewBurn(1); // 1 wei rounds to 0 USDC
     }
 
     function test_EjectLiquidity_PausesAndSecuresFunds() public {
