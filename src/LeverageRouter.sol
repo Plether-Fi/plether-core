@@ -23,6 +23,7 @@ interface IMorpho {
         address onBehalfOf,
         address receiver
     ) external returns (uint256 assetsBorrowed, uint256 sharesIssued);
+    function isAuthorized(address authorizer, address authorized) external view returns (bool);
 }
 
 // Morpho Structs
@@ -76,6 +77,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      */
     function openLeverage(uint256 principal, uint256 leverage, uint256 minMDXY) external {
         require(leverage > 1e18, "Leverage must be > 1x");
+        require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
         // 1. Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
         // 2. Calculate Flash Loan Amount
@@ -123,7 +125,6 @@ contract LeverageRouter is IERC3156FlashBorrower {
         });
         uint256 mDXYReceived = SWAP_ROUTER.exactInputSingle(params);
         // 3. Supply mDXY to Morpho on behalf of the USER
-        // Note: User must have called `morpho.setAuthorization(address(this), true)` beforehand!
         MORPHO.supply(
             marketParams,
             mDXYReceived,

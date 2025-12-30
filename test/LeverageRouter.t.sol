@@ -65,9 +65,25 @@ contract LeverageRouterTest is Test {
 
         vm.startPrank(alice);
         usdc.approve(address(leverageRouter), principal);
-        // Skip auth
+        // Skip auth - router checks upfront before flash loan
 
-        vm.expectRevert("Morpho: Not authorized");
+        vm.expectRevert("LeverageRouter not authorized in Morpho");
+        leverageRouter.openLeverage(principal, leverage, 0);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_Revert_AuthRevoked() public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+
+        // Authorize then revoke
+        morpho.setAuthorization(address(leverageRouter), true);
+        morpho.setAuthorization(address(leverageRouter), false);
+
+        vm.expectRevert("LeverageRouter not authorized in Morpho");
         leverageRouter.openLeverage(principal, leverage, 0);
         vm.stopPrank();
     }
