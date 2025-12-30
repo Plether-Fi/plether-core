@@ -20,8 +20,8 @@ contract LeverageRouterTest is Test {
     MarketParams params;
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
-        mDXY = new MockToken("mDXY", "mDXY");
+        usdc = new MockToken("USDC", "USDC", 6);
+        mDXY = new MockToken("mDXY", "mDXY", 18);
         morpho = new MockMorpho();
         swapRouter = new MockSwapRouter();
         lender = new MockFlashLender(address(usdc));
@@ -121,6 +121,85 @@ contract LeverageRouterTest is Test {
         leverageRouter.openLeverage(principal, leverage, 0, block.timestamp - 1);
         vm.stopPrank();
     }
+
+    // ==========================================
+    // CLOSE LEVERAGE TESTS
+    // ==========================================
+
+    function test_CloseLeverage_Success() public {
+        // First open a leveraged position
+        uint256 principal = 1000 * 1e6; // $1,000
+        uint256 leverage = 3 * 1e18; // 3x
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+
+        // Verify position was opened
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertEq(supplied, 3000 * 1e18, "Incorrect supplied amount after open");
+        assertEq(borrowed, 2000 * 1e6, "Incorrect borrowed amount after open");
+
+        // Now close the position
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+        uint256 minUsdcOut = 900 * 1e6; // Expect at least $900 back after repaying debt
+
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, minUsdcOut, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify position was closed
+        (uint256 suppliedAfter, uint256 borrowedAfter) = morpho.positions(alice);
+        assertEq(suppliedAfter, 0, "Supplied should be 0 after close");
+        assertEq(borrowedAfter, 0, "Borrowed should be 0 after close");
+    }
+
+    function test_CloseLeverage_EmitsLeverageClosedEvent() public {
+        // First open a leveraged position
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(principal, leverage, 2900 * 1e18, block.timestamp + 1 hours);
+
+        // Now close the position and check event
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+        uint256 expectedUsdcReturned = 1000 * 1e6; // 3000 mDXY -> 3000 USDC - 2000 debt = 1000
+
+        vm.expectEmit(true, false, false, true);
+        emit LeverageRouter.LeverageClosed(alice, debtToRepay, collateralToWithdraw, expectedUsdcReturned);
+
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 900 * 1e6, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_CloseLeverage_Revert_NoAuth() public {
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+
+        vm.startPrank(alice);
+        // Skip authorization
+
+        vm.expectRevert("LeverageRouter not authorized in Morpho");
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_CloseLeverage_Revert_Expired() public {
+        uint256 debtToRepay = 2000 * 1e6;
+        uint256 collateralToWithdraw = 3000 * 1e18;
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        vm.expectRevert("Transaction expired");
+        leverageRouter.closeLeverage(debtToRepay, collateralToWithdraw, 0, block.timestamp - 1);
+        vm.stopPrank();
+    }
 }
 
 // ==========================================
@@ -128,7 +207,15 @@ contract LeverageRouterTest is Test {
 // ==========================================
 
 contract MockToken is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
+    uint8 private _decimals;
+
+    constructor(string memory name, string memory symbol, uint8 decimals_) ERC20(name, symbol) {
+        _decimals = decimals_;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _decimals;
+    }
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
@@ -171,8 +258,18 @@ contract MockSwapRouter is ISwapRouter {
         override
         returns (uint256 amountOut)
     {
-        // USDC (6) -> mDXY (18) : * 1e12
-        amountOut = params.amountIn * 1e12;
+        // Detect swap direction by checking decimals difference
+        uint8 tokenInDecimals = MockToken(params.tokenIn).decimals();
+        uint8 tokenOutDecimals = MockToken(params.tokenOut).decimals();
+
+        if (tokenInDecimals < tokenOutDecimals) {
+            // USDC (6) -> mDXY (18) : * 1e12
+            amountOut = params.amountIn * 1e12;
+        } else {
+            // mDXY (18) -> USDC (6) : / 1e12
+            amountOut = params.amountIn / 1e12;
+        }
+
         MockToken(params.tokenOut).mint(params.recipient, amountOut);
         return amountOut;
     }
@@ -212,6 +309,30 @@ contract MockMorpho is IMorpho {
             require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].borrowed += assets;
+        return (assets, 0);
+    }
+
+    function repay(MarketParams memory, uint256 assets, uint256, address onBehalfOf, bytes calldata)
+        external
+        override
+        returns (uint256, uint256)
+    {
+        if (msg.sender != onBehalfOf) {
+            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+        }
+        positions[onBehalfOf].borrowed -= assets;
+        return (assets, 0);
+    }
+
+    function withdraw(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address)
+        external
+        override
+        returns (uint256, uint256)
+    {
+        if (msg.sender != onBehalfOf) {
+            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+        }
+        positions[onBehalfOf].supplied -= assets;
         return (assets, 0);
     }
 }
