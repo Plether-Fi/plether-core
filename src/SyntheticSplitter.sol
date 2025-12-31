@@ -468,6 +468,8 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         uint256 treasuryShare = (remaining * 20) / 100;
         uint256 stakingShare = remaining - treasuryShare;
 
+        emit YieldHarvested(harvested, treasuryShare, stakingShare);
+
         // Transfers (CEI: All calcs done before interactions)
         if (callerCut > 0) USDC.safeTransfer(msg.sender, callerCut);
         if (treasury != address(0)) USDC.safeTransfer(treasury, treasuryShare);
@@ -476,8 +478,6 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
         } else {
             USDC.safeTransfer(treasury, stakingShare);
         }
-
-        emit YieldHarvested(harvested, treasuryShare, stakingShare); // Update event to use harvested
     }
 
     // ==========================================
