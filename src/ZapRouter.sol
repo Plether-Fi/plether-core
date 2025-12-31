@@ -56,6 +56,7 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline) external {
+        require(usdcAmount > 0, "Amount must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
 

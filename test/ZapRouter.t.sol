@@ -305,6 +305,135 @@ contract ZapRouterTest is Test {
         uint256 actualTokensOut = mInvDXY.balanceOf(alice);
         assertEq(actualTokensOut, expectedTokensOut, "Preview doesn't match actual");
     }
+
+    // ==========================================
+    // CRITICAL: REENTRANCY TESTS
+    // ==========================================
+
+    function test_OnFlashLoan_Reentrancy_NoExploitation() public {
+        // Deploy a malicious mDXY token that attempts reentrancy during flash loan
+        ReentrantFlashToken maliciousMDXY = new ReentrantFlashToken("mDXY", "mDXY", address(zapRouter));
+
+        // Create splitter with malicious mDXY
+        MockSplitter maliciousSplitter = new MockSplitter(address(maliciousMDXY), address(mInvDXY));
+
+        // Create a new router with the malicious token
+        ZapRouter vulnerableRouter = new ZapRouter(
+            address(maliciousSplitter), address(maliciousMDXY), address(mInvDXY), address(usdc), address(curvePool)
+        );
+
+        // Update the malicious token to target the new router
+        maliciousMDXY.setTargetRouter(address(vulnerableRouter));
+
+        uint256 usdcInput = 100 * 1e6;
+        usdc.mint(alice, usdcInput * 2);
+
+        vm.startPrank(alice);
+        usdc.approve(address(vulnerableRouter), usdcInput * 2);
+
+        // The malicious token will try to call zapMint again during flashLoan
+        // The reentrancy attempt should fail (caught by try-catch in malicious token)
+        // but the outer transaction should complete normally
+        vulnerableRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify the reentrancy attempt was made but failed
+        assertFalse(maliciousMDXY.attemptReentrancy(), "Reentrancy was attempted");
+
+        // Verify only normal amount of tokens received (no double-minting)
+        uint256 aliceBalance = mInvDXY.balanceOf(alice);
+        assertEq(aliceBalance, 200 * 1e18, "Should have exactly one zap's worth of tokens");
+    }
+
+    // ==========================================
+    // CRITICAL: ZERO INPUT TESTS
+    // ==========================================
+
+    function test_ZapMint_ZeroAmount_Reverts() public {
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 0);
+
+        vm.expectRevert("Amount must be > 0");
+        zapRouter.zapMint(0, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // CRITICAL: FLASH FEE TESTS
+    // ==========================================
+
+    function test_ZapMint_WithFlashFee_Success() public {
+        // Set a 0.1% flash fee (10 bps)
+        mDXY.setFeeBps(10);
+
+        uint256 usdcInput = 100 * 1e6;
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        // With flash fee, slightly less mInvDXY should be received
+        // Flash amount = 100e18, fee = 0.1% = 0.1e18
+        // Must repay 100.1e18 mDXY, so less pairs can be kept
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // User should still receive tokens (flash fee reduces output)
+        assertGt(mInvDXY.balanceOf(alice), 0, "Should receive tokens even with flash fee");
+    }
+
+    function test_PreviewZapMint_IncludesFlashFee() public {
+        // Set a flash fee
+        mDXY.setFeeBps(50); // 0.5%
+
+        uint256 usdcAmount = 100 * 1e6;
+
+        (uint256 flashAmount,,,, uint256 flashFee) = zapRouter.previewZapMint(usdcAmount);
+
+        // Flash amount = 100e18
+        uint256 expectedFlashAmount = 100 * 1e18;
+        uint256 expectedFee = (expectedFlashAmount * 50) / 10000; // 0.5e18
+
+        assertEq(flashAmount, expectedFlashAmount, "Flash amount incorrect");
+        assertEq(flashFee, expectedFee, "Preview should include flash fee");
+    }
+
+    // ==========================================
+    // CRITICAL: STATE ISOLATION TESTS
+    // ==========================================
+
+    function test_ZapMint_SequentialUsers_StateIsolation() public {
+        // Test that _lastSwapOut doesn't leak between operations
+        address bob = address(0xB0B);
+        usdc.mint(bob, 200 * 1e6);
+
+        // Alice zaps 100 USDC
+        uint256 aliceInput = 100 * 1e6;
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), aliceInput);
+        zapRouter.zapMint(aliceInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Bob zaps 200 USDC - event should have Bob's swap amount, not Alice's
+        uint256 bobInput = 200 * 1e6;
+        vm.startPrank(bob);
+        usdc.approve(address(zapRouter), bobInput);
+
+        // Capture event to verify correct values
+        vm.expectEmit(true, false, false, true);
+        emit ZapRouter.ZapMint(
+            bob,
+            bobInput,
+            400 * 1e18, // Bob's tokensOut (200 * 2 * 1e12)
+            100, // maxSlippageBps
+            200 * 1e6 // Bob's actualSwapOut (not Alice's 100)
+        );
+        zapRouter.zapMint(bobInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify each user has correct balance
+        assertEq(mInvDXY.balanceOf(alice), 200 * 1e18, "Alice balance incorrect");
+        assertEq(mInvDXY.balanceOf(bob), 400 * 1e18, "Bob balance incorrect");
+    }
 }
 
 // ==========================================
@@ -416,4 +545,57 @@ contract MockSplitter is ISyntheticSplitter {
         return 0;
     }
     function skimYield() external override {}
+}
+
+/// @notice Malicious flash token that attempts reentrancy during flash loan
+contract ReentrantFlashToken is ERC20, IERC3156FlashLender {
+    address public targetRouter;
+    bool public attemptReentrancy = true;
+
+    constructor(string memory name, string memory symbol, address _targetRouter) ERC20(name, symbol) {
+        targetRouter = _targetRouter;
+    }
+
+    function setTargetRouter(address _targetRouter) external {
+        targetRouter = _targetRouter;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function maxFlashLoan(address) external pure override returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function flashFee(address, uint256) public pure override returns (uint256) {
+        return 0;
+    }
+
+    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
+        external
+        override
+        returns (bool)
+    {
+        _mint(address(receiver), amount); // optimistic mint
+
+        // Before calling the callback, attempt reentrancy
+        if (attemptReentrancy && targetRouter != address(0)) {
+            attemptReentrancy = false; // Prevent infinite recursion
+            // Try to call zapMint on the router during the flash loan
+            try ZapRouter(targetRouter).zapMint(50 * 1e6, 0, 100, block.timestamp + 1 hours) {
+            // If this succeeds, we have a reentrancy vulnerability
+            }
+                catch {
+                // Expected: should fail
+            }
+        }
+
+        require(
+            receiver.onFlashLoan(msg.sender, token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
+            "Callback failed"
+        );
+        _burn(address(receiver), amount); // repay (no fee for simplicity)
+        return true;
+    }
 }

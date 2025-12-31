@@ -131,6 +131,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline) external {
+        require(principal > 0, "Principal must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(leverage > 1e18, "Leverage must be > 1x");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");

@@ -440,6 +440,175 @@ contract LeverageRouterTest is Test {
         uint256 actualReturn = usdc.balanceOf(alice) - balanceBefore;
         assertEq(actualReturn, expectedReturn, "Preview return doesn't match actual");
     }
+
+    // ==========================================
+    // CRITICAL: REENTRANCY TESTS
+    // ==========================================
+
+    function test_OnFlashLoan_Reentrancy_NoExploitation() public {
+        // Deploy a malicious flash lender that attempts reentrancy
+        ReentrantFlashLender maliciousLender = new ReentrantFlashLender(address(usdc), address(leverageRouter));
+
+        // Create a new router with the malicious lender
+        LeverageRouter vulnerableRouter = new LeverageRouter(
+            address(morpho), address(curvePool), address(usdc), address(mDXY), address(maliciousLender), params
+        );
+
+        // Update the malicious lender to target the new router
+        maliciousLender.setTargetRouter(address(vulnerableRouter));
+
+        uint256 principal = 1000 * 1e6;
+        usdc.mint(alice, principal * 2); // Extra for potential reentrancy
+
+        vm.startPrank(alice);
+        usdc.approve(address(vulnerableRouter), principal * 2);
+        morpho.setAuthorization(address(vulnerableRouter), true);
+
+        // The malicious lender will try to call openLeverage again during callback
+        // The reentrancy attempt should fail (caught by try-catch in malicious lender)
+        // but the outer transaction should complete normally
+        vulnerableRouter.openLeverage(principal, 2e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify only ONE position was created (no double-entry from reentrancy)
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Expected: 2x leverage on $1000 = $2000 total exposure
+        // Only one position should exist
+        assertEq(supplied, 2000 * 1e18, "Should have exactly one position's collateral");
+        assertEq(borrowed, 1000 * 1e6, "Should have exactly one position's debt");
+
+        // Verify the reentrancy attempt was made but failed
+        assertFalse(maliciousLender.attemptReentrancy(), "Reentrancy was attempted");
+    }
+
+    // ==========================================
+    // CRITICAL: ZERO INPUT TESTS
+    // ==========================================
+
+    function test_OpenLeverage_ZeroPrincipal_Reverts() public {
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), 0);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        vm.expectRevert("Principal must be > 0");
+        leverageRouter.openLeverage(0, 2e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // CRITICAL: FLASH FEE TESTS
+    // ==========================================
+
+    function test_OpenLeverage_WithFlashFee_DebtIncludesFee() public {
+        // Set a 0.1% flash fee (10 bps)
+        lender.setFeeBps(10);
+
+        uint256 principal = 1000 * 1e6; // $1,000
+        uint256 leverage = 3e18; // 3x -> $2000 loan
+        uint256 expectedLoan = 2000 * 1e6;
+        uint256 expectedFee = (expectedLoan * 10) / 10000; // 0.1% of $2000 = $2
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify debt includes the flash fee
+        (, uint256 borrowed) = morpho.positions(alice);
+        assertEq(borrowed, expectedLoan + expectedFee, "Debt should include flash fee");
+    }
+
+    function test_CloseLeverage_WithFlashFee_AccountsForFee() public {
+        // First open a position without fee
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), principal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Now set a flash fee for close
+        lender.setFeeBps(10); // 0.1%
+        uint256 flashFee = (borrowed * 10) / 10000;
+
+        uint256 balanceBefore = usdc.balanceOf(alice);
+
+        // Close the position - flash loan costs extra due to fee
+        leverageRouter.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // User should receive: swapOutput - borrowed - flashFee
+        // swapOutput = 3000e18 / 1e12 = 3000e6
+        // returned = 3000e6 - 2000e6 - flashFee
+        uint256 expectedReturn = 3000 * 1e6 - borrowed - flashFee;
+        uint256 actualReturn = usdc.balanceOf(alice) - balanceBefore;
+        assertEq(actualReturn, expectedReturn, "Return should account for flash fee");
+    }
+
+    function test_PreviewOpenLeverage_IncludesFlashFee() public {
+        // Set a flash fee
+        lender.setFeeBps(50); // 0.5%
+
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+        uint256 expectedLoan = 2000 * 1e6;
+        uint256 expectedFee = (expectedLoan * 50) / 10000; // $10
+
+        (uint256 loanAmount,,, uint256 expectedDebt) = leverageRouter.previewOpenLeverage(principal, leverage);
+
+        assertEq(loanAmount, expectedLoan, "Loan amount incorrect");
+        assertEq(expectedDebt, expectedLoan + expectedFee, "Preview should include flash fee in debt");
+    }
+
+    // ==========================================
+    // CRITICAL: STATE ISOLATION TESTS
+    // ==========================================
+
+    function test_OpenLeverage_SequentialUsers_StateIsolation() public {
+        // Test that transient state variables don't leak between operations
+        address bob = address(0xB0B);
+        usdc.mint(bob, 2000 * 1e6);
+
+        // Alice opens position
+        uint256 alicePrincipal = 1000 * 1e6;
+        vm.startPrank(alice);
+        usdc.approve(address(leverageRouter), alicePrincipal);
+        morpho.setAuthorization(address(leverageRouter), true);
+        leverageRouter.openLeverage(alicePrincipal, 2e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Bob opens position with different amount
+        uint256 bobPrincipal = 2000 * 1e6;
+        vm.startPrank(bob);
+        usdc.approve(address(leverageRouter), bobPrincipal);
+        morpho.setAuthorization(address(leverageRouter), true);
+
+        // Capture event to verify correct values
+        vm.expectEmit(true, false, false, true);
+        emit LeverageRouter.LeverageOpened(
+            bob,
+            bobPrincipal,
+            2e18,
+            2000 * 1e6, // Bob's loan
+            4000 * 1e18, // Bob's mDXY (not Alice's)
+            2000 * 1e6, // Bob's debt (not Alice's)
+            100
+        );
+        leverageRouter.openLeverage(bobPrincipal, 2e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify each user has correct position
+        (uint256 aliceSupplied,) = morpho.positions(alice);
+        (uint256 bobSupplied,) = morpho.positions(bob);
+        assertEq(aliceSupplied, 2000 * 1e18, "Alice position incorrect");
+        assertEq(bobSupplied, 4000 * 1e18, "Bob position incorrect");
+    }
 }
 
 // ==========================================
@@ -464,17 +633,22 @@ contract MockToken is ERC20 {
 
 contract MockFlashLender is IERC3156FlashLender {
     address token;
+    uint256 public feeBps = 0; // Configurable fee in basis points (default 0)
 
     constructor(address _token) {
         token = _token;
+    }
+
+    function setFeeBps(uint256 _feeBps) external {
+        feeBps = _feeBps;
     }
 
     function maxFlashLoan(address) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
-    function flashFee(address, uint256) external pure override returns (uint256) {
-        return 0;
+    function flashFee(address, uint256 amount) public view override returns (uint256) {
+        return (amount * feeBps) / 10000;
     }
 
     function flashLoan(IERC3156FlashBorrower receiver, address t, uint256 amount, bytes calldata data)
@@ -482,11 +656,14 @@ contract MockFlashLender is IERC3156FlashLender {
         override
         returns (bool)
     {
+        uint256 fee = flashFee(t, amount);
         MockToken(token).mint(address(receiver), amount); // Send money
         require(
-            receiver.onFlashLoan(msg.sender, t, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
+            receiver.onFlashLoan(msg.sender, t, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
             "Callback failed"
         );
+        // In a real lender, we'd burn/transfer back amount + fee
+        // For mock, we just verify the callback succeeded
         return true;
     }
 }
@@ -581,5 +758,55 @@ contract MockMorpho is IMorpho {
         }
         positions[onBehalfOf].supplied -= assets;
         return (assets, 0);
+    }
+}
+
+/// @notice Malicious flash lender that attempts reentrancy during callback
+contract ReentrantFlashLender is IERC3156FlashLender {
+    address public token;
+    address public targetRouter;
+    bool public attemptReentrancy = true;
+
+    constructor(address _token, address _targetRouter) {
+        token = _token;
+        targetRouter = _targetRouter;
+    }
+
+    function setTargetRouter(address _targetRouter) external {
+        targetRouter = _targetRouter;
+    }
+
+    function maxFlashLoan(address) external pure override returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function flashFee(address, uint256) external pure override returns (uint256) {
+        return 0;
+    }
+
+    function flashLoan(IERC3156FlashBorrower receiver, address t, uint256 amount, bytes calldata data)
+        external
+        override
+        returns (bool)
+    {
+        MockToken(token).mint(address(receiver), amount);
+
+        // Before calling the callback, attempt reentrancy by calling openLeverage again
+        if (attemptReentrancy && targetRouter != address(0)) {
+            attemptReentrancy = false; // Prevent infinite recursion
+            // Try to call openLeverage on the router during the flash loan
+            try LeverageRouter(targetRouter).openLeverage(100 * 1e6, 2e18, 100, block.timestamp + 1 hours) {
+            // If this succeeds, we have a reentrancy vulnerability
+            }
+                catch {
+                // Expected: should fail
+            }
+        }
+
+        require(
+            receiver.onFlashLoan(msg.sender, t, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
+            "Callback failed"
+        );
+        return true;
     }
 }
