@@ -817,6 +817,11 @@ contract MockCurvePool is ICurvePool {
         MockToken(tokenOut).mint(msg.sender, dy);
         return dy;
     }
+
+    function get_dy(int128, int128, uint256 dx) external pure override returns (uint256) {
+        // Simple 1:1 mock for legacy tests
+        return dx;
+    }
 }
 
 contract MockMorpho is IMorpho {

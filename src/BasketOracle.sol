@@ -28,7 +28,7 @@ contract BasketOracle is AggregatorV3Interface {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
             // SAFETY CHECK: Ensure feed uses expected precision
             if (feed.decimals() != DECIMALS) revert BasketOracle__InvalidPrice(address(feed));
-            
+
             components.push(Component({feed: feed, quantity: _quantities[i]}));
         }
     }

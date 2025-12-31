@@ -18,6 +18,9 @@ contract ZapRouter is IERC3156FlashBorrower {
     int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
     int128 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
+    // The system CAP is $2.00. We assume 6 decimal precision for checks (2e6).
+    uint256 public constant CAP_PRICE = 2e6;
+
     // Immutable Dependencies
     ISyntheticSplitter public immutable SPLITTER;
     IERC20 public immutable DXY_BEAR;
@@ -52,7 +55,7 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @param usdcAmount The amount of USDC the user is sending.
      * @param minAmountOut Minimum amount of DXY-BULL tokens to receive.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 100 = 1%).
-     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline) external {
@@ -61,33 +64,47 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(SPLITTER.currentStatus() == ISyntheticSplitter.Status.ACTIVE, "Splitter not active");
 
-        // 1. Pull USDC from User
+        // 1. Get Real-Time Prices
+        // "How much USDC do I get for 1 BEAR (1e18)?"
+        uint256 priceBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+        require(priceBear < CAP_PRICE, "Bear price > Cap");
+
+        // 2. Calculate Bull Price ($2.00 - BearPrice)
+        uint256 priceBull = CAP_PRICE - priceBear;
+
+        // 3. Calculate Perfect Flash Amount
+        // Borrow = Principal / PriceBull
+        // (USDC_6 * 1e18) / USDC_6 = 18 decimals
+        uint256 flashAmount = (usdcAmount * 1e18) / priceBull;
+
+        // 4. Safety Buffer
+        // Rounding in the Swap (18->6 dec) and Mint (6->18 dec) cycles can cause us
+        // to be short by ~1e12 wei (dust). We reduce the borrow amount slightly to guarantee solvency.
+        // The surplus (dust) will be swept to the user in the callback.
+        if (flashAmount > 1e13) flashAmount -= 1e13;
+
+        // 5. Calculate Minimum Swap Output (Slippage Check 1)
+        // We expect to sell `flashAmount` of Bear.
+        // Expected USDC = flashAmount * priceBear
+        uint256 expectedSwapOut = (flashAmount * priceBear) / 1e18;
+        uint256 minSwapOut = (expectedSwapOut * (10000 - maxSlippageBps)) / 10000;
+
+        // 6. Initiate Flash Loan
+        // Pull USDC from User first
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // 2. Calculate how much DXY-BEAR to Flash Mint
-        // We estimate 1:1 price parity for the initial request.
-        // 1 Token unit (1e18) roughly equals 1 USDC (1e6).
-        // Formula: usdcAmount (6 decimals) -> 18 decimals
-        uint256 flashAmount = usdcAmount * 1e12;
-
-        // 3. Calculate minimum swap output based on user's slippage tolerance
-        // Expected output at 1:1 parity is usdcAmount
-        uint256 minSwapOut = (usdcAmount * (10000 - maxSlippageBps)) / 10000;
-
-        // 4. Initiate Flash Mint of DXY-BEAR
-        // We borrow DXY-BEAR, sell it for USDC, mint pairs, keep DXY-BULL, repay DXY-BEAR
-        bytes memory data = abi.encode(usdcAmount, minSwapOut);
+        // Encode user address so we can sweep dust to them
+        bytes memory data = abi.encode(msg.sender, usdcAmount, minSwapOut);
 
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
-        // 5. Final Transfer
+        // 7. Final Transfer & Check
         // The flash loan callback handles the minting.
-        // We just check if we got enough.
         uint256 tokensOut = DXY_BULL.balanceOf(address(this));
         require(tokensOut >= minAmountOut, "Slippage too high");
         DXY_BULL.safeTransfer(msg.sender, tokensOut);
 
-        // 6. Emit event for off-chain tracking and MEV analysis
+        // 8. Emit event for off-chain tracking and MEV analysis
         emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
     }
 
@@ -102,22 +119,29 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == address(DXY_BEAR), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params
-        (uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (uint256, uint256));
+        // Decode params including user address for dust sweeping
+        (address user, uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (address, uint256, uint256));
 
-        // 1. Sell DXY-BEAR for USDC via Curve
+        // 1. Swap Borrowed Bear -> USDC via Curve
         uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, amount, minSwapOut);
-
-        // Store for event emission in main function
         _lastSwapOut = swappedUsdc;
 
         // 2. Mint Real Pairs from Core (userUsdcAmount + swappedUsdc)
+        // Splitter logic: 2 USDC -> 1 Pair (if CAP is $2)
         SPLITTER.mint(userUsdcAmount + swappedUsdc);
 
         // 3. Repay the Flash Loan
         uint256 repayAmount = amount + fee;
-        require(DXY_BEAR.balanceOf(address(this)) >= repayAmount, "Insolvent Zap: Swap didn't cover mint cost");
         DXY_BEAR.safeIncreaseAllowance(msg.sender, repayAmount);
+
+        // 4. Sweep Dust
+        // Due to the Safety Buffer, we likely minted slightly more BEAR than we owe.
+        // Send this surplus to the user to prevent stuck funds (leaks).
+        uint256 currentBalance = DXY_BEAR.balanceOf(address(this));
+        if (currentBalance > repayAmount) {
+            uint256 surplus = currentBalance - repayAmount;
+            DXY_BEAR.safeTransfer(user, surplus);
+        }
 
         return keccak256("ERC3156FlashBorrower.onFlashLoan");
     }
@@ -130,7 +154,7 @@ contract ZapRouter is IERC3156FlashBorrower {
      * @notice Preview the result of a zapMint operation.
      * @param usdcAmount The amount of USDC the user will send.
      * @return flashAmount Amount of DXY-BEAR to flash mint.
-     * @return expectedSwapOut Expected USDC from selling flash-minted DXY-BEAR (at 1:1 parity).
+     * @return expectedSwapOut Expected USDC from selling flash-minted DXY-BEAR.
      * @return totalUSDC Total USDC for minting pairs (user + swap).
      * @return expectedTokensOut Expected DXY-BULL tokens to receive.
      * @return flashFee Flash mint fee (if any).
@@ -146,24 +170,26 @@ contract ZapRouter is IERC3156FlashBorrower {
             uint256 flashFee
         )
     {
-        // Flash mint amount (USDC 6 decimals -> DXY-BEAR 18 decimals)
-        flashAmount = usdcAmount * 1e12;
+        uint256 priceBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+        if (priceBear >= CAP_PRICE) return (0, 0, 0, 0, 0);
 
-        // Expected USDC from swap at 1:1 parity
-        expectedSwapOut = usdcAmount;
+        // Calculate Bull Price
+        uint256 priceBull = CAP_PRICE - priceBear;
 
-        // Total USDC for minting = user's USDC + swapped USDC
+        // Calculate Dynamic Flash Amount
+        flashAmount = (usdcAmount * 1e18) / priceBull;
+
+        // Include buffer in preview to match execution
+        if (flashAmount > 1e13) flashAmount -= 1e13;
+
+        expectedSwapOut = (flashAmount * priceBear) / 1e18;
         totalUSDC = usdcAmount + expectedSwapOut;
 
-        // Flash fee from DXY-BEAR token
-        flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
+        // Minting pairs: 2 USDC -> 1 Pair (assuming CAP=$2)
+        // Formula: (totalUSDC * 1e18) / CAP_PRICE
+        // Simplified: (totalUSDC * 1e12) / 2
+        expectedTokensOut = (totalUSDC * 1e12) / 2;
 
-        // Minting pairs: totalUSDC (6 decimals) -> tokens (18 decimals)
-        // Each USDC mints 1e12 of each token pair
-        // But we need to repay flashAmount + flashFee of DXY-BEAR
-        // Actually: mint gives us totalUSDC * 1e12 of EACH token
-        // We repay flashAmount + flashFee of DXY-BEAR
-        // User gets all the DXY-BULL = totalUSDC * 1e12
-        expectedTokensOut = totalUSDC * 1e12;
+        flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
     }
 }
