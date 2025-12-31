@@ -25,7 +25,11 @@ contract BasketOracle is AggregatorV3Interface {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
-            components.push(Component({feed: AggregatorV3Interface(_feeds[i]), quantity: _quantities[i]}));
+            AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
+            // SAFETY CHECK: Ensure feed uses expected precision
+            if (feed.decimals() != DECIMALS) revert BasketOracle__InvalidPrice(address(feed));
+            
+            components.push(Component({feed: feed, quantity: _quantities[i]}));
         }
     }
 
