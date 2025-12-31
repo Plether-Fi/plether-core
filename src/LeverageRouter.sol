@@ -109,6 +109,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         DXY_BEAR = IERC20(_dxyBear);
         LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
+
         // Approvals (One-time)
         // 1. Allow Curve pool to take USDC (for opening)
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
@@ -127,7 +128,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param principal Amount of USDC user sends.
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
-     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline) external {
@@ -137,7 +138,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
 
-        // 2. Calculate Flash Loan Amount (before pulling funds to save gas on revert)
+        // 1. Calculate Flash Loan Amount
         // If User has $1000 and wants 3x ($3000 exposure):
         // We need to buy $3000 worth of DXY-BEAR.
         // We have $1000. We need to borrow $2000.
@@ -145,14 +146,14 @@ contract LeverageRouter is IERC3156FlashBorrower {
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
         require(loanAmount > 0, "Leverage too low for principal");
 
-        // 1. Pull User Funds
+        // 2. Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
-        // 3. Calculate minimum DXY-BEAR output based on slippage tolerance
-        // Total USDC to swap = principal + loanAmount
-        // Expected DXY-BEAR at 1:1 parity = totalUSDC * 1e12 (6 decimals -> 18 decimals)
+        // 3. Calculate minimum DXY-BEAR output based on REAL MARKET PRICE
+        // Use get_dy to find real market expectation, NOT 1:1 assumption
         uint256 totalUSDC = principal + loanAmount;
-        uint256 expectedDxyBear = totalUSDC * 1e12;
+        uint256 expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
+
         uint256 minDxyBear = (expectedDxyBear * (10000 - maxSlippageBps)) / 10000;
 
         // 4. Encode data for callback (operation type, user, deadline, and operation-specific data)
@@ -173,7 +174,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param debtToRepay Amount of USDC debt to repay (flash loaned).
      * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
-     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 deadline)
@@ -183,9 +184,9 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
 
-        // 1. Calculate minimum USDC output based on slippage tolerance
-        // Expected USDC at 1:1 parity = collateral / 1e12 (18 decimals -> 6 decimals)
-        uint256 expectedUSDC = collateralToWithdraw / 1e12;
+        // 1. Calculate minimum USDC output based on REAL MARKET PRICE
+        // Use get_dy to find real market expectation
+        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, collateralToWithdraw);
         uint256 minUsdcOut = (expectedUSDC * (10000 - maxSlippageBps)) / 10000;
 
         // 2. Encode data for callback (operation type, user, deadline, and operation-specific data)
@@ -237,17 +238,16 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // Decode open-specific data: (op, user, deadline, principal, minDxyBear)
         (,,, uint256 principal, uint256 minDxyBear) = abi.decode(data, (uint8, address, uint256, uint256, uint256));
 
-        // 1. Total Capital = User Principal + Flash Loan
         uint256 totalUSDC = principal + loanAmount;
 
-        // 2. Swap ALL USDC -> DXY-BEAR via Curve
+        // 1. Swap ALL USDC -> DXY-BEAR via Curve
         uint256 dxyBearReceived = CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC, minDxyBear);
         _lastDxyBearReceived = dxyBearReceived;
 
-        // 3. Supply DXY-BEAR to Morpho on behalf of the USER
+        // 2. Supply DXY-BEAR to Morpho on behalf of the USER
         MORPHO.supply(marketParams, dxyBearReceived, 0, user, "");
 
-        // 4. Borrow USDC from Morpho to repay flash loan
+        // 3. Borrow USDC from Morpho to repay flash loan
         uint256 debtToIncur = loanAmount + fee;
         _lastDebtIncurred = debtToIncur;
         MORPHO.borrow(marketParams, debtToIncur, 0, user, address(this));
@@ -293,7 +293,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @return loanAmount Amount of USDC to flash loan.
      * @return totalUSDC Total USDC to swap (principal + loan).
-     * @return expectedDxyBear Expected DXY-BEAR at 1:1 parity (before slippage).
+     * @return expectedDxyBear Expected DXY-BEAR (based on current curve price).
      * @return expectedDebt Expected debt incurred (loan + flash fee).
      */
     function previewOpenLeverage(uint256 principal, uint256 leverage)
@@ -305,7 +305,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
 
         loanAmount = (principal * (leverage - 1e18)) / 1e18;
         totalUSDC = principal + loanAmount;
-        expectedDxyBear = totalUSDC * 1e12; // 6 decimals -> 18 decimals
+
+        // Use get_dy for accurate preview
+        expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
+
         uint256 flashFee = LENDER.flashFee(address(USDC), loanAmount);
         expectedDebt = loanAmount + flashFee;
     }
@@ -314,7 +317,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
      * @notice Preview the result of closing a leveraged position.
      * @param debtToRepay Amount of USDC debt to repay.
      * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
-     * @return expectedUSDC Expected USDC from swap at 1:1 parity (before slippage).
+     * @return expectedUSDC Expected USDC from swap (based on current curve price).
      * @return flashFee Flash loan fee.
      * @return expectedReturn Expected USDC returned to user after repaying flash loan.
      */
@@ -323,7 +326,9 @@ contract LeverageRouter is IERC3156FlashBorrower {
         view
         returns (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn)
     {
-        expectedUSDC = collateralToWithdraw / 1e12; // 18 decimals -> 6 decimals
+        // Use get_dy for accurate preview
+        expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, collateralToWithdraw);
+
         flashFee = LENDER.flashFee(address(USDC), debtToRepay);
         uint256 totalRepayment = debtToRepay + flashFee;
         expectedReturn = expectedUSDC > totalRepayment ? expectedUSDC - totalRepayment : 0;
