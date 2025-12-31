@@ -434,6 +434,53 @@ contract ZapRouterTest is Test {
         assertEq(mInvDXY.balanceOf(alice), 200 * 1e18, "Alice balance incorrect");
         assertEq(mInvDXY.balanceOf(bob), 400 * 1e18, "Bob balance incorrect");
     }
+
+    // ==========================================
+    // HIGH PRIORITY: SPLITTER STATE TESTS (#9)
+    // ==========================================
+
+    function test_ZapMint_SplitterPaused_Reverts() public {
+        uint256 usdcInput = 100 * 1e6;
+
+        // Set splitter to PAUSED
+        splitter.setStatus(ISyntheticSplitter.Status.PAUSED);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        vm.expectRevert("Splitter not active");
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_ZapMint_SplitterSettled_Reverts() public {
+        uint256 usdcInput = 100 * 1e6;
+
+        // Set splitter to SETTLED
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        vm.expectRevert("Splitter not active");
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_ZapMint_SplitterActive_Succeeds() public {
+        uint256 usdcInput = 100 * 1e6;
+
+        // Explicitly set to ACTIVE (default, but making it explicit)
+        splitter.setStatus(ISyntheticSplitter.Status.ACTIVE);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcInput);
+
+        zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        assertGt(mInvDXY.balanceOf(alice), 0, "Should receive tokens when active");
+    }
 }
 
 // ==========================================
@@ -516,10 +563,15 @@ contract MockCurvePool is ICurvePool {
 contract MockSplitter is ISyntheticSplitter {
     address public tA;
     address public tB;
+    Status private _status = Status.ACTIVE;
 
     constructor(address _tA, address _tB) {
         tA = _tA;
         tB = _tB;
+    }
+
+    function setStatus(Status newStatus) external {
+        _status = newStatus;
     }
 
     function mint(uint256 amount) external override {
@@ -530,7 +582,7 @@ contract MockSplitter is ISyntheticSplitter {
 
     // Stubs for Missing Implementation Errors
     function currentStatus() external view override returns (Status) {
-        return Status.ACTIVE;
+        return _status;
     }
 
     function getSystemSolvency() external view override returns (uint256, uint256) {

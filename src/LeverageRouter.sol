@@ -137,15 +137,16 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
 
-        // 1. Pull User Funds
-        USDC.safeTransferFrom(msg.sender, address(this), principal);
-
-        // 2. Calculate Flash Loan Amount
+        // 2. Calculate Flash Loan Amount (before pulling funds to save gas on revert)
         // If User has $1000 and wants 3x ($3000 exposure):
         // We need to buy $3000 worth of mDXY.
         // We have $1000. We need to borrow $2000.
         // Formula: Loan = Principal * (Lev - 1)
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        require(loanAmount > 0, "Leverage too low for principal");
+
+        // 1. Pull User Funds
+        USDC.safeTransferFrom(msg.sender, address(this), principal);
 
         // 3. Calculate minimum mDXY output based on slippage tolerance
         // Total USDC to swap = principal + loanAmount
@@ -214,8 +215,9 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(msg.sender == address(LENDER), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode common fields (deadline checked in main function, not needed here)
-        (uint8 operation, address user,) = abi.decode(data, (uint8, address, uint256));
+        // Decode common fields and validate deadline
+        (uint8 operation, address user, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
+        require(block.timestamp <= deadline, "Transaction expired");
 
         if (operation == OP_OPEN) {
             _executeOpen(amount, fee, user, data);
