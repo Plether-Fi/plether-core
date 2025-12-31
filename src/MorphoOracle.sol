@@ -17,7 +17,6 @@ contract MorphoOracle is IMorphoOracle {
     uint256 constant SCALE_FACTOR = 1e28;
 
     error MorphoOracle__InvalidPrice();
-    error MorphoOracle__CapBreached();
 
     /**
      * @param _basketOracle Address of your BasketOracle

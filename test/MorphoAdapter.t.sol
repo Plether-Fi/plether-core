@@ -34,6 +34,7 @@ contract MockMorpho is IMorpho {
         bytes calldata
     )
         external
+        override
         returns (uint256 assetsSupplied, uint256 sharesSupplied)
     {
         bytes32 id = keccak256(abi.encode(marketParams));
@@ -63,6 +64,7 @@ contract MockMorpho is IMorpho {
         address receiver
     )
         external
+        override
         returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn)
     {
         bytes32 id = keccak256(abi.encode(marketParams));
@@ -82,13 +84,14 @@ contract MockMorpho is IMorpho {
         return (assets, sharesWithdrawn);
     }
 
-    function position(bytes32 id, address user) external view returns (uint256, uint128, uint128) {
+    function position(bytes32 id, address user) external view override returns (uint256, uint128, uint128) {
         return (supplyShares[id][user], 0, 0);
     }
 
     function market(bytes32 id)
         external
         view
+        override
         returns (
             uint128 _totalSupplyAssets,
             uint128 _totalSupplyShares,
@@ -99,6 +102,29 @@ contract MockMorpho is IMorpho {
         )
     {
         return (uint128(totalSupplyAssets[id]), uint128(totalSupplyShares[id]), 0, 0, uint128(block.timestamp), 0);
+    }
+
+    // Stubs for interface compliance (not used by MorphoAdapter)
+    function borrow(MarketParams memory, uint256, uint256, address, address)
+        external
+        pure
+        override
+        returns (uint256, uint256)
+    {
+        return (0, 0);
+    }
+
+    function repay(MarketParams memory, uint256, uint256, address, bytes calldata)
+        external
+        pure
+        override
+        returns (uint256, uint256)
+    {
+        return (0, 0);
+    }
+
+    function isAuthorized(address, address) external pure override returns (bool) {
+        return false;
     }
 
     // Helper: Simulate yield by increasing totalSupplyAssets

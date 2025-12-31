@@ -164,6 +164,7 @@ contract YieldAdapter is ERC4626, Ownable {
      * @param _rewardsController The address of the Aave V3 RewardsController
      */
     function setRewardsController(address _rewardsController) external onlyOwner {
+        require(_rewardsController != address(0), "RewardsController cannot be zero address");
         rewardsController = IRewardsController(_rewardsController);
     }
 

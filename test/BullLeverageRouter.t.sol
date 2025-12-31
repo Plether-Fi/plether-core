@@ -751,6 +751,14 @@ contract MockMorpho is IMorpho {
         MockToken(collateralToken).mint(receiver, assets);
         return (assets, 0);
     }
+
+    function position(bytes32, address) external pure override returns (uint256, uint128, uint128) {
+        return (0, 0, 0);
+    }
+
+    function market(bytes32) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
+        return (0, 0, 0, 0, 0, 0);
+    }
 }
 
 contract MockSplitter is ISyntheticSplitter {

@@ -114,6 +114,96 @@ contract LeverageRouterTest is Test {
         router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
+
+    function test_PreviewOpenLeverage_Success() public view {
+        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) =
+            router.previewOpenLeverage(1000 * 1e6, 3e18);
+
+        assertEq(loanAmount, 2000 * 1e6, "Loan amount mismatch");
+        assertEq(totalUSDC, 3000 * 1e6, "Total USDC mismatch");
+        assertGt(expectedDxyBear, 0, "Expected DXY-BEAR should be > 0");
+        assertEq(expectedDebt, 2000 * 1e6, "Expected debt mismatch (no fee)");
+    }
+
+    function test_PreviewOpenLeverage_RevertOnLowLeverage() public {
+        vm.expectRevert("Leverage must be > 1x");
+        router.previewOpenLeverage(1000 * 1e6, 1e18);
+    }
+
+    function test_PreviewCloseLeverage_Success() public view {
+        (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn) =
+            router.previewCloseLeverage(2000 * 1e6, 3000 * 1e18);
+
+        assertGt(expectedUSDC, 0, "Expected USDC should be > 0");
+        assertEq(flashFee, 0, "Flash fee should be 0 (mock)");
+        assertGt(expectedReturn, 0, "Expected return should be > 0");
+    }
+
+    function test_PreviewCloseLeverage_ZeroReturn() public view {
+        // When debt is huge relative to collateral, return should be 0
+        (,, uint256 expectedReturn) = router.previewCloseLeverage(10000 * 1e6, 100 * 1e18);
+        assertEq(expectedReturn, 0, "Expected return should be 0 when insolvent");
+    }
+
+    function test_OpenLeverage_ZeroPrincipal_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert("Principal must be > 0");
+        router.openLeverage(0, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_LeverageAtMinimum_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        // Leverage = 1x exactly should revert
+        vm.expectRevert("Leverage must be > 1x");
+        router.openLeverage(1000 * 1e6, 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_LeverageTooLow_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1e6); // 1 USDC
+
+        // Leverage = 1.0001x with 1 USDC = 0.0001 USDC loan which rounds to 0
+        vm.expectRevert("Leverage too low for principal");
+        router.openLeverage(1e6, 1e18 + 100, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_Deadline_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        vm.expectRevert("Transaction expired");
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    function test_CloseLeverage_Deadline_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert("Transaction expired");
+        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    function test_OpenLeverage_SlippageExceedsMax_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        vm.expectRevert("Slippage exceeds maximum");
+        router.openLeverage(1000 * 1e6, 3e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
+        vm.stopPrank();
+    }
 }
 
 // ==========================================
@@ -249,5 +339,13 @@ contract MockMorpho is IMorpho {
         collateralBalance[onBehalfOf] -= assets;
         MockToken(bear).mint(receiver, assets);
         return (assets, 0);
+    }
+
+    function position(bytes32, address) external pure override returns (uint256, uint128, uint128) {
+        return (0, 0, 0);
+    }
+
+    function market(bytes32) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
+        return (0, 0, 0, 0, 0, 0);
     }
 }

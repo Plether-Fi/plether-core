@@ -6,48 +6,7 @@ import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156Fl
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
-
-// Morpho Blue Interface (Minimal)
-interface IMorpho {
-    function supply(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        bytes calldata data
-    ) external returns (uint256 assetsDeposited, uint256 sharesIssued);
-    function borrow(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        address receiver
-    ) external returns (uint256 assetsBorrowed, uint256 sharesIssued);
-    function repay(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        bytes calldata data
-    ) external returns (uint256 assetsRepaid, uint256 sharesRepaid);
-    function withdraw(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        address receiver
-    ) external returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn);
-    function isAuthorized(address authorizer, address authorized) external view returns (bool);
-}
-
-// Morpho Structs
-struct MarketParams {
-    address loanToken;
-    address collateralToken;
-    address oracle;
-    address irm; // Interest Rate Model
-    uint256 lltv; // Liquidation LTV
-}
+import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 
 contract LeverageRouter is IERC3156FlashBorrower {
     using SafeERC20 for IERC20;

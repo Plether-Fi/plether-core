@@ -7,48 +7,7 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
-
-// Morpho Blue Interface (Minimal)
-interface IMorpho {
-    function supply(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        bytes calldata data
-    ) external returns (uint256 assetsDeposited, uint256 sharesIssued);
-    function borrow(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        address receiver
-    ) external returns (uint256 assetsBorrowed, uint256 sharesIssued);
-    function repay(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        bytes calldata data
-    ) external returns (uint256 assetsRepaid, uint256 sharesRepaid);
-    function withdraw(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        address receiver
-    ) external returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn);
-    function isAuthorized(address authorizer, address authorized) external view returns (bool);
-}
-
-// Morpho Structs
-struct MarketParams {
-    address loanToken;
-    address collateralToken;
-    address oracle;
-    address irm; // Interest Rate Model
-    uint256 lltv; // Liquidation LTV
-}
+import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 
 /// @notice Leverage router for DXY-BULL positions via Morpho Blue.
 /// @dev Uses flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.

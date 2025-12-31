@@ -5,51 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-// Morpho Blue Market Parameters
-struct MarketParams {
-    address loanToken;
-    address collateralToken;
-    address oracle;
-    address irm;
-    uint256 lltv;
-}
-
-// Morpho Blue Interface
-interface IMorpho {
-    function supply(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalf,
-        bytes calldata data
-    ) external returns (uint256 assetsSupplied, uint256 sharesSupplied);
-
-    function withdraw(
-        MarketParams memory marketParams,
-        uint256 assets,
-        uint256 shares,
-        address onBehalf,
-        address receiver
-    ) external returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn);
-
-    function position(bytes32 id, address user)
-        external
-        view
-        returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
-
-    function market(bytes32 id)
-        external
-        view
-        returns (
-            uint128 totalSupplyAssets,
-            uint128 totalSupplyShares,
-            uint128 totalBorrowAssets,
-            uint128 totalBorrowShares,
-            uint128 lastUpdate,
-            uint128 fee
-        );
-}
+import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 
 // Morpho Universal Rewards Distributor Interface
 interface IUniversalRewardsDistributor {
@@ -178,6 +134,7 @@ contract MorphoAdapter is ERC4626, Ownable {
      * @param _urd The URD contract address
      */
     function setUrd(address _urd) external onlyOwner {
+        require(_urd != address(0), "URD cannot be zero address");
         urd = _urd;
     }
 
