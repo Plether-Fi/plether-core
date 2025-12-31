@@ -12,7 +12,7 @@ contract LeverageRouterTest is Test {
 
     // Mocks
     MockToken public usdc;
-    MockToken public mDXY;
+    MockToken public dxyBear;
     MockMorpho public morpho;
     MockCurvePool public curvePool;
     MockFlashLender public lender;
@@ -22,21 +22,21 @@ contract LeverageRouterTest is Test {
 
     function setUp() public {
         usdc = new MockToken("USDC", "USDC", 6);
-        mDXY = new MockToken("mDXY", "mDXY", 18);
+        dxyBear = new MockToken("dxyBear", "dxyBear", 18);
         morpho = new MockMorpho();
-        curvePool = new MockCurvePool(address(usdc), address(mDXY));
+        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
         lender = new MockFlashLender(address(usdc));
 
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(mDXY),
+            collateralToken: address(dxyBear),
             oracle: address(0),
             irm: address(0),
             lltv: 900000000000000000 // 90%
         });
 
         leverageRouter = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(mDXY), address(lender), params
+            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(lender), params
         );
 
         // Setup Alice
@@ -224,7 +224,7 @@ contract LeverageRouterTest is Test {
         // Now close the position and check event
         uint256 debtToRepay = 2000 * 1e6;
         uint256 collateralToWithdraw = 3000 * 1e18;
-        uint256 expectedUsdcReturned = 1000 * 1e6; // 3000 mDXY -> 3000 USDC - 2000 debt = 1000
+        uint256 expectedUsdcReturned = 1000 * 1e6; // 3000 dxyBear (DXY-BEAR) -> 3000 USDC - 2000 debt = 1000
 
         vm.expectEmit(true, false, false, true);
         emit LeverageRouter.LeverageClosed(
@@ -299,11 +299,11 @@ contract LeverageRouterTest is Test {
         // Expected values (at 1:1 mock rate):
         // totalUSDC = principal + loanAmount = principal + principal * (leverage - 1) / 1e18
         //           = principal * leverage / 1e18
-        // mDXY received = totalUSDC * 1e12 (decimal conversion)
+        // dxyBear (DXY-BEAR) received = totalUSDC * 1e12 (decimal conversion)
         uint256 expectedSupplied = (principal * leverageMultiplier / 1e18) * 1e12;
         uint256 expectedBorrowed = principal * (leverageMultiplier - 1e18) / 1e18;
 
-        assertEq(supplied, expectedSupplied, "Supplied mDXY mismatch");
+        assertEq(supplied, expectedSupplied, "Supplied dxyBear mismatch");
         assertEq(borrowed, expectedBorrowed, "Borrowed USDC mismatch");
     }
 
@@ -370,8 +370,8 @@ contract LeverageRouterTest is Test {
         assertEq(loanAmount, 2000 * 1e6, "Incorrect loan amount");
         // Total = $1000 + $2000 = $3000
         assertEq(totalUSDC, 3000 * 1e6, "Incorrect total USDC");
-        // mDXY at 1:1 = $3000 * 1e12 = 3000e18
-        assertEq(expectedMDXY, 3000 * 1e18, "Incorrect expected mDXY");
+        // dxyBear (DXY-BEAR) at 1:1 = $3000 * 1e12 = 3000e18
+        assertEq(expectedMDXY, 3000 * 1e18, "Incorrect expected dxyBear");
         // Debt = loan + fee (fee is 0 in mock)
         assertEq(expectedDebt, 2000 * 1e6, "Incorrect expected debt");
     }
@@ -393,7 +393,7 @@ contract LeverageRouterTest is Test {
 
         // Verify preview matches actual
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
-        assertEq(supplied, expectedMDXY, "Preview mDXY doesn't match actual");
+        assertEq(supplied, expectedMDXY, "Preview dxyBear doesn't match actual");
         assertEq(borrowed, expectedDebt, "Preview debt doesn't match actual");
     }
 
@@ -404,7 +404,7 @@ contract LeverageRouterTest is Test {
         (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn) =
             leverageRouter.previewCloseLeverage(debtToRepay, collateralToWithdraw);
 
-        // USDC from selling 3000e18 mDXY at 1:1 = $3000
+        // USDC from selling 3000e18 dxyBear (DXY-BEAR) at 1:1 = $3000
         assertEq(expectedUSDC, 3000 * 1e6, "Incorrect expected USDC");
         // Flash fee is 0 in mock
         assertEq(flashFee, 0, "Incorrect flash fee");
@@ -451,7 +451,7 @@ contract LeverageRouterTest is Test {
 
         // Create a new router with the malicious lender
         LeverageRouter vulnerableRouter = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(mDXY), address(maliciousLender), params
+            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(maliciousLender), params
         );
 
         // Update the malicious lender to target the new router
@@ -596,7 +596,7 @@ contract LeverageRouterTest is Test {
             bobPrincipal,
             2e18,
             2000 * 1e6, // Bob's loan
-            4000 * 1e18, // Bob's mDXY (not Alice's)
+            4000 * 1e18, // Bob's dxyBear/DXY-BEAR (not Alice's)
             2000 * 1e6, // Bob's debt (not Alice's)
             100
         );
@@ -790,7 +790,7 @@ contract MockFlashLender is IERC3156FlashLender {
 
 contract MockCurvePool is ICurvePool {
     address public token0; // USDC (index 0)
-    address public token1; // mDXY (index 1)
+    address public token1; // dxyBear/DXY-BEAR (index 1)
 
     constructor(address _token0, address _token1) {
         token0 = _token0;
@@ -806,10 +806,10 @@ contract MockCurvePool is ICurvePool {
         uint8 tokenOutDecimals = MockToken(tokenOut).decimals();
 
         if (tokenInDecimals < tokenOutDecimals) {
-            // USDC (6) -> mDXY (18) : * 1e12
+            // USDC (6) -> dxyBear/DXY-BEAR (18) : * 1e12
             dy = dx * 1e12;
         } else {
-            // mDXY (18) -> USDC (6) : / 1e12
+            // dxyBear/DXY-BEAR (18) -> USDC (6) : / 1e12
             dy = dx / 1e12;
         }
 

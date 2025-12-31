@@ -36,23 +36,23 @@ interface ISyntheticSplitter {
     // ==========================================
 
     /**
-     * @notice Deposits collateral to mint equal amounts of Long and Short tokens.
+     * @notice Deposits collateral to mint equal amounts of DXY-BEAR and DXY-BULL tokens.
      * @dev Requires approval on the stablecoin (USDT).
      * @param amount The amount of collateral to deposit (e.g., 200 USDT).
      */
     function mint(uint256 amount) external;
 
     /**
-     * @notice Burns equal amounts of Long and Short tokens to retrieve collateral.
+     * @notice Burns equal amounts of DXY-BEAR and DXY-BULL tokens to retrieve collateral.
      * @dev Only works when Status is ACTIVE.
-     * @param amount The amount of tokens to burn (e.g. 100 mDXY + 100 mInvDXY).
+     * @param amount The amount of token pairs to burn.
      */
     function redeemPair(uint256 amount) external;
 
     /**
      * @notice Emergency/Final exit. Burns a single token for its settled value.
      * @dev Only works when Status is SETTLED.
-     * @param token The address of the token to burn (either mDXY or mInvDXY).
+     * @param token The address of the token to burn (DXY-BEAR or DXY-BULL).
      * @param amount The amount of tokens to burn.
      */
     function redeemSettled(address token, uint256 amount) external;

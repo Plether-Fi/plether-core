@@ -22,24 +22,24 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ### Core Contracts
 
 **SyntheticSplitter** - Central protocol contract
-- Accepts USDC collateral to mint equal amounts of TOKEN_A (mDXY/bear) + TOKEN_B (mInvDXY/bull)
+- Accepts USDC collateral to mint equal amounts of DXY-BEAR + DXY-BULL
 - Maintains 10% liquidity buffer locally, 90% deployed to yield adapters
 - Three lifecycle states: ACTIVE → PAUSED → SETTLED
 - Liquidates when oracle price >= CAP (protocol end-of-life)
 
 **SyntheticToken** - ERC20 + ERC20FlashMint tokens
-- mDXY (bear): appreciates when DXY falls
-- mInvDXY (bull): appreciates when DXY rises
+- DXY-BEAR: appreciates when USD weakens / DXY falls
+- DXY-BULL: appreciates when USD strengthens / DXY rises
 - Only SyntheticSplitter can mint/burn
 
 ### Routing Layer
 
-**ZapRouter** - Efficient bull token acquisition using flash mints
-- Flash mints mDXY → swaps to USDC via Curve → mints pairs → keeps mInvDXY
+**ZapRouter** - Efficient DXY-BULL acquisition using flash mints
+- Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL
 - 1% max slippage cap for MEV protection
 
 **LeverageRouter** - Leveraged positions via Morpho Blue
-- Flash loans USDC → swaps to mDXY → deposits as Morpho collateral
+- Flash loans USDC → swaps to DXY-BEAR → deposits as Morpho collateral
 - Requires user authorization in Morpho (`isAuthorized`)
 
 ### Oracle Layer
@@ -72,6 +72,6 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ## External Integrations
 
 - **Chainlink**: AggregatorV3Interface for price feeds
-- **Curve**: ICurvePool for USDC/mDXY (bear) swaps (indices: USDC=0, mDXY=1)
+- **Curve**: ICurvePool for USDC/DXY-BEAR swaps (indices: USDC=0, DXY-BEAR=1)
 - **Morpho Blue**: IMorpho for lending/collateral
 - **Aave V3**: IAavePool for yield farming

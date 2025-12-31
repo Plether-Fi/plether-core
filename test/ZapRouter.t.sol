@@ -13,8 +13,8 @@ contract ZapRouterTest is Test {
 
     // Mocks
     MockToken public usdc;
-    MockFlashToken public mDXY;
-    MockFlashToken public mInvDXY;
+    MockFlashToken public dxyBear;
+    MockFlashToken public dxyBull;
     MockSplitter public splitter;
     MockCurvePool public curvePool;
 
@@ -23,13 +23,14 @@ contract ZapRouterTest is Test {
     function setUp() public {
         // 1. Deploy Mocks
         usdc = new MockToken("USDC", "USDC");
-        mDXY = new MockFlashToken("mDXY", "mDXY");
-        mInvDXY = new MockFlashToken("mInvDXY", "mInvDXY");
-        splitter = new MockSplitter(address(mDXY), address(mInvDXY));
-        curvePool = new MockCurvePool(address(usdc), address(mDXY));
+        dxyBear = new MockFlashToken("dxyBear", "dxyBear");
+        dxyBull = new MockFlashToken("dxyBull", "dxyBull");
+        splitter = new MockSplitter(address(dxyBear), address(dxyBull));
+        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
 
         // 2. Deploy ZapRouter
-        zapRouter = new ZapRouter(address(splitter), address(mDXY), address(mInvDXY), address(usdc), address(curvePool));
+        zapRouter =
+            new ZapRouter(address(splitter), address(dxyBear), address(dxyBull), address(usdc), address(curvePool));
 
         // 3. Setup Initial State
         usdc.mint(alice, 1000 * 1e6);
@@ -45,13 +46,13 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        // Expect ~200 units of pldxy-bull (mInvDXY)
-        // Flash mint 100e18 mDXY, swap for 100 USDC, total 200 USDC, mint 200e18 pairs
+        // Expect ~200 units of DXY-BULL (dxyBull)
+        // Flash mint 100e18 dxyBear (DXY-BEAR), swap for 100 USDC, total 200 USDC, mint 200e18 pairs
         // Using 1% slippage tolerance (100 bps)
         zapRouter.zapMint(usdcInput, 190 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        assertGe(mInvDXY.balanceOf(alice), 190 * 1e18, "Alice didn't get enough mInvDXY");
+        assertGe(dxyBull.balanceOf(alice), 190 * 1e18, "Alice didn't get enough dxyBull");
         assertEq(usdc.balanceOf(alice), 900 * 1e6, "Alice spent wrong amount of USDC");
     }
 
@@ -134,7 +135,7 @@ contract ZapRouterTest is Test {
         zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        assertGt(mInvDXY.balanceOf(alice), 0, "Should have received tokens");
+        assertGt(dxyBull.balanceOf(alice), 0, "Should have received tokens");
     }
 
     function test_ZapMint_Insolvency_Reverts() public {
@@ -144,7 +145,7 @@ contract ZapRouterTest is Test {
         curvePool.setRate(9900);
 
         // Set a very high flash fee (200%) that causes insolvency
-        mDXY.setFeeBps(20000);
+        dxyBear.setFeeBps(20000);
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
@@ -174,19 +175,19 @@ contract ZapRouterTest is Test {
 
         // Alice pretends to be a Flash Lender calling the callback
         vm.expectRevert("Untrusted lender");
-        zapRouter.onFlashLoan(address(zapRouter), address(mDXY), 100, 0, "");
+        zapRouter.onFlashLoan(address(zapRouter), address(dxyBear), 100, 0, "");
         vm.stopPrank();
     }
 
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
-        // We pretend to be the legitimate mDXY token calling the callback...
-        vm.startPrank(address(mDXY));
+        // We pretend to be the legitimate dxyBear token calling the callback...
+        vm.startPrank(address(dxyBear));
 
         // ...BUT the 'initiator' arg is Alice, not the ZapRouter itself.
         vm.expectRevert("Untrusted initiator");
         zapRouter.onFlashLoan(
             alice, // <--- Malicious initiator
-            address(mDXY),
+            address(dxyBear),
             100,
             0,
             ""
@@ -216,14 +217,14 @@ contract ZapRouterTest is Test {
         // 1. User spent exactly usdcAmount
         assertEq(usdc.balanceOf(alice), aliceUsdcBefore - usdcAmount, "Incorrect USDC spent");
 
-        // 2. User receives mInvDXY tokens
-        // At 1:1 mock rate: flash usdcAmount*1e12 mDXY, swap for usdcAmount USDC
+        // 2. User receives dxyBull (DXY-BULL) tokens
+        // At 1:1 mock rate: flash usdcAmount*1e12 dxyBear (DXY-BEAR), swap for usdcAmount USDC
         // Total: 2*usdcAmount USDC -> mint 2*usdcAmount*1e12 of each token
         uint256 expectedTokens = 2 * usdcAmount * 1e12;
-        assertEq(mInvDXY.balanceOf(alice), expectedTokens, "Incorrect mInvDXY received");
+        assertEq(dxyBull.balanceOf(alice), expectedTokens, "Incorrect dxyBull received");
 
-        // 3. Router has no leftover mInvDXY (the output token)
-        assertEq(mInvDXY.balanceOf(address(zapRouter)), 0, "Router has leftover mInvDXY");
+        // 3. Router has no leftover dxyBull (the output token)
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router has leftover dxyBull");
     }
 
     function testFuzz_ZapMint_SlippageBound(uint256 slippageBps) public {
@@ -239,7 +240,7 @@ contract ZapRouterTest is Test {
             zapRouter.zapMint(usdcAmount, 0, slippageBps, block.timestamp + 1 hours);
         } else {
             zapRouter.zapMint(usdcAmount, 0, slippageBps, block.timestamp + 1 hours);
-            assertGt(mInvDXY.balanceOf(alice), 0, "Should have received tokens");
+            assertGt(dxyBull.balanceOf(alice), 0, "Should have received tokens");
         }
         vm.stopPrank();
     }
@@ -261,7 +262,7 @@ contract ZapRouterTest is Test {
             zapRouter.zapMint(usdcAmount, minAmountOut, 100, block.timestamp + 1 hours);
         } else {
             zapRouter.zapMint(usdcAmount, minAmountOut, 100, block.timestamp + 1 hours);
-            assertGe(mInvDXY.balanceOf(alice), minAmountOut, "Received less than minAmountOut");
+            assertGe(dxyBull.balanceOf(alice), minAmountOut, "Received less than minAmountOut");
         }
         vm.stopPrank();
     }
@@ -276,7 +277,7 @@ contract ZapRouterTest is Test {
         (uint256 flashAmount, uint256 expectedSwapOut, uint256 totalUSDC, uint256 expectedTokensOut, uint256 flashFee) =
             zapRouter.previewZapMint(usdcAmount);
 
-        // Flash mint $100 worth of mDXY = 100e18
+        // Flash mint $100 worth of dxyBear (DXY-BEAR) = 100e18
         assertEq(flashAmount, 100 * 1e18, "Incorrect flash amount");
         // Expected swap output at 1:1 = $100
         assertEq(expectedSwapOut, 100 * 1e6, "Incorrect expected swap out");
@@ -302,7 +303,7 @@ contract ZapRouterTest is Test {
         vm.stopPrank();
 
         // Verify preview matches actual
-        uint256 actualTokensOut = mInvDXY.balanceOf(alice);
+        uint256 actualTokensOut = dxyBull.balanceOf(alice);
         assertEq(actualTokensOut, expectedTokensOut, "Preview doesn't match actual");
     }
 
@@ -311,15 +312,15 @@ contract ZapRouterTest is Test {
     // ==========================================
 
     function test_OnFlashLoan_Reentrancy_NoExploitation() public {
-        // Deploy a malicious mDXY token that attempts reentrancy during flash loan
-        ReentrantFlashToken maliciousMDXY = new ReentrantFlashToken("mDXY", "mDXY", address(zapRouter));
+        // Deploy a malicious dxyBear (DXY-BEAR) token that attempts reentrancy during flash loan
+        ReentrantFlashToken maliciousMDXY = new ReentrantFlashToken("dxyBear", "dxyBear", address(zapRouter));
 
-        // Create splitter with malicious mDXY
-        MockSplitter maliciousSplitter = new MockSplitter(address(maliciousMDXY), address(mInvDXY));
+        // Create splitter with malicious dxyBear (DXY-BEAR)
+        MockSplitter maliciousSplitter = new MockSplitter(address(maliciousMDXY), address(dxyBull));
 
         // Create a new router with the malicious token
         ZapRouter vulnerableRouter = new ZapRouter(
-            address(maliciousSplitter), address(maliciousMDXY), address(mInvDXY), address(usdc), address(curvePool)
+            address(maliciousSplitter), address(maliciousMDXY), address(dxyBull), address(usdc), address(curvePool)
         );
 
         // Update the malicious token to target the new router
@@ -341,7 +342,7 @@ contract ZapRouterTest is Test {
         assertFalse(maliciousMDXY.attemptReentrancy(), "Reentrancy was attempted");
 
         // Verify only normal amount of tokens received (no double-minting)
-        uint256 aliceBalance = mInvDXY.balanceOf(alice);
+        uint256 aliceBalance = dxyBull.balanceOf(alice);
         assertEq(aliceBalance, 200 * 1e18, "Should have exactly one zap's worth of tokens");
     }
 
@@ -364,26 +365,26 @@ contract ZapRouterTest is Test {
 
     function test_ZapMint_WithFlashFee_Success() public {
         // Set a 0.1% flash fee (10 bps)
-        mDXY.setFeeBps(10);
+        dxyBear.setFeeBps(10);
 
         uint256 usdcInput = 100 * 1e6;
 
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        // With flash fee, slightly less mInvDXY should be received
+        // With flash fee, slightly less dxyBull (DXY-BULL) should be received
         // Flash amount = 100e18, fee = 0.1% = 0.1e18
-        // Must repay 100.1e18 mDXY, so less pairs can be kept
+        // Must repay 100.1e18 dxyBear (DXY-BEAR), so less pairs can be kept
         zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // User should still receive tokens (flash fee reduces output)
-        assertGt(mInvDXY.balanceOf(alice), 0, "Should receive tokens even with flash fee");
+        assertGt(dxyBull.balanceOf(alice), 0, "Should receive tokens even with flash fee");
     }
 
     function test_PreviewZapMint_IncludesFlashFee() public {
         // Set a flash fee
-        mDXY.setFeeBps(50); // 0.5%
+        dxyBear.setFeeBps(50); // 0.5%
 
         uint256 usdcAmount = 100 * 1e6;
 
@@ -431,8 +432,8 @@ contract ZapRouterTest is Test {
         vm.stopPrank();
 
         // Verify each user has correct balance
-        assertEq(mInvDXY.balanceOf(alice), 200 * 1e18, "Alice balance incorrect");
-        assertEq(mInvDXY.balanceOf(bob), 400 * 1e18, "Bob balance incorrect");
+        assertEq(dxyBull.balanceOf(alice), 200 * 1e18, "Alice balance incorrect");
+        assertEq(dxyBull.balanceOf(bob), 400 * 1e18, "Bob balance incorrect");
     }
 
     // ==========================================
@@ -479,7 +480,7 @@ contract ZapRouterTest is Test {
         zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        assertGt(mInvDXY.balanceOf(alice), 0, "Should receive tokens when active");
+        assertGt(dxyBull.balanceOf(alice), 0, "Should receive tokens when active");
     }
 }
 
@@ -534,7 +535,7 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
 
 contract MockCurvePool is ICurvePool {
     address public token0; // USDC (index 0)
-    address public token1; // mDXY (index 1)
+    address public token1; // dxyBear/DXY-BEAR (index 1)
     uint256 public rate = 10000; // 100.00%
 
     constructor(address _token0, address _token1) {
@@ -547,7 +548,7 @@ contract MockCurvePool is ICurvePool {
     }
 
     function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256 dy) {
-        // mDXY (18 decimals) -> USDC (6 decimals)
+        // dxyBear/DXY-BEAR (18 decimals) -> USDC (6 decimals)
         // Apply rate for slippage simulation
         dy = (dx / 1e12) * rate / 10000;
 

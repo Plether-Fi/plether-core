@@ -26,7 +26,7 @@ contract MorphoOracleTest is Test {
     }
 
     // ==========================================
-    // 1. Bear Token Logic (mInvDXY)
+    // 1. DXY-BEAR - Direct Token Logic
     // ==========================================
     function test_BearOracle_ReturnsBasketPrice() public {
         // Basket = $1.04
@@ -40,7 +40,7 @@ contract MorphoOracleTest is Test {
     }
 
     // ==========================================
-    // 2. Bull Token Logic (mDXY)
+    // 2. DXY-BULL - Inverse Token Logic
     // ==========================================
     function test_BullOracle_ReturnsInvertedPrice() public {
         // Basket = $1.04

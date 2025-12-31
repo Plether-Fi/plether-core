@@ -11,7 +11,7 @@ interface IMorphoOracle {
 contract MorphoOracle is IMorphoOracle {
     AggregatorV3Interface public immutable BASKET_ORACLE;
     uint256 public immutable CAP;
-    bool public immutable IS_INVERSE; // True = Bull Token (Cap - Price)
+    bool public immutable IS_INVERSE; // True = DXY-BULL (Cap - Price)
 
     // Scaling: 8 decimals (Chainlink) -> 36 decimals (Morpho)
     uint256 constant SCALE_FACTOR = 1e28;
@@ -42,7 +42,7 @@ contract MorphoOracle is IMorphoOracle {
 
         // 2. Calculate Token Value
         if (IS_INVERSE) {
-            // Logic for Bull Token (mDXY)
+            // Logic for DXY-BULL - inverse token
             // Value = Cap - Basket
 
             if (basketPrice >= CAP) {
@@ -53,7 +53,7 @@ contract MorphoOracle is IMorphoOracle {
             }
             finalPrice = CAP - basketPrice;
         } else {
-            // Logic for Bear Token (mInvDXY)
+            // Logic for DXY-BEAR - direct token
             // Value = Basket
             finalPrice = basketPrice;
         }
