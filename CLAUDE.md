@@ -38,8 +38,14 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL
 - 1% max slippage cap for MEV protection
 
-**LeverageRouter** - Leveraged positions via Morpho Blue
+**LeverageRouter** - Leveraged DXY-BEAR positions via Morpho Blue
 - Flash loans USDC → swaps to DXY-BEAR → deposits as Morpho collateral
+- Requires user authorization in Morpho (`isAuthorized`)
+
+**BullLeverageRouter** - Leveraged DXY-BULL positions via Morpho Blue
+- Open: Flash loan USDC → mint pairs via Splitter → sell DXY-BEAR on Curve → deposit DXY-BULL to Morpho
+- Close: Uses nested flash loans - USDC flash for debt + DXY-BEAR flash mint for pair redemption
+- Close flow: Repay debt → withdraw DXY-BULL → flash mint DXY-BEAR → redeem pairs → buy back DXY-BEAR on Curve
 - Requires user authorization in Morpho (`isAuthorized`)
 
 ### Oracle Layer
@@ -65,9 +71,9 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ## Test Structure
 
 - `SyntheticSplitter*.t.sol` - Core protocol tests (unit, concurrent, fuzzy, invariant, preview)
-- `ZapRouter.t.sol` / `LeverageRouter.t.sol` - Router tests with MEV protection scenarios
+- `ZapRouter.t.sol` / `LeverageRouter.t.sol` / `BullLeverageRouter.t.sol` - Router tests with MEV protection scenarios
 - `YieldAdapter.t.sol` / `MorphoAdapter.t.sol` - Adapter tests with CAPO mechanism
-- Mock contracts in `test/` files (MockToken, MockFlashLender, MockMorpho, etc.)
+- Mock contracts in `test/` files (MockToken, MockFlashLender, MockMorpho, MockSplitter, etc.)
 
 ## External Integrations
 

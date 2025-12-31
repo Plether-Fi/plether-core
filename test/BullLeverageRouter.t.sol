@@ -87,11 +87,11 @@ contract BullLeverageRouterTest is Test {
 
     function test_OpenLeverage_WithFlashLoanFees() public {
         // Set 0.09% fee (standard for some pools)
-        lender.setFeeBps(9); 
-        
+        lender.setFeeBps(9);
+
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 3 * 1e18;
-        
+
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
@@ -99,7 +99,7 @@ contract BullLeverageRouterTest is Test {
         vm.stopPrank();
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
-        
+
         // Loan = 2000 USDC. Fee = 2000 * 0.0009 = 1.8 USDC (1_800_000).
         // Total Debt needed = 2000 + 1.8 = 2001.8 USDC.
         // Sale Proceeds (1:1) = 1500 USDC.
@@ -271,8 +271,8 @@ contract BullLeverageRouterTest is Test {
         // 5. Verify no USDC is left (it was either used to buy expensive BEAR or refunded)
         assertEq(usdc.balanceOf(address(router)), 0, "Router holding USDC");
 
-        // 6. Note: Due to slippage buffer logic in _executeCloseRedeem, 
-        // the router will likely hold some DXY-BEAR dust. 
+        // 6. Note: Due to slippage buffer logic in _executeCloseRedeem,
+        // the router will likely hold some DXY-BEAR dust.
         // We assert >= 0 just to acknowledge this behavior.
         assertGe(dxyBear.balanceOf(address(router)), 0, "Router may hold BEAR dust");
     }
@@ -281,20 +281,20 @@ contract BullLeverageRouterTest is Test {
         // 1. Open Position
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 3 * 1e18;
-        
+
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
         router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
-        
+
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         // 2. Mock a catastrophic event where Splitter redemption pays out only 10%
-        // The user owes 2000 USDC Flash Loan, but redemption of 1500 pairs only gives 
+        // The user owes 2000 USDC Flash Loan, but redemption of 1500 pairs only gives
         // 3000 * 0.10 = 300 USDC.
         // 300 USDC < 2000 USDC Debt -> Revert
         splitter.setRedemptionRate(10); // 10%
-        
+
         vm.expectRevert("Insufficient USDC for BEAR buyback");
         router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
         vm.stopPrank();
@@ -614,7 +614,7 @@ contract MockFlashLender is IERC3156FlashLender {
 contract MockCurvePool is ICurvePool {
     address public token0; // USDC (index 0)
     address public token1; // DXY-BEAR (index 1)
-    
+
     // Scale factor for output. Default 1:1.
     // dy = dx * rateNum / rateDenom (with decimals adjusted)
     uint256 public rateNum = 1;
@@ -624,7 +624,7 @@ contract MockCurvePool is ICurvePool {
         token0 = _token0;
         token1 = _token1;
     }
-    
+
     function setRate(uint256 num, uint256 denom) external {
         rateNum = num;
         rateDenom = denom;
@@ -644,7 +644,7 @@ contract MockCurvePool is ICurvePool {
             // DXY-BEAR (18) -> USDC (6) : / 1e12
             dy = dx / 1e12;
         }
-        
+
         // Apply Price Ratio
         dy = (dy * rateNum) / rateDenom;
 
@@ -670,7 +670,7 @@ contract MockCurvePool is ICurvePool {
             // DXY-BEAR (18) -> USDC (6) : / 1e12
             dy = dx / 1e12;
         }
-        
+
         // Apply Price Ratio
         dy = (dy * rateNum) / rateDenom;
     }
@@ -769,7 +769,7 @@ contract MockSplitter is ISyntheticSplitter {
     function setStatus(Status newStatus) external {
         _status = newStatus;
     }
-    
+
     function setRedemptionRate(uint256 rate) external {
         redemptionRate = rate;
     }
@@ -793,10 +793,10 @@ contract MockSplitter is ISyntheticSplitter {
         MockFlashToken(dxyBear).burn(msg.sender, amount);
         MockToken(dxyBull).burn(msg.sender, amount);
         uint256 usdcAmount = (amount * 2) / 1e12;
-        
+
         // Apply solvency haircut if set
         usdcAmount = (usdcAmount * redemptionRate) / 100;
-        
+
         MockToken(usdc).mint(msg.sender, usdcAmount);
     }
 
