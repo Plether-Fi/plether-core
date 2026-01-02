@@ -824,7 +824,7 @@ contract MockSplitter is ISyntheticSplitter {
         MockToken(dxyBull).mint(msg.sender, tokenAmount);
     }
 
-    function redeemPair(uint256 amount) external override {
+    function burn(uint256 amount) external override {
         // Burn both tokens, mint USDC at CAP pricing
         // amount is in token units (18 decimals), USDC is 6 decimals
         // CAP = $2.00, so 1 pair redeems to $2.00 USDC
@@ -839,20 +839,9 @@ contract MockSplitter is ISyntheticSplitter {
         MockToken(usdc).mint(msg.sender, usdcAmount);
     }
 
+    function emergencyRedeem(uint256) external override {}
+
     function currentStatus() external view override returns (Status) {
         return _status;
     }
-
-    // Stubs
-    function getSystemSolvency() external pure override returns (uint256, uint256) {
-        return (0, 0);
-    }
-    function redeemSettled(address, uint256) external override {}
-    function setTreasury(address) external override {}
-    function setVault(address) external override {}
-
-    function settledPrice() external pure override returns (uint256) {
-        return 0;
-    }
-    function skimYield() external override {}
 }

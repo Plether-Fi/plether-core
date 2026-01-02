@@ -280,21 +280,11 @@ contract MockSplitter is ISyntheticSplitter {
         MockFlashToken(tB).mint(msg.sender, mintAmount);
     }
 
-    // Stubs
+    function burn(uint256) external override {}
+
+    function emergencyRedeem(uint256) external override {}
+
     function currentStatus() external view override returns (Status) {
         return _status;
     }
-
-    function getSystemSolvency() external view override returns (uint256, uint256) {
-        return (0, 0);
-    }
-    function redeemPair(uint256) external override {}
-    function redeemSettled(address, uint256) external override {}
-    function setTreasury(address) external override {}
-    function setVault(address) external override {}
-
-    function settledPrice() external view override returns (uint256) {
-        return 0;
-    }
-    function skimYield() external override {}
 }

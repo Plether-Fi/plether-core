@@ -324,7 +324,7 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
 
         // 1. Redeem pairs via Splitter (DXY-BEAR + DXY-BULL -> USDC)
         // Both tokens should be in equal amounts. This burns both tokens.
-        SPLITTER.redeemPair(dxyBullAmount);
+        SPLITTER.burn(dxyBullAmount);
 
         // 2. Buy DXY-BEAR back on Curve to repay flash mint
         // We need flashMintAmount + fee of DXY-BEAR

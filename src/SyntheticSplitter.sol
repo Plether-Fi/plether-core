@@ -11,9 +11,10 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
+import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {SyntheticToken} from "./SyntheticToken.sol";
 
-contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
+contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ==========================================
@@ -566,6 +567,16 @@ contract SyntheticSplitter is Ownable, Pausable, ReentrancyGuard {
     // ==========================================
     // VIEW HELPERS (DASHBOARD)
     // ==========================================
+
+    /**
+     * @notice Returns the current protocol lifecycle status.
+     * @return The current Status enum value (ACTIVE, PAUSED, or SETTLED).
+     */
+    function currentStatus() external view override returns (Status) {
+        if (isLiquidated) return Status.SETTLED;
+        if (paused()) return Status.PAUSED;
+        return Status.ACTIVE;
+    }
 
     /**
      * @notice Returns high-level system metrics for UI dashboards
