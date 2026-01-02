@@ -43,7 +43,7 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes DXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF) |
+| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes DXY as weighted basket of 6 Chainlink feeds, with bound validation against Curve EMA price |
 | [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
@@ -146,6 +146,7 @@ forge fmt --check       # Check formatting
 - Reentrancy protection on state-changing functions
 - 7-day timelock for critical governance changes
 - Oracle staleness checks (8-hour timeout)
+- Oracle bound validation against Curve EMA to prevent price manipulation
 - Flash loan callback validation (initiator + lender checks)
 - CAPO mechanism protects yield adapters from donation attacks
 
