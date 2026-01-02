@@ -18,15 +18,16 @@ contract ZapRouter is IERC3156FlashBorrower {
     uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
     uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
-    // The system CAP is $2.00. We assume 6 decimal precision for checks (2e6).
-    uint256 public constant CAP_PRICE = 2e6;
-
     // Immutable Dependencies
     ISyntheticSplitter public immutable SPLITTER;
     IERC20 public immutable DXY_BEAR;
     IERC20 public immutable DXY_BULL;
     IERC20 public immutable USDC;
     ICurvePool public immutable CURVE_POOL;
+
+    // Cached from Splitter (immutable)
+    uint256 public immutable CAP; // 8 decimals (oracle format)
+    uint256 public immutable CAP_PRICE; // 6 decimals (for Curve price comparison)
 
     // Transient state for passing swap result from callback to main function
     uint256 private _lastSwapOut;
@@ -42,6 +43,10 @@ contract ZapRouter is IERC3156FlashBorrower {
         DXY_BULL = IERC20(_dxyBull);
         USDC = IERC20(_usdc);
         CURVE_POOL = ICurvePool(_curvePool);
+
+        // Cache CAP from Splitter (8 decimals) and derive 6-decimal version for price checks
+        CAP = ISyntheticSplitter(_splitter).CAP();
+        CAP_PRICE = CAP / 100; // 8 dec -> 6 dec
 
         // Pre-approve the Splitter to take our USDC
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
@@ -116,8 +121,9 @@ contract ZapRouter is IERC3156FlashBorrower {
         // Use balance check as source of truth (handles dust/fee-on-transfer edge cases)
         uint256 totalUsdc = USDC.balanceOf(address(this));
 
-        // Calculate mint amount: scale USDC (6 dec) to pairs (18 dec) at $2/pair
-        uint256 mintAmount = (totalUsdc * 1e12) / 2;
+        // Calculate mint amount: scale USDC (6 dec) to pairs (18 dec) using CAP
+        // Formula: mintAmount = totalUsdc * 1e20 / CAP (inverse of Splitter's usdcNeeded calculation)
+        uint256 mintAmount = (totalUsdc * 1e20) / CAP;
 
         // Note: Splitter is already approved for max in constructor
         SPLITTER.mint(mintAmount);

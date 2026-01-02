@@ -297,6 +297,7 @@ contract MockSplitter is ISyntheticSplitter {
     address public tA;
     address public tB;
     Status private _status = Status.ACTIVE;
+    uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
 
     constructor(address _tA, address _tB) {
         tA = _tA;

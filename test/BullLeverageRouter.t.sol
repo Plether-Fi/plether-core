@@ -798,6 +798,7 @@ contract MockSplitter is ISyntheticSplitter {
     address public usdc;
     Status private _status = Status.ACTIVE;
     uint256 public redemptionRate = 100; // Percentage of payout (100 = 100%)
+    uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
 
     constructor(address _dxyBear, address _dxyBull, address _usdc) {
         dxyBear = _dxyBear;

@@ -57,4 +57,10 @@ interface ISyntheticSplitter {
      * @return The current Status enum value.
      */
     function currentStatus() external view returns (Status);
+
+    /**
+     * @notice Returns the protocol CAP price (8 decimals, oracle format).
+     * @return The CAP value in 8 decimal format (e.g., 2e8 = $2.00).
+     */
+    function CAP() external view returns (uint256);
 }
