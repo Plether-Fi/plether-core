@@ -18,8 +18,8 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
 
     // Constants
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage
-    int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
-    int128 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
+    uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
+    uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
     // Splitter pricing constants (must match SyntheticSplitter)
     // CAP = $2.00 in oracle format (8 decimals)

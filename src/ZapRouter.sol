@@ -15,8 +15,8 @@ contract ZapRouter is IERC3156FlashBorrower {
 
     // Constants
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
-    int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
-    int128 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
+    uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
+    uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
     // The system CAP is $2.00. We assume 6 decimal precision for checks (2e6).
     uint256 public constant CAP_PRICE = 2e6;

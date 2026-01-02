@@ -14,8 +14,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
 
     // Constants
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
-    int128 public constant USDC_INDEX = 0; // USDC index in Curve pool
-    int128 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
+    uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
+    uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
     // Operation types for flash loan callback
     uint8 private constant OP_OPEN = 1;

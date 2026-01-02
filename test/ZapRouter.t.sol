@@ -233,13 +233,13 @@ contract MockCurvePool is ICurvePool {
         bearPrice = _price;
     }
 
-    function get_dy(int128 i, int128 j, uint256 dx) external view override returns (uint256) {
+    function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256) {
         if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
         if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
         return 0;
     }
 
-    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external override returns (uint256 dy) {
+    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
         require(dy >= min_dy, "Too little received");
 
