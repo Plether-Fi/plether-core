@@ -6,6 +6,7 @@ import "../src/BullLeverageRouter.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
 contract BullLeverageRouterTest is Test {
@@ -15,6 +16,7 @@ contract BullLeverageRouterTest is Test {
     MockToken public usdc;
     MockFlashToken public dxyBear;
     MockToken public dxyBull;
+    MockStakedToken public stakedDxyBull;
     MockMorpho public morpho;
     MockCurvePool public curvePool;
     MockFlashLender public lender;
@@ -27,17 +29,18 @@ contract BullLeverageRouterTest is Test {
         usdc = new MockToken("USDC", "USDC", 6);
         dxyBear = new MockFlashToken("DXY-BEAR", "DXY-BEAR");
         dxyBull = new MockToken("DXY-BULL", "DXY-BULL", 18);
+        stakedDxyBull = new MockStakedToken(address(dxyBull));
         morpho = new MockMorpho();
         curvePool = new MockCurvePool(address(usdc), address(dxyBear));
         lender = new MockFlashLender(address(usdc));
         splitter = new MockSplitter(address(dxyBear), address(dxyBull), address(usdc));
 
-        // Configure MockMorpho with token addresses
-        morpho.setTokens(address(usdc), address(dxyBull));
+        // Configure MockMorpho with token addresses (collateral is now staked token)
+        morpho.setTokens(address(usdc), address(stakedDxyBull));
 
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(dxyBull),
+            collateralToken: address(stakedDxyBull),
             oracle: address(0),
             irm: address(0),
             lltv: 900000000000000000 // 90%
@@ -50,6 +53,7 @@ contract BullLeverageRouterTest is Test {
             address(usdc),
             address(dxyBear),
             address(dxyBull),
+            address(stakedDxyBull),
             address(lender),
             params
         );
@@ -530,6 +534,29 @@ contract MockToken is ERC20 {
     }
 }
 
+contract MockStakedToken is ERC20 {
+    MockToken public underlying;
+
+    constructor(address _underlying) ERC20("Staked Token", "sTKN") {
+        underlying = MockToken(_underlying);
+    }
+
+    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+        underlying.transferFrom(msg.sender, address(this), assets);
+        shares = assets; // 1:1 for simplicity
+        _mint(receiver, shares);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        assets = shares; // 1:1 for simplicity
+        underlying.transfer(receiver, assets);
+    }
+}
+
 contract MockFlashToken is ERC20, IERC3156FlashLender {
     uint256 private _feeBps = 0;
 
@@ -705,8 +732,8 @@ contract MockMorpho is IMorpho {
             require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].supplied += assets;
-        // Burn collateral from caller (simulates transfer to Morpho)
-        MockToken(collateralToken).burn(msg.sender, assets);
+        // Transfer collateral from caller to Morpho
+        IERC20(collateralToken).transferFrom(msg.sender, address(this), assets);
         return (assets, 0);
     }
 
@@ -738,7 +765,7 @@ contract MockMorpho is IMorpho {
         return (assets, 0);
     }
 
-    function withdraw(MarketParams memory mp, uint256 assets, uint256, address onBehalfOf, address receiver)
+    function withdraw(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
         external
         override
         returns (uint256, uint256)
@@ -747,8 +774,8 @@ contract MockMorpho is IMorpho {
             require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].supplied -= assets;
-        // Mint collateral token to receiver
-        MockToken(collateralToken).mint(receiver, assets);
+        // Transfer collateral from Morpho to receiver
+        IERC20(collateralToken).transfer(receiver, assets);
         return (assets, 0);
     }
 

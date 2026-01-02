@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
@@ -69,8 +70,9 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
     IERC20 public immutable USDC;
     IERC20 public immutable DXY_BEAR;
     IERC20 public immutable DXY_BULL;
+    IERC4626 public immutable STAKED_DXY_BULL; // Staked token (Morpho collateral)
     IERC3156FlashLender public immutable LENDER; // USDC flash lender (e.g., Aave or Balancer)
-    // Morpho Market ID Configuration (DXY-BULL as collateral)
+    // Morpho Market ID Configuration (sDXY-BULL as collateral)
     MarketParams public marketParams;
 
     constructor(
@@ -80,6 +82,7 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         address _usdc,
         address _dxyBear,
         address _dxyBull,
+        address _stakedDxyBull,
         address _lender,
         MarketParams memory _marketParams
     ) {
@@ -89,6 +92,7 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         USDC = IERC20(_usdc);
         DXY_BEAR = IERC20(_dxyBear);
         DXY_BULL = IERC20(_dxyBull);
+        STAKED_DXY_BULL = IERC4626(_stakedDxyBull);
         LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
 
@@ -97,17 +101,19 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
         // 2. Allow Curve pool to take DXY-BEAR (for selling)
         DXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 3. Allow Morpho to take DXY-BULL (for supplying collateral)
-        DXY_BULL.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 4. Allow Morpho to take USDC (for repaying debt)
+        // 3. Allow StakedToken to take DXY-BULL (for staking)
+        DXY_BULL.safeIncreaseAllowance(_stakedDxyBull, type(uint256).max);
+        // 4. Allow Morpho to take sDXY-BULL (for supplying collateral)
+        IERC20(_stakedDxyBull).safeIncreaseAllowance(_morpho, type(uint256).max);
+        // 5. Allow Morpho to take USDC (for repaying debt)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 5. Allow Lender to take back USDC (Flash Loan Repayment)
+        // 6. Allow Lender to take back USDC (Flash Loan Repayment)
         USDC.safeIncreaseAllowance(_lender, type(uint256).max);
-        // 6. Allow Splitter to take DXY-BEAR (for redeeming pairs during close)
+        // 7. Allow Splitter to take DXY-BEAR (for redeeming pairs during close)
         DXY_BEAR.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 7. Allow Splitter to take DXY-BULL (for redeeming pairs during close)
+        // 8. Allow Splitter to take DXY-BULL (for redeeming pairs during close)
         DXY_BULL.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 8. Allow DXY-BEAR to take back tokens (Flash Mint Repayment)
+        // 9. Allow DXY-BEAR to take back tokens (Flash Mint Repayment)
         DXY_BEAR.safeIncreaseAllowance(_dxyBear, type(uint256).max);
     }
 
@@ -236,12 +242,15 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         uint256 dxyBearBalance = DXY_BEAR.balanceOf(address(this));
         uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearBalance, minSwapOut);
 
-        // 4. Deposit DXY-BULL to Morpho on behalf of the USER
+        // 4. Stake DXY-BULL to get sDXY-BULL
         uint256 dxyBullBalance = DXY_BULL.balanceOf(address(this));
         _lastDxyBullReceived = dxyBullBalance;
-        MORPHO.supply(marketParams, dxyBullBalance, 0, user, "");
+        uint256 stakedShares = STAKED_DXY_BULL.deposit(dxyBullBalance, address(this));
 
-        // 5. Borrow USDC from Morpho to repay flash loan
+        // 5. Deposit sDXY-BULL to Morpho on behalf of the USER
+        MORPHO.supply(marketParams, stakedShares, 0, user, "");
+
+        // 6. Borrow USDC from Morpho to repay flash loan
         // We already have usdcFromSale, so only borrow the remaining amount needed
         uint256 flashRepayment = loanAmount + fee;
         uint256 debtToIncur = flashRepayment > usdcFromSale ? flashRepayment - usdcFromSale : 0;
@@ -265,19 +274,22 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         // 1. Repay user's debt on Morpho
         MORPHO.repay(marketParams, loanAmount, 0, user, "");
 
-        // 2. Withdraw user's DXY-BULL collateral from Morpho
-        (uint256 withdrawnAssets,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
-        _lastCollateralWithdrawn = withdrawnAssets;
+        // 2. Withdraw user's sDXY-BULL collateral from Morpho
+        (uint256 withdrawnShares,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
+        _lastCollateralWithdrawn = withdrawnShares;
 
-        // 3. Store state for nested callback
+        // 3. Unstake sDXY-BULL to get DXY-BULL
+        uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(withdrawnShares, address(this), address(this));
+
+        // 4. Store state for nested callback
         _closeUser = user;
         _closeUsdcFlashAmount = loanAmount;
         _closeUsdcFlashFee = fee;
 
-        // 4. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
+        // 5. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
         // We need equal amounts of DXY-BEAR and DXY-BULL to redeem
-        bytes memory redeemData = abi.encode(OP_CLOSE_REDEEM, user, deadline, withdrawnAssets, maxSlippageBps);
-        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), withdrawnAssets, redeemData);
+        bytes memory redeemData = abi.encode(OP_CLOSE_REDEEM, user, deadline, dxyBullReceived, maxSlippageBps);
+        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), dxyBullReceived, redeemData);
 
         // After nested callback completes, repay USDC flash loan
         // (USDC should now be in contract from redemption)
@@ -285,7 +297,7 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         uint256 usdcBalance = USDC.balanceOf(address(this));
         require(usdcBalance >= flashRepayment, "Insufficient USDC from redemption");
 
-        // 5. Send remaining USDC to user
+        // 6. Send remaining USDC to user
         uint256 usdcToReturn = usdcBalance - flashRepayment;
         _lastUsdcReturned = usdcToReturn;
         if (usdcToReturn > 0) {

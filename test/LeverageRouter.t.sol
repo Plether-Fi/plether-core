@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../src/LeverageRouter.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
 contract LeverageRouterTest is Test {
@@ -13,6 +14,7 @@ contract LeverageRouterTest is Test {
     // Mocks
     MockToken public usdc;
     MockToken public dxyBear;
+    MockStakedToken public stakedDxyBear;
     MockCurvePool public curvePool;
     MockMorpho public morpho;
     MockFlashLender public lender;
@@ -25,17 +27,28 @@ contract LeverageRouterTest is Test {
     function setUp() public {
         usdc = new MockToken("USDC", "USDC");
         dxyBear = new MockToken("DXY-BEAR", "BEAR");
+        stakedDxyBear = new MockStakedToken(address(dxyBear));
         curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        morpho = new MockMorpho(address(usdc), address(dxyBear));
+        morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
         lender = new MockFlashLender();
 
         // FIX: Assign to state variable
         params = MarketParams({
-            loanToken: address(usdc), collateralToken: address(dxyBear), oracle: address(0), irm: address(0), lltv: 0
+            loanToken: address(usdc),
+            collateralToken: address(stakedDxyBear),
+            oracle: address(0),
+            irm: address(0),
+            lltv: 0
         });
 
         router = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(lender), params
+            address(morpho),
+            address(curvePool),
+            address(usdc),
+            address(dxyBear),
+            address(stakedDxyBear),
+            address(lender),
+            params
         );
 
         usdc.mint(alice, 1000 * 1e6);
@@ -83,15 +96,16 @@ contract LeverageRouterTest is Test {
     }
 
     function test_CloseLeverage_Success() public {
-        // Setup existing position: 3000 BEAR Collateral, 2000 USDC Debt
+        // Setup existing position: 3000 sDXY-BEAR Collateral, 2000 USDC Debt
         usdc.mint(address(morpho), 2000 * 1e6); // Fund morpho for borrowing
 
         vm.startPrank(alice);
-        // Manually create position in mock
+        // Manually create position in mock: mint BEAR -> stake to sBEAR -> supply to Morpho
         dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(morpho), 3000 * 1e18);
+        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
+        stakedDxyBear.deposit(3000 * 1e18, alice); // Alice gets 3000 sDXY-BEAR
 
-        // FIX: Use the state variable 'params' instead of router.marketParams()
+        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
         morpho.supply(params, 3000 * 1e18, 0, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice); // Alice holds the debt
 
@@ -218,6 +232,29 @@ contract MockToken is ERC20 {
     }
 }
 
+contract MockStakedToken is ERC20 {
+    MockToken public underlying;
+
+    constructor(address _underlying) ERC20("Staked Token", "sTKN") {
+        underlying = MockToken(_underlying);
+    }
+
+    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+        underlying.transferFrom(msg.sender, address(this), assets);
+        shares = assets; // 1:1 for simplicity
+        _mint(receiver, shares);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        assets = shares; // 1:1 for simplicity
+        underlying.transfer(receiver, assets);
+    }
+}
+
 contract MockFlashLender is IERC3156FlashLender {
     function maxFlashLoan(address) external pure override returns (uint256) {
         return type(uint256).max;
@@ -277,14 +314,14 @@ contract MockCurvePool is ICurvePool {
 
 contract MockMorpho is IMorpho {
     address public usdc;
-    address public bear;
+    address public stakedToken; // sDXY-BEAR
     mapping(address => uint256) public collateralBalance;
     mapping(address => uint256) public borrowBalance;
     mapping(address => mapping(address => bool)) public _isAuthorized;
 
-    constructor(address _usdc, address _bear) {
+    constructor(address _usdc, address _stakedToken) {
         usdc = _usdc;
-        bear = _bear;
+        stakedToken = _stakedToken;
     }
 
     function setAuthorization(address authorized, bool status) external {
@@ -300,7 +337,7 @@ contract MockMorpho is IMorpho {
         override
         returns (uint256, uint256)
     {
-        MockToken(bear).transferFrom(msg.sender, address(this), assets);
+        IERC20(stakedToken).transferFrom(msg.sender, address(this), assets);
         collateralBalance[onBehalfOf] += assets;
         return (assets, 0);
     }
@@ -337,7 +374,8 @@ contract MockMorpho is IMorpho {
             require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
         }
         collateralBalance[onBehalfOf] -= assets;
-        MockToken(bear).mint(receiver, assets);
+        // Transfer staked tokens back to receiver
+        IERC20(stakedToken).transfer(receiver, assets);
         return (assets, 0);
     }
 

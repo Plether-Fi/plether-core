@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
@@ -49,7 +50,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
     IMorpho public immutable MORPHO;
     ICurvePool public immutable CURVE_POOL;
     IERC20 public immutable USDC;
-    IERC20 public immutable DXY_BEAR; // Collateral token
+    IERC20 public immutable DXY_BEAR; // Underlying token
+    IERC4626 public immutable STAKED_DXY_BEAR; // Staked token (Morpho collateral)
     IERC3156FlashLender public immutable LENDER; // e.g., Aave or Balancer
     // Morpho Market ID Configuration
     MarketParams public marketParams;
@@ -59,6 +61,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         address _curvePool,
         address _usdc,
         address _dxyBear,
+        address _stakedDxyBear,
         address _lender,
         MarketParams memory _marketParams
     ) {
@@ -66,6 +69,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         CURVE_POOL = ICurvePool(_curvePool);
         USDC = IERC20(_usdc);
         DXY_BEAR = IERC20(_dxyBear);
+        STAKED_DXY_BEAR = IERC4626(_stakedDxyBear);
         LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
 
@@ -74,11 +78,13 @@ contract LeverageRouter is IERC3156FlashBorrower {
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
         // 2. Allow Curve pool to take DXY-BEAR (for closing)
         DXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 3. Allow Morpho to take DXY-BEAR (for supplying collateral)
-        DXY_BEAR.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 4. Allow Morpho to take USDC (for repaying debt)
+        // 3. Allow StakedToken to take DXY-BEAR (for staking)
+        DXY_BEAR.safeIncreaseAllowance(_stakedDxyBear, type(uint256).max);
+        // 4. Allow Morpho to take sDXY-BEAR (for supplying collateral)
+        IERC20(_stakedDxyBear).safeIncreaseAllowance(_morpho, type(uint256).max);
+        // 5. Allow Morpho to take USDC (for repaying debt)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 5. Allow Lender to take back USDC (Flash Loan Repayment)
+        // 6. Allow Lender to take back USDC (Flash Loan Repayment)
         USDC.safeIncreaseAllowance(_lender, type(uint256).max);
     }
 
@@ -203,10 +209,13 @@ contract LeverageRouter is IERC3156FlashBorrower {
         uint256 dxyBearReceived = CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC, minDxyBear);
         _lastDxyBearReceived = dxyBearReceived;
 
-        // 2. Supply DXY-BEAR to Morpho on behalf of the USER
-        MORPHO.supply(marketParams, dxyBearReceived, 0, user, "");
+        // 2. Stake DXY-BEAR to get sDXY-BEAR
+        uint256 stakedShares = STAKED_DXY_BEAR.deposit(dxyBearReceived, address(this));
 
-        // 3. Borrow USDC from Morpho to repay flash loan
+        // 3. Supply sDXY-BEAR to Morpho on behalf of the USER
+        MORPHO.supply(marketParams, stakedShares, 0, user, "");
+
+        // 4. Borrow USDC from Morpho to repay flash loan
         uint256 debtToIncur = loanAmount + fee;
         _lastDebtIncurred = debtToIncur;
         MORPHO.borrow(marketParams, debtToIncur, 0, user, address(this));
@@ -223,18 +232,21 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 1. Repay user's debt on Morpho
         MORPHO.repay(marketParams, loanAmount, 0, user, "");
 
-        // 2. Withdraw user's collateral from Morpho
-        (uint256 withdrawnAssets,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
-        _lastCollateralWithdrawn = withdrawnAssets;
+        // 2. Withdraw user's sDXY-BEAR collateral from Morpho
+        (uint256 withdrawnShares,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
+        _lastCollateralWithdrawn = withdrawnShares;
 
-        // 3. Swap DXY-BEAR -> USDC via Curve
-        uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, withdrawnAssets, minUsdcOut);
+        // 3. Unstake sDXY-BEAR to get DXY-BEAR
+        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(withdrawnShares, address(this), address(this));
 
-        // 4. Repay flash loan (loanAmount + fee)
+        // 4. Swap DXY-BEAR -> USDC via Curve
+        uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
+
+        // 5. Repay flash loan (loanAmount + fee)
         uint256 flashRepayment = loanAmount + fee;
         require(usdcReceived >= flashRepayment, "Insufficient USDC from swap");
 
-        // 5. Send remaining USDC to user
+        // 6. Send remaining USDC to user
         uint256 usdcToReturn = usdcReceived - flashRepayment;
         _lastUsdcReturned = usdcToReturn;
         if (usdcToReturn > 0) {
