@@ -21,11 +21,8 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
     uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
     uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
 
-    // Splitter pricing constants (must match SyntheticSplitter)
-    // CAP = $2.00 in oracle format (8 decimals)
     // USDC_MULTIPLIER = 10^(18 + 8 - 6) = 1e20 for USDC with 6 decimals
     // tokens = usdcAmount * USDC_MULTIPLIER / CAP
-    uint256 public constant CAP = 2e8; // $2.00 in 8 decimal format
     uint256 public constant USDC_MULTIPLIER = 1e20;
 
     // Operation types for flash loan callback
@@ -75,6 +72,9 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
     // Morpho Market ID Configuration (sDXY-BULL as collateral)
     MarketParams public marketParams;
 
+    // Cached from Splitter (immutable)
+    uint256 public immutable CAP; // 8 decimals (oracle format)
+
     constructor(
         address _morpho,
         address _splitter,
@@ -95,6 +95,9 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         STAKED_DXY_BULL = IERC4626(_stakedDxyBull);
         LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
+
+        // Cache CAP from Splitter (8 decimals)
+        CAP = ISyntheticSplitter(_splitter).CAP();
 
         // Approvals (One-time)
         // 1. Allow Splitter to take USDC (for minting pairs)
