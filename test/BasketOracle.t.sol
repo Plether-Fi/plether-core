@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
-import "../src/BasketOracle.sol";
+import "../src/oracles/BasketOracle.sol";
 import "./utils/MockOracle.sol";
 
 // 2. The Test Suite

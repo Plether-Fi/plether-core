@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
-import {BasketOracle} from "../src/BasketOracle.sol";
+import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {YieldAdapter} from "../src/YieldAdapter.sol";
 import {MockYieldAdapter} from "../src/MockYieldAdapter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";

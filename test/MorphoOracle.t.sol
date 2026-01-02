@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
-import "../src/MorphoOracle.sol";
+import "../src/oracles/MorphoOracle.sol";
 import "./utils/MockOracle.sol"; // Reusing the Mock from Step 2
 
 contract MorphoOracleTest is Test {
