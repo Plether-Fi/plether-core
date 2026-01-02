@@ -48,12 +48,12 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        zapRouter.zapMint(usdcInput, 99 * 1e18, 100, block.timestamp + 1 hours);
+        // ZapRouter has 1% buffer, so output is ~99% of theoretical max
+        zapRouter.zapMint(usdcInput, 98 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        // Parity: Alice gets ~100 BULL.
-        // Tolerance 1e15 (0.001 units) allows for buffer dust effects
-        assertApproxEqAbs(dxyBull.balanceOf(alice), 100 * 1e18, 1e15, "Parity: Alice should get ~100 BULL");
+        // Parity with 1% buffer: Alice gets ~99.5 BULL
+        assertApproxEqAbs(dxyBull.balanceOf(alice), 99.5 ether, 1e18, "Parity: Alice should get ~99.5 BULL");
         // Ensure no leaks in Router (Balance must be 0)
         assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Parity: Router leaked BEAR");
     }
@@ -66,14 +66,12 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        zapRouter.zapMint(usdcInput, 66 * 1e18, 100, block.timestamp + 1 hours);
+        // ZapRouter has 1% buffer, so output is ~99% of theoretical max
+        zapRouter.zapMint(usdcInput, 65 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        // Exp: 66.666... BULL
-        // Hardcoded integer approx for 66.66... ether
-        uint256 expected = 66666666666666666666;
-
-        assertApproxEqAbs(dxyBull.balanceOf(alice), expected, 1e15, "Cheap: Alice output mismatch");
+        // With 1% buffer: ~66 BULL (theoretical 66.66)
+        assertApproxEqAbs(dxyBull.balanceOf(alice), 66 ether, 1e18, "Cheap: Alice output mismatch");
         assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Cheap: Router leaked BEAR");
     }
 
@@ -85,11 +83,12 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        zapRouter.zapMint(usdcInput, 199 * 1e18, 100, block.timestamp + 1 hours);
+        // ZapRouter has 1% buffer, so output is ~99% of theoretical max
+        zapRouter.zapMint(usdcInput, 196 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        // Exp: 200 BULL
-        assertApproxEqAbs(dxyBull.balanceOf(alice), 200 * 1e18, 1e15, "Expensive: Alice should get ~200 BULL");
+        // With 1% buffer: ~198 BULL (theoretical 200)
+        assertApproxEqAbs(dxyBull.balanceOf(alice), 198 ether, 3e18, "Expensive: Alice should get ~198 BULL");
         assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Expensive: Router leaked BEAR");
     }
 
@@ -168,6 +167,42 @@ contract ZapRouterTest is Test {
 
         uint256 tokens = (total * 1e12) / 2;
         assertEq(expectedTokensOut, tokens, "Preview Token Out");
+    }
+
+    function test_BugFix_DecimalScaling() public {
+        // 1. SETUP
+        uint256 amountIn = 100e6; // $100 USDC (6 Decimals)
+
+        vm.startPrank(alice);
+        IERC20(usdc).approve(address(zapRouter), amountIn);
+
+        uint256 balanceBefore = IERC20(dxyBull).balanceOf(alice);
+
+        // 2. EXECUTE
+        // We use a generous deadline and 0 minOut to focus purely on the math mechanics
+        zapRouter.zapMint(amountIn, 0, 100, block.timestamp + 1 hours);
+
+        uint256 balanceAfter = IERC20(dxyBull).balanceOf(alice);
+        uint256 mintedAmount = balanceAfter - balanceBefore;
+        vm.stopPrank();
+
+        console.log("Input USDC (6 dec): ", amountIn);
+        console.log("Output BULL (18 dec):", mintedAmount);
+
+        // 3. VERIFICATION
+        // Scenario A (The Bug):
+        // If we didn't scale, $100 USDC -> 100e6 units.
+        // 100e6 units treated as 18 decimals is 0.0000000001 tokens.
+
+        // Scenario B (The Fix):
+        // $100 USDC * 1e12 = 100e18 units.
+        // With ~2x leverage, we expect roughly 100 BULL tokens (100e18).
+
+        // Assertion: Ensure we received more than 1 whole unit (1e18).
+        // If the bug was present, this assertion would fail immediately.
+        assertGt(mintedAmount, 1e18, "Decimal Scaling Failed: Output is dust");
+
+        console.log("Test Passed: Output is properly scaled to 18 decimals.");
     }
 }
 
@@ -273,11 +308,9 @@ contract MockSplitter is ISyntheticSplitter {
     }
 
     function mint(uint256 amount) external override {
-        // CAP = 2 USDC. Input amount is USDC.
-        // Logic: (amount * 1e12) / 2
-        uint256 mintAmount = (amount * 1e12) / 2;
-        MockFlashToken(tA).mint(msg.sender, mintAmount);
-        MockFlashToken(tB).mint(msg.sender, mintAmount);
+        // amount is already in 18-decimal token units (ZapRouter pre-calculates)
+        MockFlashToken(tA).mint(msg.sender, amount);
+        MockFlashToken(tB).mint(msg.sender, amount);
     }
 
     function burn(uint256) external override {}

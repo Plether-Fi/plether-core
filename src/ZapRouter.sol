@@ -64,53 +64,40 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(SPLITTER.currentStatus() == ISyntheticSplitter.Status.ACTIVE, "Splitter not active");
 
-        // 1. Get Real-Time Prices
-        // "How much USDC do I get for 1 BEAR (1e18)?"
+        // 1. Get Spot Price
         uint256 priceBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
         require(priceBear < CAP_PRICE, "Bear price > Cap");
 
-        // 2. Calculate Bull Price ($2.00 - BearPrice)
+        // 2. Calculate Bull Price (e.g., $2.00 - $1.10 = $0.90)
         uint256 priceBull = CAP_PRICE - priceBear;
 
-        // 3. Calculate Perfect Flash Amount
-        // Borrow = Principal / PriceBull
-        // (USDC_6 * 1e18) / USDC_6 = 18 decimals
-        uint256 flashAmount = (usdcAmount * 1e18) / priceBull;
+        // 3. Calculate Theoretical Max Borrow
+        // Example: $1000 / $0.90 = 1111 Bear Tokens
+        uint256 theoreticalFlash = (usdcAmount * 1e18) / priceBull;
 
-        // 4. Safety Buffer
-        // Rounding in the Swap (18->6 dec) and Mint (6->18 dec) cycles can cause us
-        // to be short by ~1e12 wei (dust). We reduce the borrow amount slightly to guarantee solvency.
-        // The surplus (dust) will be swept to the user in the callback.
-        if (flashAmount > 1e13) flashAmount -= 1e13;
+        // Apply solvency buffer to cover swap fees (~0.04%) and rounding
+        uint256 bufferBps = 100; // 1% buffer
+        uint256 flashAmount = (theoreticalFlash * (10000 - bufferBps)) / 10000;
 
-        // 5. Calculate Minimum Swap Output (Slippage Check 1)
-        // We expect to sell `flashAmount` of Bear.
-        // Expected USDC = flashAmount * priceBear
-        uint256 expectedSwapOut = (flashAmount * priceBear) / 1e18;
+        // 4. Calculate Expected Swap Output (with Price Impact)
+        uint256 expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
         uint256 minSwapOut = (expectedSwapOut * (10000 - maxSlippageBps)) / 10000;
 
-        // 6. Initiate Flash Loan
-        // Pull USDC from User first
+        // 5. Initiate Flash Loan
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // Encode user address so we can sweep dust to them
         bytes memory data = abi.encode(msg.sender, usdcAmount, minSwapOut);
 
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
-        // 7. Final Transfer & Check
-        // The flash loan callback handles the minting.
+        // 6. Final Transfer
         uint256 tokensOut = DXY_BULL.balanceOf(address(this));
         require(tokensOut >= minAmountOut, "Slippage too high");
         DXY_BULL.safeTransfer(msg.sender, tokensOut);
 
-        // 8. Emit event for off-chain tracking and MEV analysis
         emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
     }
 
-    /**
-     * @dev The Callback Function called by DXY-BEAR token during flashLoan.
-     */
     function onFlashLoan(address initiator, address token, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
@@ -119,25 +106,31 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == address(DXY_BEAR), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params including user address for dust sweeping
+        // Decode params
         (address user, uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (address, uint256, uint256));
 
         // 1. Swap Borrowed Bear -> USDC via Curve
         uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, amount, minSwapOut);
         _lastSwapOut = swappedUsdc;
 
-        // 2. Mint Real Pairs from Core (userUsdcAmount + swappedUsdc)
-        // Splitter logic: 2 USDC -> 1 Pair (if CAP is $2)
-        SPLITTER.mint(userUsdcAmount + swappedUsdc);
+        // Use balance check as source of truth (handles dust/fee-on-transfer edge cases)
+        uint256 totalUsdc = USDC.balanceOf(address(this));
+
+        // Calculate mint amount: scale USDC (6 dec) to pairs (18 dec) at $2/pair
+        uint256 mintAmount = (totalUsdc * 1e12) / 2;
+
+        // Note: Splitter is already approved for max in constructor
+        SPLITTER.mint(mintAmount);
 
         // 3. Repay the Flash Loan
         uint256 repayAmount = amount + fee;
         DXY_BEAR.safeIncreaseAllowance(msg.sender, repayAmount);
 
         // 4. Sweep Dust
-        // Due to the Safety Buffer, we likely minted slightly more BEAR than we owe.
-        // Send this surplus to the user to prevent stuck funds (leaks).
+        // Check if we successfully minted enough to repay (Safety Check)
         uint256 currentBalance = DXY_BEAR.balanceOf(address(this));
+        require(currentBalance >= repayAmount, "Solvency Breach: Not enough Bear minted");
+
         if (currentBalance > repayAmount) {
             uint256 surplus = currentBalance - repayAmount;
             DXY_BEAR.safeTransfer(user, surplus);
