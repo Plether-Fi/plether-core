@@ -701,6 +701,10 @@ contract MockCurvePool is ICurvePool {
         // Apply Price Ratio
         dy = (dy * rateNum) / rateDenom;
     }
+
+    function price_oracle() external pure override returns (uint256) {
+        return 1e18; // Default 1:1 price in 18 decimals
+    }
 }
 
 contract MockMorpho is IMorpho {

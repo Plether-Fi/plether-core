@@ -14,4 +14,8 @@ interface ICurvePool {
     /// @param dx Amount of input token
     /// @param min_dy Minimum amount of output token to receive
     function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external returns (uint256);
+
+    /// @notice Returns the EMA price of the pool (Token1 per Token0 or vice versa)
+    /// @dev Typically returns price of the non-stablecoin asset in 1e18 precision
+    function price_oracle() external view returns (uint256);
 }

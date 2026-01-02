@@ -2,12 +2,7 @@
 pragma solidity 0.8.33;
 
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
-
-interface ICurvePool {
-    /// @notice Returns the EMA price of the pool (Token1 per Token0 or vice versa)
-    /// @dev Typically returns price of the non-stablecoin asset in 1e18 precision
-    function price_oracle() external view returns (uint256);
-}
+import {ICurvePool} from "../interfaces/ICurvePool.sol";
 
 /**
  * @title BasketOracle
@@ -34,9 +29,11 @@ contract BasketOracle is AggregatorV3Interface {
     error BasketOracle__InvalidPrice(address feed);
     error BasketOracle__LengthMismatch();
     error BasketOracle__PriceDeviation(uint256 theoretical, uint256 spot);
+    error BasketOracle__ZeroAddress();
 
     constructor(address[] memory _feeds, uint256[] memory _quantities, address _curvePool, uint256 _maxDeviationBps) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
+        if (_curvePool == address(0)) revert BasketOracle__ZeroAddress();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
@@ -101,11 +98,16 @@ contract BasketOracle is AggregatorV3Interface {
         // the TOKEN price in USDC (1e18 precision).
         uint256 spot18 = CURVE_POOL.price_oracle();
 
+        // Safety: Spot price must be positive
+        if (spot18 == 0) revert BasketOracle__InvalidPrice(address(CURVE_POOL));
+
         // Calculate difference
         uint256 diff = theoretical18 > spot18 ? theoretical18 - spot18 : spot18 - theoretical18;
 
-        // Threshold: (theoretical * bps) / 10000
-        uint256 threshold = (theoretical18 * MAX_DEVIATION_BPS) / 10000;
+        // Threshold: Use min of theoretical and spot to prevent manipulation
+        // If attacker inflates Chainlink, they can't inflate the threshold
+        uint256 basePrice = theoretical18 < spot18 ? theoretical18 : spot18;
+        uint256 threshold = (basePrice * MAX_DEVIATION_BPS) / 10000;
 
         if (diff > threshold) {
             revert BasketOracle__PriceDeviation(theoretical18, spot18);

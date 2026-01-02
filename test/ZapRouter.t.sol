@@ -252,6 +252,10 @@ contract MockCurvePool is ICurvePool {
 
         return dy;
     }
+
+    function price_oracle() external view override returns (uint256) {
+        return bearPrice * 1e12; // Scale 6 decimals to 18 decimals
+    }
 }
 
 contract MockSplitter is ISyntheticSplitter {

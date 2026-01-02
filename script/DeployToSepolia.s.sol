@@ -79,8 +79,12 @@ contract DeployToSepolia is Script {
         quantities[4] = 42 * 10 ** 15; // 4.2%
         quantities[5] = 36 * 10 ** 15; // 3.6%
 
+        // Curve Pool address on Sepolia (placeholder - update with actual pool)
+        address curvePool = address(0x1); // TODO: Replace with actual Curve pool
+        uint256 maxDeviationBps = 200; // 2% max deviation
+
         // Deploy BasketOracle
-        BasketOracle oracle = new BasketOracle(feeds, quantities);
+        BasketOracle oracle = new BasketOracle(feeds, quantities, curvePool, maxDeviationBps);
 
         // USDC address on Sepolia
         // address usdc = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
