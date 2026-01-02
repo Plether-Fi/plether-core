@@ -32,6 +32,14 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - DXY-BULL: appreciates when USD strengthens / DXY rises
 - Only SyntheticSplitter can mint/burn
 
+### Staking Layer
+
+**StakedToken** - Staked versions of DXY-BEAR and DXY-BULL (sDXY-BEAR, sDXY-BULL)
+- Users stake DXY tokens to receive staked tokens 1:1
+- Staked tokens are used as collateral in Morpho lending pools
+- Required for leverage positions (routers stake on behalf of users)
+- May accrue staking rewards (protocol-specific incentives)
+
 ### Routing Layer
 
 **ZapRouter** - Efficient DXY-BULL acquisition using flash mints
@@ -39,13 +47,15 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - 1% max slippage cap for MEV protection
 
 **LeverageRouter** - Leveraged DXY-BEAR positions via Morpho Blue
-- Flash loans USDC → swaps to DXY-BEAR → deposits as Morpho collateral
+- Flash loans USDC → swaps to DXY-BEAR → stakes to sDXY-BEAR → deposits as Morpho collateral
+- Morpho market uses sDXY-BEAR as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
 **BullLeverageRouter** - Leveraged DXY-BULL positions via Morpho Blue
-- Open: Flash loan USDC → mint pairs via Splitter → sell DXY-BEAR on Curve → deposit DXY-BULL to Morpho
+- Open: Flash loan USDC → mint pairs via Splitter → sell DXY-BEAR on Curve → stake DXY-BULL → deposit sDXY-BULL to Morpho
 - Close: Uses nested flash loans - USDC flash for debt + DXY-BEAR flash mint for pair redemption
-- Close flow: Repay debt → withdraw DXY-BULL → flash mint DXY-BEAR → redeem pairs → buy back DXY-BEAR on Curve
+- Close flow: Repay debt → withdraw sDXY-BULL → unstake to DXY-BULL → flash mint DXY-BEAR → redeem pairs → buy back DXY-BEAR on Curve
+- Morpho market uses sDXY-BULL as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
 ### Oracle Layer
@@ -53,6 +63,8 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 **BasketOracle** - Computes DXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF)
 
 **MorphoOracle** - Adapts BasketOracle to Morpho's 1e36 scale format
+
+**StakedOracle**: Wrapper that calculates `Price(Asset) * ExchangeRate` to price sDXY collateral for Morpho
 
 ### Yield Adapters (ERC4626)
 
@@ -79,5 +91,5 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 - **Chainlink**: AggregatorV3Interface for price feeds
 - **Curve**: ICurvePool for USDC/DXY-BEAR swaps (indices: USDC=0, DXY-BEAR=1)
-- **Morpho Blue**: IMorpho for lending/collateral
+- **Morpho Blue**: IMorpho for lending with staked tokens (sDXY-BEAR, sDXY-BULL) as collateral
 - **Aave V3**: IAavePool for yield farming
