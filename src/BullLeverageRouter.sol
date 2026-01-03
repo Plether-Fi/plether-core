@@ -9,6 +9,7 @@ import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 import {FlashLoanBase} from "./base/FlashLoanBase.sol";
+import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @notice Leverage router for DXY-BULL positions via Morpho Blue.
 /// @dev Uses flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.
@@ -20,10 +21,6 @@ contract BullLeverageRouter is FlashLoanBase {
     uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage
     uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
     uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
-
-    // USDC_MULTIPLIER = 10^(18 + 8 - 6) = 1e20 for USDC with 6 decimals
-    // tokens = usdcAmount * USDC_MULTIPLIER / CAP
-    uint256 public constant USDC_MULTIPLIER = 1e20;
 
     // Operation types for flash loan callback
     uint8 private constant OP_OPEN = 1;
@@ -150,10 +147,10 @@ contract BullLeverageRouter is FlashLoanBase {
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
         // Calculate minimum USDC output from selling DXY-BEAR using Curve price discovery
-        // Splitter mints at CAP price: tokens = usdc * USDC_MULTIPLIER / CAP
+        // Splitter mints at CAP price: tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
         // For CAP=$2, $1 USDC → 0.5 pairs (0.5e18 of each token)
         uint256 totalUSDC = principal + loanAmount;
-        uint256 dxyBearAmount = (totalUSDC * USDC_MULTIPLIER) / CAP;
+        uint256 dxyBearAmount = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
         uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
         uint256 minSwapOut = (expectedUsdcFromSale * (10_000 - maxSlippageBps)) / 10_000;
 
@@ -242,8 +239,8 @@ contract BullLeverageRouter is FlashLoanBase {
 
         // 2. Mint pairs via Splitter (USDC -> DXY-BEAR + DXY-BULL)
         // Splitter.mint expects token amount (18 decimals), not USDC (6 decimals)
-        // tokens = usdc * USDC_MULTIPLIER / CAP
-        SPLITTER.mint((totalUSDC * USDC_MULTIPLIER) / CAP);
+        // tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
+        SPLITTER.mint((totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP);
 
         // 3. Sell ALL DXY-BEAR for USDC via Curve
         uint256 dxyBearBalance = DXY_BEAR.balanceOf(address(this));
@@ -386,8 +383,8 @@ contract BullLeverageRouter is FlashLoanBase {
 
         loanAmount = (principal * (leverage - 1e18)) / 1e18;
         totalUSDC = principal + loanAmount;
-        // Splitter mints at CAP price: tokens = usdc * USDC_MULTIPLIER / CAP
-        expectedDxyBull = (totalUSDC * USDC_MULTIPLIER) / CAP;
+        // Splitter mints at CAP price: tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
+        expectedDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
 
         // Use Curve to estimate USDC from selling DXY-BEAR
         uint256 dxyBearAmount = expectedDxyBull;
@@ -416,8 +413,8 @@ contract BullLeverageRouter is FlashLoanBase {
         // Convert staked shares to underlying BULL amount (shares have 1000x offset)
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
 
-        // Redeeming pairs at CAP: usdc = tokens * CAP / USDC_MULTIPLIER
-        expectedUSDC = (dxyBullAmount * CAP) / USDC_MULTIPLIER;
+        // Redeeming pairs at CAP: usdc = tokens * CAP / DecimalConstants.USDC_TO_TOKEN_SCALE
+        expectedUSDC = (dxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
 
         // Estimate USDC needed to buy back DXY-BEAR for flash mint repayment
         uint256 testUsdcAmount = 1e6; // 1 USDC
@@ -426,7 +423,7 @@ contract BullLeverageRouter is FlashLoanBase {
             usdcForBearBuyback = (dxyBullAmount * testUsdcAmount) / bearPerUsdc;
         } else {
             // Fallback: use CAP pricing
-            usdcForBearBuyback = (dxyBullAmount * CAP) / USDC_MULTIPLIER;
+            usdcForBearBuyback = (dxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         }
 
         // Flash loan fee for USDC debt repayment

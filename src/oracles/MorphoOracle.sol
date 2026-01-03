@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
+import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 
 interface IMorphoOracle {
     /// @notice Returns the price of 1 unit of collateral, quoted in the loan asset, scaled to 1e36.
@@ -12,9 +13,6 @@ contract MorphoOracle is IMorphoOracle {
     AggregatorV3Interface public immutable BASKET_ORACLE;
     uint256 public immutable CAP;
     bool public immutable IS_INVERSE; // True = DXY-BULL (Cap - Price)
-
-    // Scaling: 8 decimals (Chainlink) -> 36 decimals (Morpho)
-    uint256 constant SCALE_FACTOR = 1e28;
 
     error MorphoOracle__InvalidPrice();
 
@@ -59,6 +57,6 @@ contract MorphoOracle is IMorphoOracle {
 
         // 3. Scale Up to 1e36
         // Example: Price $1.00 (10^8) * 10^28 = 10^36
-        return finalPrice * SCALE_FACTOR;
+        return finalPrice * DecimalConstants.CHAINLINK_TO_MORPHO_SCALE;
     }
 }

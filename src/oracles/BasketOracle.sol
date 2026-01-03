@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../interfaces/ICurvePool.sol";
+import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 
 /**
  * @title BasketOracle
@@ -91,7 +92,7 @@ contract BasketOracle is AggregatorV3Interface {
     function _checkDeviation(uint256 theoreticalPrice8Dec) internal view {
         // Curve returns 18 decimals usually. Chainlink is 8.
         // Scale Theoretical to 18 decimals for comparison.
-        uint256 theoretical18 = theoreticalPrice8Dec * 1e10;
+        uint256 theoretical18 = theoreticalPrice8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         // Get Spot Price (EMA) from Curve V2
         // Note: Assumes Curve Pool is [USDC, TOKEN] or similar where price_oracle returns

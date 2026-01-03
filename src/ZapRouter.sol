@@ -7,6 +7,7 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {FlashLoanBase} from "./base/FlashLoanBase.sol";
+import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @notice ZapRouter for acquiring DXY-BULL tokens efficiently.
 /// @dev For DXY-BEAR, users should swap directly on Curve.
@@ -163,8 +164,8 @@ contract ZapRouter is FlashLoanBase {
         uint256 totalUsdc = USDC.balanceOf(address(this));
 
         // Calculate mint amount: scale USDC (6 dec) to pairs (18 dec) using CAP
-        // Formula: mintAmount = totalUsdc * 1e20 / CAP (inverse of Splitter's usdcNeeded calculation)
-        uint256 mintAmount = (totalUsdc * 1e20) / CAP;
+        // Formula: mintAmount = totalUsdc * USDC_TO_TOKEN_SCALE / CAP (inverse of Splitter's usdcNeeded calculation)
+        uint256 mintAmount = (totalUsdc * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
 
         // Note: Splitter is already approved for max in constructor
         SPLITTER.mint(mintAmount);
