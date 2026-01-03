@@ -9,6 +9,10 @@ import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 
+/// @title LeverageRouter
+/// @notice Leverage router for DXY-BEAR positions via Morpho Blue.
+/// @dev Flash loans USDC → swaps to DXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
+///      Requires user to authorize this contract in Morpho before use.
 contract LeverageRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
@@ -166,9 +170,7 @@ contract LeverageRouter is FlashLoanBase {
         emit LeverageClosed(msg.sender, debtToRepay, _lastCollateralWithdrawn, _lastUsdcReturned, maxSlippageBps);
     }
 
-    /**
-     * @dev Callback: Handles both open and close operations.
-     */
+    /// @dev ERC-3156 flash loan callback. Routes to open or close handler.
     function onFlashLoan(
         address initiator,
         address token,

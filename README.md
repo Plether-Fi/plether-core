@@ -147,6 +147,16 @@ forge fmt               # Format code
 forge fmt --check       # Check formatting
 ```
 
+### Documentation
+
+Generate HTML documentation from NatSpec comments:
+
+```bash
+forge doc               # Generate docs to ./docs
+forge doc --serve       # Serve docs locally at http://localhost:3000
+forge doc --build       # Build static site to ./docs/book
+```
+
 ## Security
 
 - All contracts use OpenZeppelin's battle-tested implementations

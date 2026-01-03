@@ -15,6 +15,11 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {SyntheticToken} from "./SyntheticToken.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
+/// @title SyntheticSplitter
+/// @notice Core protocol contract for minting/burning synthetic DXY tokens.
+/// @dev Accepts USDC collateral to mint equal amounts of DXY-BEAR + DXY-BULL tokens.
+///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
+///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
 contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -162,6 +167,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         depositToAdapter = usdcRequired - keptInBuffer;
     }
 
+    /// @notice Mint DXY-BEAR and DXY-BULL tokens by depositing USDC collateral.
+    /// @param amount The amount of token pairs to mint (18 decimals).
     function mint(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
@@ -236,6 +243,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         }
     }
 
+    /// @notice Burn DXY-BEAR and DXY-BULL tokens to redeem USDC collateral.
+    /// @param amount The amount of token pairs to burn (18 decimals).
     function burn(uint256 amount) external nonReentrant {
         if (amount == 0) revert Splitter__ZeroAmount();
 
@@ -308,6 +317,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit LiquidationTriggered(price);
     }
 
+    /// @notice Emergency redemption when protocol is liquidated (price >= CAP).
+    /// @dev Only burns DXY-BEAR tokens at CAP price. DXY-BULL becomes worthless.
+    /// @param amount The amount of DXY-BEAR tokens to redeem (18 decimals).
     function emergencyRedeem(uint256 amount) external nonReentrant {
         if (!isLiquidated) {
             uint256 price = _getOraclePrice();
@@ -415,6 +427,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         canHarvest = true;
     }
 
+    /// @notice Permissionless yield harvesting from the adapter.
+    /// @dev Distributes surplus: 1% to caller, 20% to treasury, 79% to staking.
     function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
@@ -473,7 +487,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         }
     }
 
-    // --- Fee Receivers ---
+    /// @notice Propose new fee receiver addresses (7-day timelock).
+    /// @param _treasury New treasury address.
+    /// @param _staking New staking address (can be zero to send all to treasury).
     function proposeFeeReceivers(address _treasury, address _staking) external onlyOwner {
         require(_treasury != address(0), "Invalid Treasury");
         pendingFees = FeeConfig(_treasury, _staking);
@@ -481,6 +497,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit FeesProposed(_treasury, _staking, feesActivationTime);
     }
 
+    /// @notice Finalize pending fee receiver change after timelock expires.
     function finalizeFeeReceivers() external onlyOwner {
         if (feesActivationTime == 0) revert Splitter__InvalidProposal();
         if (block.timestamp < feesActivationTime) revert Splitter__TimelockActive();
@@ -495,7 +512,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit FeesUpdated(treasury, staking);
     }
 
-    // --- Adapter Migration ---
+    /// @notice Propose a new yield adapter (7-day timelock).
+    /// @param _newAdapter Address of the new ERC4626-compliant adapter.
     function proposeAdapter(address _newAdapter) external onlyOwner {
         require(_newAdapter != address(0), "Invalid Adapter");
         pendingAdapter = _newAdapter;
@@ -503,6 +521,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit AdapterProposed(_newAdapter, adapterActivationTime);
     }
 
+    /// @notice Finalize adapter migration after timelock. Migrates all funds.
     function finalizeAdapter() external nonReentrant onlyOwner {
         if (pendingAdapter == address(0)) revert Splitter__InvalidProposal();
         if (block.timestamp < adapterActivationTime) revert Splitter__TimelockActive();
@@ -534,10 +553,13 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     // ==========================================
     // ADMIN HELPERS
     // ==========================================
+
+    /// @notice Pause the protocol. Blocks minting and harvesting.
     function pause() external onlyOwner {
         _pause();
     }
 
+    /// @notice Unpause the protocol. Starts 7-day governance cooldown.
     function unpause() external onlyOwner {
         lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
         _unpause();

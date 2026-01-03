@@ -9,6 +9,9 @@ interface IMorphoOracle {
     function price() external view returns (uint256);
 }
 
+/// @title MorphoOracle
+/// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
+/// @dev Supports both DXY-BEAR (direct) and DXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {
     AggregatorV3Interface public immutable BASKET_ORACLE;
     uint256 public immutable CAP;
@@ -27,6 +30,8 @@ contract MorphoOracle is IMorphoOracle {
         IS_INVERSE = _isInverse;
     }
 
+    /// @notice Returns collateral price scaled to 1e36 for Morpho Blue.
+    /// @return The price of 1 unit of collateral in loan token terms.
     function price() external view override returns (uint256) {
         // 1. Get Price from Basket (8 decimals)
         (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();

@@ -9,8 +9,10 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
-/// @notice ZapRouter for acquiring DXY-BULL tokens efficiently.
-/// @dev For DXY-BEAR, users should swap directly on Curve.
+/// @title ZapRouter
+/// @notice Efficient router for acquiring DXY-BULL tokens using flash mints.
+/// @dev Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL.
+///      For DXY-BEAR, users should swap directly on Curve instead.
 contract ZapRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
@@ -113,6 +115,11 @@ contract ZapRouter is FlashLoanBase {
     // =================================================================
     // ZAP BURN (BULL -> USDC)
     // =================================================================
+
+    /// @notice Sell DXY-BULL tokens for USDC using flash mint efficiency.
+    /// @param bullAmount Amount of DXY-BULL to sell.
+    /// @param minUsdcOut Minimum USDC to receive (slippage protection).
+    /// @param deadline Unix timestamp after which the transaction reverts.
     function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external {
         require(bullAmount > 0, "Amount > 0");
         require(block.timestamp <= deadline, "Expired");
@@ -135,6 +142,8 @@ contract ZapRouter is FlashLoanBase {
     // =================================================================
     // FLASH LOAN CALLBACK
     // =================================================================
+
+    /// @dev ERC-3156 flash loan callback. Handles both mint and burn operations.
     function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
