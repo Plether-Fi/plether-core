@@ -46,6 +46,12 @@ jobs:
       - name: Run coverage
         run: forge coverage --ir-minimum --report lcov --no-match-path "test/fork/*"
 
+      - name: Filter coverage report
+        run: |
+          # Remove test files and scripts from coverage report
+          sed -i '/^SF:.*test\//,/^end_of_record$/d' lcov.info
+          sed -i '/^SF:.*script\//,/^end_of_record$/d' lcov.info
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
