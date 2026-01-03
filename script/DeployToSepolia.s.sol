@@ -3,10 +3,16 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
+import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
+import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {MorphoAdapter} from "../src/MorphoAdapter.sol";
 import {MockYieldAdapter} from "../src/MockYieldAdapter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {StakedToken} from "../src/StakedToken.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
+import {LeverageRouter} from "../src/LeverageRouter.sol";
+import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -52,146 +58,238 @@ contract MockV3Aggregator is AggregatorV3Interface {
     }
 }
 
+/**
+ * @title DeployToSepolia
+ * @notice Deployment script for Plether protocol on Sepolia testnet
+ * @dev Deploys all contracts in correct dependency order using mock adapters
+ */
 contract DeployToSepolia is Script {
-    function run() external {
-        // Load private key from environment variable
+    // ==========================================
+    // SEPOLIA ADDRESSES
+    // ==========================================
+
+    // USDC address on Sepolia
+    address constant USDC = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
+
+    // Aave V3 Pool on Sepolia
+    address constant AAVE_POOL = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
+
+    // Curve Pool address on Sepolia (placeholder - update with actual pool)
+    address constant CURVE_POOL = address(0x1); // TODO: Replace with actual Curve pool
+
+    // Morpho Blue on Sepolia (same as mainnet)
+    address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+    address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
+
+    // Protocol Parameters
+    uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
+    uint256 constant LLTV = 0.77e18; // 77% LLTV
+    uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
+
+    // ==========================================
+    // DEPLOYMENT STATE
+    // ==========================================
+
+    struct DeployedContracts {
+        BasketOracle basketOracle;
+        MockYieldAdapter adapter;
+        SyntheticSplitter splitter;
+        SyntheticToken dxyBear;
+        SyntheticToken dxyBull;
+        MorphoOracle morphoOracleBear;
+        MorphoOracle morphoOracleBull;
+        StakedToken stakedBear;
+        StakedToken stakedBull;
+        StakedOracle stakedOracleBear;
+        StakedOracle stakedOracleBull;
+    }
+
+    function run() external returns (DeployedContracts memory deployed) {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
-        // Start broadcasting transactions
+        console.log("Deployer:", deployer);
+        console.log("");
+
         vm.startBroadcast(privateKey);
 
-        // Deploy mock Chainlink feeds for DXY components (since real fiat feeds aren't available on Sepolia)
-        // Inline deployments to reduce local variables and avoid stack too deep
+        // Step 1: Deploy BasketOracle with mock feeds
+        deployed.basketOracle = _deployBasketOracle();
+
+        // Step 2: Deploy MockAdapter + Splitter
+        (deployed.adapter, deployed.splitter) = _deploySplitterWithAdapter(address(deployed.basketOracle), deployer);
+
+        // Get token references
+        deployed.dxyBear = deployed.splitter.TOKEN_A();
+        deployed.dxyBull = deployed.splitter.TOKEN_B();
+
+        // Step 3: Deploy Morpho Oracles
+        (deployed.morphoOracleBear, deployed.morphoOracleBull) = _deployMorphoOracles(address(deployed.basketOracle));
+
+        // Step 4: Deploy Staked Tokens
+        (deployed.stakedBear, deployed.stakedBull) =
+            _deployStakedTokens(address(deployed.dxyBear), address(deployed.dxyBull));
+
+        // Step 5: Deploy Staked Oracles
+        (deployed.stakedOracleBear, deployed.stakedOracleBull) = _deployStakedOracles(
+            address(deployed.stakedBear),
+            address(deployed.stakedBull),
+            address(deployed.morphoOracleBear),
+            address(deployed.morphoOracleBull)
+        );
+
+        // Step 6: Deploy Routers (only if Curve pool is available)
+        _deployRouters(deployed, deployer);
+
+        vm.stopBroadcast();
+
+        // Log deployment
+        _logDeployment(deployed);
+
+        return deployed;
+    }
+
+    // ==========================================
+    // INTERNAL HELPERS
+    // ==========================================
+
+    function _deployBasketOracle() internal returns (BasketOracle) {
+        // Deploy mock Chainlink feeds for DXY components
         address[] memory feeds = new address[](6);
-        feeds[0] = address(new MockV3Aggregator(105000000)); // ~1.05 USD per EUR, 8 decimals
+        feeds[0] = address(new MockV3Aggregator(105000000)); // ~1.05 USD per EUR
         feeds[1] = address(new MockV3Aggregator(640000)); // ~0.0064 USD per JPY
         feeds[2] = address(new MockV3Aggregator(125000000)); // ~1.25 USD per GBP
         feeds[3] = address(new MockV3Aggregator(73000000)); // ~0.73 USD per CAD
         feeds[4] = address(new MockV3Aggregator(9300000)); // ~0.093 USD per SEK
         feeds[5] = address(new MockV3Aggregator(113000000)); // ~1.13 USD per CHF
 
-        // Prepare quantities based on DXY weights (scaled to 1e18 precision)
+        // DXY weights (scaled to 1e18)
         uint256[] memory quantities = new uint256[](6);
-        quantities[0] = 576 * 10 ** 15; // 57.6%
-        quantities[1] = 136 * 10 ** 15; // 13.6%
-        quantities[2] = 119 * 10 ** 15; // 11.9%
-        quantities[3] = 91 * 10 ** 15; // 9.1%
-        quantities[4] = 42 * 10 ** 15; // 4.2%
-        quantities[5] = 36 * 10 ** 15; // 3.6%
+        quantities[0] = 576 * 10 ** 15; // EUR: 57.6%
+        quantities[1] = 136 * 10 ** 15; // JPY: 13.6%
+        quantities[2] = 119 * 10 ** 15; // GBP: 11.9%
+        quantities[3] = 91 * 10 ** 15; // CAD: 9.1%
+        quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
+        quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
 
-        // Curve Pool address on Sepolia (placeholder - update with actual pool)
-        address curvePool = address(0x1); // TODO: Replace with actual Curve pool
-        uint256 maxDeviationBps = 200; // 2% max deviation
+        return new BasketOracle(feeds, quantities, CURVE_POOL, MAX_DEVIATION_BPS);
+    }
 
-        // Deploy BasketOracle
-        BasketOracle oracle = new BasketOracle(feeds, quantities, curvePool, maxDeviationBps);
-
-        // USDC address on Sepolia
-        // address usdc = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
-        address usdc = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
-
-        // Aave V3 Pool on Sepolia
-        address aavePool = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
-
-        // Aave V3 aUSDC on Sepolia
-        address aUsdc = 0x16dA4541aD1807f4443d92D26044C1147406EB80;
-
-        // Set CAP (example: 2 with 8 decimals, adjust as needed)
-        uint256 cap = 2 * 10 ** 8;
-
-        // Treasury (using deployer as example)
-        address treasury = deployer;
-
-        // Sequencer Uptime Feed (address(0) since Sepolia is L1, no sequencer)
-        address sequencerUptimeFeed = address(0);
-
-        // ============================================
-        // OPTION A: MockYieldAdapter (for testnet)
-        // ============================================
-        // Predict Splitter address before deploying Adapter (circular dependency)
+    function _deploySplitterWithAdapter(address oracle, address deployer)
+        internal
+        returns (MockYieldAdapter adapter, SyntheticSplitter splitter)
+    {
+        // Predict Splitter address (deployed 1 nonce after adapter)
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
-        MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer, predictedSplitter);
+        // Deploy adapter with predicted splitter address
+        adapter = new MockYieldAdapter(IERC20(USDC), deployer, predictedSplitter);
 
-        SyntheticSplitter splitter =
-            new SyntheticSplitter(address(oracle), usdc, address(mockAdapter), cap, treasury, sequencerUptimeFeed);
+        // Deploy splitter (sequencer uptime feed = address(0) for L1)
+        splitter = new SyntheticSplitter(oracle, USDC, address(adapter), CAP, deployer, address(0));
 
+        // Verify prediction was correct
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
+    }
 
-        console.log("BasketOracle deployed at:", address(oracle));
-        console.log("MockAdapter deployed at:", address(mockAdapter));
-        console.log("SyntheticSplitter deployed at:", address(splitter));
-        console.log("Bear Token (TOKEN_A):", address(splitter.TOKEN_A()));
-        console.log("Bull Token (TOKEN_B):", address(splitter.TOKEN_B()));
+    function _deployMorphoOracles(address basketOracle)
+        internal
+        returns (MorphoOracle oracleBear, MorphoOracle oracleBull)
+    {
+        oracleBear = new MorphoOracle(basketOracle, CAP, false); // BEAR: NOT inverse
+        oracleBull = new MorphoOracle(basketOracle, CAP, true); // BULL: IS inverse
+    }
 
-        // ============================================
-        // OPTION B: Real MorphoAdapter (for mainnet)
-        // Uses CREATE2 to predict Splitter address before deploying Adapter
-        // Uncomment below and comment out Option A for production
-        // ============================================
-        /*
-        bytes32 salt = keccak256("PlethSyntheticSplitterV1");
+    function _deployStakedTokens(address bearToken, address bullToken)
+        internal
+        returns (StakedToken stakedBear, StakedToken stakedBull)
+    {
+        stakedBear = new StakedToken(IERC20(bearToken), "Staked DXY-BEAR", "sDXY-BEAR");
+        stakedBull = new StakedToken(IERC20(bullToken), "Staked DXY-BULL", "sDXY-BULL");
+    }
 
-        // Morpho Blue addresses (mainnet - update for target network)
-        address morphoBlue = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
-        address morphoOracle = address(0); // TODO: Deploy MorphoOracle first
-        address morphoIrm = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC; // AdaptiveCurveIrm
-        uint256 lltv = 0.945e18; // 94.5% LLTV for stablecoin market
+    function _deployStakedOracles(
+        address stakedBear,
+        address stakedBull,
+        address morphoOracleBear,
+        address morphoOracleBull
+    ) internal returns (StakedOracle oracleBear, StakedOracle oracleBull) {
+        oracleBear = new StakedOracle(stakedBear, morphoOracleBear);
+        oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
+    }
 
-        // Define Morpho market parameters
-        MarketParams memory marketParams = MarketParams({
-            loanToken: usdc,
-            collateralToken: usdc, // Same asset lending market
-            oracle: morphoOracle,
-            irm: morphoIrm,
-            lltv: lltv
+    function _deployRouters(DeployedContracts memory d, address deployer) internal {
+        if (CURVE_POOL == address(0x1)) {
+            console.log("ZapRouter: SKIPPED (no Curve pool)");
+            console.log("LeverageRouter: SKIPPED (no Curve pool)");
+            console.log("BullLeverageRouter: SKIPPED (no Curve pool)");
+            return;
+        }
+
+        // Deploy ZapRouter
+        ZapRouter zapRouter =
+            new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), USDC, CURVE_POOL);
+        console.log("ZapRouter:", address(zapRouter));
+
+        // Deploy LeverageRouter (BEAR)
+        MarketParams memory bearMarketParams = MarketParams({
+            loanToken: USDC,
+            collateralToken: address(d.stakedBear),
+            oracle: address(d.stakedOracleBear),
+            irm: MORPHO_IRM,
+            lltv: LLTV
         });
 
-        // Predict the Splitter address using CREATE2
-        // Note: The Splitter constructor args must match exactly
-        bytes memory splitterCreationCode = abi.encodePacked(
-            type(SyntheticSplitter).creationCode,
-            abi.encode(address(oracle), usdc, address(0), cap, treasury, sequencerUptimeFeed)
+        LeverageRouter leverageRouter = new LeverageRouter(
+            MORPHO_BLUE, CURVE_POOL, USDC, address(d.dxyBear), address(d.stakedBear), AAVE_POOL, bearMarketParams
         );
+        console.log("LeverageRouter:", address(leverageRouter));
 
-        // This will be the Splitter address (we update adapter address in creationCode after computing)
-        address predictedSplitterProd = vm.computeCreate2Address(
-            salt,
-            keccak256(splitterCreationCode)
+        // Deploy BullLeverageRouter
+        MarketParams memory bullMarketParams = MarketParams({
+            loanToken: USDC,
+            collateralToken: address(d.stakedBull),
+            oracle: address(d.stakedOracleBull),
+            irm: MORPHO_IRM,
+            lltv: LLTV
+        });
+
+        BullLeverageRouter bullLeverageRouter = new BullLeverageRouter(
+            MORPHO_BLUE,
+            address(d.splitter),
+            CURVE_POOL,
+            USDC,
+            address(d.dxyBear),
+            address(d.dxyBull),
+            address(d.stakedBull),
+            AAVE_POOL,
+            bullMarketParams
         );
+        console.log("BullLeverageRouter:", address(bullLeverageRouter));
+    }
 
-        // Deploy MorphoAdapter with the predicted Splitter address (immutable)
-        MorphoAdapter morphoAdapter = new MorphoAdapter(
-            IERC20(usdc),
-            morphoBlue,
-            marketParams,
-            deployer,
-            predictedSplitterProd  // This will be the Splitter's address
-        );
-
-        // Now deploy Splitter with CREATE2 at the predicted address
-        // Update creation code with actual adapter address
-        SyntheticSplitter splitterProd = new SyntheticSplitter{salt: salt}(
-            address(oracle),
-            usdc,
-            address(morphoAdapter),
-            cap,
-            treasury,
-            sequencerUptimeFeed
-        );
-
-        // Verify deployment
-        require(address(splitterProd) == predictedSplitterProd, "CREATE2 address mismatch!");
-
-        console.log("BasketOracle deployed at:", address(oracle));
-        console.log("MorphoAdapter deployed at:", address(morphoAdapter));
-        console.log("SyntheticSplitter deployed at:", address(splitterProd));
-        console.log("Bear Token (TOKEN_A):", address(splitterProd.TOKEN_A()));
-        console.log("Bull Token (TOKEN_B):", address(splitterProd.TOKEN_B()));
-        */
-
-        vm.stopBroadcast();
+    function _logDeployment(DeployedContracts memory d) internal pure {
+        console.log("========================================");
+        console.log("SEPOLIA DEPLOYMENT COMPLETE");
+        console.log("========================================");
+        console.log("");
+        console.log("Core Contracts:");
+        console.log("  BasketOracle:        ", address(d.basketOracle));
+        console.log("  MockAdapter:         ", address(d.adapter));
+        console.log("  SyntheticSplitter:   ", address(d.splitter));
+        console.log("  DXY-BEAR:            ", address(d.dxyBear));
+        console.log("  DXY-BULL:            ", address(d.dxyBull));
+        console.log("");
+        console.log("Morpho Oracles:");
+        console.log("  MorphoOracle (BEAR): ", address(d.morphoOracleBear));
+        console.log("  MorphoOracle (BULL): ", address(d.morphoOracleBull));
+        console.log("");
+        console.log("Staking:");
+        console.log("  StakedToken (BEAR):  ", address(d.stakedBear));
+        console.log("  StakedToken (BULL):  ", address(d.stakedBull));
+        console.log("  StakedOracle (BEAR): ", address(d.stakedOracleBear));
+        console.log("  StakedOracle (BULL): ", address(d.stakedOracleBull));
+        console.log("========================================");
     }
 }
