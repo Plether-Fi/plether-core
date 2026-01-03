@@ -100,6 +100,82 @@ This provides users time to exit if they disagree with proposed changes.
 - **Risk**: Large concurrent redemptions may require waiting for adapter withdrawal
 - **Mitigation**: Harvest function can be called to rebalance
 
+### Protocol Fees
+
+The protocol has zero fees for user operations. The only fee is a performance fee on yield.
+
+| Operation | Fee | Notes |
+|-----------|-----|-------|
+| Mint | 0% | No fee to mint BEAR+BULL pairs |
+| Burn | 0% | No fee to redeem USDC |
+| Flash Mint (DXY-BEAR/BULL) | 0% | ERC-3156 compliant, zero fee |
+| Flash Loan (Morpho) | 0% | Morpho Blue provides fee-free flash loans |
+| Curve Swaps | ~0.04% | Paid to Curve LPs, not Plether |
+
+#### Yield Distribution (Performance Fee)
+
+When `harvestYield()` is called, surplus yield is distributed:
+
+| Recipient | Share | Purpose |
+|-----------|-------|---------|
+| Caller | 1% | Incentive to call harvest |
+| Treasury | 20% | Protocol/developer performance fee |
+| Staking | 79% | Distributed to stakers |
+
+- Performance fee only applies to yield generated, not principal
+- If staking address is not set, treasury receives 100% of non-caller share
+- Fee percentages are hardcoded and cannot be changed
+
+### Flash Mint Capability
+
+SyntheticToken (DXY-BEAR and DXY-BULL) supports ERC-3156 flash mints:
+
+- **Fee**: Zero (no flash mint fee)
+- **Max Amount**: Unlimited (tokens are minted on demand)
+- **Use Case**: ZapRouter uses flash mints for atomic single-sided operations
+- **Risk**: Flash-minted tokens could be used in complex attack vectors (e.g., oracle manipulation, governance attacks)
+- **Mitigation**: Tokens must be returned in same transaction; protocol operations validate prices independently
+
+### Decimal Handling
+
+Critical decimal conversions throughout the protocol:
+
+| Asset/Oracle | Decimals | Notes |
+|--------------|----------|-------|
+| USDC | 6 | Collateral token |
+| DXY-BEAR / DXY-BULL | 18 | Synthetic tokens |
+| Chainlink Price Feeds | 8 | EUR/USD, JPY/USD, etc. |
+| BasketOracle Output | 8 | Aggregated DXY price |
+| Morpho Oracle | 36 | Internal Morpho scaling |
+| StakedToken Offset | 3 | 1000x inflation attack protection |
+
+Conversion formula in Splitter:
+- `USDC_MULTIPLIER = 10^(18 - 6 + 8) = 10^20`
+- `usdcNeeded = (tokenAmount * CAP) / USDC_MULTIPLIER`
+
+### StakedToken Security
+
+StakedToken (sDXY-BEAR, sDXY-BULL) is an ERC-4626 vault used as Morpho collateral:
+
+- **Inflation Attack Protection**: Uses `_decimalsOffset() = 3` (1000x multiplier)
+- **Permissionless Yield Injection**: `donateYield()` allows anyone to add yield
+- **Share Price**: Increases as yield is donated (benefits all stakers proportionally)
+- **Risk**: Donation could be used to manipulate share price for Morpho liquidations
+- **Mitigation**: Morpho uses time-weighted prices; instantaneous donations have limited impact
+
+### Curve Pool Configuration
+
+Router contracts assume specific Curve pool structure:
+
+| Index | Asset | Constant |
+|-------|-------|----------|
+| 0 | USDC | `USDC_INDEX` |
+| 1 | DXY-BEAR | `DXY_BEAR_INDEX` |
+
+- **Risk**: If Curve pool is deployed with different indices, all router swaps fail
+- **Mitigation**: Indices are verified during deployment; pool address is immutable
+- **Deviation Check**: BasketOracle validates Chainlink price against Curve `price_oracle()` (max 2% deviation)
+
 ## Emergency Procedures
 
 ### Protocol Pause
@@ -169,5 +245,6 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-03 | Added protocol fees, flash mint, decimal handling, StakedToken, and Curve pool documentation |
 | 2026-01-03 | Migrated to Morpho Blue as sole flash loan provider (removed Aave/Balancer dependencies) |
 | 2025-01-03 | Initial security documentation |
