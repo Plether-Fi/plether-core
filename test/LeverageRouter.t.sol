@@ -282,6 +282,161 @@ contract LeverageRouterTest is Test {
         // Verify position created (with slightly less collateral due to slippage)
         assertGt(morpho.collateralBalance(alice), 0, "Should have collateral");
     }
+
+    // ==========================================
+    // EDGE CASE TESTS (Phase 2.5)
+    // ==========================================
+
+    /// @notice Test extreme leverage: 100x
+    function test_OpenLeverage_ExtremeLeverage_100x() public {
+        // Alice wants 100x leverage
+        // With $1000 principal at 100x, loan = $99,000
+        usdc.mint(address(lender), 100_000 * 1e6); // Fund lender for large loan
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        router.openLeverage(1000 * 1e6, 100e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should have $100,000 worth of collateral and $99,000 debt
+        assertEq(morpho.collateralBalance(alice), 100_000 * 1e18, "Collateral should be 100x");
+        assertEq(morpho.borrowBalance(alice), 99_000 * 1e6, "Debt should be 99x");
+    }
+
+    /// @notice Test leverage just above 1x (1.1x)
+    function test_OpenLeverage_MinimalLeverage_1_1x() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        // 1.1x leverage = borrow 10%
+        router.openLeverage(1000 * 1e6, 1_100_000_000_000_000_000, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should have $1100 collateral and $100 debt
+        assertEq(morpho.collateralBalance(alice), 1100 * 1e18, "Collateral should be 1.1x");
+        assertEq(morpho.borrowBalance(alice), 100 * 1e6, "Debt should be 0.1x");
+    }
+
+    /// @notice Test principal = 1 wei (smallest possible) - actually succeeds
+    function test_OpenLeverage_TinyPrincipal_1Wei() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1);
+
+        // With 1 wei USDC and 3x leverage, loan = 2 wei
+        // This actually succeeds because loan > 0
+        router.openLeverage(1, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Tiny position created
+        assertGt(morpho.collateralBalance(alice), 0, "Should have tiny collateral");
+        assertEq(morpho.borrowBalance(alice), 2, "Debt should be 2 wei");
+    }
+
+    /// @notice Test small but viable principal
+    function test_OpenLeverage_SmallPrincipal_1000Wei() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000);
+
+        // With 1000 wei USDC and 3x leverage, loan = 2000 wei
+        router.openLeverage(1000, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify tiny position created
+        assertGt(morpho.collateralBalance(alice), 0, "Should have some collateral");
+        assertEq(morpho.borrowBalance(alice), 2000, "Debt should be 2000 wei");
+    }
+
+    /// @notice Test authorization revoked after callback started (simulated)
+    function test_OpenLeverage_AuthorizationRequired_BeforeCallback() public {
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        // Not authorized
+
+        vm.expectRevert("LeverageRouter not authorized in Morpho");
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test pause blocks operations
+    function test_OpenLeverage_WhenPaused_Reverts() public {
+        // Owner pauses router
+        router.pause();
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        vm.expectRevert();
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test close when paused also reverts
+    function test_CloseLeverage_WhenPaused_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Owner pauses router
+        router.pause();
+
+        // Alice tries to close
+        vm.startPrank(alice);
+        vm.expectRevert();
+        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test unpause allows operations
+    function test_Unpause_AllowsOperations() public {
+        // Pause then unpause
+        router.pause();
+        router.unpause();
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        // Should work after unpause
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        assertGt(morpho.collateralBalance(alice), 0, "Position should be created");
+    }
+
+    /// @notice Test flash loan repayment failure
+    function test_OpenLeverage_FlashLoanRepayFails_Reverts() public {
+        // Create a lender that doesn't accept repayment
+        BadFlashLender badLender = new BadFlashLender();
+        usdc.mint(address(badLender), 10_000 * 1e6);
+
+        // Deploy router with bad lender
+        LeverageRouter badRouter = new LeverageRouter(
+            address(morpho),
+            address(curvePool),
+            address(usdc),
+            address(dxyBear),
+            address(stakedDxyBear),
+            address(badLender),
+            params
+        );
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(badRouter), true);
+        usdc.approve(address(badRouter), 1000 * 1e6);
+
+        vm.expectRevert("Flash repay failed");
+        badRouter.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
 }
 
 // ==========================================
@@ -653,5 +808,33 @@ contract LeverageRouterOffsetTest is Test {
         uint256 assets = stakedDxyBear.previewRedeem(shares);
         assertEq(assets, shares / 1000, "previewRedeem should divide shares by 1000");
         assertEq(assets, 1e21, "1e24 shares = 1e21 BEAR (1000 BEAR tokens)");
+    }
+}
+
+// ==========================================
+// BAD FLASH LENDER (for testing failures)
+// ==========================================
+
+contract BadFlashLender is IERC3156FlashLender {
+    function maxFlashLoan(address) external pure override returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function flashFee(address, uint256) public pure override returns (uint256) {
+        return 0;
+    }
+
+    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
+        external
+        override
+        returns (bool)
+    {
+        MockToken(token).mint(address(receiver), amount);
+        require(
+            receiver.onFlashLoan(msg.sender, token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
+            "Callback failed"
+        );
+        // Don't accept repayment - simulates failure
+        revert("Flash repay failed");
     }
 }

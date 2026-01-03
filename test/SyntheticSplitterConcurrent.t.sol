@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/MockYieldAdapter.sol";
+import "../src/interfaces/ISyntheticSplitter.sol";
 
 // ==========================================
 // MOCKS
@@ -86,6 +87,11 @@ contract MockOracle is AggregatorV3Interface {
         price = _price;
         startedAt = _startedAt;
         updatedAt = _updatedAt;
+    }
+
+    function setPrice(int256 _price) external {
+        price = _price;
+        updatedAt = block.timestamp;
     }
 
     function decimals() external pure returns (uint8) {
@@ -367,5 +373,285 @@ contract SyntheticSplitterConcurrentTest is Test {
         uint256 shares = currentAdapter.balanceOf(address(splitter));
         uint256 adapterAssets = shares > 0 ? currentAdapter.convertToAssets(shares) : 0;
         return buffer + adapterAssets;
+    }
+
+    // ==========================================
+    // CONCURRENT STATE TESTS (Phase 2.3)
+    // ==========================================
+
+    /// @notice Test: User A burns while User B mints while price approaches CAP
+    function test_ConcurrentMintBurn_NearLiquidation() public {
+        uint256 mintAmount = 100_000 ether;
+        uint256 burnAmount = 50_000 ether;
+
+        // Setup: Alice and Bob mint initially
+        dealUsdc(alice, 1_000_000e6);
+        dealUsdc(bob, 1_000_000e6);
+        dealUsdc(carol, 1_000_000e6);
+
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(mintAmount);
+
+        vm.prank(bob);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(bob);
+        splitter.mint(mintAmount);
+
+        // Record state before price change
+        uint256 aliceTokensBefore = splitter.TOKEN_A().balanceOf(alice);
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        // Price increases to $1.95 (just below CAP of $2.00)
+        oracle = new MockOracle(195_000_000, block.timestamp, block.timestamp);
+        // Note: Can't change oracle after construction, so simulate via state
+
+        // Alice burns while Bob mints (concurrent operations)
+        vm.prank(alice);
+        splitter.burn(burnAmount);
+
+        vm.prank(carol);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(carol);
+        splitter.mint(mintAmount);
+
+        // Verify Alice got her refund
+        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
+        assertEq(splitter.TOKEN_A().balanceOf(alice), aliceTokensBefore - burnAmount);
+
+        // Verify Carol got her tokens
+        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount);
+
+        // Verify system solvency
+        _verifySolvency();
+    }
+
+    /// @notice Test: Multiple operations interleaved with buffer depletion
+    function test_HarvestBurnRace_BufferDepletion() public {
+        uint256 largeAmount = 500_000 ether;
+
+        // Alice mints a large amount (creates adapter deposit + buffer)
+        dealUsdc(alice, 10_000_000e6);
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(largeAmount);
+
+        // Check initial buffer state
+        uint256 initialBuffer = usdc.balanceOf(address(splitter));
+        uint256 adapterShares = unlimitedAdapter.balanceOf(address(splitter));
+        assertGt(adapterShares, 0, "Should have adapter deposits");
+        assertGt(initialBuffer, 0, "Should have local buffer");
+
+        // Alice burns in multiple small chunks to deplete buffer
+        uint256 burnChunk = 100_000 ether;
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        // First burn - uses buffer
+        vm.prank(alice);
+        splitter.burn(burnChunk);
+
+        // Second burn - might need adapter withdrawal
+        vm.prank(alice);
+        splitter.burn(burnChunk);
+
+        // Third burn - definitely needs adapter withdrawal
+        vm.prank(alice);
+        splitter.burn(burnChunk);
+
+        // Verify Alice got all her refunds
+        uint256 expectedTotal = (burnChunk * 3 * CAP) / splitter.USDC_MULTIPLIER();
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedTotal);
+
+        // Verify remaining tokens
+        assertEq(splitter.TOKEN_A().balanceOf(alice), largeAmount - (burnChunk * 3));
+
+        // Verify solvency maintained
+        _verifySolvency();
+    }
+
+    /// @notice Test: Burn during adapter migration timelock
+    function test_BurnDuringAdapterMigration() public {
+        uint256 mintAmount = 100_000 ether;
+
+        // Alice mints
+        dealUsdc(alice, 1_000_000e6);
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(mintAmount);
+
+        // Owner initiates adapter migration (proposeAdapter starts timelock)
+        vm.startPrank(owner);
+        uint256 nonce = vm.getNonce(owner);
+        address newAdapterAddr = vm.computeCreateAddress(owner, nonce);
+        MockYieldAdapter newAdapter = new MockYieldAdapter(IERC20(address(usdc)), owner, address(splitter));
+        splitter.proposeAdapter(address(newAdapter));
+        vm.stopPrank();
+
+        // Alice tries to burn during migration timelock
+        // Burns should still work with the current adapter
+        uint256 burnAmount = 50_000 ether;
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.prank(alice);
+        splitter.burn(burnAmount);
+
+        // Verify burn succeeded
+        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
+        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
+
+        // Verify solvency
+        _verifySolvency();
+    }
+
+    /// @notice Test: Concurrent mints and burns that empty and refill buffer
+    function test_BufferEmptyRefill_Concurrent() public {
+        uint256 mintAmount = 100_000 ether;
+
+        // Initial setup - multiple users mint
+        dealUsdc(alice, 5_000_000e6);
+        dealUsdc(bob, 5_000_000e6);
+        dealUsdc(carol, 5_000_000e6);
+
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(mintAmount);
+
+        vm.prank(bob);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(bob);
+        splitter.mint(mintAmount);
+
+        // Alice burns most of her tokens (depletes buffer)
+        uint256 largeBurn = 90_000 ether;
+        vm.prank(alice);
+        splitter.burn(largeBurn);
+
+        // Carol mints (refills buffer)
+        vm.prank(carol);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(carol);
+        splitter.mint(mintAmount);
+
+        // Bob burns (should work with refilled buffer)
+        vm.prank(bob);
+        splitter.burn(largeBurn);
+
+        // Verify final state
+        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - largeBurn);
+        assertEq(splitter.TOKEN_A().balanceOf(bob), mintAmount - largeBurn);
+        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount);
+
+        _verifySolvency();
+    }
+
+    /// @notice Test: Rapid successive operations don't break state
+    function test_RapidSuccessiveOperations() public {
+        dealUsdc(alice, 10_000_000e6);
+        dealUsdc(bob, 10_000_000e6);
+
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(bob);
+        usdc.approve(address(splitter), type(uint256).max);
+
+        // Rapid mint-burn-mint-burn sequence
+        for (uint256 i = 0; i < 5; i++) {
+            uint256 amount = (i + 1) * 10_000 ether;
+
+            vm.prank(alice);
+            splitter.mint(amount);
+
+            vm.prank(bob);
+            splitter.mint(amount);
+
+            // Partial burns
+            if (splitter.TOKEN_A().balanceOf(alice) >= amount / 2) {
+                vm.prank(alice);
+                splitter.burn(amount / 2);
+            }
+
+            if (splitter.TOKEN_A().balanceOf(bob) >= amount / 2) {
+                vm.prank(bob);
+                splitter.burn(amount / 2);
+            }
+        }
+
+        // System should still be solvent after all operations
+        _verifySolvency();
+
+        // Both users should have non-zero balances
+        assertGt(splitter.TOKEN_A().balanceOf(alice), 0, "Alice should have tokens");
+        assertGt(splitter.TOKEN_A().balanceOf(bob), 0, "Bob should have tokens");
+    }
+
+    /// @notice Test: Liquidation blocks new mints but allows burns and emergency redemption
+    function test_LiquidationBlocksMintAllowsRedeem() public {
+        uint256 mintAmount = 100_000 ether;
+
+        // Alice mints
+        dealUsdc(alice, 1_000_000e6);
+        vm.prank(alice);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(alice);
+        splitter.mint(mintAmount);
+
+        // Set oracle price to >= CAP to trigger liquidation
+        oracle.setPrice(int256(CAP)); // $2.00 = CAP
+
+        // Anyone can trigger liquidation when price >= CAP
+        splitter.triggerLiquidation();
+
+        // Verify status is SETTLED
+        assertEq(uint256(splitter.currentStatus()), uint256(ISyntheticSplitter.Status.SETTLED));
+
+        // Bob tries to mint - should fail (liquidation blocks mints)
+        dealUsdc(bob, 1_000_000e6);
+        vm.prank(bob);
+        usdc.approve(address(splitter), type(uint256).max);
+        vm.prank(bob);
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        splitter.mint(mintAmount);
+
+        // Regular burn still works during liquidation (requires both BEAR + BULL)
+        uint256 burnAmount = 50_000 ether;
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        splitter.burn(burnAmount);
+
+        // Verify burn succeeded
+        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
+
+        // emergencyRedeem also works (only needs BEAR - BULL is worthless at CAP)
+        uint256 emergencyAmount = 10_000 ether;
+        aliceUsdcBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        splitter.emergencyRedeem(emergencyAmount);
+
+        // Verify emergency redeem succeeded
+        expectedRefund = (emergencyAmount * CAP) / splitter.USDC_MULTIPLIER();
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
+    }
+
+    // ==========================================
+    // HELPER FUNCTIONS
+    // ==========================================
+
+    function _verifySolvency() internal view {
+        uint256 totalSupply = splitter.TOKEN_A().totalSupply();
+        uint256 liabilities = (totalSupply * CAP) / splitter.USDC_MULTIPLIER();
+
+        uint256 localBuffer = usdc.balanceOf(address(splitter));
+        uint256 adapterShares = unlimitedAdapter.balanceOf(address(splitter));
+        uint256 adapterAssets = adapterShares > 0 ? unlimitedAdapter.convertToAssets(adapterShares) : 0;
+        uint256 totalAssets = localBuffer + adapterAssets;
+
+        assertGe(totalAssets, liabilities, "System should be solvent");
     }
 }

@@ -579,6 +579,154 @@ contract BullLeverageRouterTest is Test {
         router.onFlashLoan(alice, address(usdc), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
         vm.stopPrank();
     }
+
+    // ==========================================
+    // EDGE CASE TESTS (Phase 2.5)
+    // ==========================================
+
+    /// @notice Test extreme leverage: 100x
+    function test_OpenLeverage_ExtremeLeverage_100x() public {
+        uint256 principal = 100 * 1e6; // $100 to keep numbers manageable
+        uint256 leverage = 100 * 1e18; // 100x
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // With 100x: loan = 99 * $100 = $9900
+        // Total USDC = $10,000
+        // With CAP=$2: mints 5000e18 of each token
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertEq(supplied, 5000 * 1e18, "Collateral should be 100x / CAP");
+        // Borrowed = max(0, 9900 - 5000) = 4900
+        assertEq(borrowed, 4900 * 1e6, "Debt = flash loan - sale proceeds");
+    }
+
+    /// @notice Test leverage just above 1x (1.1x)
+    function test_OpenLeverage_MinimalLeverage_1_1x() public {
+        uint256 principal = 1000 * 1e6;
+        // 1.1x leverage
+        uint256 leverage = 1_100_000_000_000_000_000;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // 1.1x on $1000 = $1100 total
+        // With CAP=$2: mints 550e18 of each token
+        // Sale = 550 USDC, loan = 100 USDC
+        // Debt = max(0, 100 - 550) = 0
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertEq(supplied, 550 * 1e18, "Collateral for 1.1x");
+        assertEq(borrowed, 0, "No debt needed at 1.1x");
+    }
+
+    /// @notice Test small principal
+    function test_OpenLeverage_SmallPrincipal_100Wei() public {
+        uint256 principal = 100; // 100 wei USDC
+        uint256 leverage = 3 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        // Loan = 200 wei
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertGt(supplied, 0, "Should have some collateral");
+    }
+
+    /// @notice Test pause blocks open
+    function test_OpenLeverage_WhenPaused_Reverts() public {
+        router.pause();
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert();
+        router.openLeverage(1000 * 1e6, 3 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test pause blocks close
+    function test_CloseLeverage_WhenPaused_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000 * 1e6, 2 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Pause router
+        router.pause();
+
+        // Close should fail
+        vm.startPrank(alice);
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        vm.expectRevert();
+        router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test unpause allows operations
+    function test_Unpause_AllowsOperations() public {
+        router.pause();
+        router.unpause();
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+
+        // Should work after unpause
+        router.openLeverage(1000 * 1e6, 2 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 supplied,) = morpho.positions(alice);
+        assertGt(supplied, 0, "Position should be created");
+    }
+
+    /// @notice Test zero principal reverts
+    function test_OpenLeverage_ZeroPrincipal_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert("Principal must be > 0");
+        router.openLeverage(0, 3 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test close with zero debt still works
+    function test_CloseLeverage_ZeroDebt_Succeeds() public {
+        // Create position with low leverage that results in zero debt
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 1_100_000_000_000_000_000; // 1.1x
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+        assertEq(borrowed, 0, "Should have zero debt at 1.1x");
+
+        // Close position (with zero debt)
+        router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Position should be cleared
+        (uint256 suppliedAfter, uint256 borrowedAfter) = morpho.positions(alice);
+        assertEq(suppliedAfter, 0, "Collateral should be cleared");
+        assertEq(borrowedAfter, 0, "Debt should remain zero");
+    }
 }
 
 // ==========================================
