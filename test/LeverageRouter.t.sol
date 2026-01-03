@@ -218,6 +218,70 @@ contract LeverageRouterTest is Test {
         router.openLeverage(1000 * 1e6, 3e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
+
+    function test_CloseLeverage_SlippageExceedsMax_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert("Slippage exceeds maximum");
+        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
+        vm.stopPrank();
+    }
+
+    /// @notice Test that swap reverts when Curve returns less than minOut (MEV protection)
+    function test_OpenLeverage_MinOut_Enforced_Reverts() public {
+        // Simulate MEV attack: price moves after get_dy but before exchange
+        // get_dy returns expected amount, but exchange returns less
+        curvePool.setSlippage(500); // 5% slippage during swap (exceeds 1% max)
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        // Router calculates minOut based on get_dy - 1%, but actual swap gives 5% less
+        vm.expectRevert("Too little received");
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test that close swap reverts when Curve returns less than minOut
+    function test_CloseLeverage_MinOut_Enforced_Reverts() public {
+        // Setup existing position
+        usdc.mint(address(morpho), 2000 * 1e6);
+
+        vm.startPrank(alice);
+        dxyBear.mint(alice, 3000 * 1e18);
+        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
+        stakedDxyBear.deposit(3000 * 1e18, alice);
+        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supply(params, 3000 * 1e18, 0, alice, "");
+        morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
+
+        // Simulate MEV attack during close
+        curvePool.setSlippage(500); // 5% slippage
+
+        morpho.setAuthorization(address(router), true);
+        vm.expectRevert("Too little received");
+        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test that small slippage within tolerance succeeds
+    function test_OpenLeverage_SlippageWithinTolerance_Succeeds() public {
+        // 0.5% slippage is within 1% max tolerance
+        curvePool.setSlippage(50); // 0.5% slippage
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), 1000 * 1e6);
+
+        // Should succeed because actual slippage (0.5%) < tolerance (1%)
+        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify position created (with slightly less collateral due to slippage)
+        assertGt(morpho.collateralBalance(alice), 0, "Should have collateral");
+    }
 }
 
 // ==========================================
@@ -287,6 +351,7 @@ contract MockCurvePool is ICurvePool {
     address public token0; // USDC
     address public token1; // dxyBear
     uint256 public bearPrice = 1e6;
+    uint256 public slippageBps = 0; // Simulated slippage in basis points
 
     constructor(address _token0, address _token1) {
         token0 = _token0;
@@ -297,14 +362,23 @@ contract MockCurvePool is ICurvePool {
         bearPrice = _price;
     }
 
+    /// @notice Set slippage to simulate MEV attacks
+    /// @param _slippageBps Slippage in basis points (100 = 1%)
+    function setSlippage(uint256 _slippageBps) external {
+        slippageBps = _slippageBps;
+    }
+
     function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256) {
+        // get_dy returns the "quoted" price without slippage
         if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
         if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
         return 0;
     }
 
     function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
-        dy = this.get_dy(i, j, dx);
+        // exchange applies slippage to simulate MEV/price movement
+        uint256 quotedDy = this.get_dy(i, j, dx);
+        dy = (quotedDy * (10000 - slippageBps)) / 10000; // Apply slippage
         require(dy >= min_dy, "Too little received");
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;

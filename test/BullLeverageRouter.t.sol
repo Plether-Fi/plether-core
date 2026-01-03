@@ -188,6 +188,76 @@ contract BullLeverageRouterTest is Test {
         vm.stopPrank();
     }
 
+    function test_CloseLeverage_Revert_SlippageTooHigh() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert("Slippage exceeds maximum");
+        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 101, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test that open swap reverts when Curve returns less than minOut (MEV protection)
+    function test_OpenLeverage_MinOut_Enforced_Reverts() public {
+        // Simulate MEV attack: price moves after get_dy but before exchange
+        curvePool.setSlippage(500); // 5% slippage exceeds 1% tolerance
+
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        // The BEAR -> USDC swap during open will fail due to slippage
+        vm.expectRevert("Too little received");
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test that close swap reverts when Curve returns less than minOut
+    function test_CloseLeverage_MinOut_Enforced_Reverts() public {
+        // First open a position successfully
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
+
+        // Now simulate MEV attack during close
+        curvePool.setSlippage(500); // 5% slippage exceeds 1% tolerance
+
+        // The USDC -> BEAR swap during close (to repay flash mint) will fail
+        vm.expectRevert("Too little received");
+        router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Test that slippage within tolerance succeeds
+    function test_OpenLeverage_SlippageWithinTolerance_Succeeds() public {
+        // 0.5% slippage is within 1% max tolerance
+        curvePool.setSlippage(50);
+
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 2 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        // Should succeed because actual slippage (0.5%) < tolerance (1%)
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify position was created
+        (uint256 supplied,) = morpho.positions(alice);
+        assertGt(supplied, 0, "Should have collateral");
+    }
+
     function test_OpenLeverage_Revert_ZeroPrincipal() public {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
@@ -650,6 +720,7 @@ contract MockCurvePool is ICurvePool {
     // dy = dx * rateNum / rateDenom (with decimals adjusted)
     uint256 public rateNum = 1;
     uint256 public rateDenom = 1;
+    uint256 public slippageBps = 0; // Simulated slippage in basis points
 
     constructor(address _token0, address _token1) {
         token0 = _token0;
@@ -659,6 +730,12 @@ contract MockCurvePool is ICurvePool {
     function setRate(uint256 num, uint256 denom) external {
         rateNum = num;
         rateDenom = denom;
+    }
+
+    /// @notice Set slippage to simulate MEV attacks
+    /// @param _slippageBps Slippage in basis points (100 = 1%)
+    function setSlippage(uint256 _slippageBps) external {
+        slippageBps = _slippageBps;
     }
 
     function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
@@ -679,6 +756,9 @@ contract MockCurvePool is ICurvePool {
         // Apply Price Ratio
         dy = (dy * rateNum) / rateDenom;
 
+        // Apply slippage to simulate MEV/price movement
+        dy = (dy * (10000 - slippageBps)) / 10000;
+
         require(dy >= min_dy, "Too little received");
         // Burn input tokens and mint output tokens
         MockToken(tokenIn).burn(msg.sender, dx);
@@ -687,7 +767,7 @@ contract MockCurvePool is ICurvePool {
     }
 
     function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256 dy) {
-        // Match the exchange logic for decimal conversion
+        // get_dy returns quoted price WITHOUT slippage (as in real Curve)
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;
 
@@ -702,7 +782,7 @@ contract MockCurvePool is ICurvePool {
             dy = dx / 1e12;
         }
 
-        // Apply Price Ratio
+        // Apply Price Ratio (but NOT slippage - get_dy is the quote)
         dy = (dy * rateNum) / rateDenom;
     }
 
