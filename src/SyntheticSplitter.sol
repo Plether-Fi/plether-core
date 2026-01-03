@@ -215,14 +215,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         if (burnAmount == 0) return (0, 0);
 
         // 1. Solvency Check (Simulates the paused logic)
-        if (paused()) {
-            uint256 totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
-            uint256 myShares = yieldAdapter.balanceOf(address(this));
-            uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
-            uint256 totalAssets = USDC.balanceOf(address(this)) + adapterValue;
-
-            require(totalAssets >= totalLiabilities, "Paused & Insolvent");
-        }
+        _requireSolventIfPaused();
 
         // 2. Calculate Refund
         usdcToReturn = (burnAmount * CAP) / USDC_MULTIPLIER;
@@ -246,20 +239,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     function burn(uint256 amount) external nonReentrant {
         if (amount == 0) revert Splitter__ZeroAmount();
 
-        if (paused()) {
-            // If paused, we strictly enforce 100% solvency.
-            // If we are even 1 USDC short, we keep the lock to prevent a race to exit.
-
-            uint256 totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
-
-            // Calculate Total Assets (Local + Adapter)
-            // Note: We use the SAFE 'convertToAssets' calculation we fixed earlier
-            uint256 myShares = yieldAdapter.balanceOf(address(this));
-            uint256 adapterValue = yieldAdapter.convertToAssets(myShares);
-            uint256 totalAssets = USDC.balanceOf(address(this)) + adapterValue;
-
-            require(totalAssets >= totalLiabilities, "Paused & Insolvent: Burn Locked");
-        }
+        // If paused, enforce 100% solvency to prevent race to exit
+        _requireSolventIfPaused();
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
         if (usdcRefund == 0) revert Splitter__ZeroRefund();
@@ -593,15 +574,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         }
 
         // Assets/Liabilities
-        uint256 myShares = 0;
-        uint256 adapterVal = 0;
-        if (address(yieldAdapter) != address(0)) {
-            myShares = yieldAdapter.balanceOf(address(this));
-            adapterVal = yieldAdapter.convertToAssets(myShares);
-        }
-
-        status.totalAssets = USDC.balanceOf(address(this)) + adapterVal;
-        status.totalLiabilities = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
+        status.totalAssets = _getTotalAssets();
+        status.totalLiabilities = _getTotalLiabilities();
 
         if (status.totalLiabilities > 0) {
             status.collateralRatio = (status.totalAssets * 1e4) / status.totalLiabilities;
@@ -609,11 +583,42 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
             status.collateralRatio = 0; // Infinite/Unset
         }
 
-        // To help UI calc APY history
-        status.adapterAssets = adapterVal;
+        // Adapter assets for UI APY calculation
+        if (address(yieldAdapter) != address(0)) {
+            uint256 myShares = yieldAdapter.balanceOf(address(this));
+            status.adapterAssets = yieldAdapter.convertToAssets(myShares);
+        }
     }
 
-    // Oracle Price Logic (using OracleLib)
+    // ==========================================
+    // INTERNAL HELPERS
+    // ==========================================
+
+    /// @dev Calculates total liabilities based on TOKEN_A supply at CAP price.
+    function _getTotalLiabilities() internal view returns (uint256) {
+        return (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
+    }
+
+    /// @dev Calculates total assets (local USDC + adapter value).
+    function _getTotalAssets() internal view returns (uint256) {
+        uint256 adapterValue = 0;
+        if (address(yieldAdapter) != address(0)) {
+            uint256 myShares = yieldAdapter.balanceOf(address(this));
+            adapterValue = yieldAdapter.convertToAssets(myShares);
+        }
+        return USDC.balanceOf(address(this)) + adapterValue;
+    }
+
+    /// @dev Reverts if paused and insolvent (assets < liabilities).
+    function _requireSolventIfPaused() internal view {
+        if (paused()) {
+            uint256 totalAssets = _getTotalAssets();
+            uint256 totalLiabilities = _getTotalLiabilities();
+            require(totalAssets >= totalLiabilities, "Paused & Insolvent");
+        }
+    }
+
+    /// @dev Oracle price validation using OracleLib.
     function _getOraclePrice() internal view returns (uint256) {
         return OracleLib.getValidatedPrice(ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
     }

@@ -174,7 +174,7 @@ contract SplitterHandler is Test {
             if (reason.length >= 4) {
                 bytes4 selector = bytes4(reason);
                 // String error selector: Error(string) = 0x08c379a0
-                // Expected for "Paused & Insolvent: Burn Locked"
+                // Expected for "Paused & Insolvent" solvency check
                 if (selector == bytes4(0x08c379a0)) return;
                 // ERR_ZERO_AMOUNT shouldn't happen (we bound > 0) but allow it
                 if (selector == ERR_ZERO_AMOUNT) return;

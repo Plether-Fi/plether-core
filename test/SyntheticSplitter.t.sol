@@ -269,7 +269,7 @@ contract SyntheticSplitterTest is Test {
 
         // Expect Revert due to Solvency Check
         // Assets ($20 Buffer + $179 Adapter = $199) < Liabilities ($200)
-        vm.expectRevert(bytes("Paused & Insolvent: Burn Locked"));
+        vm.expectRevert(bytes("Paused & Insolvent"));
         splitter.burn(50 * 1e18);
 
         vm.stopPrank();
