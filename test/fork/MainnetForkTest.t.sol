@@ -225,6 +225,325 @@ contract MainnetForkTest is Test {
     }
 }
 
+// ============================================================
+// FULL CYCLE FORK TEST
+// Tests complete protocol lifecycle: Mint -> Yield -> Burn
+// ============================================================
+
+contract FullCycleForkTest is Test {
+    // Mainnet constants
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant CL_EUR = 0xb49f677943BC038e9857d61E7d053CaA2C1734C1;
+
+    // Protocol
+    SyntheticSplitter splitter;
+    BasketOracle basketOracle;
+    MockYieldAdapter yieldAdapter;
+
+    address bullToken;
+    address bearToken;
+    address treasury;
+
+    address alice = address(0xA11CE);
+    address bob = address(0xB0B);
+
+    function setUp() public {
+        // 1. SETUP FORK
+        try vm.envString("MAINNET_RPC_URL") returns (string memory url) {
+            vm.createSelectFork(url, 24_136_062);
+        } catch {
+            revert("Missing MAINNET_RPC_URL in .env");
+        }
+
+        treasury = makeAddr("treasury");
+
+        // 2. FUNDING
+        deal(USDC, alice, 100_000e6);
+        deal(USDC, bob, 100_000e6);
+
+        // 3. FETCH REAL PRICE AND WARP
+        uint256 realOraclePrice;
+        {
+            (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+            realOraclePrice = uint256(price) * 1e10;
+            vm.warp(updatedAt + 1 hours);
+        }
+
+        // 4. DEPLOY CORE PROTOCOL
+        {
+            yieldAdapter = new MockYieldAdapter(IERC20(USDC), address(this));
+
+            address[] memory feeds = new address[](1);
+            feeds[0] = CL_EUR;
+            uint256[] memory qtys = new uint256[](1);
+            qtys[0] = 1e18;
+
+            address tempCurvePool = address(new MockCurvePoolForOracle(realOraclePrice));
+            basketOracle = new BasketOracle(feeds, qtys, tempCurvePool, 200);
+
+            splitter =
+                new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, treasury, address(0));
+
+            bullToken = address(splitter.TOKEN_B());
+            bearToken = address(splitter.TOKEN_A());
+        }
+    }
+
+    /// @notice Test full cycle: mint tokens, simulate yield, harvest, burn tokens
+    function test_FullCycle_MintYieldBurn() public {
+        uint256 mintAmount = 10_000e18; // 10,000 token pairs
+
+        // ==========================================
+        // PHASE 1: MINT
+        // ==========================================
+        console.log("=== PHASE 1: MINT ===");
+
+        vm.startPrank(alice);
+        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
+        console.log("USDC Required for mint:", usdcRequired);
+
+        IERC20(USDC).approve(address(splitter), usdcRequired);
+        splitter.mint(mintAmount);
+        vm.stopPrank();
+
+        // Verify mint
+        assertEq(IERC20(bullToken).balanceOf(alice), mintAmount, "Alice should have BULL tokens");
+        assertEq(IERC20(bearToken).balanceOf(alice), mintAmount, "Alice should have BEAR tokens");
+        console.log("Alice BULL balance:", IERC20(bullToken).balanceOf(alice));
+        console.log("Alice BEAR balance:", IERC20(bearToken).balanceOf(alice));
+
+        // Check protocol state
+        uint256 adapterShares = yieldAdapter.balanceOf(address(splitter));
+        uint256 adapterAssets = yieldAdapter.convertToAssets(adapterShares);
+        uint256 localBuffer = IERC20(USDC).balanceOf(address(splitter));
+        console.log("Adapter assets:", adapterAssets);
+        console.log("Local buffer:", localBuffer);
+        console.log("Total holdings:", adapterAssets + localBuffer);
+
+        // ==========================================
+        // PHASE 2: SIMULATE YIELD
+        // ==========================================
+        console.log("\n=== PHASE 2: SIMULATE YIELD ===");
+
+        // Simulate 10% APY for 1 year worth of yield
+        uint256 yieldAmount = (adapterAssets * 10) / 100; // 10% yield
+        console.log("Simulated yield:", yieldAmount);
+
+        // Deal USDC directly to adapter to simulate yield accrual
+        deal(USDC, address(yieldAdapter), adapterAssets + yieldAmount);
+
+        uint256 newAdapterAssets = yieldAdapter.convertToAssets(adapterShares);
+        console.log("New adapter assets after yield:", newAdapterAssets);
+
+        // ==========================================
+        // PHASE 3: HARVEST YIELD
+        // ==========================================
+        console.log("\n=== PHASE 3: HARVEST YIELD ===");
+
+        uint256 treasuryBefore = IERC20(USDC).balanceOf(treasury);
+
+        // Harvest the yield
+        splitter.harvestYield();
+
+        uint256 treasuryAfter = IERC20(USDC).balanceOf(treasury);
+        uint256 harvested = treasuryAfter - treasuryBefore;
+        console.log("Yield harvested to treasury:", harvested);
+
+        // Yield should be sent to treasury
+        assertGt(harvested, 0, "Should have harvested yield");
+        // Most of the yield should be harvested (some may remain due to rounding)
+        assertGt(harvested, (yieldAmount * 90) / 100, "Should harvest most of yield");
+
+        // ==========================================
+        // PHASE 4: BURN TOKENS
+        // ==========================================
+        console.log("\n=== PHASE 4: BURN ===");
+
+        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+
+        vm.startPrank(alice);
+        // Preview burn
+        (uint256 expectedUsdc,) = splitter.previewBurn(mintAmount);
+        console.log("Expected USDC from burn:", expectedUsdc);
+
+        // Approve and burn
+        IERC20(bullToken).approve(address(splitter), mintAmount);
+        IERC20(bearToken).approve(address(splitter), mintAmount);
+        splitter.burn(mintAmount);
+        vm.stopPrank();
+
+        uint256 aliceUsdcAfter = IERC20(USDC).balanceOf(alice);
+        uint256 usdcReturned = aliceUsdcAfter - aliceUsdcBefore;
+        console.log("USDC returned from burn:", usdcReturned);
+
+        // Verify burn
+        assertEq(IERC20(bullToken).balanceOf(alice), 0, "Alice should have no BULL tokens");
+        assertEq(IERC20(bearToken).balanceOf(alice), 0, "Alice should have no BEAR tokens");
+        // User should get back close to original amount (minus any rounding)
+        assertGt(usdcReturned, (usdcRequired * 99) / 100, "Should return ~100% of original USDC");
+
+        // ==========================================
+        // SUMMARY
+        // ==========================================
+        console.log("\n=== SUMMARY ===");
+        console.log("USDC deposited:", usdcRequired);
+        console.log("USDC returned:", usdcReturned);
+        console.log("Yield harvested:", harvested);
+        console.log("Net cost to user:", usdcRequired > usdcReturned ? usdcRequired - usdcReturned : 0);
+    }
+
+    /// @notice Test multiple users minting, yield accrual, then burning
+    function test_FullCycle_MultipleUsers() public {
+        uint256 aliceMint = 5_000e18;
+        uint256 bobMint = 10_000e18;
+
+        // ==========================================
+        // PHASE 1: MULTIPLE MINTS
+        // ==========================================
+        console.log("=== PHASE 1: MULTIPLE MINTS ===");
+
+        // Alice mints
+        vm.startPrank(alice);
+        (uint256 aliceUsdc,,) = splitter.previewMint(aliceMint);
+        IERC20(USDC).approve(address(splitter), aliceUsdc);
+        splitter.mint(aliceMint);
+        vm.stopPrank();
+        console.log("Alice minted %s pairs for %s USDC", aliceMint, aliceUsdc);
+
+        // Bob mints
+        vm.startPrank(bob);
+        (uint256 bobUsdc,,) = splitter.previewMint(bobMint);
+        IERC20(USDC).approve(address(splitter), bobUsdc);
+        splitter.mint(bobMint);
+        vm.stopPrank();
+        console.log("Bob minted %s pairs for %s USDC", bobMint, bobUsdc);
+
+        // ==========================================
+        // PHASE 2: YIELD ACCRUAL
+        // ==========================================
+        console.log("\n=== PHASE 2: YIELD ACCRUAL ===");
+
+        uint256 adapterShares = yieldAdapter.balanceOf(address(splitter));
+        uint256 adapterAssets = yieldAdapter.convertToAssets(adapterShares);
+        uint256 yieldAmount = (adapterAssets * 5) / 100; // 5% yield
+
+        deal(USDC, address(yieldAdapter), adapterAssets + yieldAmount);
+        console.log("Added yield:", yieldAmount);
+
+        // Harvest
+        uint256 treasuryBefore = IERC20(USDC).balanceOf(treasury);
+        splitter.harvestYield();
+        uint256 harvested = IERC20(USDC).balanceOf(treasury) - treasuryBefore;
+        console.log("Harvested:", harvested);
+
+        // ==========================================
+        // PHASE 3: PARTIAL BURN (Alice)
+        // ==========================================
+        console.log("\n=== PHASE 3: ALICE BURNS ===");
+
+        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+        vm.startPrank(alice);
+        IERC20(bullToken).approve(address(splitter), aliceMint);
+        IERC20(bearToken).approve(address(splitter), aliceMint);
+        splitter.burn(aliceMint);
+        vm.stopPrank();
+
+        uint256 aliceReturned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
+        console.log("Alice USDC returned:", aliceReturned);
+
+        // ==========================================
+        // PHASE 4: BOB BURNS
+        // ==========================================
+        console.log("\n=== PHASE 4: BOB BURNS ===");
+
+        uint256 bobUsdcBefore = IERC20(USDC).balanceOf(bob);
+        vm.startPrank(bob);
+        IERC20(bullToken).approve(address(splitter), bobMint);
+        IERC20(bearToken).approve(address(splitter), bobMint);
+        splitter.burn(bobMint);
+        vm.stopPrank();
+
+        uint256 bobReturned = IERC20(USDC).balanceOf(bob) - bobUsdcBefore;
+        console.log("Bob USDC returned:", bobReturned);
+
+        // ==========================================
+        // ASSERTIONS
+        // ==========================================
+        assertEq(IERC20(bullToken).balanceOf(alice), 0, "Alice BULL should be 0");
+        assertEq(IERC20(bearToken).balanceOf(alice), 0, "Alice BEAR should be 0");
+        assertEq(IERC20(bullToken).balanceOf(bob), 0, "Bob BULL should be 0");
+        assertEq(IERC20(bearToken).balanceOf(bob), 0, "Bob BEAR should be 0");
+
+        // Both users should get back close to their original deposits
+        assertGt(aliceReturned, (aliceUsdc * 99) / 100, "Alice should get ~100% back");
+        assertGt(bobReturned, (bobUsdc * 99) / 100, "Bob should get ~100% back");
+
+        console.log("\n=== SUMMARY ===");
+        console.log("Total USDC in:", aliceUsdc + bobUsdc);
+        console.log("Total USDC out:", aliceReturned + bobReturned);
+        console.log("Treasury yield:", harvested);
+    }
+
+    /// @notice Test yield accumulation over multiple harvest cycles
+    function test_FullCycle_MultipleHarvests() public {
+        uint256 mintAmount = 50_000e18;
+
+        // Initial mint
+        vm.startPrank(alice);
+        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
+        IERC20(USDC).approve(address(splitter), usdcRequired);
+        splitter.mint(mintAmount);
+        vm.stopPrank();
+
+        console.log("=== INITIAL STATE ===");
+        console.log("Minted:", mintAmount, "pairs");
+
+        uint256 totalHarvested = 0;
+
+        // Simulate 4 quarters of yield
+        for (uint256 i = 1; i <= 4; i++) {
+            console.log("\n=== QUARTER", i, "===");
+
+            uint256 adapterShares = yieldAdapter.balanceOf(address(splitter));
+            uint256 adapterAssets = yieldAdapter.convertToAssets(adapterShares);
+            uint256 quarterlyYield = (adapterAssets * 25) / 1000; // 2.5% quarterly
+
+            // Add yield
+            deal(USDC, address(yieldAdapter), adapterAssets + quarterlyYield);
+
+            // Harvest
+            uint256 treasuryBefore = IERC20(USDC).balanceOf(treasury);
+            splitter.harvestYield();
+            uint256 harvested = IERC20(USDC).balanceOf(treasury) - treasuryBefore;
+
+            totalHarvested += harvested;
+            console.log("Quarterly yield added:", quarterlyYield);
+            console.log("Harvested:", harvested);
+        }
+
+        console.log("\n=== FINAL BURN ===");
+
+        // Final burn
+        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+        vm.startPrank(alice);
+        IERC20(bullToken).approve(address(splitter), mintAmount);
+        IERC20(bearToken).approve(address(splitter), mintAmount);
+        splitter.burn(mintAmount);
+        vm.stopPrank();
+
+        uint256 returned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
+
+        console.log("\n=== SUMMARY ===");
+        console.log("USDC deposited:", usdcRequired);
+        console.log("USDC returned:", returned);
+        console.log("Total yield harvested:", totalHarvested);
+
+        // Assertions
+        assertGt(totalHarvested, 0, "Should have harvested yield");
+        assertGt(returned, (usdcRequired * 99) / 100, "Should return ~100% of deposit");
+    }
+}
+
 contract MockCurvePoolForOracle {
     uint256 public oraclePrice;
 
