@@ -6,6 +6,7 @@ import "forge-std/StdInvariant.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/MockYieldAdapter.sol";
+import "../src/libraries/OracleLib.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
 
@@ -58,9 +59,9 @@ contract SplitterHandler is Test {
     bytes4 constant ERR_ZERO_AMOUNT = SyntheticSplitter.Splitter__ZeroAmount.selector;
     bytes4 constant ERR_LIQUIDATION_ACTIVE = SyntheticSplitter.Splitter__LiquidationActive.selector;
     bytes4 constant ERR_NOT_LIQUIDATED = SyntheticSplitter.Splitter__NotLiquidated.selector;
-    bytes4 constant ERR_STALE_PRICE = SyntheticSplitter.Splitter__StalePrice.selector;
-    bytes4 constant ERR_SEQUENCER_DOWN = SyntheticSplitter.Splitter__SequencerDown.selector;
-    bytes4 constant ERR_SEQUENCER_GRACE = SyntheticSplitter.Splitter__SequencerGracePeriod.selector;
+    bytes4 constant ERR_STALE_PRICE = OracleLib.OracleLib__StalePrice.selector;
+    bytes4 constant ERR_SEQUENCER_DOWN = OracleLib.OracleLib__SequencerDown.selector;
+    bytes4 constant ERR_SEQUENCER_GRACE = OracleLib.OracleLib__SequencerGracePeriod.selector;
     bytes4 constant ERR_NO_SURPLUS = SyntheticSplitter.Splitter__NoSurplus.selector;
     bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
 

@@ -13,6 +13,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {SyntheticToken} from "./SyntheticToken.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -85,10 +86,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     error Splitter__TimelockActive();
     error Splitter__InvalidProposal();
     error Splitter__NoSurplus();
-    error Splitter__StalePrice();
     error Splitter__GovernanceLocked();
-    error Splitter__SequencerDown();
-    error Splitter__SequencerGracePeriod();
     error Splitter__InsufficientHarvest();
     error Splitter__AdapterWithdrawFailed();
 
@@ -615,45 +613,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         status.adapterAssets = adapterVal;
     }
 
-    // Sequencer Check Logic
-    function _checkSequencer() internal view {
-        // Skip check if no feed address is provided (e.g. Mainnet/Testnet without feed)
-        if (address(SEQUENCER_UPTIME_FEED) == address(0)) return;
-
-        (
-            /*uint80 roundID*/,
-            int256 answer,
-            uint256 startedAt,
-            /*uint256 updatedAt*/,
-            /*uint80 answeredInRound*/
-        ) = SEQUENCER_UPTIME_FEED.latestRoundData();
-
-        // Answer == 0: Sequencer is UP
-        // Answer == 1: Sequencer is DOWN
-        bool isSequencerUp = answer == 0;
-        if (!isSequencerUp) {
-            revert Splitter__SequencerDown();
-        }
-
-        // Check if Grace Period has passed since it came back up
-        // "startedAt" on the Sequencer Feed is the timestamp when the status changed
-        if (block.timestamp - startedAt < SEQUENCER_GRACE_PERIOD) {
-            revert Splitter__SequencerGracePeriod();
-        }
-    }
-
+    // Oracle Price Logic (using OracleLib)
     function _getOraclePrice() internal view returns (uint256) {
-        _checkSequencer();
-        (
-            /* uint80 roundID */,
-            int256 price,
-            /* uint startedAt */,
-            uint256 updatedAt,
-            /* uint80 answeredInRound */
-        ) = ORACLE.latestRoundData();
-
-        if (updatedAt < block.timestamp - ORACLE_TIMEOUT) revert Splitter__StalePrice();
-        if (price <= 0) return 0;
-        return uint256(price);
+        return OracleLib.getValidatedPrice(ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
     }
 }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/MockYieldAdapter.sol";
+import "../src/libraries/OracleLib.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
@@ -308,7 +309,7 @@ contract SyntheticSplitterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
 
-        vm.expectRevert(SyntheticSplitter.Splitter__StalePrice.selector);
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
         splitter.mint(10 * 1e18);
         vm.stopPrank();
     }
@@ -336,7 +337,7 @@ contract SyntheticSplitterTest is Test {
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(0, 1, block.timestamp - 2 hours, 0, 0) // answer=1 (down)
         );
-        vm.expectRevert(SyntheticSplitter.Splitter__SequencerDown.selector);
+        vm.expectRevert(OracleLib.OracleLib__SequencerDown.selector);
         splitterWithFeed.mint(10 * 1e18); // Triggers _checkSequencer
     }
 
@@ -352,7 +353,7 @@ contract SyntheticSplitterTest is Test {
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(0, 0, block.timestamp - 30 minutes, 0, 0) // answer=0, but startedAt <1hr
         );
-        vm.expectRevert(SyntheticSplitter.Splitter__SequencerGracePeriod.selector);
+        vm.expectRevert(OracleLib.OracleLib__SequencerGracePeriod.selector);
         splitterWithFeed.mint(10 * 1e18);
     }
 
