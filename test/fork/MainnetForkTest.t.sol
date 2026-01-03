@@ -67,6 +67,11 @@ abstract contract BaseForkTest is Test {
     uint256 constant LLTV_945 = 945000000000000000; // 94.5%
 
     // ==========================================
+    // BALANCER V2 MAINNET CONSTANTS
+    // ==========================================
+    address constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+
+    // ==========================================
     // CURVE POOL PARAMETERS
     // Single source of truth for all fork tests
     // ==========================================
@@ -520,7 +525,7 @@ contract LeverageRouterForkTest is BaseForkTest {
     StakedToken stBear;
     LeverageRouter leverageRouter;
     MorphoOracle morphoOracle;
-    MockFlashLenderForFork lender;
+    BalancerFlashLender lender;
     MarketParams marketParams;
 
     address alice = address(0xA11CE);
@@ -545,9 +550,8 @@ contract LeverageRouterForkTest is BaseForkTest {
         // Create Morpho market with real Morpho
         marketParams = _createMorphoMarket(address(stBear), address(morphoOracle), 1_000_000e6);
 
-        // Deploy mock flash lender (zero fee for testing)
-        lender = new MockFlashLenderForFork(USDC);
-        deal(USDC, address(lender), 1_000_000e6);
+        // Deploy ERC-3156 wrapper around real Balancer V2 Vault (zero fee flash loans)
+        lender = new BalancerFlashLender(BALANCER_VAULT);
 
         // Deploy router
         leverageRouter =
@@ -674,7 +678,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
     StakedToken stBull;
     BullLeverageRouter bullLeverageRouter;
     MorphoOracle morphoOracle;
-    MockFlashLenderForFork lender;
+    BalancerFlashLender lender;
     MarketParams marketParams;
 
     address alice = address(0xA11CE);
@@ -699,9 +703,8 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         // Create Morpho market with real Morpho
         marketParams = _createMorphoMarket(address(stBull), address(morphoOracle), 1_000_000e6);
 
-        // Deploy mock flash lender (zero fee for testing)
-        lender = new MockFlashLenderForFork(USDC);
-        deal(USDC, address(lender), 1_000_000e6);
+        // Deploy ERC-3156 wrapper around real Balancer V2 Vault (zero fee flash loans)
+        lender = new BalancerFlashLender(BALANCER_VAULT);
 
         // Deploy router
         bullLeverageRouter = new BullLeverageRouter(
@@ -873,38 +876,99 @@ contract MockCurvePoolForOracle {
     }
 }
 
-/// @notice Mock flash lender with zero fees for testing
-contract MockFlashLenderForFork is IERC3156FlashLender {
-    address public token;
+/// @notice Balancer V2 Vault interface for flash loans
+interface IBalancerVault {
+    function flashLoan(
+        IFlashLoanRecipient recipient,
+        IERC20[] memory tokens,
+        uint256[] memory amounts,
+        bytes memory userData
+    ) external;
+}
 
-    constructor(address _token) {
-        token = _token;
+/// @notice Balancer flash loan recipient interface
+interface IFlashLoanRecipient {
+    function receiveFlashLoan(
+        IERC20[] memory tokens,
+        uint256[] memory amounts,
+        uint256[] memory feeAmounts,
+        bytes memory userData
+    ) external;
+}
+
+/// @notice ERC-3156 wrapper around Balancer V2 Vault flash loans
+/// @dev Balancer V2 has zero flash loan fees, making it ideal for leverage operations
+contract BalancerFlashLender is IERC3156FlashLender, IFlashLoanRecipient {
+    IBalancerVault public immutable VAULT;
+
+    // Transient storage for callback routing
+    IERC3156FlashBorrower private _currentBorrower;
+    address private _currentInitiator;
+
+    constructor(address _vault) {
+        VAULT = IBalancerVault(_vault);
     }
 
-    function maxFlashLoan(address) external pure override returns (uint256) {
-        return type(uint256).max;
+    function maxFlashLoan(address token) external view override returns (uint256) {
+        // Return the vault's balance of the token
+        return IERC20(token).balanceOf(address(VAULT));
     }
 
     function flashFee(address, uint256) external pure override returns (uint256) {
+        // Balancer V2 has zero flash loan fees
         return 0;
     }
 
-    function flashLoan(IERC3156FlashBorrower receiver, address _token, uint256 amount, bytes calldata data)
+    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
         external
         override
         returns (bool)
     {
-        require(_token == token, "Unsupported token");
+        // Store callback info
+        _currentBorrower = receiver;
+        _currentInitiator = msg.sender;
 
-        IERC20(token).transfer(address(receiver), amount);
+        // Prepare Balancer flash loan parameters
+        IERC20[] memory tokens = new IERC20[](1);
+        tokens[0] = IERC20(token);
 
-        require(
-            receiver.onFlashLoan(msg.sender, _token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
 
-        IERC20(token).transferFrom(address(receiver), address(this), amount);
+        // Execute flash loan - Balancer will call receiveFlashLoan
+        VAULT.flashLoan(this, tokens, amounts, data);
+
+        // Clear transient storage
+        _currentBorrower = IERC3156FlashBorrower(address(0));
+        _currentInitiator = address(0);
 
         return true;
+    }
+
+    /// @notice Balancer callback - routes to ERC-3156 borrower
+    function receiveFlashLoan(
+        IERC20[] memory tokens,
+        uint256[] memory amounts,
+        uint256[] memory feeAmounts,
+        bytes memory userData
+    ) external override {
+        require(msg.sender == address(VAULT), "Only Balancer Vault");
+
+        address token = address(tokens[0]);
+        uint256 amount = amounts[0];
+        uint256 fee = feeAmounts[0];
+
+        // Transfer tokens to borrower
+        IERC20(token).transfer(address(_currentBorrower), amount);
+
+        // Call ERC-3156 callback
+        bytes32 result = _currentBorrower.onFlashLoan(_currentInitiator, token, amount, fee, userData);
+        require(result == keccak256("ERC3156FlashBorrower.onFlashLoan"), "Callback failed");
+
+        // Borrower should have approved us, pull tokens back
+        IERC20(token).transferFrom(address(_currentBorrower), address(this), amount + fee);
+
+        // Transfer tokens back to vault (Balancer expects direct transfer, not approve)
+        IERC20(token).transfer(address(VAULT), amount + fee);
     }
 }
