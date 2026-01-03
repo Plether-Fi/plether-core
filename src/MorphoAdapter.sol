@@ -34,6 +34,8 @@ contract MorphoAdapter is ERC4626, Ownable {
     error MorphoAdapter__InvalidAddress();
     error MorphoAdapter__InvalidMarket();
 
+    event UrdUpdated(address indexed oldUrd, address indexed newUrd);
+
     constructor(IERC20 _asset, address _morpho, MarketParams memory _marketParams, address _owner, address _splitter)
         ERC4626(_asset)
         ERC20("Morpho Yield Wrapper", "myUSDC")
@@ -135,7 +137,9 @@ contract MorphoAdapter is ERC4626, Ownable {
      */
     function setUrd(address _urd) external onlyOwner {
         require(_urd != address(0), "URD cannot be zero address");
+        address oldUrd = urd;
         urd = _urd;
+        emit UrdUpdated(oldUrd, _urd);
     }
 
     /**

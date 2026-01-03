@@ -378,6 +378,22 @@ contract MorphoAdapterTest is Test {
         assertEq(adapter.urd(), address(urd));
     }
 
+    function test_SetUrd_EmitsEvent() public {
+        address newUrd = address(0x1234);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, false);
+        emit MorphoAdapter.UrdUpdated(address(0), newUrd);
+        adapter.setUrd(newUrd);
+
+        // Update again to verify old value is captured
+        address newerUrd = address(0x5678);
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, false);
+        emit MorphoAdapter.UrdUpdated(newUrd, newerUrd);
+        adapter.setUrd(newerUrd);
+    }
+
     function test_SetUrd_OnlyOwner() public {
         vm.prank(hacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
