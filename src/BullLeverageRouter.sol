@@ -407,17 +407,20 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         view
         returns (uint256 expectedUSDC, uint256 usdcForBearBuyback, uint256 expectedReturn)
     {
+        // Convert staked shares to underlying BULL amount (shares have 1000x offset)
+        uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
+
         // Redeeming pairs at CAP: usdc = tokens * CAP / USDC_MULTIPLIER
-        expectedUSDC = (collateralToWithdraw * CAP) / USDC_MULTIPLIER;
+        expectedUSDC = (dxyBullAmount * CAP) / USDC_MULTIPLIER;
 
         // Estimate USDC needed to buy back DXY-BEAR for flash mint repayment
         uint256 testUsdcAmount = 1e6; // 1 USDC
         uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, testUsdcAmount);
         if (bearPerUsdc > 0) {
-            usdcForBearBuyback = (collateralToWithdraw * testUsdcAmount) / bearPerUsdc;
+            usdcForBearBuyback = (dxyBullAmount * testUsdcAmount) / bearPerUsdc;
         } else {
             // Fallback: use CAP pricing
-            usdcForBearBuyback = (collateralToWithdraw * CAP) / USDC_MULTIPLIER;
+            usdcForBearBuyback = (dxyBullAmount * CAP) / USDC_MULTIPLIER;
         }
 
         // Flash loan fee for USDC debt repayment

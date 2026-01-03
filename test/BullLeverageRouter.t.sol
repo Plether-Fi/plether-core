@@ -555,6 +555,10 @@ contract MockStakedToken is ERC20 {
         assets = shares; // 1:1 for simplicity
         underlying.transfer(receiver, assets);
     }
+
+    function previewRedeem(uint256 shares) external pure returns (uint256) {
+        return shares; // 1:1 for simplicity
+    }
 }
 
 contract MockFlashToken is ERC20, IERC3156FlashLender {
