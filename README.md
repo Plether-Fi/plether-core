@@ -110,7 +110,7 @@ Both routers include MEV protection via user-defined slippage caps (max 1%).
 The protocol operates in three states:
 
 1. **ACTIVE** - Normal operations (mint, burn, redeem)
-2. **PAUSED** - Emergency pause (only admin functions)
+2. **PAUSED** - Emergency pause (minting blocked, burning allowed so users can exit)
 3. **SETTLED** - End-of-life when DXY hits CAP price (only redemptions allowed)
 
 ## Development

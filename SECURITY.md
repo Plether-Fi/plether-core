@@ -33,7 +33,7 @@ The protocol owner can:
 - Rescue stuck tokens (non-core assets only)
 
 The owner **cannot**:
-- Freeze user funds permanently (burn always works when active)
+- Freeze user funds permanently (burn always works, even when paused)
 - Modify the CAP after deployment
 - Change oracle addresses after deployment
 - Mint or burn tokens directly
