@@ -10,10 +10,7 @@ import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
  * @title VerifyDeployment

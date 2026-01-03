@@ -12,7 +12,6 @@ import {StakedToken} from "../src/StakedToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 

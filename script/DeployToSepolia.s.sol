@@ -5,7 +5,6 @@ import "forge-std/Script.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
-import {MorphoAdapter} from "../src/MorphoAdapter.sol";
 import {MockYieldAdapter} from "../test/utils/MockYieldAdapter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";

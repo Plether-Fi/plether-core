@@ -14,7 +14,6 @@ import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.
 import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
 import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC3156FlashLender, IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
 // --------------------------------------------------------
