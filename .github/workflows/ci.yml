@@ -29,7 +29,7 @@ jobs:
         run: forge build --sizes
 
       - name: Run tests
-        run: forge test -vvv
+        run: forge test -vvv --no-match-path "test/fork/*"
 
   coverage:
     runs-on: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
           version: nightly
 
       - name: Run coverage
-        run: forge coverage --report lcov
+        run: forge coverage --report lcov --no-match-path "test/fork/*"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

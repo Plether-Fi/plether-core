@@ -133,6 +133,15 @@ forge test -vvv         # Verbose output
 forge coverage          # Generate coverage report
 ```
 
+### Fork Tests
+
+Fork tests run against mainnet state and require an RPC URL:
+
+```bash
+export MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+forge test --match-path "test/fork/*" -vvv
+```
+
 ### Format
 
 ```bash
