@@ -102,21 +102,23 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         // Approvals (One-time)
         // 1. Allow Splitter to take USDC (for minting pairs)
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 2. Allow Curve pool to take DXY-BEAR (for selling)
+        // 2. Allow Curve pool to take DXY-BEAR (for selling during open)
         DXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 3. Allow StakedToken to take DXY-BULL (for staking)
+        // 3. Allow Curve pool to take USDC (for buying BEAR during close)
+        USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
+        // 4. Allow StakedToken to take DXY-BULL (for staking)
         DXY_BULL.safeIncreaseAllowance(_stakedDxyBull, type(uint256).max);
-        // 4. Allow Morpho to take sDXY-BULL (for supplying collateral)
+        // 5. Allow Morpho to take sDXY-BULL (for supplying collateral)
         IERC20(_stakedDxyBull).safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 5. Allow Morpho to take USDC (for repaying debt)
+        // 6. Allow Morpho to take USDC (for repaying debt)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 6. Allow Lender to take back USDC (Flash Loan Repayment)
+        // 7. Allow Lender to take back USDC (Flash Loan Repayment)
         USDC.safeIncreaseAllowance(_lender, type(uint256).max);
-        // 7. Allow Splitter to take DXY-BEAR (for redeeming pairs during close)
+        // 8. Allow Splitter to take DXY-BEAR (for redeeming pairs during close)
         DXY_BEAR.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 8. Allow Splitter to take DXY-BULL (for redeeming pairs during close)
+        // 9. Allow Splitter to take DXY-BULL (for redeeming pairs during close)
         DXY_BULL.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 9. Allow DXY-BEAR to take back tokens (Flash Mint Repayment)
+        // 10. Allow DXY-BEAR to take back tokens (Flash Mint Repayment)
         DXY_BEAR.safeIncreaseAllowance(_dxyBear, type(uint256).max);
     }
 
@@ -239,7 +241,9 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         uint256 totalUSDC = principal + loanAmount;
 
         // 2. Mint pairs via Splitter (USDC -> DXY-BEAR + DXY-BULL)
-        SPLITTER.mint(totalUSDC);
+        // Splitter.mint expects token amount (18 decimals), not USDC (6 decimals)
+        // tokens = usdc * USDC_MULTIPLIER / CAP
+        SPLITTER.mint((totalUSDC * USDC_MULTIPLIER) / CAP);
 
         // 3. Sell ALL DXY-BEAR for USDC via Curve
         uint256 dxyBearBalance = DXY_BEAR.balanceOf(address(this));

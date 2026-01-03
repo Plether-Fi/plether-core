@@ -819,14 +819,12 @@ contract MockSplitter is ISyntheticSplitter {
     }
 
     function mint(uint256 amount) external override {
-        // Burn USDC, mint tokens at CAP pricing
-        // amount is in USDC (6 decimals), tokens are 18 decimals
-        // CAP = $2.00, so 1 USDC mints 0.5 pairs (tokens)
-        // tokens = usdc * 1e20 / CAP = usdc * 1e20 / 2e8 = usdc * 1e12 / 2
-        MockToken(usdc).burn(msg.sender, amount);
-        uint256 tokenAmount = (amount * 1e12) / 2;
-        MockFlashToken(dxyBear).mint(msg.sender, tokenAmount);
-        MockToken(dxyBull).mint(msg.sender, tokenAmount);
+        // amount is token amount (18 decimals), matching real SyntheticSplitter
+        // Calculate USDC to pull: usdc = tokens * CAP / 1e20 = tokens * 2e8 / 1e20 = tokens * 2 / 1e12
+        uint256 usdcNeeded = (amount * 2) / 1e12;
+        MockToken(usdc).burn(msg.sender, usdcNeeded);
+        MockFlashToken(dxyBear).mint(msg.sender, amount);
+        MockToken(dxyBull).mint(msg.sender, amount);
     }
 
     function burn(uint256 amount) external override {
