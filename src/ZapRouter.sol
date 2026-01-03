@@ -29,6 +29,10 @@ contract ZapRouter is IERC3156FlashBorrower {
     uint256 public immutable CAP; // 8 decimals (oracle format)
     uint256 public immutable CAP_PRICE; // 6 decimals (for Curve price comparison)
 
+    // Action Flags for Flash Loan
+    uint256 private constant ACTION_MINT = 0;
+    uint256 private constant ACTION_BURN = 1;
+
     // Transient state for passing swap result from callback to main function
     uint256 private _lastSwapOut;
 
@@ -36,6 +40,7 @@ contract ZapRouter is IERC3156FlashBorrower {
     event ZapMint(
         address indexed user, uint256 usdcIn, uint256 tokensOut, uint256 maxSlippageBps, uint256 actualSwapOut
     );
+    event ZapBurn(address indexed user, uint256 tokensIn, uint256 usdcOut);
 
     constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool) {
         SPLITTER = ISyntheticSplitter(_splitter);
@@ -52,6 +57,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
         // Pre-approve the Curve pool to take DXY-BEAR (for swapping)
         IERC20(_dxyBear).safeIncreaseAllowance(_curvePool, type(uint256).max);
+        USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
     /**
@@ -91,7 +97,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         // 5. Initiate Flash Loan
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        bytes memory data = abi.encode(msg.sender, usdcAmount, minSwapOut);
+        bytes memory data = abi.encode(ACTION_MINT, msg.sender, usdcAmount, minSwapOut);
 
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
@@ -103,7 +109,32 @@ contract ZapRouter is IERC3156FlashBorrower {
         emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
     }
 
-    function onFlashLoan(address initiator, address token, uint256 amount, uint256 fee, bytes calldata data)
+    // =================================================================
+    // ZAP BURN (BULL -> USDC)
+    // =================================================================
+    function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external {
+        require(bullAmount > 0, "Amount > 0");
+        require(block.timestamp <= deadline, "Expired");
+
+        // 1. Pull Bull Tokens from User
+        DXY_BULL.safeTransferFrom(msg.sender, address(this), bullAmount);
+
+        // 2. Flash Borrow Matching Bear Tokens
+        // To merge and unlock collateral, we need 1 Bear for every 1 Bull.
+        uint256 flashAmount = bullAmount;
+
+        // Encode ACTION_BURN
+        bytes memory data = abi.encode(ACTION_BURN, msg.sender, bullAmount, minUsdcOut);
+        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
+
+        // 3. Final Check (USDC sent in callback)
+        emit ZapBurn(msg.sender, bullAmount, _lastSwapOut);
+    }
+
+    // =================================================================
+    // FLASH LOAN CALLBACK
+    // =================================================================
+    function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
         returns (bytes32)
@@ -111,11 +142,22 @@ contract ZapRouter is IERC3156FlashBorrower {
         require(msg.sender == address(DXY_BEAR), "Untrusted lender");
         require(initiator == address(this), "Untrusted initiator");
 
-        // Decode params
-        (address user, uint256 userUsdcAmount, uint256 minSwapOut) = abi.decode(data, (address, uint256, uint256));
+        // Decode Action Flag First
+        (uint256 action, address user, uint256 amountIn, uint256 minOut) =
+            abi.decode(data, (uint256, address, uint256, uint256));
 
+        if (action == ACTION_MINT) {
+            _handleMint(amount, fee, user, minOut);
+        } else {
+            _handleBurn(amount, fee, user, minOut);
+        }
+
+        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+    }
+
+    function _handleMint(uint256 loanAmount, uint256 fee, address user, uint256 minSwapOut) internal {
         // 1. Swap Borrowed Bear -> USDC via Curve
-        uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, amount, minSwapOut);
+        uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, loanAmount, minSwapOut);
         _lastSwapOut = swappedUsdc;
 
         // Use balance check as source of truth (handles dust/fee-on-transfer edge cases)
@@ -129,7 +171,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         SPLITTER.mint(mintAmount);
 
         // 3. Repay the Flash Loan
-        uint256 repayAmount = amount + fee;
+        uint256 repayAmount = loanAmount + fee;
         DXY_BEAR.safeIncreaseAllowance(msg.sender, repayAmount);
 
         // 4. Sweep Dust
@@ -141,8 +183,64 @@ contract ZapRouter is IERC3156FlashBorrower {
             uint256 surplus = currentBalance - repayAmount;
             DXY_BEAR.safeTransfer(user, surplus);
         }
+    }
 
-        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+    function _handleBurn(uint256 loanAmount, uint256 fee, address user, uint256 minUsdcOut) internal {
+        // State: We have `loanAmount` Bear (Borrowed) + `loanAmount` Bull (From User)
+
+        // 1. Combine to Unlock USDC
+        // This burns Bull+Bear and sends USDC to this contract
+        SPLITTER.burn(loanAmount);
+
+        // 2. Calculate Debt in Bear (Loan + Fee)
+        uint256 debtBear = loanAmount + fee;
+
+        // 3. Buy Debt Bear using USDC
+        // FIX: Don't use get_dx (fragile). Estimate using get_dy + Buffer.
+
+        // Step A: Get price for 1 USDC
+        // "How much Bear do I get for 1 USDC?"
+        uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+        require(bearFromOneUsdc > 0, "Pool liquidity error");
+
+        // Step B: Calculate Linear Requirement
+        // (Debt / Rate) = USDC needed
+        // (18 dec * 6 dec) / 18 dec = 6 dec
+        uint256 usdcLinear = (debtBear * 1e6) / bearFromOneUsdc;
+
+        // Step C: Apply Safety Buffer (1%)
+        // We swap slightly more USDC to handle slippage/fees and guarantee we get enough Bear.
+        // Any excess Bear is swept to user.
+        uint256 usdcToSwap = (usdcLinear * 10100) / 10000;
+
+        // Sanity Check: Do we have enough USDC?
+        uint256 totalUsdc = USDC.balanceOf(address(this));
+        if (usdcToSwap > totalUsdc) {
+            usdcToSwap = totalUsdc; // Cap at max available (hoping it's enough)
+        }
+
+        // Execute Swap
+        CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, usdcToSwap, 0);
+
+        // 4. Repay Loan
+        DXY_BEAR.safeIncreaseAllowance(msg.sender, debtBear);
+
+        // Verify we actually bought enough (Solvency Check)
+        uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
+        require(bearBalance >= debtBear, "Burn Solvency: Not enough Bear bought");
+
+        // 5. Send remaining USDC to User (The Exit)
+        uint256 remainingUsdc = USDC.balanceOf(address(this));
+        require(remainingUsdc >= minUsdcOut, "Slippage: Burn");
+        USDC.safeTransfer(user, remainingUsdc);
+
+        // 6. Sweep Dust Bear
+        // Because we added a buffer, we will have a tiny bit of Bear left.
+        if (bearBalance > debtBear) {
+            DXY_BEAR.safeTransfer(user, bearBalance - debtBear);
+        }
+
+        _lastSwapOut = remainingUsdc;
     }
 
     // ==========================================
