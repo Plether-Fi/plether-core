@@ -11,7 +11,6 @@ library OracleLib {
     error OracleLib__SequencerDown();
     error OracleLib__SequencerGracePeriod();
     error OracleLib__StalePrice();
-    error OracleLib__InvalidPrice();
 
     /// @notice Check if the L2 sequencer is up and grace period has passed.
     /// @param sequencerFeed The Chainlink sequencer uptime feed.
@@ -42,15 +41,6 @@ library OracleLib {
         if (updatedAt < block.timestamp - timeout) {
             revert OracleLib__StalePrice();
         }
-    }
-
-    /// @notice Validate that a price is positive.
-    /// @param price The price to validate.
-    /// @return The price as uint256 if valid.
-    /// @dev Reverts if price <= 0.
-    function validatePositivePrice(int256 price) internal pure returns (uint256) {
-        if (price <= 0) revert OracleLib__InvalidPrice();
-        return uint256(price);
     }
 
     /// @notice Get a validated price from an oracle with staleness and sequencer checks.
