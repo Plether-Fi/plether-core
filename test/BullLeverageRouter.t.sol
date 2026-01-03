@@ -1045,6 +1045,15 @@ contract MockMorpho is IMorpho {
     }
 
     function accrueInterest(MarketParams memory) external override {}
+
+    function liquidate(MarketParams memory, address, uint256, uint256, bytes calldata)
+        external
+        pure
+        override
+        returns (uint256, uint256)
+    {
+        return (0, 0);
+    }
 }
 
 contract MockSplitter is ISyntheticSplitter {

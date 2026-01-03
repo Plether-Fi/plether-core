@@ -92,6 +92,24 @@ interface IMorpho {
     function accrueInterest(MarketParams memory marketParams) external;
 
     // ==========================================
+    // LIQUIDATION
+    // ==========================================
+
+    /// @notice Liquidate an unhealthy position
+    /// @param marketParams The market parameters
+    /// @param borrower The address of the borrower to liquidate
+    /// @param seizedAssets The amount of collateral to seize
+    /// @param repaidShares The amount of debt shares to repay (alternative to seizedAssets)
+    /// @param data Callback data
+    function liquidate(
+        MarketParams memory marketParams,
+        address borrower,
+        uint256 seizedAssets,
+        uint256 repaidShares,
+        bytes calldata data
+    ) external returns (uint256 assetsSeized, uint256 assetsRepaid);
+
+    // ==========================================
     // VIEW FUNCTIONS
     // ==========================================
 
