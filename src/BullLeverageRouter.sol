@@ -4,6 +4,9 @@ pragma solidity 0.8.33;
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
@@ -49,7 +52,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │   2. Emit LeverageClosed event                                          │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
-contract BullLeverageRouter is FlashLoanBase {
+contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -95,12 +98,8 @@ contract BullLeverageRouter is FlashLoanBase {
     uint256 private _lastCollateralWithdrawn;
     uint256 private _lastUsdcReturned;
 
-    /// @dev Nested flash loan state (set in _executeClose, read in _executeCloseRedeem)
-    /// Required because the nested DXY-BEAR flash mint callback cannot access
-    /// the outer USDC flash loan's parameters directly.
-    address private _closeUser;
-    uint256 private _closeUsdcFlashAmount;
-    uint256 private _closeUsdcFlashFee;
+    // Note: Nested flash loan state (_closeUser, _closeUsdcFlashAmount, _closeUsdcFlashFee)
+    // is now passed via callback data to prevent stale state attacks on revert.
 
     // Dependencies
     IMorpho public immutable MORPHO;
@@ -117,6 +116,8 @@ contract BullLeverageRouter is FlashLoanBase {
     // Cached from Splitter (immutable)
     uint256 public immutable CAP; // 8 decimals (oracle format)
 
+    error BullLeverageRouter__ZeroAddress();
+
     constructor(
         address _morpho,
         address _splitter,
@@ -127,7 +128,15 @@ contract BullLeverageRouter is FlashLoanBase {
         address _stakedDxyBull,
         address _lender,
         MarketParams memory _marketParams
-    ) {
+    ) Ownable(msg.sender) {
+        if (_morpho == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_splitter == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_curvePool == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_usdc == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_dxyBear == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_dxyBull == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_stakedDxyBull == address(0)) revert BullLeverageRouter__ZeroAddress();
+        if (_lender == address(0)) revert BullLeverageRouter__ZeroAddress();
         MORPHO = IMorpho(_morpho);
         SPLITTER = ISyntheticSplitter(_splitter);
         CURVE_POOL = ICurvePool(_curvePool);
@@ -173,7 +182,11 @@ contract BullLeverageRouter is FlashLoanBase {
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline) external {
+    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+    {
         require(principal > 0, "Principal must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(leverage > 1e18, "Leverage must be > 1x");
@@ -223,6 +236,8 @@ contract BullLeverageRouter is FlashLoanBase {
      */
     function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 deadline)
         external
+        nonReentrant
+        whenNotPaused
     {
         require(block.timestamp <= deadline, "Transaction expired");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
@@ -347,14 +362,10 @@ contract BullLeverageRouter is FlashLoanBase {
         // 3. Unstake sDXY-BULL to get DXY-BULL
         uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
 
-        // 4. Store state for nested callback
-        _closeUser = user;
-        _closeUsdcFlashAmount = loanAmount;
-        _closeUsdcFlashFee = fee;
-
-        // 5. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
-        // We need equal amounts of DXY-BEAR and DXY-BULL to redeem
-        bytes memory redeemData = abi.encode(OP_CLOSE_REDEEM, user, deadline, dxyBullReceived, maxSlippageBps);
+        // 4. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
+        // Pass outer flash loan params via callback data (not transient storage) to prevent stale state attacks
+        bytes memory redeemData =
+            abi.encode(OP_CLOSE_REDEEM, user, deadline, dxyBullReceived, maxSlippageBps, loanAmount, fee);
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), dxyBullReceived, redeemData);
 
         // After nested callback completes, repay USDC flash loan
@@ -363,17 +374,12 @@ contract BullLeverageRouter is FlashLoanBase {
         uint256 usdcBalance = USDC.balanceOf(address(this));
         require(usdcBalance >= flashRepayment, "Insufficient USDC from redemption");
 
-        // 6. Send remaining USDC to user
+        // 5. Send remaining USDC to user
         uint256 usdcToReturn = usdcBalance - flashRepayment;
         _lastUsdcReturned = usdcToReturn;
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
         }
-
-        // Clean up transient state
-        _closeUser = address(0);
-        _closeUsdcFlashAmount = 0;
-        _closeUsdcFlashFee = 0;
     }
 
     /**
@@ -388,9 +394,11 @@ contract BullLeverageRouter is FlashLoanBase {
      * when this callback returns - the token contract handles it.
      */
     function _executeCloseRedeem(uint256 flashMintAmount, uint256 fee, bytes calldata data) private {
-        // Decode: (op, user, deadline, dxyBullAmount, maxSlippageBps)
-        (, address user, uint256 deadline, uint256 dxyBullAmount, uint256 maxSlippageBps) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256));
+        // Decode: (op, user, deadline, dxyBullAmount, maxSlippageBps, outerLoanAmount, outerFee)
+        // Note: outerLoanAmount and outerFee are passed via data (not transient storage) for safety
+        // but are only used in _executeClose after this callback returns
+        (,, uint256 deadline, uint256 dxyBullAmount, uint256 maxSlippageBps,,) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         require(block.timestamp <= deadline, "Transaction expired");
 
@@ -497,5 +505,19 @@ contract BullLeverageRouter is FlashLoanBase {
         uint256 totalCosts = debtToRepay + flashFee + usdcForBearBuyback;
 
         expectedReturn = expectedUSDC > totalCosts ? expectedUSDC - totalCosts : 0;
+    }
+
+    // ==========================================
+    // ADMIN FUNCTIONS
+    // ==========================================
+
+    /// @notice Pause the router. Blocks openLeverage and closeLeverage.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause the router.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

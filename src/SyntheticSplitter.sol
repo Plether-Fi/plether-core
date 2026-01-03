@@ -254,9 +254,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
         if (usdcRefund == 0) revert Splitter__ZeroRefund();
 
-        TOKEN_A.burn(msg.sender, amount);
-        TOKEN_B.burn(msg.sender, amount);
-
         // 1. Check Local Buffer First
         uint256 localBalance = USDC.balanceOf(address(this));
 
@@ -269,8 +266,13 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
             _withdrawFromAdapter(shortage);
         }
 
-        // Now localBalance is sufficient (Original + Withdrawn Shortage)
+        // 2. Transfer USDC to user BEFORE burning tokens
+        // This ensures tokens aren't burned if USDC transfer fails
         USDC.safeTransfer(msg.sender, usdcRefund);
+
+        // 3. Burn tokens AFTER successful USDC transfer
+        TOKEN_A.burn(msg.sender, amount);
+        TOKEN_B.burn(msg.sender, amount);
 
         emit Burned(msg.sender, amount);
     }

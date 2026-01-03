@@ -4,6 +4,9 @@ pragma solidity 0.8.33;
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
@@ -13,7 +16,7 @@ import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 /// @notice Leverage router for DXY-BEAR positions via Morpho Blue.
 /// @dev Flash loans USDC → swaps to DXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
 ///      Requires user to authorize this contract in Morpho before use.
-contract LeverageRouter is FlashLoanBase {
+contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -60,6 +63,8 @@ contract LeverageRouter is FlashLoanBase {
     // Morpho Market ID Configuration
     MarketParams public marketParams;
 
+    error LeverageRouter__ZeroAddress();
+
     constructor(
         address _morpho,
         address _curvePool,
@@ -68,7 +73,13 @@ contract LeverageRouter is FlashLoanBase {
         address _stakedDxyBear,
         address _lender,
         MarketParams memory _marketParams
-    ) {
+    ) Ownable(msg.sender) {
+        if (_morpho == address(0)) revert LeverageRouter__ZeroAddress();
+        if (_curvePool == address(0)) revert LeverageRouter__ZeroAddress();
+        if (_usdc == address(0)) revert LeverageRouter__ZeroAddress();
+        if (_dxyBear == address(0)) revert LeverageRouter__ZeroAddress();
+        if (_stakedDxyBear == address(0)) revert LeverageRouter__ZeroAddress();
+        if (_lender == address(0)) revert LeverageRouter__ZeroAddress();
         MORPHO = IMorpho(_morpho);
         CURVE_POOL = ICurvePool(_curvePool);
         USDC = IERC20(_usdc);
@@ -100,7 +111,11 @@ contract LeverageRouter is FlashLoanBase {
      * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline) external {
+    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+    {
         require(principal > 0, "Principal must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(leverage > 1e18, "Leverage must be > 1x");
@@ -148,6 +163,8 @@ contract LeverageRouter is FlashLoanBase {
      */
     function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 deadline)
         external
+        nonReentrant
+        whenNotPaused
     {
         require(block.timestamp <= deadline, "Transaction expired");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
@@ -310,5 +327,19 @@ contract LeverageRouter is FlashLoanBase {
         flashFee = LENDER.flashFee(address(USDC), debtToRepay);
         uint256 totalRepayment = debtToRepay + flashFee;
         expectedReturn = expectedUSDC > totalRepayment ? expectedUSDC - totalRepayment : 0;
+    }
+
+    // ==========================================
+    // ADMIN FUNCTIONS
+    // ==========================================
+
+    /// @notice Pause the router. Blocks openLeverage and closeLeverage.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause the router.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

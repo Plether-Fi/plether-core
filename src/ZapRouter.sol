@@ -3,6 +3,9 @@ pragma solidity 0.8.33;
 
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
@@ -13,7 +16,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @notice Efficient router for acquiring DXY-BULL tokens using flash mints.
 /// @dev Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL.
 ///      For DXY-BEAR, users should swap directly on Curve instead.
-contract ZapRouter is FlashLoanBase {
+contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -45,7 +48,17 @@ contract ZapRouter is FlashLoanBase {
     );
     event ZapBurn(address indexed user, uint256 tokensIn, uint256 usdcOut);
 
-    constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool) {
+    error ZapRouter__ZeroAddress();
+
+    constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool)
+        Ownable(msg.sender)
+    {
+        if (_splitter == address(0)) revert ZapRouter__ZeroAddress();
+        if (_dxyBear == address(0)) revert ZapRouter__ZeroAddress();
+        if (_dxyBull == address(0)) revert ZapRouter__ZeroAddress();
+        if (_usdc == address(0)) revert ZapRouter__ZeroAddress();
+        if (_curvePool == address(0)) revert ZapRouter__ZeroAddress();
+
         SPLITTER = ISyntheticSplitter(_splitter);
         DXY_BEAR = IERC20(_dxyBear);
         DXY_BULL = IERC20(_dxyBull);
@@ -72,7 +85,11 @@ contract ZapRouter is FlashLoanBase {
      * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline) external {
+    function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline)
+        external
+        nonReentrant
+        whenNotPaused
+    {
         require(usdcAmount > 0, "Amount must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
@@ -120,7 +137,7 @@ contract ZapRouter is FlashLoanBase {
     /// @param bullAmount Amount of DXY-BULL to sell.
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param deadline Unix timestamp after which the transaction reverts.
-    function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external {
+    function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external nonReentrant whenNotPaused {
         require(bullAmount > 0, "Amount > 0");
         require(block.timestamp <= deadline, "Expired");
 
@@ -297,5 +314,19 @@ contract ZapRouter is FlashLoanBase {
         expectedTokensOut = (totalUSDC * 1e12) / 2;
 
         flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
+    }
+
+    // ==========================================
+    // ADMIN FUNCTIONS
+    // ==========================================
+
+    /// @notice Pause the router. Blocks zapMint and zapBurn.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause the router.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }
