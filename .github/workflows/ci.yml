@@ -44,7 +44,7 @@ jobs:
           version: nightly
 
       - name: Run coverage
-        run: forge coverage --via-ir --report lcov --no-match-path "test/fork/*"
+        run: forge coverage --ir-minimum --report lcov --no-match-path "test/fork/*"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

@@ -672,64 +672,74 @@ contract LeverageRouterForkTest is BaseForkTest {
     function test_CloseLeverage_RealCurve_RealMorpho() public {
         uint256 principal = 500e6;
         uint256 leverage = 2e18;
-
-        vm.startPrank(alice);
-        IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
-        IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
-
         bytes32 marketId = _getMarketId(marketParams);
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
+        uint128 collateral;
+        uint256 usdcReturned;
 
-        console.log("=== BEFORE CLOSE ===");
-        console.log("Collateral:", collateral);
-        console.log("Borrow Shares:", borrowShares);
+        // PHASE 1: OPEN POSITION
+        {
+            vm.startPrank(alice);
+            IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
+            IERC20(USDC).approve(address(leverageRouter), principal);
+            leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
-        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+            (, uint128 borrowShares, uint128 coll) = IMorpho(MORPHO).position(marketId, alice);
+            collateral = coll;
 
-        // Get actual debt in assets (approximate)
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debtAssets = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
+            console.log("=== BEFORE CLOSE ===");
+            console.log("Collateral:", collateral);
+            console.log("Borrow Shares:", borrowShares);
 
-        leverageRouter.closeLeverage(debtAssets, collateral, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
+            // Get actual debt in assets
+            (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
+            uint256 debtAssets =
+                totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
 
-        uint256 aliceUsdcAfter = IERC20(USDC).balanceOf(alice);
-        uint256 usdcReturned = aliceUsdcAfter - aliceUsdcBefore;
+            uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+            leverageRouter.closeLeverage(debtAssets, collateral, 100, block.timestamp + 1 hours);
+            usdcReturned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
+            vm.stopPrank();
+        }
 
-        (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
+        // PHASE 2: VERIFY
+        {
+            (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
 
-        console.log("=== AFTER CLOSE ===");
-        console.log("USDC Returned:", usdcReturned);
-        console.log("Collateral After:", collateralAfter);
-        console.log("Borrow Shares After:", borrowSharesAfter);
+            console.log("=== AFTER CLOSE ===");
+            console.log("USDC Returned:", usdcReturned);
+            console.log("Collateral After:", collateralAfter);
+            console.log("Borrow Shares After:", borrowSharesAfter);
 
-        assertEq(collateralAfter, 0, "Collateral should be cleared");
-        assertGt(usdcReturned, (principal * 90) / 100, "Should return >90% of principal");
+            assertEq(collateralAfter, 0, "Collateral should be cleared");
+            assertGt(usdcReturned, (principal * 90) / 100, "Should return >90% of principal");
+        }
     }
 
     function test_LeverageRoundTrip_RealCurve_RealMorpho() public {
         uint256 principal = 1000e6;
         uint256 leverage = 2e18;
-
+        bytes32 marketId = _getMarketId(marketParams);
         uint256 aliceUsdcStart = IERC20(USDC).balanceOf(alice);
 
-        vm.startPrank(alice);
-        IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
-        IERC20(USDC).approve(address(leverageRouter), principal);
+        // OPEN AND CLOSE POSITION
+        {
+            vm.startPrank(alice);
+            IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
+            IERC20(USDC).approve(address(leverageRouter), principal);
 
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+            leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
-        bytes32 marketId = _getMarketId(marketParams);
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
+            (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        // Get actual debt in assets
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
+            // Get actual debt in assets
+            (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
+            uint256 debt = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
 
-        leverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
+            leverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+            vm.stopPrank();
+        }
 
+        // VERIFY
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
         uint256 totalCost = aliceUsdcStart - aliceUsdcEnd;
 
