@@ -51,7 +51,7 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`ZapRouter`](src/ZapRouter.sol) | Efficient single-sided DXY-BULL acquisition using flash mints |
+| [`ZapRouter`](src/ZapRouter.sol) | Single-sided DXY-BULL minting and burning using flash mints |
 | [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged DXY-BEAR positions via Morpho Blue flash loans (fee-free) |
 | [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged DXY-BULL positions via Morpho + DXY-BEAR flash mints |
 
