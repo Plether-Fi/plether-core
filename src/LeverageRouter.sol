@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
+import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 
-contract LeverageRouter is IERC3156FlashBorrower {
+contract LeverageRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -180,8 +180,7 @@ contract LeverageRouter is IERC3156FlashBorrower {
         override
         returns (bytes32)
     {
-        require(msg.sender == address(LENDER), "Untrusted lender");
-        require(initiator == address(this), "Untrusted initiator");
+        _validateFlashLoan(msg.sender, address(LENDER), initiator);
 
         // Decode common fields and validate deadline
         (uint8 operation, address user, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
@@ -192,10 +191,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
         } else if (operation == OP_CLOSE) {
             _executeClose(amount, fee, user, data);
         } else {
-            revert("Invalid operation");
+            revert FlashLoan__InvalidOperation();
         }
 
-        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+        return CALLBACK_SUCCESS;
     }
 
     /**

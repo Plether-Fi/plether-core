@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/ZapRouter.sol";
+import "../src/base/FlashLoanBase.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
@@ -135,14 +136,14 @@ contract ZapRouterTest is Test {
 
     function test_OnFlashLoan_UntrustedLender_Reverts() public {
         vm.startPrank(alice);
-        vm.expectRevert("Untrusted lender");
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         zapRouter.onFlashLoan(address(zapRouter), address(dxyBear), 100, 0, "");
         vm.stopPrank();
     }
 
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
         vm.startPrank(address(dxyBear));
-        vm.expectRevert("Untrusted initiator");
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidInitiator.selector);
         zapRouter.onFlashLoan(alice, address(dxyBear), 100, 0, "");
         vm.stopPrank();
     }

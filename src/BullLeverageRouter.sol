@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -9,11 +8,12 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
+import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 
 /// @notice Leverage router for DXY-BULL positions via Morpho Blue.
 /// @dev Uses flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.
 ///      Close operation uses nested flash loans (USDC + DXY-BEAR flash mint) to unwind positions.
-contract BullLeverageRouter is IERC3156FlashBorrower {
+contract BullLeverageRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -206,25 +206,25 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         override
         returns (bytes32)
     {
-        require(initiator == address(this), "Untrusted initiator");
+        _validateInitiator(initiator);
 
         // Decode operation type
         uint8 operation = abi.decode(data, (uint8));
 
         if (operation == OP_OPEN) {
-            require(msg.sender == address(LENDER), "Untrusted lender");
+            _validateLender(msg.sender, address(LENDER));
             _executeOpen(amount, fee, data);
         } else if (operation == OP_CLOSE) {
-            require(msg.sender == address(LENDER), "Untrusted lender");
+            _validateLender(msg.sender, address(LENDER));
             _executeClose(amount, fee, data);
         } else if (operation == OP_CLOSE_REDEEM) {
-            require(msg.sender == address(DXY_BEAR), "Untrusted lender");
+            _validateLender(msg.sender, address(DXY_BEAR));
             _executeCloseRedeem(amount, fee, data);
         } else {
-            revert("Invalid operation");
+            revert FlashLoan__InvalidOperation();
         }
 
-        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+        return CALLBACK_SUCCESS;
     }
 
     /**

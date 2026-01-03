@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
+import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 
 /// @notice ZapRouter for acquiring DXY-BULL tokens efficiently.
 /// @dev For DXY-BEAR, users should swap directly on Curve.
-contract ZapRouter is IERC3156FlashBorrower {
+contract ZapRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
     // Constants
@@ -139,8 +139,7 @@ contract ZapRouter is IERC3156FlashBorrower {
         override
         returns (bytes32)
     {
-        require(msg.sender == address(DXY_BEAR), "Untrusted lender");
-        require(initiator == address(this), "Untrusted initiator");
+        _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
 
         // Decode Action Flag First
         (uint256 action, address user, uint256 amountIn, uint256 minOut) =
@@ -152,7 +151,7 @@ contract ZapRouter is IERC3156FlashBorrower {
             _handleBurn(amount, fee, user, minOut);
         }
 
-        return keccak256("ERC3156FlashBorrower.onFlashLoan");
+        return CALLBACK_SUCCESS;
     }
 
     function _handleMint(uint256 loanAmount, uint256 fee, address user, uint256 minSwapOut) internal {

@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/BullLeverageRouter.sol";
+import "../src/base/FlashLoanBase.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -564,7 +565,7 @@ contract BullLeverageRouterTest is Test {
     function test_OnFlashLoan_UntrustedLender_Reverts() public {
         vm.startPrank(alice);
 
-        vm.expectRevert("Untrusted lender");
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         router.onFlashLoan(
             address(router), address(usdc), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0)
         );
@@ -574,7 +575,7 @@ contract BullLeverageRouterTest is Test {
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
         vm.startPrank(address(lender));
 
-        vm.expectRevert("Untrusted initiator");
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidInitiator.selector);
         router.onFlashLoan(alice, address(usdc), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
         vm.stopPrank();
     }
