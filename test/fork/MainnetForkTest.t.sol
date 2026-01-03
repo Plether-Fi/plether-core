@@ -299,7 +299,7 @@ contract MainnetForkTest is BaseForkTest {
         console.log("USDC returned:", usdcReturned);
         console.log("Round-trip cost:", amountIn - usdcReturned);
 
-        assertGt(usdcReturned, 95e6, "Should return >95% of original USDC");
+        assertGt(usdcReturned, 98e6, "Should return >98% of original USDC");
         assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
     }
 }
@@ -591,7 +591,7 @@ contract FullCycleForkTest is BaseForkTest {
         console.log("USDC returned:", returned);
         console.log("Total yield harvested:", totalHarvested);
 
-        assertGt(returned, (usdcRequired * 95) / 100, "Should return ~95%+ of deposit");
+        assertGt(returned, (usdcRequired * 98) / 100, "Should return >98% of deposit");
     }
 }
 
@@ -710,7 +710,7 @@ contract LeverageRouterForkTest is BaseForkTest {
             console.log("Borrow Shares After:", borrowSharesAfter);
 
             assertEq(collateralAfter, 0, "Collateral should be cleared");
-            assertGt(usdcReturned, (principal * 90) / 100, "Should return >90% of principal");
+            assertGt(usdcReturned, (principal * 97) / 100, "Should return >97% of principal");
         }
     }
 
@@ -876,7 +876,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         console.log("Borrow Shares After:", borrowSharesAfter);
 
         assertEq(collateralAfter, 0, "Collateral should be cleared");
-        assertGt(usdcReturned, (principal * 85) / 100, "Should return >85% of principal");
+        assertGt(usdcReturned, (principal * 95) / 100, "Should return >95% of principal");
     }
 
     function test_LeverageRoundTrip_RealCurve_RealMorpho() public {
@@ -910,7 +910,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         console.log("Round-trip cost:", totalCost);
         console.log("Cost %:", (totalCost * 10000) / principal, "bps");
 
-        assertLt(totalCost, (principal * 10) / 100, "Round-trip cost should be <10%");
+        assertLt(totalCost, (principal * 5) / 100, "Round-trip cost should be <5%");
     }
 
     function test_PreviewCloseLeverage_WithOffset() public {
@@ -2266,7 +2266,7 @@ contract BasketOracleForkTest is Test {
         console.log("Expected impact (bps):", expectedImpact);
 
         // Verify impact matches EUR's actual contribution weight (with tolerance)
-        assertApproxEqAbs(change, expectedImpact, 15, "EUR impact should match contribution weight");
+        assertApproxEqAbs(change, expectedImpact, 10, "EUR impact should match contribution weight");
 
         // Clear mock
         vm.clearMockedCalls();
