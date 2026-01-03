@@ -150,8 +150,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
         require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
 
         // 1. Calculate minimum USDC output based on REAL MARKET PRICE
+        // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
+        uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
         // Use get_dy to find real market expectation
-        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, collateralToWithdraw);
+        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
         uint256 minUsdcOut = (expectedUSDC * (10000 - maxSlippageBps)) / 10000;
 
         // 2. Encode data for callback (operation type, user, deadline, and operation-specific data)
@@ -297,8 +299,10 @@ contract LeverageRouter is IERC3156FlashBorrower {
         view
         returns (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn)
     {
+        // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
+        uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
         // Use get_dy for accurate preview
-        expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, collateralToWithdraw);
+        expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
 
         flashFee = LENDER.flashFee(address(USDC), debtToRepay);
         uint256 totalRepayment = debtToRepay + flashFee;

@@ -253,6 +253,10 @@ contract MockStakedToken is ERC20 {
         assets = shares; // 1:1 for simplicity
         underlying.transfer(receiver, assets);
     }
+
+    function previewRedeem(uint256 shares) external pure returns (uint256) {
+        return shares; // 1:1 for simplicity
+    }
 }
 
 contract MockFlashLender is IERC3156FlashLender {
@@ -389,5 +393,170 @@ contract MockMorpho is IMorpho {
 
     function market(bytes32) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
         return (0, 0, 0, 0, 0, 0);
+    }
+}
+
+// ==========================================
+// MOCK WITH OFFSET (like real StakedToken)
+// ==========================================
+
+/// @notice Mock that simulates StakedToken's 1000x decimals offset
+/// @dev Real StakedToken has _decimalsOffset() = 3, meaning shares = assets * 1000
+contract MockStakedTokenWithOffset is ERC20 {
+    MockToken public underlying;
+    uint256 public constant OFFSET = 1000; // 10^3 like real StakedToken
+
+    constructor(address _underlying) ERC20("Staked Token With Offset", "sTKN") {
+        underlying = MockToken(_underlying);
+    }
+
+    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+        underlying.transferFrom(msg.sender, address(this), assets);
+        shares = assets * OFFSET; // 1000x more shares than assets
+        _mint(receiver, shares);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        assets = shares / OFFSET; // Convert back to assets
+        underlying.transfer(receiver, assets);
+    }
+
+    function previewRedeem(uint256 shares) external pure returns (uint256) {
+        return shares / OFFSET; // Correctly converts shares to assets
+    }
+}
+
+// ==========================================
+// OFFSET TESTS
+// Tests that verify previewCloseLeverage handles decimals offset correctly
+// ==========================================
+
+contract LeverageRouterOffsetTest is Test {
+    LeverageRouter public router;
+
+    MockToken public usdc;
+    MockToken public dxyBear;
+    MockStakedTokenWithOffset public stakedDxyBear;
+    MockCurvePool public curvePool;
+    MockMorpho public morpho;
+    MockFlashLender public lender;
+
+    MarketParams public params;
+    address alice = address(0xA11ce);
+
+    function setUp() public {
+        usdc = new MockToken("USDC", "USDC");
+        dxyBear = new MockToken("DXY-BEAR", "BEAR");
+        stakedDxyBear = new MockStakedTokenWithOffset(address(dxyBear)); // Uses offset mock!
+        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
+        morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
+        lender = new MockFlashLender();
+
+        params = MarketParams({
+            loanToken: address(usdc),
+            collateralToken: address(stakedDxyBear),
+            oracle: address(0),
+            irm: address(0),
+            lltv: 0
+        });
+
+        router = new LeverageRouter(
+            address(morpho),
+            address(curvePool),
+            address(usdc),
+            address(dxyBear),
+            address(stakedDxyBear),
+            address(lender),
+            params
+        );
+
+        usdc.mint(alice, 1000 * 1e6);
+        usdc.mint(address(lender), 10_000 * 1e6);
+    }
+
+    /// @notice Test that previewCloseLeverage correctly handles 1000x offset
+    /// @dev This test would FAIL with the bug (passing shares directly to get_dy)
+    ///      With bug: 3000e18 shares passed to get_dy -> 3000e18 * 1e6 / 1e18 = 3000e6 USDC
+    ///      Fixed: 3000e18 shares / 1000 = 3e18 BEAR -> 3e18 * 1e6 / 1e18 = 3e6 USDC
+    function test_PreviewCloseLeverage_WithOffset_ReturnsCorrectValue() public view {
+        // Simulate: user has 3 BEAR staked, which is 3000 shares (3e18 * 1000 = 3e21)
+        uint256 bearAmount = 3e18; // 3 BEAR tokens
+        uint256 stakedShares = bearAmount * 1000; // 3e21 shares (1000x offset)
+        uint256 debt = 2e6; // 2 USDC debt
+
+        (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn) =
+            router.previewCloseLeverage(debt, stakedShares);
+
+        // With 1:1 BEAR/USDC price in mock, 3 BEAR should give ~3 USDC (scaled)
+        // MockCurvePool.get_dy(1, 0, 3e18) = 3e18 * 1e6 / 1e18 = 3e6 USDC
+        assertEq(expectedUSDC, 3e6, "Should return 3 USDC for 3 BEAR");
+        assertEq(flashFee, 0, "Flash fee should be 0");
+        assertEq(expectedReturn, 1e6, "Return should be 3 USDC - 2 USDC debt = 1 USDC");
+    }
+
+    /// @notice Verify the math: shares vs assets distinction
+    /// @dev Demonstrates why passing shares directly to get_dy would be wrong
+    function test_PreviewCloseLeverage_SharesVsAssets_Distinction() public view {
+        // 1000 BEAR tokens staked = 1,000,000 shares (1e21 shares for 1e18 BEAR... no wait)
+        // Let me recalculate: 1000 BEAR = 1000e18 wei BEAR
+        // With 1000x offset: shares = 1000e18 * 1000 = 1000e21 = 1e24 shares
+        uint256 bearAmount = 1000e18; // 1000 BEAR tokens
+        uint256 stakedShares = bearAmount * 1000; // 1e24 shares
+
+        (uint256 expectedUSDC,,) = router.previewCloseLeverage(0, stakedShares);
+
+        // Correct behavior: previewRedeem(1e24) = 1e24 / 1000 = 1e21 = 1000e18 BEAR
+        // Then get_dy(1, 0, 1000e18) = 1000e18 * 1e6 / 1e18 = 1000e6 = 1000 USDC
+        assertEq(expectedUSDC, 1000e6, "1000 BEAR should return 1000 USDC");
+
+        // BUG would have returned: get_dy(1, 0, 1e24) = 1e24 * 1e6 / 1e18 = 1e12 USDC
+        // That's 1,000,000 USDC instead of 1000 USDC! (1000x wrong)
+        assertTrue(expectedUSDC != 1e12, "Should NOT return buggy 1000x value");
+    }
+
+    /// @notice Test close leverage flow with offset mock
+    function test_CloseLeverage_WithOffset_Success() public {
+        // Setup: Create a position with 3000 BEAR collateral
+        usdc.mint(address(morpho), 2000 * 1e6);
+
+        vm.startPrank(alice);
+
+        // Mint BEAR, stake to get shares (with 1000x offset)
+        dxyBear.mint(alice, 3000 * 1e18);
+        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
+        uint256 shares = stakedDxyBear.deposit(3000 * 1e18, alice);
+
+        // Verify offset: 3000 BEAR -> 3,000,000 shares (3e21 in wei)
+        assertEq(shares, 3000 * 1e18 * 1000, "Shares should be 1000x BEAR amount");
+
+        // Supply to Morpho and borrow
+        stakedDxyBear.approve(address(morpho), shares);
+        morpho.supply(params, shares, 0, alice, "");
+        morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
+
+        // Close leverage
+        morpho.setAuthorization(address(router), true);
+        router.closeLeverage(2000 * 1e6, shares, 100, block.timestamp + 1 hours);
+
+        vm.stopPrank();
+
+        // Verify position closed
+        assertEq(morpho.collateralBalance(alice), 0, "Collateral should be cleared");
+        assertEq(morpho.borrowBalance(alice), 0, "Debt should be cleared");
+        assertGt(usdc.balanceOf(alice), 0, "Alice should receive USDC");
+    }
+
+    /// @notice Test that demonstrates the 1000x difference with offset
+    function test_Offset_PreviewRedeem_Conversion() public view {
+        uint256 shares = 1e24; // 1 million in 18 decimals... wait, 1e24 / 1e18 = 1e6 tokens
+
+        // previewRedeem should divide by 1000
+        uint256 assets = stakedDxyBear.previewRedeem(shares);
+        assertEq(assets, shares / 1000, "previewRedeem should divide shares by 1000");
+        assertEq(assets, 1e21, "1e24 shares = 1e21 BEAR (1000 BEAR tokens)");
     }
 }
