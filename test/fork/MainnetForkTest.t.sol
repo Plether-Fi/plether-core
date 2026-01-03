@@ -33,7 +33,7 @@ interface ICurveCryptoFactory {
 }
 
 interface ICurvePoolExtended {
-    function get_dy(int128 i, int128 j, uint256 dx) external view returns (uint256);
+    function get_dy(uint256 i, uint256 j, uint256 dx) external view returns (uint256);
     function price_oracle() external view returns (uint256);
 }
 
@@ -66,8 +66,8 @@ contract MainnetForkTest is Test {
     function setUp() public {
         // 1. SETUP FORK
         try vm.envString("MAINNET_RPC_URL") returns (string memory url) {
-            // FIX: Use a Wednesday block (Aug 14, 2024) to ensure Forex feeds are fresh
-            vm.createSelectFork(url, 20_522_000);
+            // Use a recent block to ensure Chainlink feeds are fresh
+            vm.createSelectFork(url, 24_136_062);
         } catch {
             revert("Missing MAINNET_RPC_URL in .env");
         }
@@ -76,12 +76,15 @@ contract MainnetForkTest is Test {
         // 2. FUNDING
         deal(USDC, address(this), 2_000_000e6);
 
-        // 3. FETCH REAL PRICE
+        // 3. FETCH REAL PRICE AND WARP TO FRESH TIMESTAMP
         uint256 realOraclePrice;
         {
-            (, int256 price,,,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+            (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
             realOraclePrice = uint256(price) * 1e10;
             console.log("Real Oracle Price:", realOraclePrice);
+
+            // Warp to 1 hour after oracle update to ensure freshness (within 8-hour window)
+            vm.warp(updatedAt + 1 hours);
         }
 
         // 4. DEPLOY CORE PROTOCOL (Scoped Block 1)
@@ -107,9 +110,9 @@ contract MainnetForkTest is Test {
             stBull = new StakedToken(IERC20(bullToken), "Staked Bull", "stBULL");
             stBear = new StakedToken(IERC20(bearToken), "Staked Bear", "stBEAR");
 
-            // Mint initial tokens
+            // Mint initial tokens (500k pairs for deep pool liquidity)
             IERC20(USDC).approve(address(splitter), 1_000_000e6);
-            splitter.mint(100_000e18);
+            splitter.mint(500_000e18);
         }
 
         // 5. DEPLOY CURVE POOL (Scoped Block 2)
@@ -120,11 +123,9 @@ contract MainnetForkTest is Test {
 
             // CONFIGURATION:
             // 1. Use Safe V2 Params (A=2M, Gamma=0.00005)
-            // 2. Reduce Fees to 0 (to minimize friction in test)
-            // 3. FIX: Set Initial Price to 101% of Oracle (1% Premium)
-            //    This ensures the Swap yields enough USDC to cover the Flash Loan repayment.
-
-            uint256 premiumPrice = (realOraclePrice * 101) / 100;
+            // 2. CRITICAL: Must use non-zero fees! 0% fees cause USDC→BEAR swaps to fail
+            //    because the pool's xcp (virtual profit) check fails without fee revenue
+            // 3. Use actual oracle price for initialization
 
             curvePool = ICurveCryptoFactory(CURVE_CRYPTO_FACTORY)
                 .deploy_pool(
@@ -132,25 +133,25 @@ contract MainnetForkTest is Test {
                     "USDC-BEAR",
                     coins,
                     0,
-                    2000000,
-                    50000000000000,
-                    0, // Fee = 0% (Frictionless Test)
-                    0, // Fee = 0%
-                    2000000000000,
-                    230000000000000,
-                    146000000000000,
-                    600,
-                    premiumPrice // <--- The Fix: Initialize with Premium
+                    2000000, // A
+                    50000000000000, // gamma
+                    5000000, // mid_fee = 0.05%
+                    45000000, // out_fee = 0.45%
+                    2000000000000, // allowed_extra_profit
+                    230000000000000, // fee_gamma
+                    146000000000000, // adjustment_step
+                    600, // ma_half_time
+                    realOraclePrice
                 );
 
             require(curvePool != address(0), "Pool Deployment Failed");
             console.log("Pool Deployed at:", curvePool);
 
-            // Add Liquidity
+            // Add Liquidity (500k BEAR for deep liquidity to support zapBurn)
             IERC20(USDC).approve(curvePool, type(uint256).max);
             IERC20(bearToken).approve(curvePool, type(uint256).max);
 
-            uint256 bearAmount = 100_000e18;
+            uint256 bearAmount = 500_000e18;
             uint256 usdcAmount = (bearAmount * realOraclePrice) / 1e18 / 1e12;
             uint256[2] memory amountsFixed = [usdcAmount, bearAmount];
 
@@ -191,6 +192,36 @@ contract MainnetForkTest is Test {
 
         uint256 bullAfter = IERC20(bullToken).balanceOf(address(this));
         assertEq(bullAfter - bullBefore, mintAmount);
+    }
+
+    /// @notice Test zapBurn with proper pool fees
+    function test_ZapBurn_RealExecution() public {
+        // 1. ZapMint first
+        uint256 amountIn = 100e6; // 100 USDC
+        uint256 bullBefore = IERC20(bullToken).balanceOf(address(this));
+
+        IERC20(USDC).approve(address(zapRouter), amountIn);
+        zapRouter.zapMint(amountIn, 0, 100, block.timestamp + 1 hours);
+
+        uint256 bullMinted = IERC20(bullToken).balanceOf(address(this)) - bullBefore;
+        console.log("BULL minted:", bullMinted);
+
+        uint256 usdcBefore = IERC20(USDC).balanceOf(address(this));
+
+        // 2. ZapBurn
+        IERC20(bullToken).approve(address(zapRouter), bullMinted);
+        zapRouter.zapBurn(bullMinted, 0, block.timestamp + 1 hours);
+
+        uint256 usdcAfter = IERC20(USDC).balanceOf(address(this));
+        uint256 usdcReturned = usdcAfter - usdcBefore;
+
+        console.log("USDC returned:", usdcReturned);
+        console.log("Round-trip cost:", amountIn - usdcReturned);
+
+        // 3. Assertions
+        // With fees (~0.5% each way), expect ~98-99% return
+        assertGt(usdcReturned, 95e6, "Should return >95% of original USDC");
+        assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
     }
 }
 
