@@ -11,9 +11,44 @@ import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
+/// @title BullLeverageRouter
 /// @notice Leverage router for DXY-BULL positions via Morpho Blue.
 /// @dev Uses flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.
 ///      Close operation uses nested flash loans (USDC + DXY-BEAR flash mint) to unwind positions.
+///
+/// @dev STATE MACHINE - OPEN LEVERAGE:
+///      ┌─────────────────────────────────────────────────────────────────────────┐
+///      │ openLeverage(principal, leverage)                                       │
+///      │   1. Pull USDC from user                                                │
+///      │   2. Flash loan additional USDC from Lender                             │
+///      │      └──► onFlashLoan(OP_OPEN)                                          │
+///      │            └──► _executeOpen()                                          │
+///      │                  1. Mint DXY-BEAR + DXY-BULL pairs via Splitter         │
+///      │                  2. Sell DXY-BEAR on Curve → USDC                       │
+///      │                  3. Stake DXY-BULL → sDXY-BULL                          │
+///      │                  4. Deposit sDXY-BULL to Morpho (user's collateral)     │
+///      │                  5. Borrow USDC from Morpho to cover flash repayment    │
+///      │   3. Emit LeverageOpened event                                          │
+///      └─────────────────────────────────────────────────────────────────────────┘
+///
+/// @dev STATE MACHINE - CLOSE LEVERAGE (Nested Flash Loans):
+///      ┌─────────────────────────────────────────────────────────────────────────┐
+///      │ closeLeverage(debtToRepay, collateralToWithdraw)                        │
+///      │   1. Flash loan USDC from Lender                                        │
+///      │      └──► onFlashLoan(OP_CLOSE)                                         │
+///      │            └──► _executeClose()                                         │
+///      │                  1. Repay user's Morpho debt with flash loaned USDC     │
+///      │                  2. Withdraw user's sDXY-BULL from Morpho               │
+///      │                  3. Unstake sDXY-BULL → DXY-BULL                        │
+///      │                  4. Flash mint DXY-BEAR (equal to DXY-BULL amount)      │
+///      │                     └──► onFlashLoan(OP_CLOSE_REDEEM)  [NESTED]         │
+///      │                           └──► _executeCloseRedeem()                    │
+///      │                                 1. Redeem DXY-BEAR + DXY-BULL → USDC    │
+///      │                                 2. Buy DXY-BEAR on Curve to repay mint  │
+///      │                  5. Transfer remaining USDC to user                     │
+///      │   2. Emit LeverageClosed event                                          │
+///      └─────────────────────────────────────────────────────────────────────────┘
+///
 contract BullLeverageRouter is FlashLoanBase {
     using SafeERC20 for IERC20;
 
@@ -46,13 +81,23 @@ contract BullLeverageRouter is FlashLoanBase {
         uint256 maxSlippageBps
     );
 
-    // Transient state for passing values between callbacks
+    // ==========================================
+    // TRANSIENT STATE (callback → caller communication)
+    // ==========================================
+    // These variables pass results from flash loan callbacks back to the
+    // initiating function for event emission. Reset after each operation.
+
+    /// @dev Open operation results (set in _executeOpen, read in openLeverage)
     uint256 private _lastDxyBullReceived;
     uint256 private _lastDebtIncurred;
+
+    /// @dev Close operation results (set in _executeClose, read in closeLeverage)
     uint256 private _lastCollateralWithdrawn;
     uint256 private _lastUsdcReturned;
 
-    // Close operation transient state (for nested flash loan)
+    /// @dev Nested flash loan state (set in _executeClose, read in _executeCloseRedeem)
+    /// Required because the nested DXY-BEAR flash mint callback cannot access
+    /// the outer USDC flash loan's parameters directly.
     address private _closeUser;
     uint256 private _closeUsdcFlashAmount;
     uint256 private _closeUsdcFlashFee;
@@ -194,9 +239,16 @@ contract BullLeverageRouter is FlashLoanBase {
     }
 
     /**
-     * @dev Callback: Handles open, close, and close-redeem operations.
-     *      Called by USDC Lender for OP_OPEN and OP_CLOSE.
-     *      Called by DXY-BEAR token for OP_CLOSE_REDEEM (nested flash mint).
+     * @dev Flash loan callback dispatcher.
+     *
+     * Routes to the appropriate handler based on operation type:
+     * - OP_OPEN (1): USDC flash loan for opening leverage position
+     * - OP_CLOSE (2): USDC flash loan for closing leverage (phase 1)
+     * - OP_CLOSE_REDEEM (3): DXY-BEAR flash mint for pair redemption (phase 2, nested)
+     *
+     * Lender validation:
+     * - OP_OPEN/OP_CLOSE: Must be called by USDC flash lender
+     * - OP_CLOSE_REDEEM: Must be called by DXY-BEAR token (flash mint)
      */
     function onFlashLoan(address initiator, address token, uint256 amount, uint256 fee, bytes calldata data)
         external
@@ -205,16 +257,18 @@ contract BullLeverageRouter is FlashLoanBase {
     {
         _validateInitiator(initiator);
 
-        // Decode operation type
         uint8 operation = abi.decode(data, (uint8));
 
         if (operation == OP_OPEN) {
+            // Phase: OPEN - USDC flash loan to mint pairs
             _validateLender(msg.sender, address(LENDER));
             _executeOpen(amount, fee, data);
         } else if (operation == OP_CLOSE) {
+            // Phase: CLOSE (1/2) - USDC flash loan to repay Morpho debt
             _validateLender(msg.sender, address(LENDER));
             _executeClose(amount, fee, data);
         } else if (operation == OP_CLOSE_REDEEM) {
+            // Phase: CLOSE (2/2) - Nested DXY-BEAR flash mint for pair redemption
             _validateLender(msg.sender, address(DXY_BEAR));
             _executeCloseRedeem(amount, fee, data);
         } else {
@@ -265,8 +319,14 @@ contract BullLeverageRouter is FlashLoanBase {
     }
 
     /**
-     * @dev Execute close leverage operation - first phase (USDC flash loan callback).
-     *      Repays Morpho, withdraws DXY-BULL, then initiates DXY-BEAR flash mint.
+     * @dev Execute close leverage operation - Phase 1 of 2 (USDC flash loan callback).
+     *
+     * Flow:
+     * 1. Repay Morpho debt with flash loaned USDC
+     * 2. Withdraw sDXY-BULL collateral from Morpho
+     * 3. Unstake to get DXY-BULL
+     * 4. Initiate nested DXY-BEAR flash mint → triggers _executeCloseRedeem
+     * 5. After nested callback returns: transfer remaining USDC to user
      */
     function _executeClose(uint256 loanAmount, uint256 fee, bytes calldata data) private {
         // Decode: (op, user, deadline, collateralToWithdraw, maxSlippageBps)
@@ -317,9 +377,15 @@ contract BullLeverageRouter is FlashLoanBase {
     }
 
     /**
-     * @dev Execute close redemption - second phase (DXY-BEAR flash mint callback).
-     *      Redeems DXY-BEAR + DXY-BULL pairs for USDC via Splitter, then buys
-     *      DXY-BEAR back on Curve to repay the flash mint.
+     * @dev Execute close redemption - Phase 2 of 2 (nested DXY-BEAR flash mint callback).
+     *
+     * Flow:
+     * 1. Redeem DXY-BEAR + DXY-BULL pairs via Splitter → receive USDC
+     * 2. Buy DXY-BEAR on Curve to repay flash mint
+     * 3. Return to _executeClose with USDC balance for final distribution
+     *
+     * Note: Flash mint repayment (burning DXY-BEAR) happens automatically
+     * when this callback returns - the token contract handles it.
      */
     function _executeCloseRedeem(uint256 flashMintAmount, uint256 fee, bytes calldata data) private {
         // Decode: (op, user, deadline, dxyBullAmount, maxSlippageBps)
