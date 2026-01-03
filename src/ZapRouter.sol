@@ -181,6 +181,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         return CALLBACK_SUCCESS;
     }
 
+    /// @dev Morpho flash loan callback - not used by ZapRouter.
+    function onMorphoFlashLoan(uint256, bytes calldata) external pure override {
+        revert FlashLoan__InvalidOperation();
+    }
+
     function _handleMint(uint256 loanAmount, uint256 fee, address user, uint256 minSwapOut) internal {
         // 1. Swap Borrowed Bear -> USDC via Curve
         uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, loanAmount, minSwapOut);

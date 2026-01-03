@@ -17,14 +17,10 @@ This document outlines the security assumptions, trust model, known limitations,
 - **Risk**: Curve pool manipulation could affect ZapRouter and LeverageRouter swap outcomes; user-provided slippage protects against this
 
 #### Morpho Blue
-- **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, and liquidations
-- **Mitigation**: Router contracts validate authorization before operations
+- **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, liquidations, and flash loans
+- **Mitigation**: Router contracts validate authorization before operations; flash loan callbacks validate caller and initiator
 - **Risk**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
-
-#### Aave V3
-- **Assumption**: Aave flash loan facility operates correctly and charges expected fees
-- **Mitigation**: Flash loan callbacks validate initiator and lender addresses
-- **Risk**: Aave unavailability blocks leverage operations but doesn't affect core protocol
+- **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
 
 ### Internal Trust Model
 
@@ -172,4 +168,5 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-03 | Migrated to Morpho Blue as sole flash loan provider (removed Aave/Balancer dependencies) |
 | 2025-01-03 | Initial security documentation |

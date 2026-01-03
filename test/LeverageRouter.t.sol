@@ -4,9 +4,9 @@ pragma solidity ^0.8.30;
 import "forge-std/Test.sol";
 import "../src/LeverageRouter.sol";
 import "../src/interfaces/ICurvePool.sol";
+import {IMorphoFlashLoanCallback} from "../src/interfaces/IMorpho.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
 contract LeverageRouterTest is Test {
     LeverageRouter public router;
@@ -17,7 +17,6 @@ contract LeverageRouterTest is Test {
     MockStakedToken public stakedDxyBear;
     MockCurvePool public curvePool;
     MockMorpho public morpho;
-    MockFlashLender public lender;
 
     // FIX: Make params a state variable so we can reuse it correctly
     MarketParams public params;
@@ -30,7 +29,6 @@ contract LeverageRouterTest is Test {
         stakedDxyBear = new MockStakedToken(address(dxyBear));
         curvePool = new MockCurvePool(address(usdc), address(dxyBear));
         morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
-        lender = new MockFlashLender();
 
         // FIX: Assign to state variable
         params = MarketParams({
@@ -42,18 +40,12 @@ contract LeverageRouterTest is Test {
         });
 
         router = new LeverageRouter(
-            address(morpho),
-            address(curvePool),
-            address(usdc),
-            address(dxyBear),
-            address(stakedDxyBear),
-            address(lender),
-            params
+            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(stakedDxyBear), params
         );
 
         usdc.mint(alice, 1000 * 1e6);
-        // Fund Lender
-        usdc.mint(address(lender), 10_000 * 1e6);
+        // Fund Morpho for flash loans
+        usdc.mint(address(morpho), 100_000 * 1e6);
     }
 
     // ==========================================
@@ -291,7 +283,7 @@ contract LeverageRouterTest is Test {
     function test_OpenLeverage_ExtremeLeverage_100x() public {
         // Alice wants 100x leverage
         // With $1000 principal at 100x, loan = $99,000
-        usdc.mint(address(lender), 100_000 * 1e6); // Fund lender for large loan
+        // Morpho is already funded in setUp with 100k USDC for flash loans
 
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
@@ -412,30 +404,13 @@ contract LeverageRouterTest is Test {
         assertGt(morpho.collateralBalance(alice), 0, "Position should be created");
     }
 
-    /// @notice Test flash loan repayment failure
-    function test_OpenLeverage_FlashLoanRepayFails_Reverts() public {
-        // Create a lender that doesn't accept repayment
-        BadFlashLender badLender = new BadFlashLender();
-        usdc.mint(address(badLender), 10_000 * 1e6);
+    /// @notice Test flash loan from unauthorized caller reverts
+    function test_FlashLoanCallback_UnauthorizedCaller_Reverts() public {
+        // Try to call onMorphoFlashLoan directly (not from Morpho)
+        bytes memory data = abi.encode(uint8(1), alice, block.timestamp + 1 hours, uint256(1000e6), uint256(1000e18));
 
-        // Deploy router with bad lender
-        LeverageRouter badRouter = new LeverageRouter(
-            address(morpho),
-            address(curvePool),
-            address(usdc),
-            address(dxyBear),
-            address(stakedDxyBear),
-            address(badLender),
-            params
-        );
-
-        vm.startPrank(alice);
-        morpho.setAuthorization(address(badRouter), true);
-        usdc.approve(address(badRouter), 1000 * 1e6);
-
-        vm.expectRevert("Flash repay failed");
-        badRouter.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
+        vm.expectRevert(); // Should revert with InvalidLender
+        router.onMorphoFlashLoan(1000e6, data);
     }
 }
 
@@ -448,6 +423,10 @@ contract MockToken is ERC20 {
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
     }
 }
 
@@ -475,30 +454,6 @@ contract MockStakedToken is ERC20 {
 
     function previewRedeem(uint256 shares) external pure returns (uint256) {
         return shares; // 1:1 for simplicity
-    }
-}
-
-contract MockFlashLender is IERC3156FlashLender {
-    function maxFlashLoan(address) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(address, uint256) public pure override returns (uint256) {
-        return 0;
-    }
-
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
-        MockToken(token).mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        MockToken(token).transferFrom(address(receiver), address(this), amount); // Repay
-        return true;
     }
 }
 
@@ -573,6 +528,19 @@ contract MockMorpho is IMorpho {
 
     function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
         return MarketParams(address(0), address(0), address(0), address(0), 0);
+    }
+
+    // Flash loan (fee-free like real Morpho)
+    function flashLoan(address token, uint256 assets, bytes calldata data) external override {
+        // Mint tokens to borrower (simulating flash loan)
+        MockToken(token).mint(msg.sender, assets);
+
+        // Call the borrower's callback
+        IMorphoFlashLoanCallback(msg.sender).onMorphoFlashLoan(assets, data);
+
+        // Verify repayment (pull and burn tokens)
+        IERC20(token).transferFrom(msg.sender, address(this), assets);
+        MockToken(token).burn(address(this), assets);
     }
 
     // Lending functions (supply/withdraw loan tokens)
@@ -702,7 +670,6 @@ contract LeverageRouterOffsetTest is Test {
     MockStakedTokenWithOffset public stakedDxyBear;
     MockCurvePool public curvePool;
     MockMorpho public morpho;
-    MockFlashLender public lender;
 
     MarketParams public params;
     address alice = address(0xA11ce);
@@ -713,7 +680,6 @@ contract LeverageRouterOffsetTest is Test {
         stakedDxyBear = new MockStakedTokenWithOffset(address(dxyBear)); // Uses offset mock!
         curvePool = new MockCurvePool(address(usdc), address(dxyBear));
         morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
-        lender = new MockFlashLender();
 
         params = MarketParams({
             loanToken: address(usdc),
@@ -724,17 +690,11 @@ contract LeverageRouterOffsetTest is Test {
         });
 
         router = new LeverageRouter(
-            address(morpho),
-            address(curvePool),
-            address(usdc),
-            address(dxyBear),
-            address(stakedDxyBear),
-            address(lender),
-            params
+            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(stakedDxyBear), params
         );
 
         usdc.mint(alice, 1000 * 1e6);
-        usdc.mint(address(lender), 10_000 * 1e6);
+        usdc.mint(address(morpho), 10_000 * 1e6);
     }
 
     /// @notice Test that previewCloseLeverage correctly handles 1000x offset
@@ -817,33 +777,5 @@ contract LeverageRouterOffsetTest is Test {
         uint256 assets = stakedDxyBear.previewRedeem(shares);
         assertEq(assets, shares / 1000, "previewRedeem should divide shares by 1000");
         assertEq(assets, 1e21, "1e24 shares = 1e21 BEAR (1000 BEAR tokens)");
-    }
-}
-
-// ==========================================
-// BAD FLASH LENDER (for testing failures)
-// ==========================================
-
-contract BadFlashLender is IERC3156FlashLender {
-    function maxFlashLoan(address) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(address, uint256) public pure override returns (uint256) {
-        return 0;
-    }
-
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
-        MockToken(token).mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        // Don't accept repayment - simulates failure
-        revert("Flash repay failed");
     }
 }

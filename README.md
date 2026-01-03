@@ -52,8 +52,8 @@ User deposits USDC
 | Contract | Description |
 |----------|-------------|
 | [`ZapRouter`](src/ZapRouter.sol) | Efficient single-sided DXY-BULL acquisition using flash mints |
-| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged DXY-BEAR positions via Morpho Blue + flash loans |
-| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged DXY-BULL positions via Morpho Blue + nested flash loans |
+| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged DXY-BEAR positions via Morpho Blue flash loans (fee-free) |
+| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged DXY-BULL positions via Morpho + DXY-BEAR flash mints |
 
 ### Yield Adapters (ERC-4626)
 
@@ -86,7 +86,7 @@ User deposits USDC
 
 - **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD
 - **Curve Finance** - AMM pools for USDC/DXY-BEAR swaps
-- **Morpho Blue** - Lending markets for leveraged positions and yield generation on idle USDC reserves
+- **Morpho Blue** - Lending markets for leveraged positions, yield generation on idle USDC reserves, and fee-free flash loans
 
 ## Protocol Mechanics
 
@@ -98,8 +98,10 @@ The SyntheticSplitter maintains a 10% local buffer of USDC for redemptions, with
 
 Users can open leveraged positions through the routers:
 
-1. **LeverageRouter** (Bear): Flash loan USDC → Swap to DXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
-2. **BullLeverageRouter** (Bull): Flash loan USDC → Mint pairs → Sell DXY-BEAR → Stake DXY-BULL → Deposit to Morpho → Borrow to repay
+1. **LeverageRouter** (Bear): Morpho flash loan USDC → Swap to DXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
+2. **BullLeverageRouter** (Bull): Morpho flash loan USDC → Mint pairs → Sell DXY-BEAR → Stake DXY-BULL → Deposit to Morpho → Borrow to repay
+
+Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
 
 Both routers include MEV protection via user-defined slippage caps (max 1%).
 

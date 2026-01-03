@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -14,8 +13,9 @@ import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 
 /// @title LeverageRouter
 /// @notice Leverage router for DXY-BEAR positions via Morpho Blue.
-/// @dev Flash loans USDC → swaps to DXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
+/// @dev Flash loans USDC from Morpho → swaps to DXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
 ///      Requires user to authorize this contract in Morpho before use.
+///      Uses Morpho's fee-free flash loans for capital efficiency.
 contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -59,7 +59,6 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     IERC20 public immutable USDC;
     IERC20 public immutable DXY_BEAR; // Underlying token
     IERC4626 public immutable STAKED_DXY_BEAR; // Staked token (Morpho collateral)
-    IERC3156FlashLender public immutable LENDER; // e.g., Aave or Balancer
     // Morpho Market ID Configuration
     MarketParams public marketParams;
 
@@ -71,7 +70,6 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         address _usdc,
         address _dxyBear,
         address _stakedDxyBear,
-        address _lender,
         MarketParams memory _marketParams
     ) Ownable(msg.sender) {
         if (_morpho == address(0)) revert LeverageRouter__ZeroAddress();
@@ -79,13 +77,11 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         if (_usdc == address(0)) revert LeverageRouter__ZeroAddress();
         if (_dxyBear == address(0)) revert LeverageRouter__ZeroAddress();
         if (_stakedDxyBear == address(0)) revert LeverageRouter__ZeroAddress();
-        if (_lender == address(0)) revert LeverageRouter__ZeroAddress();
         MORPHO = IMorpho(_morpho);
         CURVE_POOL = ICurvePool(_curvePool);
         USDC = IERC20(_usdc);
         DXY_BEAR = IERC20(_dxyBear);
         STAKED_DXY_BEAR = IERC4626(_stakedDxyBear);
-        LENDER = IERC3156FlashLender(_lender);
         marketParams = _marketParams;
 
         // Approvals (One-time)
@@ -97,10 +93,8 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         DXY_BEAR.safeIncreaseAllowance(_stakedDxyBear, type(uint256).max);
         // 4. Allow Morpho to take sDXY-BEAR (for supplying collateral)
         IERC20(_stakedDxyBear).safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 5. Allow Morpho to take USDC (for repaying debt)
+        // 5. Allow Morpho to take USDC (for repaying debt and flash loan)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 6. Allow Lender to take back USDC (Flash Loan Repayment)
-        USDC.safeIncreaseAllowance(_lender, type(uint256).max);
     }
 
     /**
@@ -143,9 +137,8 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // 4. Encode data for callback (operation type, user, deadline, and operation-specific data)
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, minDxyBear);
 
-        // 5. Initiate Flash Loan (Get the extra USDC)
-        // NOTE: We are flash loaning USDC, not DXY-BEAR
-        LENDER.flashLoan(this, address(USDC), loanAmount, data);
+        // 5. Initiate Morpho Flash Loan (fee-free)
+        MORPHO.flashLoan(address(USDC), loanAmount, data);
 
         // 6. Emit event for off-chain tracking and MEV analysis
         emit LeverageOpened(
@@ -155,7 +148,7 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
 
     /**
      * @notice Close a Leveraged Position in one transaction.
-     * @param debtToRepay Amount of USDC debt to repay (flash loaned).
+     * @param debtToRepay Amount of USDC debt to repay (flash loaned). Can be 0 if no debt.
      * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
      * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
@@ -177,51 +170,51 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
         uint256 minUsdcOut = (expectedUSDC * (10000 - maxSlippageBps)) / 10000;
 
-        // 2. Encode data for callback (operation type, user, deadline, and operation-specific data)
-        bytes memory data = abi.encode(OP_CLOSE, msg.sender, deadline, collateralToWithdraw, minUsdcOut);
+        if (debtToRepay > 0) {
+            // Standard path: flash loan USDC to repay debt
+            bytes memory data = abi.encode(OP_CLOSE, msg.sender, deadline, collateralToWithdraw, minUsdcOut);
+            MORPHO.flashLoan(address(USDC), debtToRepay, data);
+        } else {
+            // No debt to repay: directly unwind position without flash loan
+            _executeCloseNoDebt(msg.sender, collateralToWithdraw, minUsdcOut);
+        }
 
-        // 3. Flash loan USDC to repay the debt
-        LENDER.flashLoan(this, address(USDC), debtToRepay, data);
-
-        // 4. Emit event for off-chain tracking and MEV analysis
+        // Emit event for off-chain tracking and MEV analysis
         emit LeverageClosed(msg.sender, debtToRepay, _lastCollateralWithdrawn, _lastUsdcReturned, maxSlippageBps);
     }
 
-    /// @dev ERC-3156 flash loan callback. Routes to open or close handler.
-    function onFlashLoan(
-        address initiator,
-        address token,
-        uint256 amount, // Loan Amount
-        uint256 fee,
-        bytes calldata data
-    )
-        external
-        override
-        returns (bytes32)
-    {
-        _validateFlashLoan(msg.sender, address(LENDER), initiator);
+    /// @dev Morpho flash loan callback. Routes to open or close handler.
+    function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
+        // Validate caller is Morpho
+        _validateLender(msg.sender, address(MORPHO));
 
         // Decode common fields and validate deadline
-        (uint8 operation, address user, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
+        (uint8 operation,, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
         require(block.timestamp <= deadline, "Transaction expired");
 
         if (operation == OP_OPEN) {
-            _executeOpen(amount, fee, user, data);
+            _executeOpen(amount, data);
         } else if (operation == OP_CLOSE) {
-            _executeClose(amount, fee, user, data);
+            _executeClose(amount, data);
         } else {
             revert FlashLoan__InvalidOperation();
         }
+        // Flash loan repayment: Morpho will pull tokens via transferFrom.
+        // Constructor grants max approval, so no additional approval needed.
+    }
 
-        return CALLBACK_SUCCESS;
+    /// @dev ERC-3156 flash loan callback - not used but required by FlashLoanBase.
+    function onFlashLoan(address, address, uint256, uint256, bytes calldata) external pure override returns (bytes32) {
+        revert FlashLoan__InvalidOperation();
     }
 
     /**
      * @dev Execute open leverage operation in flash loan callback.
      */
-    function _executeOpen(uint256 loanAmount, uint256 fee, address user, bytes calldata data) private {
+    function _executeOpen(uint256 loanAmount, bytes calldata data) private {
         // Decode open-specific data: (op, user, deadline, principal, minDxyBear)
-        (,,, uint256 principal, uint256 minDxyBear) = abi.decode(data, (uint8, address, uint256, uint256, uint256));
+        (, address user,, uint256 principal, uint256 minDxyBear) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256));
 
         uint256 totalUSDC = principal + loanAmount;
 
@@ -235,8 +228,8 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // 3. Supply sDXY-BEAR collateral to Morpho on behalf of the USER
         MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
-        // 4. Borrow USDC from Morpho to repay flash loan
-        uint256 debtToIncur = loanAmount + fee;
+        // 4. Borrow USDC from Morpho to repay flash loan (no fee with Morpho)
+        uint256 debtToIncur = loanAmount;
         _lastDebtIncurred = debtToIncur;
         MORPHO.borrow(marketParams, debtToIncur, 0, user, address(this));
     }
@@ -244,9 +237,9 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /**
      * @dev Execute close leverage operation in flash loan callback.
      */
-    function _executeClose(uint256 loanAmount, uint256 fee, address user, bytes calldata data) private {
+    function _executeClose(uint256 loanAmount, bytes calldata data) private {
         // Decode close-specific data: (op, user, deadline, collateralToWithdraw, minUsdcOut)
-        (,,, uint256 collateralToWithdraw, uint256 minUsdcOut) =
+        (, address user,, uint256 collateralToWithdraw, uint256 minUsdcOut) =
             abi.decode(data, (uint8, address, uint256, uint256, uint256));
 
         // 1. Repay user's debt on Morpho (skip if no debt)
@@ -264,15 +257,44 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // 4. Swap DXY-BEAR -> USDC via Curve
         uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
 
-        // 5. Repay flash loan (loanAmount + fee)
-        uint256 flashRepayment = loanAmount + fee;
-        require(usdcReceived >= flashRepayment, "Insufficient USDC from swap");
+        // 5. Flash loan repayment handled by caller (no fee with Morpho)
+        require(usdcReceived >= loanAmount, "Insufficient USDC from swap");
 
         // 6. Send remaining USDC to user
-        uint256 usdcToReturn = usdcReceived - flashRepayment;
+        uint256 usdcToReturn = usdcReceived - loanAmount;
         _lastUsdcReturned = usdcToReturn;
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
+        }
+    }
+
+    /**
+     * @dev Execute close operation when there is no Morpho debt to repay.
+     *
+     * This is a simplified version of _executeClose that skips the flash loan
+     * since no USDC is needed to repay debt.
+     *
+     * Flow:
+     * 1. Withdraw sDXY-BEAR collateral from Morpho
+     * 2. Unstake to get DXY-BEAR
+     * 3. Swap DXY-BEAR -> USDC via Curve
+     * 4. Transfer all USDC to user
+     */
+    function _executeCloseNoDebt(address user, uint256 collateralToWithdraw, uint256 minUsdcOut) private {
+        // 1. Withdraw user's sDXY-BEAR collateral from Morpho
+        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
+        _lastCollateralWithdrawn = collateralToWithdraw;
+
+        // 2. Unstake sDXY-BEAR to get DXY-BEAR
+        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
+
+        // 3. Swap DXY-BEAR -> USDC via Curve
+        uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
+
+        // 4. Send all USDC to user (no flash loan to repay)
+        _lastUsdcReturned = usdcReceived;
+        if (usdcReceived > 0) {
+            USDC.safeTransfer(user, usdcReceived);
         }
     }
 
@@ -287,7 +309,7 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
      * @return loanAmount Amount of USDC to flash loan.
      * @return totalUSDC Total USDC to swap (principal + loan).
      * @return expectedDxyBear Expected DXY-BEAR (based on current curve price).
-     * @return expectedDebt Expected debt incurred (loan + flash fee).
+     * @return expectedDebt Expected debt incurred (equals loan amount, no flash fee with Morpho).
      */
     function previewOpenLeverage(uint256 principal, uint256 leverage)
         external
@@ -302,8 +324,8 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Use get_dy for accurate preview
         expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
 
-        uint256 flashFee = LENDER.flashFee(address(USDC), loanAmount);
-        expectedDebt = loanAmount + flashFee;
+        // No flash fee with Morpho
+        expectedDebt = loanAmount;
     }
 
     /**
@@ -311,7 +333,7 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
      * @param debtToRepay Amount of USDC debt to repay.
      * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
      * @return expectedUSDC Expected USDC from swap (based on current curve price).
-     * @return flashFee Flash loan fee.
+     * @return flashFee Flash loan fee (always 0 with Morpho).
      * @return expectedReturn Expected USDC returned to user after repaying flash loan.
      */
     function previewCloseLeverage(uint256 debtToRepay, uint256 collateralToWithdraw)
@@ -324,9 +346,9 @@ contract LeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Use get_dy for accurate preview
         expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
 
-        flashFee = LENDER.flashFee(address(USDC), debtToRepay);
-        uint256 totalRepayment = debtToRepay + flashFee;
-        expectedReturn = expectedUSDC > totalRepayment ? expectedUSDC - totalRepayment : 0;
+        // No flash fee with Morpho
+        flashFee = 0;
+        expectedReturn = expectedUSDC > debtToRepay ? expectedUSDC - debtToRepay : 0;
     }
 
     // ==========================================

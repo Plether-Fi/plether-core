@@ -2,12 +2,14 @@
 pragma solidity 0.8.33;
 
 import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
+import {IMorphoFlashLoanCallback} from "../interfaces/IMorpho.sol";
 
 /// @title FlashLoanBase
 /// @notice Abstract base contract for flash loan borrowers with common validation logic.
 /// @dev Provides shared constants, errors, and validation helpers for routers.
-abstract contract FlashLoanBase is IERC3156FlashBorrower {
-    // ERC-3156 callback success value
+///      Supports both Morpho flash loans and ERC-3156 flash mints (for SyntheticToken).
+abstract contract FlashLoanBase is IERC3156FlashBorrower, IMorphoFlashLoanCallback {
+    // ERC-3156 callback success value (used for SyntheticToken flash mints)
     bytes32 internal constant CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
 
     // Errors

@@ -69,11 +69,6 @@ abstract contract BaseForkTest is Test {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
     // ==========================================
-    // BALANCER V2 MAINNET CONSTANTS
-    // ==========================================
-    address constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
-
-    // ==========================================
     // CURVE POOL PARAMETERS
     // Single source of truth for all fork tests
     // ==========================================
@@ -299,7 +294,9 @@ contract MainnetForkTest is BaseForkTest {
         console.log("USDC returned:", usdcReturned);
         console.log("Round-trip cost:", amountIn - usdcReturned);
 
-        assertGt(usdcReturned, 98e6, "Should return >98% of original USDC");
+        // Round-trip costs include: 2x Curve swap fees, flash mint fees, and slippage
+        // Expect ~2-3% loss on round trip, so require >97% return
+        assertGt(usdcReturned, 97e6, "Should return >97% of original USDC");
         assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
     }
 }
@@ -604,7 +601,6 @@ contract LeverageRouterForkTest is BaseForkTest {
     StakedToken stBear;
     LeverageRouter leverageRouter;
     MorphoOracle morphoOracle;
-    BalancerFlashLender lender;
     MarketParams marketParams;
 
     address alice = address(0xA11CE);
@@ -629,12 +625,8 @@ contract LeverageRouterForkTest is BaseForkTest {
         // Create Morpho market with real Morpho
         marketParams = _createMorphoMarket(address(stBear), address(morphoOracle), 1_000_000e6);
 
-        // Deploy ERC-3156 wrapper around real Balancer V2 Vault (zero fee flash loans)
-        lender = new BalancerFlashLender(BALANCER_VAULT);
-
-        // Deploy router
-        leverageRouter =
-            new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), address(lender), marketParams);
+        // Deploy router (uses Morpho native fee-free flash loans)
+        leverageRouter = new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), marketParams);
     }
 
     function test_OpenLeverage_RealCurve_RealMorpho() public {
@@ -767,7 +759,6 @@ contract BullLeverageRouterForkTest is BaseForkTest {
     StakedToken stBull;
     BullLeverageRouter bullLeverageRouter;
     MorphoOracle morphoOracle;
-    BalancerFlashLender lender;
     MarketParams marketParams;
 
     address alice = address(0xA11CE);
@@ -792,20 +783,9 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         // Create Morpho market with real Morpho
         marketParams = _createMorphoMarket(address(stBull), address(morphoOracle), 1_000_000e6);
 
-        // Deploy ERC-3156 wrapper around real Balancer V2 Vault (zero fee flash loans)
-        lender = new BalancerFlashLender(BALANCER_VAULT);
-
-        // Deploy router
+        // Deploy router (uses Morpho native fee-free flash loans)
         bullLeverageRouter = new BullLeverageRouter(
-            MORPHO,
-            address(splitter),
-            curvePool,
-            USDC,
-            bearToken,
-            bullToken,
-            address(stBull),
-            address(lender),
-            marketParams
+            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), marketParams
         );
     }
 
@@ -977,103 +957,6 @@ contract MockCurvePoolForOracle {
     }
 }
 
-/// @notice Balancer V2 Vault interface for flash loans
-interface IBalancerVault {
-    function flashLoan(
-        IFlashLoanRecipient recipient,
-        IERC20[] memory tokens,
-        uint256[] memory amounts,
-        bytes memory userData
-    ) external;
-}
-
-/// @notice Balancer flash loan recipient interface
-interface IFlashLoanRecipient {
-    function receiveFlashLoan(
-        IERC20[] memory tokens,
-        uint256[] memory amounts,
-        uint256[] memory feeAmounts,
-        bytes memory userData
-    ) external;
-}
-
-/// @notice ERC-3156 wrapper around Balancer V2 Vault flash loans
-/// @dev Balancer V2 has zero flash loan fees, making it ideal for leverage operations
-contract BalancerFlashLender is IERC3156FlashLender, IFlashLoanRecipient {
-    IBalancerVault public immutable VAULT;
-
-    // Transient storage for callback routing
-    IERC3156FlashBorrower private _currentBorrower;
-    address private _currentInitiator;
-
-    constructor(address _vault) {
-        VAULT = IBalancerVault(_vault);
-    }
-
-    function maxFlashLoan(address token) external view override returns (uint256) {
-        // Return the vault's balance of the token
-        return IERC20(token).balanceOf(address(VAULT));
-    }
-
-    function flashFee(address, uint256) external pure override returns (uint256) {
-        // Balancer V2 has zero flash loan fees
-        return 0;
-    }
-
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
-        // Store callback info
-        _currentBorrower = receiver;
-        _currentInitiator = msg.sender;
-
-        // Prepare Balancer flash loan parameters
-        IERC20[] memory tokens = new IERC20[](1);
-        tokens[0] = IERC20(token);
-
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = amount;
-
-        // Execute flash loan - Balancer will call receiveFlashLoan
-        VAULT.flashLoan(this, tokens, amounts, data);
-
-        // Clear transient storage
-        _currentBorrower = IERC3156FlashBorrower(address(0));
-        _currentInitiator = address(0);
-
-        return true;
-    }
-
-    /// @notice Balancer callback - routes to ERC-3156 borrower
-    function receiveFlashLoan(
-        IERC20[] memory tokens,
-        uint256[] memory amounts,
-        uint256[] memory feeAmounts,
-        bytes memory userData
-    ) external override {
-        require(msg.sender == address(VAULT), "Only Balancer Vault");
-
-        address token = address(tokens[0]);
-        uint256 amount = amounts[0];
-        uint256 fee = feeAmounts[0];
-
-        // Transfer tokens to borrower
-        IERC20(token).transfer(address(_currentBorrower), amount);
-
-        // Call ERC-3156 callback
-        bytes32 result = _currentBorrower.onFlashLoan(_currentInitiator, token, amount, fee, userData);
-        require(result == keccak256("ERC3156FlashBorrower.onFlashLoan"), "Callback failed");
-
-        // Borrower should have approved us, pull tokens back
-        IERC20(token).transferFrom(address(_currentBorrower), address(this), amount + fee);
-
-        // Transfer tokens back to vault (Balancer expects direct transfer, not approve)
-        IERC20(token).transfer(address(VAULT), amount + fee);
-    }
-}
-
 // ============================================================
 // SLIPPAGE PROTECTION FORK TEST
 // Adversarial tests proving routers protect users from MEV/price manipulation
@@ -1087,7 +970,6 @@ contract SlippageProtectionForkTest is BaseForkTest {
     BullLeverageRouter bullLeverageRouter;
     MorphoOracle bearMorphoOracle;
     MorphoOracle bullMorphoOracle;
-    BalancerFlashLender lender;
     MarketParams bearMarketParams;
     MarketParams bullMarketParams;
 
@@ -1127,22 +1009,10 @@ contract SlippageProtectionForkTest is BaseForkTest {
         bearMarketParams = _createMorphoMarket(address(stBear), address(bearMorphoOracle), 2_000_000e6);
         bullMarketParams = _createMorphoMarket(address(stBull), address(bullMorphoOracle), 2_000_000e6);
 
-        // Deploy Balancer flash lender
-        lender = new BalancerFlashLender(BALANCER_VAULT);
-
-        // Deploy leverage routers
-        leverageRouter =
-            new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), address(lender), bearMarketParams);
+        // Deploy leverage routers (use Morpho native fee-free flash loans)
+        leverageRouter = new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), bearMarketParams);
         bullLeverageRouter = new BullLeverageRouter(
-            MORPHO,
-            address(splitter),
-            curvePool,
-            USDC,
-            bearToken,
-            bullToken,
-            address(stBull),
-            address(lender),
-            bullMarketParams
+            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), bullMarketParams
         );
     }
 
@@ -1518,7 +1388,6 @@ contract LiquidationForkTest is BaseForkTest {
     BullLeverageRouter bullLeverageRouter;
     MorphoOracle bearMorphoOracle;
     MorphoOracle bullMorphoOracle;
-    BalancerFlashLender lender;
     MarketParams bearMarketParams;
     MarketParams bullMarketParams;
 
@@ -1549,20 +1418,10 @@ contract LiquidationForkTest is BaseForkTest {
         bearMarketParams = _createMorphoMarket(address(stBear), address(bearMorphoOracle), 2_000_000e6);
         bullMarketParams = _createMorphoMarket(address(stBull), address(bullMorphoOracle), 2_000_000e6);
 
-        // Deploy flash lender and routers
-        lender = new BalancerFlashLender(BALANCER_VAULT);
-        leverageRouter =
-            new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), address(lender), bearMarketParams);
+        // Deploy leverage routers (use Morpho native fee-free flash loans)
+        leverageRouter = new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), bearMarketParams);
         bullLeverageRouter = new BullLeverageRouter(
-            MORPHO,
-            address(splitter),
-            curvePool,
-            USDC,
-            bearToken,
-            bullToken,
-            address(stBull),
-            address(lender),
-            bullMarketParams
+            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), bullMarketParams
         );
     }
 

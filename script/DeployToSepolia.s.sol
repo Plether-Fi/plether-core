@@ -70,13 +70,10 @@ contract DeployToSepolia is Script {
     // USDC address on Sepolia
     address constant USDC = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
 
-    // Aave V3 Pool on Sepolia
-    address constant AAVE_POOL = 0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951;
-
     // Curve Pool address on Sepolia (placeholder - update with actual pool)
     address constant CURVE_POOL = address(0x1); // TODO: Replace with actual Curve pool
 
-    // Morpho Blue on Sepolia (same as mainnet)
+    // Morpho Blue on Sepolia (same as mainnet, also provides fee-free flash loans)
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
     address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
 
@@ -241,7 +238,7 @@ contract DeployToSepolia is Script {
         });
 
         LeverageRouter leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, CURVE_POOL, USDC, address(d.dxyBear), address(d.stakedBear), AAVE_POOL, bearMarketParams
+            MORPHO_BLUE, CURVE_POOL, USDC, address(d.dxyBear), address(d.stakedBear), bearMarketParams
         );
         console.log("LeverageRouter:", address(leverageRouter));
 
@@ -262,7 +259,6 @@ contract DeployToSepolia is Script {
             address(d.dxyBear),
             address(d.dxyBull),
             address(d.stakedBull),
-            AAVE_POOL,
             bullMarketParams
         );
         console.log("BullLeverageRouter:", address(bullLeverageRouter));

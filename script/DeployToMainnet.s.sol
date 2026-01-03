@@ -55,12 +55,9 @@ contract DeployToMainnet is Script {
     // Curve Pool (USDC/DXY-BEAR) - To be deployed or use existing
     address constant CURVE_POOL = address(0); // TODO: Set after Curve pool deployment
 
-    // Morpho Blue
+    // Morpho Blue (also provides fee-free flash loans)
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
     address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC; // AdaptiveCurveIrm
-
-    // Aave V3 (for flash loans)
-    address constant AAVE_POOL = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     // Protocol Parameters
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
@@ -166,13 +163,7 @@ contract DeployToMainnet is Script {
         });
 
         deployed.leverageRouter = new LeverageRouter(
-            MORPHO_BLUE,
-            CURVE_POOL,
-            USDC,
-            address(deployed.dxyBear),
-            address(deployed.stakedBear),
-            AAVE_POOL, // Flash lender
-            bearMarketParams
+            MORPHO_BLUE, CURVE_POOL, USDC, address(deployed.dxyBear), address(deployed.stakedBear), bearMarketParams
         );
 
         // ==========================================
@@ -194,7 +185,6 @@ contract DeployToMainnet is Script {
             address(deployed.dxyBear),
             address(deployed.dxyBull),
             address(deployed.stakedBull),
-            AAVE_POOL, // Flash lender
             bullMarketParams
         );
 

@@ -150,6 +150,10 @@ contract MockMorpho is IMorpho {
         return (0, 0);
     }
 
+    function flashLoan(address, uint256, bytes calldata) external override {
+        // Not used by MorphoAdapter
+    }
+
     // Helper: Simulate yield by increasing totalSupplyAssets
     function simulateYield(bytes32 id, uint256 yieldAmount) external {
         totalSupplyAssets[id] += yieldAmount;

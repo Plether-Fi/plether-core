@@ -110,6 +110,17 @@ interface IMorpho {
     ) external returns (uint256 assetsSeized, uint256 assetsRepaid);
 
     // ==========================================
+    // FLASH LOANS
+    // ==========================================
+
+    /// @notice Execute a flash loan
+    /// @param token The token to flash loan
+    /// @param assets The amount of tokens to flash loan
+    /// @param data Arbitrary data to pass to the callback
+    /// @dev Morpho flash loans are fee-free. Callback must repay exact amount.
+    function flashLoan(address token, uint256 assets, bytes calldata data) external;
+
+    // ==========================================
     // VIEW FUNCTIONS
     // ==========================================
 
@@ -131,4 +142,13 @@ interface IMorpho {
             uint128 lastUpdate,
             uint128 fee
         );
+}
+
+/// @notice Callback interface for Morpho flash loans
+/// @dev Contracts receiving flash loans must implement this interface
+interface IMorphoFlashLoanCallback {
+    /// @notice Called by Morpho during a flash loan
+    /// @param assets The amount of tokens borrowed
+    /// @param data The data passed to flashLoan
+    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external;
 }

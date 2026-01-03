@@ -9,6 +9,7 @@ import "../src/interfaces/ISyntheticSplitter.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import {IMorphoFlashLoanCallback} from "../src/interfaces/IMorpho.sol";
 
 contract BullLeverageRouterTest is Test {
     BullLeverageRouter public router;
@@ -20,7 +21,6 @@ contract BullLeverageRouterTest is Test {
     MockStakedToken public stakedDxyBull;
     MockMorpho public morpho;
     MockCurvePool public curvePool;
-    MockFlashLender public lender;
     MockSplitter public splitter;
 
     address alice = address(0xA11ce);
@@ -33,7 +33,6 @@ contract BullLeverageRouterTest is Test {
         stakedDxyBull = new MockStakedToken(address(dxyBull));
         morpho = new MockMorpho();
         curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        lender = new MockFlashLender(address(usdc));
         splitter = new MockSplitter(address(dxyBear), address(dxyBull), address(usdc));
 
         // Configure MockMorpho with token addresses (collateral is now staked token)
@@ -55,7 +54,6 @@ contract BullLeverageRouterTest is Test {
             address(dxyBear),
             address(dxyBull),
             address(stakedDxyBull),
-            address(lender),
             params
         );
 
@@ -88,29 +86,6 @@ contract BullLeverageRouterTest is Test {
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
         assertEq(supplied, 1500 * 1e18, "Incorrect supplied amount");
         assertEq(borrowed, 500 * 1e6, "Incorrect borrowed amount");
-    }
-
-    function test_OpenLeverage_WithFlashLoanFees() public {
-        // Set 0.09% fee (standard for some pools)
-        lender.setFeeBps(9);
-
-        uint256 principal = 1000 * 1e6;
-        uint256 leverage = 3 * 1e18;
-
-        vm.startPrank(alice);
-        usdc.approve(address(router), principal);
-        morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
-
-        // Loan = 2000 USDC. Fee = 2000 * 0.0009 = 1.8 USDC (1_800_000).
-        // Total Debt needed = 2000 + 1.8 = 2001.8 USDC.
-        // Sale Proceeds (1:1) = 1500 USDC.
-        // Borrow from Morpho should be: 2001.8 - 1500 = 501.8 USDC
-        assertEq(borrowed, 501_800_000, "Borrow amount did not account for flash fees");
-        assertEq(supplied, 1500 * 1e18, "Supplied amount unaffected by fee");
     }
 
     function test_OpenLeverage_EmitsEvent() public {
@@ -563,20 +538,22 @@ contract BullLeverageRouterTest is Test {
     // ==========================================
 
     function test_OnFlashLoan_UntrustedLender_Reverts() public {
+        // Call from alice (not dxyBear) with OP_CLOSE_REDEEM (3) to test lender validation
         vm.startPrank(alice);
 
         vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         router.onFlashLoan(
-            address(router), address(usdc), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0)
+            address(router), address(dxyBear), 100, 0, abi.encode(uint8(3), alice, block.timestamp + 1, 0, 0)
         );
         vm.stopPrank();
     }
 
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
-        vm.startPrank(address(lender));
+        // For ERC-3156 callback, the lender is dxyBear (used for close leverage)
+        vm.startPrank(address(dxyBear));
 
         vm.expectRevert(FlashLoanBase.FlashLoan__InvalidInitiator.selector);
-        router.onFlashLoan(alice, address(usdc), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
+        router.onFlashLoan(alice, address(dxyBear), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
         vm.stopPrank();
     }
 
@@ -821,46 +798,6 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
     }
 }
 
-contract MockFlashLender is IERC3156FlashLender {
-    address public token;
-    uint256 private _feeBps = 0;
-
-    constructor(address _token) {
-        token = _token;
-    }
-
-    function setFeeBps(uint256 bps) external {
-        _feeBps = bps;
-    }
-
-    function maxFlashLoan(address) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(address, uint256 amount) public view override returns (uint256) {
-        return (amount * _feeBps) / 10000;
-    }
-
-    function flashLoan(IERC3156FlashBorrower receiver, address _token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
-        require(_token == token, "Wrong token");
-        uint256 fee = flashFee(_token, amount);
-        MockToken(token).mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, _token, amount, fee, data)
-                == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        uint256 totalRepayment = amount + fee;
-        MockToken(token).transferFrom(address(receiver), address(this), totalRepayment);
-        MockToken(token).burn(address(this), totalRepayment);
-        return true;
-    }
-}
-
 contract MockCurvePool is ICurvePool {
     address public token0; // USDC (index 0)
     address public token1; // DXY-BEAR (index 1)
@@ -1053,6 +990,16 @@ contract MockMorpho is IMorpho {
         returns (uint256, uint256)
     {
         return (0, 0);
+    }
+
+    function flashLoan(address token, uint256 assets, bytes calldata data) external override {
+        // Mint tokens to borrower (simulating flash loan)
+        MockToken(token).mint(msg.sender, assets);
+        // Invoke callback
+        IMorphoFlashLoanCallback(msg.sender).onMorphoFlashLoan(assets, data);
+        // Verify repayment (pull and burn tokens)
+        IERC20(token).transferFrom(msg.sender, address(this), assets);
+        MockToken(token).burn(address(this), assets);
     }
 }
 
