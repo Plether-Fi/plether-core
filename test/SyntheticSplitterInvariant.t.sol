@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "forge-std/StdInvariant.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/MockYieldAdapter.sol";
+import "./utils/MockYieldAdapter.sol";
 import "../src/libraries/OracleLib.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";

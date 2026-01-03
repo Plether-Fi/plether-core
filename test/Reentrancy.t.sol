@@ -6,7 +6,7 @@ import "../src/SyntheticSplitter.sol";
 import "../src/ZapRouter.sol";
 import "../src/LeverageRouter.sol";
 import "../src/BullLeverageRouter.sol";
-import "../src/MockYieldAdapter.sol";
+import "./utils/MockYieldAdapter.sol";
 import "../src/interfaces/IMorpho.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";

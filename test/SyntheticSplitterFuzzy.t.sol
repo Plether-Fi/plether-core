@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/MockYieldAdapter.sol";
+import "./utils/MockYieldAdapter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
 

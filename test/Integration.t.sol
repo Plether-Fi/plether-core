@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/SyntheticToken.sol";
 import "../src/ZapRouter.sol";
-import "../src/MockYieldAdapter.sol";
+import "./utils/MockYieldAdapter.sol";
 import "../src/interfaces/AggregatorV3Interface.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";

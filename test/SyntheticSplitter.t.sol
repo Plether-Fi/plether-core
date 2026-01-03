@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/MockYieldAdapter.sol";
+import "./utils/MockYieldAdapter.sol";
 import "../src/libraries/OracleLib.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
 import "./utils/MockAave.sol";
