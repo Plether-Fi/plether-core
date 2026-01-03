@@ -894,6 +894,8 @@ contract MockMorpho is IMorpho {
     function market(bytes32) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
         return (0, 0, 0, 0, 0, 0);
     }
+
+    function accrueInterest(MarketParams memory) external override {}
 }
 
 contract MockSplitter is ISyntheticSplitter {

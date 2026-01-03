@@ -85,6 +85,13 @@ interface IMorpho {
     ) external returns (uint256 assetsRepaid, uint256 sharesRepaid);
 
     // ==========================================
+    // INTEREST ACCRUAL
+    // ==========================================
+
+    /// @notice Accrue interest for a market
+    function accrueInterest(MarketParams memory marketParams) external;
+
+    // ==========================================
     // VIEW FUNCTIONS
     // ==========================================
 

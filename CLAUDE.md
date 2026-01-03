@@ -13,6 +13,9 @@ forge test --match-path "test/ZapRouter.t.sol"  # Run tests in specific file
 forge fmt                # Format code
 forge fmt --check        # Check formatting (CI enforced)
 forge coverage           # Generate coverage report
+
+# Fork tests (require MAINNET_RPC_URL in .env)
+(source .env && forge test --match-path test/fork/MainnetForkTest.t.sol --fork-url $MAINNET_RPC_URL -vvv)
 ```
 
 ## Architecture Overview

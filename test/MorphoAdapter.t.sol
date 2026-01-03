@@ -139,6 +139,8 @@ contract MockMorpho is IMorpho {
 
     function withdrawCollateral(MarketParams memory, uint256, address, address) external override {}
 
+    function accrueInterest(MarketParams memory) external override {}
+
     // Helper: Simulate yield by increasing totalSupplyAssets
     function simulateYield(bytes32 id, uint256 yieldAmount) external {
         totalSupplyAssets[id] += yieldAmount;
