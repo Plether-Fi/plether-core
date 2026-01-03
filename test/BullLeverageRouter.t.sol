@@ -792,7 +792,7 @@ contract MockCurvePool is ICurvePool {
 }
 
 contract MockMorpho is IMorpho {
-    mapping(address => mapping(address => bool)) public isAuthorized;
+    mapping(address => mapping(address => bool)) public _isAuthorized;
     mapping(address => ActionData) public positions;
     address public usdc;
     address public collateralToken;
@@ -807,22 +807,58 @@ contract MockMorpho is IMorpho {
         collateralToken = _collateral;
     }
 
-    function setAuthorization(address operator, bool approved) external {
-        isAuthorized[msg.sender][operator] = approved;
+    function setAuthorization(address operator, bool approved) external override {
+        _isAuthorized[msg.sender][operator] = approved;
     }
 
-    function supply(MarketParams memory, uint256 assets, uint256, address onBehalfOf, bytes calldata)
+    function isAuthorized(address authorizer, address authorized) external view override returns (bool) {
+        return _isAuthorized[authorizer][authorized];
+    }
+
+    function createMarket(MarketParams memory) external override {}
+
+    function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
+        return MarketParams(address(0), address(0), address(0), address(0), 0);
+    }
+
+    // Lending functions (supply/withdraw loan tokens)
+    function supply(MarketParams memory, uint256 assets, uint256, address, bytes calldata)
         external
         override
         returns (uint256, uint256)
     {
+        return (assets, 0);
+    }
+
+    function withdraw(MarketParams memory, uint256 assets, uint256, address, address)
+        external
+        override
+        returns (uint256, uint256)
+    {
+        return (assets, 0);
+    }
+
+    // Collateral functions
+    function supplyCollateral(MarketParams memory, uint256 assets, address onBehalfOf, bytes calldata)
+        external
+        override
+    {
         if (msg.sender != onBehalfOf) {
-            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+            require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].supplied += assets;
-        // Transfer collateral from caller to Morpho
         IERC20(collateralToken).transferFrom(msg.sender, address(this), assets);
-        return (assets, 0);
+    }
+
+    function withdrawCollateral(MarketParams memory, uint256 assets, address onBehalfOf, address receiver)
+        external
+        override
+    {
+        if (msg.sender != onBehalfOf) {
+            require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+        }
+        positions[onBehalfOf].supplied -= assets;
+        IERC20(collateralToken).transfer(receiver, assets);
     }
 
     function borrow(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
@@ -831,10 +867,9 @@ contract MockMorpho is IMorpho {
         returns (uint256, uint256)
     {
         if (msg.sender != onBehalfOf) {
-            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+            require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].borrowed += assets;
-        // Mint USDC to receiver
         MockToken(usdc).mint(receiver, assets);
         return (assets, 0);
     }
@@ -845,25 +880,10 @@ contract MockMorpho is IMorpho {
         returns (uint256, uint256)
     {
         if (msg.sender != onBehalfOf) {
-            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
+            require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
         positions[onBehalfOf].borrowed -= assets;
-        // Burn loan token from caller (simulates transfer to Morpho)
         MockToken(usdc).burn(msg.sender, assets);
-        return (assets, 0);
-    }
-
-    function withdraw(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
-        external
-        override
-        returns (uint256, uint256)
-    {
-        if (msg.sender != onBehalfOf) {
-            require(isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
-        }
-        positions[onBehalfOf].supplied -= assets;
-        // Transfer collateral from Morpho to receiver
-        IERC20(collateralToken).transfer(receiver, assets);
         return (assets, 0);
     }
 

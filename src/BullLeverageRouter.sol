@@ -254,8 +254,8 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
         _lastDxyBullReceived = dxyBullBalance;
         uint256 stakedShares = STAKED_DXY_BULL.deposit(dxyBullBalance, address(this));
 
-        // 5. Deposit sDXY-BULL to Morpho on behalf of the USER
-        MORPHO.supply(marketParams, stakedShares, 0, user, "");
+        // 5. Deposit sDXY-BULL collateral to Morpho on behalf of the USER
+        MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
         // 6. Borrow USDC from Morpho to repay flash loan
         // We already have usdcFromSale, so only borrow the remaining amount needed
@@ -278,15 +278,17 @@ contract BullLeverageRouter is IERC3156FlashBorrower {
 
         require(block.timestamp <= deadline, "Transaction expired");
 
-        // 1. Repay user's debt on Morpho
-        MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        // 1. Repay user's debt on Morpho (skip if no debt)
+        if (loanAmount > 0) {
+            MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        }
 
         // 2. Withdraw user's sDXY-BULL collateral from Morpho
-        (uint256 withdrawnShares,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
-        _lastCollateralWithdrawn = withdrawnShares;
+        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
+        _lastCollateralWithdrawn = collateralToWithdraw;
 
         // 3. Unstake sDXY-BULL to get DXY-BULL
-        uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(withdrawnShares, address(this), address(this));
+        uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
 
         // 4. Store state for nested callback
         _closeUser = user;

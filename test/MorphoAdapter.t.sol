@@ -127,6 +127,18 @@ contract MockMorpho is IMorpho {
         return false;
     }
 
+    function setAuthorization(address, bool) external override {}
+
+    function createMarket(MarketParams memory) external override {}
+
+    function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
+        return MarketParams(address(0), address(0), address(0), address(0), 0);
+    }
+
+    function supplyCollateral(MarketParams memory, uint256, address, bytes calldata) external override {}
+
+    function withdrawCollateral(MarketParams memory, uint256, address, address) external override {}
+
     // Helper: Simulate yield by increasing totalSupplyAssets
     function simulateYield(bytes32 id, uint256 yieldAmount) external {
         totalSupplyAssets[id] += yieldAmount;

@@ -214,8 +214,8 @@ contract LeverageRouter is IERC3156FlashBorrower {
         // 2. Stake DXY-BEAR to get sDXY-BEAR
         uint256 stakedShares = STAKED_DXY_BEAR.deposit(dxyBearReceived, address(this));
 
-        // 3. Supply sDXY-BEAR to Morpho on behalf of the USER
-        MORPHO.supply(marketParams, stakedShares, 0, user, "");
+        // 3. Supply sDXY-BEAR collateral to Morpho on behalf of the USER
+        MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
         // 4. Borrow USDC from Morpho to repay flash loan
         uint256 debtToIncur = loanAmount + fee;
@@ -231,15 +231,17 @@ contract LeverageRouter is IERC3156FlashBorrower {
         (,,, uint256 collateralToWithdraw, uint256 minUsdcOut) =
             abi.decode(data, (uint8, address, uint256, uint256, uint256));
 
-        // 1. Repay user's debt on Morpho
-        MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        // 1. Repay user's debt on Morpho (skip if no debt)
+        if (loanAmount > 0) {
+            MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        }
 
         // 2. Withdraw user's sDXY-BEAR collateral from Morpho
-        (uint256 withdrawnShares,) = MORPHO.withdraw(marketParams, collateralToWithdraw, 0, user, address(this));
-        _lastCollateralWithdrawn = withdrawnShares;
+        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
+        _lastCollateralWithdrawn = collateralToWithdraw;
 
         // 3. Unstake sDXY-BEAR to get DXY-BEAR
-        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(withdrawnShares, address(this), address(this));
+        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
 
         // 4. Swap DXY-BEAR -> USDC via Curve
         uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);

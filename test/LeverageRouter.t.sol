@@ -106,7 +106,7 @@ contract LeverageRouterTest is Test {
         stakedDxyBear.deposit(3000 * 1e18, alice); // Alice gets 3000 sDXY-BEAR
 
         stakedDxyBear.approve(address(morpho), 3000 * 1e18);
-        morpho.supply(params, 3000 * 1e18, 0, alice, "");
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice); // Alice holds the debt
 
         // Now Close
@@ -254,7 +254,7 @@ contract LeverageRouterTest is Test {
         dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
         stakedDxyBear.deposit(3000 * 1e18, alice);
         stakedDxyBear.approve(address(morpho), 3000 * 1e18);
-        morpho.supply(params, 3000 * 1e18, 0, alice, "");
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
 
         // Simulate MEV attack during close
@@ -406,22 +406,55 @@ contract MockMorpho is IMorpho {
         stakedToken = _stakedToken;
     }
 
-    function setAuthorization(address authorized, bool status) external {
-        _isAuthorized[msg.sender][authorized] = status;
+    function setAuthorization(address authorized, bool newIsAuthorized) external override {
+        _isAuthorized[msg.sender][authorized] = newIsAuthorized;
     }
 
     function isAuthorized(address authorizer, address authorized) external view override returns (bool) {
         return _isAuthorized[authorizer][authorized];
     }
 
-    function supply(MarketParams memory, uint256 assets, uint256, address onBehalfOf, bytes calldata)
+    function createMarket(MarketParams memory) external override {}
+
+    function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
+        return MarketParams(address(0), address(0), address(0), address(0), 0);
+    }
+
+    // Lending functions (supply/withdraw loan tokens)
+    function supply(MarketParams memory, uint256 assets, uint256, address, bytes calldata)
         external
         override
         returns (uint256, uint256)
     {
+        return (assets, 0);
+    }
+
+    function withdraw(MarketParams memory, uint256 assets, uint256, address, address)
+        external
+        override
+        returns (uint256, uint256)
+    {
+        return (assets, 0);
+    }
+
+    // Collateral functions
+    function supplyCollateral(MarketParams memory, uint256 assets, address onBehalfOf, bytes calldata)
+        external
+        override
+    {
         IERC20(stakedToken).transferFrom(msg.sender, address(this), assets);
         collateralBalance[onBehalfOf] += assets;
-        return (assets, 0);
+    }
+
+    function withdrawCollateral(MarketParams memory, uint256 assets, address onBehalfOf, address receiver)
+        external
+        override
+    {
+        if (msg.sender != onBehalfOf) {
+            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+        }
+        collateralBalance[onBehalfOf] -= assets;
+        IERC20(stakedToken).transfer(receiver, assets);
     }
 
     function borrow(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
@@ -444,20 +477,6 @@ contract MockMorpho is IMorpho {
     {
         MockToken(usdc).transferFrom(msg.sender, address(this), assets);
         borrowBalance[onBehalfOf] -= assets;
-        return (assets, 0);
-    }
-
-    function withdraw(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
-        external
-        override
-        returns (uint256, uint256)
-    {
-        if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
-        }
-        collateralBalance[onBehalfOf] -= assets;
-        // Transfer staked tokens back to receiver
-        IERC20(stakedToken).transfer(receiver, assets);
         return (assets, 0);
     }
 
@@ -609,7 +628,7 @@ contract LeverageRouterOffsetTest is Test {
 
         // Supply to Morpho and borrow
         stakedDxyBear.approve(address(morpho), shares);
-        morpho.supply(params, shares, 0, alice, "");
+        morpho.supplyCollateral(params, shares, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
 
         // Close leverage
