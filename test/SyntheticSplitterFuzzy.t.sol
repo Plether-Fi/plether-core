@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/YieldAdapter.sol";
+import "../src/MockYieldAdapter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
 
@@ -18,7 +18,7 @@ contract MockUSDC is MockERC20 {
 
 contract SyntheticSplitterFuzzTest is Test {
     SyntheticSplitter splitter;
-    YieldAdapter adapter;
+    MockYieldAdapter adapter;
     MockUSDC usdc;
     MockAToken aUsdc;
     MockPool pool;
@@ -46,8 +46,7 @@ contract SyntheticSplitterFuzzTest is Test {
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
 
-        adapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
+        adapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), predictedSplitter);
 
         splitter =
             new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(sequencer));

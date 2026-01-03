@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "forge-std/StdInvariant.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/YieldAdapter.sol";
+import "../src/MockYieldAdapter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
 
@@ -25,7 +25,7 @@ contract MockUSDC is MockERC20 {
 // ==========================================
 contract SplitterHandler is Test {
     SyntheticSplitter public splitter;
-    YieldAdapter public adapter;
+    MockYieldAdapter public adapter;
     MockUSDC public usdc;
     MockOracle public oracle;
     MockAToken public aUsdc;
@@ -86,7 +86,7 @@ contract SplitterHandler is Test {
 
     constructor(
         SyntheticSplitter _splitter,
-        YieldAdapter _adapter,
+        MockYieldAdapter _adapter,
         MockUSDC _usdc,
         MockOracle _oracle,
         MockAToken _aUsdc
@@ -291,7 +291,7 @@ contract SplitterHandler is Test {
 // ==========================================
 contract SyntheticSplitterInvariantTest is StdInvariant, Test {
     SyntheticSplitter splitter;
-    YieldAdapter adapter;
+    MockYieldAdapter adapter;
     MockUSDC usdc;
     MockAToken aUsdc;
     MockPool pool;
@@ -319,8 +319,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
 
         // Deploy adapter with predicted splitter address
-        adapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
+        adapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), predictedSplitter);
 
         // Deploy splitter (no sequencer feed for simplicity)
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
@@ -446,7 +445,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
 // ==========================================
 contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
     SyntheticSplitter splitter;
-    YieldAdapter adapter;
+    MockYieldAdapter adapter;
     MockUSDC usdc;
     MockAToken aUsdc;
     MockPool pool;
@@ -470,8 +469,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
 
-        adapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
+        adapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), predictedSplitter);
 
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
 

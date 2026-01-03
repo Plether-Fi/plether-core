@@ -3,11 +3,12 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
-import {YieldAdapter} from "../src/YieldAdapter.sol";
+import {MorphoAdapter} from "../src/MorphoAdapter.sol";
 import {MockYieldAdapter} from "../src/MockYieldAdapter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
@@ -108,10 +109,16 @@ contract DeployToSepolia is Script {
         // ============================================
         // OPTION A: MockYieldAdapter (for testnet)
         // ============================================
-        MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer);
+        // Predict Splitter address before deploying Adapter (circular dependency)
+        uint64 nonce = vm.getNonce(deployer);
+        address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
+
+        MockYieldAdapter mockAdapter = new MockYieldAdapter(IERC20(usdc), deployer, predictedSplitter);
 
         SyntheticSplitter splitter =
             new SyntheticSplitter(address(oracle), usdc, address(mockAdapter), cap, treasury, sequencerUptimeFeed);
+
+        require(address(splitter) == predictedSplitter, "Splitter address mismatch");
 
         console.log("BasketOracle deployed at:", address(oracle));
         console.log("MockAdapter deployed at:", address(mockAdapter));
@@ -120,12 +127,27 @@ contract DeployToSepolia is Script {
         console.log("Bull Token (TOKEN_B):", address(splitter.TOKEN_B()));
 
         // ============================================
-        // OPTION B: Real YieldAdapter (for mainnet)
+        // OPTION B: Real MorphoAdapter (for mainnet)
         // Uses CREATE2 to predict Splitter address before deploying Adapter
         // Uncomment below and comment out Option A for production
         // ============================================
         /*
         bytes32 salt = keccak256("PlethSyntheticSplitterV1");
+
+        // Morpho Blue addresses (mainnet - update for target network)
+        address morphoBlue = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+        address morphoOracle = address(0); // TODO: Deploy MorphoOracle first
+        address morphoIrm = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC; // AdaptiveCurveIrm
+        uint256 lltv = 0.945e18; // 94.5% LLTV for stablecoin market
+
+        // Define Morpho market parameters
+        MarketParams memory marketParams = MarketParams({
+            loanToken: usdc,
+            collateralToken: usdc, // Same asset lending market
+            oracle: morphoOracle,
+            irm: morphoIrm,
+            lltv: lltv
+        });
 
         // Predict the Splitter address using CREATE2
         // Note: The Splitter constructor args must match exactly
@@ -135,18 +157,18 @@ contract DeployToSepolia is Script {
         );
 
         // This will be the Splitter address (we update adapter address in creationCode after computing)
-        address predictedSplitter = vm.computeCreate2Address(
+        address predictedSplitterProd = vm.computeCreate2Address(
             salt,
             keccak256(splitterCreationCode)
         );
 
-        // Deploy YieldAdapter with the predicted Splitter address (immutable)
-        YieldAdapter yieldAdapter = new YieldAdapter(
+        // Deploy MorphoAdapter with the predicted Splitter address (immutable)
+        MorphoAdapter morphoAdapter = new MorphoAdapter(
             IERC20(usdc),
-            aavePool,
-            aUsdc,
+            morphoBlue,
+            marketParams,
             deployer,
-            predictedSplitter  // This will be the Splitter's address
+            predictedSplitterProd  // This will be the Splitter's address
         );
 
         // Now deploy Splitter with CREATE2 at the predicted address
@@ -154,17 +176,17 @@ contract DeployToSepolia is Script {
         SyntheticSplitter splitterProd = new SyntheticSplitter{salt: salt}(
             address(oracle),
             usdc,
-            address(yieldAdapter),
+            address(morphoAdapter),
             cap,
             treasury,
             sequencerUptimeFeed
         );
 
         // Verify deployment
-        require(address(splitterProd) == predictedSplitter, "CREATE2 address mismatch!");
+        require(address(splitterProd) == predictedSplitterProd, "CREATE2 address mismatch!");
 
         console.log("BasketOracle deployed at:", address(oracle));
-        console.log("YieldAdapter deployed at:", address(yieldAdapter));
+        console.log("MorphoAdapter deployed at:", address(morphoAdapter));
         console.log("SyntheticSplitter deployed at:", address(splitterProd));
         console.log("Bear Token (TOKEN_A):", address(splitterProd.TOKEN_A()));
         console.log("Bull Token (TOKEN_B):", address(splitterProd.TOKEN_B()));

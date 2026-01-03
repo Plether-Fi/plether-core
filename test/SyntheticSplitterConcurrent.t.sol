@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/YieldAdapter.sol";
+import "../src/MockYieldAdapter.sol";
 
 // ==========================================
 // MOCKS
@@ -137,7 +137,7 @@ contract MockPool {
 
 contract SyntheticSplitterConcurrentTest is Test {
     SyntheticSplitter splitter;
-    YieldAdapter unlimitedAdapter;
+    MockYieldAdapter unlimitedAdapter;
 
     MockUSDC usdc;
     MockAToken aUsdc;
@@ -182,8 +182,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         uint256 nonce = vm.getNonce(owner);
         address futureSplitterAddr = vm.computeCreateAddress(owner, nonce + 1);
 
-        unlimitedAdapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), owner, futureSplitterAddr);
+        unlimitedAdapter = new MockYieldAdapter(IERC20(address(usdc)), owner, futureSplitterAddr);
 
         // Manual approval for Adapter -> Pool (just in case)
         vm.stopPrank();
@@ -363,7 +362,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         assertEq(usdc.balanceOf(carol) - carolBefore, expectedRefundEach);
     }
 
-    function handlerLikeTotalAssets(YieldAdapter currentAdapter) internal view returns (uint256) {
+    function handlerLikeTotalAssets(MockYieldAdapter currentAdapter) internal view returns (uint256) {
         uint256 buffer = usdc.balanceOf(address(splitter));
         uint256 shares = currentAdapter.balanceOf(address(splitter));
         uint256 adapterAssets = shares > 0 ? currentAdapter.convertToAssets(shares) : 0;

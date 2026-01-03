@@ -120,8 +120,6 @@ abstract contract BaseForkTest is Test {
     /// @notice Deploy core protocol (adapter, oracle, splitter)
     /// @param treasury Address to receive yield
     function _deployProtocol(address treasury) internal {
-        yieldAdapter = new MockYieldAdapter(IERC20(USDC), address(this));
-
         address[] memory feeds = new address[](1);
         feeds[0] = CL_EUR;
         uint256[] memory qtys = new uint256[](1);
@@ -131,7 +129,14 @@ abstract contract BaseForkTest is Test {
         address tempCurvePool = address(new MockCurvePoolForOracle(realOraclePrice));
         basketOracle = new BasketOracle(feeds, qtys, tempCurvePool, 200);
 
+        // Predict splitter address (deployed after yieldAdapter)
+        uint64 currentNonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), currentNonce + 1);
+
+        yieldAdapter = new MockYieldAdapter(IERC20(USDC), address(this), predictedSplitter);
+
         splitter = new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, treasury, address(0));
+        require(address(splitter) == predictedSplitter, "Splitter address mismatch");
 
         bullToken = address(splitter.TOKEN_B());
         bearToken = address(splitter.TOKEN_A());

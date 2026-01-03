@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "../src/YieldAdapter.sol";
+import "../src/MockYieldAdapter.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
@@ -18,7 +18,7 @@ contract MockUSDC is MockERC20 {
 
 contract SyntheticSplitterTest is Test {
     SyntheticSplitter splitter;
-    YieldAdapter adapter;
+    MockYieldAdapter adapter;
 
     MockUSDC usdc;
     MockAToken aUsdc;
@@ -46,8 +46,7 @@ contract SyntheticSplitterTest is Test {
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
         // 4. Deploy Adapter with predicted Splitter address
-        adapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), predictedSplitter);
+        adapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), predictedSplitter);
         // 5. Deploy Splitter (will be at predictedSplitter address)
         splitter = new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
         require(address(splitter) == predictedSplitter, "Address prediction failed");
@@ -487,9 +486,9 @@ contract SyntheticSplitterTest is Test {
         usdc.approve(address(splitter), 2000 * 1e6);
         splitter.mint(1000 * 1e18);
         vm.stopPrank();
-        // 2. Simulate Yield ($10 profit)
+        // 2. Simulate Yield ($10 profit) - mint USDC directly to adapter
         // Threshold is $50. This should fail.
-        aUsdc.mint(address(adapter), 10 * 1e6);
+        usdc.mint(address(adapter), 10 * 1e6);
         vm.expectRevert(SyntheticSplitter.Splitter__NoSurplus.selector);
         splitter.harvestYield();
     }
@@ -506,9 +505,9 @@ contract SyntheticSplitterTest is Test {
         splitter.finalizeFeeReceivers();
         // 2. Advance blocks to allow CAPO growth (~5.5% yield needs ~550 blocks)
         vm.roll(block.number + 600);
-        // 3. Simulate Yield ($100 profit)
+        // 3. Simulate Yield ($100 profit) - mint USDC directly to adapter
         // Threshold is $50. This should pass.
-        aUsdc.mint(address(adapter), 100 * 1e6);
+        usdc.mint(address(adapter), 100 * 1e6);
 
         // 4. Bob (Keeper) calls it
         vm.startPrank(bob);
@@ -536,7 +535,7 @@ contract SyntheticSplitterTest is Test {
         usdc.approve(address(adapter), 1_000_000 * 1e6);
 
         // Whale tries to deposit directly into adapter - should fail
-        vm.expectRevert(YieldAdapter.YieldAdapter__OnlySplitter.selector);
+        vm.expectRevert(MockYieldAdapter.MockYieldAdapter__OnlySplitter.selector);
         adapter.deposit(1_000_000 * 1e6, whale);
         vm.stopPrank();
 
@@ -589,8 +588,8 @@ contract SyntheticSplitterTest is Test {
         splitter.finalizeFeeReceivers();
         // 3. Advance blocks to allow CAPO growth (~55% yield needs ~5500 blocks)
         vm.roll(block.number + 6000);
-        // 4. Simulate Yield ($100 profit)
-        aUsdc.mint(address(adapter), 100 * 1e6);
+        // 4. Simulate Yield ($100 profit) - mint USDC directly to adapter
+        usdc.mint(address(adapter), 100 * 1e6);
         // 5. Harvest
         splitter.harvestYield();
         // Assert: stakingShare goes to treasury (total treasury = 20% + 80% = 99% of remaining after callerCut)
@@ -639,8 +638,7 @@ contract SyntheticSplitterTest is Test {
         splitter.mint(100 * 1e18);
         vm.stopPrank();
         // 2. Deploy NEW Adapter (splitter already exists, so pass its address directly)
-        YieldAdapter newAdapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), address(splitter));
+        MockYieldAdapter newAdapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), address(splitter));
         // 3. Propose & Wait
         splitter.proposeAdapter(address(newAdapter));
         vm.warp(block.timestamp + 8 days); // Pass TimeLock
@@ -899,7 +897,7 @@ contract SyntheticSplitterTest is Test {
 
     /**
      * @notice Test partial withdrawal scenario - adapter has less liquidity than needed
-     * @dev Simulates a bank run on Aave where there's not enough USDC to withdraw
+     * @dev Simulates a bank run where there's not enough USDC to withdraw
      */
     function test_Burn_FailsWhenAdapterHasInsufficientLiquidity() public {
         // 1. Setup: Mint 100 tokens
@@ -908,16 +906,19 @@ contract SyntheticSplitterTest is Test {
         splitter.mint(100 * 1e18);
         vm.stopPrank();
 
-        // 2. Drain the mock pool to simulate Aave bank run
-        // Pool has the USDC that backs the aTokens
-        uint256 poolBalance = usdc.balanceOf(address(pool));
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolBalance - 10 * 1e6); // Leave only $10
+        // 2. Mock adapter to simulate insufficient liquidity
+        // Both withdraw and redeem fail when underlying pool has insufficient funds
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("INSUFFICIENT_LIQUIDITY")
+        );
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("INSUFFICIENT_LIQUIDITY")
+        );
 
         // 3. Alice tries to burn 50 tokens ($100 refund)
-        // Buffer has $20, adapter would need $80, but pool only has $10
+        // Buffer has $20, adapter would need $80, but adapter fails
         vm.startPrank(alice);
-        vm.expectRevert(); // Should fail due to insufficient pool liquidity
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterWithdrawFailed.selector);
         splitter.burn(50 * 1e18);
         vm.stopPrank();
     }
@@ -999,8 +1000,8 @@ contract SyntheticSplitterTest is Test {
         // 2. Advance blocks to allow CAPO to recognize yield
         vm.roll(block.number + 400);
 
-        // 3. Add small surplus ($30 < $50 threshold)
-        aUsdc.mint(address(adapter), 30 * 1e6);
+        // 3. Add small surplus ($30 < $50 threshold) - mint USDC directly to adapter
+        usdc.mint(address(adapter), 30 * 1e6);
 
         // 4. Check harvestable - should return (false, surplus, 0, 0, 0)
         (bool canHarvest, uint256 surplus,,,) = splitter.previewHarvest();
@@ -1027,7 +1028,8 @@ contract SyntheticSplitterTest is Test {
 
         // 4. Add surplus ($100) which is LESS than adapter assets ($1800)
         // This triggers the withdraw path (line 456-457) instead of redeem
-        aUsdc.mint(address(adapter), 100 * 1e6);
+        // Mint USDC directly to adapter to simulate yield
+        usdc.mint(address(adapter), 100 * 1e6);
 
         // 5. Expect withdraw to be called (not redeem)
         vm.expectCall(address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector));
@@ -1098,8 +1100,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 2. Deploy new adapter
-        YieldAdapter newAdapter =
-            new YieldAdapter(IERC20(address(usdc)), address(pool), address(aUsdc), address(this), address(splitter));
+        MockYieldAdapter newAdapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), address(splitter));
 
         // 3. Propose adapter
         splitter.proposeAdapter(address(newAdapter));

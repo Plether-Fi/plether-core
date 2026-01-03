@@ -9,11 +9,22 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 /**
  * @title MockYieldAdapter
  * @notice Simple ERC4626 vault that holds USDC internally (no external yield, for testing).
+ * @dev Mirrors production adapter interface with SPLITTER restriction
  */
 contract MockYieldAdapter is ERC4626, Ownable {
     using SafeERC20 for IERC20;
 
-    constructor(IERC20 _asset, address _owner) ERC4626(_asset) ERC20("Mock Yield Wrapper", "mUSDC") Ownable(_owner) {}
+    address public immutable SPLITTER;
+
+    error MockYieldAdapter__OnlySplitter();
+
+    constructor(IERC20 _asset, address _owner, address _splitter)
+        ERC4626(_asset)
+        ERC20("Mock Yield Wrapper", "mUSDC")
+        Ownable(_owner)
+    {
+        SPLITTER = _splitter;
+    }
 
     // Total assets = USDC balance in this contract (no yield accrual)
     function totalAssets() public view override returns (uint256) {
@@ -22,6 +33,7 @@ contract MockYieldAdapter is ERC4626, Ownable {
 
     // Deposit: Just hold the assets, mint shares 1:1
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        if (caller != SPLITTER) revert MockYieldAdapter__OnlySplitter();
         super._deposit(caller, receiver, assets, shares);
         // No external call needed – assets already transferred to this via ERC4626 logic
     }

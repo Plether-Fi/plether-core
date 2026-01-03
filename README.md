@@ -59,8 +59,7 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`YieldAdapter`](src/YieldAdapter.sol) | Aave V3 wrapper with CAPO donation attack protection |
-| [`MorphoAdapter`](src/MorphoAdapter.sol) | Morpho Blue wrapper for yield generation |
+| [`MorphoAdapter`](src/MorphoAdapter.sol) | Morpho Blue wrapper for yield generation with CAPO donation attack protection |
 
 ## Ecosystem Integrations
 
@@ -71,13 +70,13 @@ User deposits USDC
                     └──────┬──────┘
                            │ Price Feeds
                            ▼
-┌─────────┐    USDC    ┌───────────────────┐    Yield    ┌───────────┐
-│  Users  │◄─────────►│      Plether      │◄──────────►│  Aave V3  │
-└─────────┘            │   (Splitter +     │             └───────────┘
+┌─────────┐    USDC    ┌───────────────────┐
+│  Users  │◄─────────►│      Plether      │
+└─────────┘            │   (Splitter +     │
      │                 │    Routers)       │
      │                 └─────────┬─────────┘             ┌───────────┐
-     │                           │                  ────►│  Morpho   │
-     │                           │          Lending      │   Blue    │
+     │                           │         Yield + ────►│  Morpho   │
+     │                           │         Lending      │   Blue    │
      │                           ▼                       └───────────┘
      │                 ┌─────────────────┐
      └────────────────►│   Curve AMM     │
@@ -87,8 +86,7 @@ User deposits USDC
 
 - **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD
 - **Curve Finance** - AMM pools for USDC/DXY-BEAR swaps
-- **Morpho Blue** - Lending markets for leveraged positions (DXY-BEAR and DXY-BULL as collateral)
-- **Aave V3** - Yield generation on idle USDC reserves
+- **Morpho Blue** - Lending markets for leveraged positions and yield generation on idle USDC reserves
 
 ## Protocol Mechanics
 
