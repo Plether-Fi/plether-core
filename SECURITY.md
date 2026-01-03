@@ -56,9 +56,10 @@ This provides users time to exit if they disagree with proposed changes.
 ### Oracle Edge Cases
 
 #### Zero/Negative Oracle Prices
-- **Behavior**: OracleLib returns 0 for invalid prices (zero, negative, or stale)
-- **Impact**: A zero price is treated as below CAP, so minting proceeds
-- **Rationale**: The oracle check is primarily to block minting when price >= CAP (liquidation threshold), not to validate price sanity
+- **Behavior**: OracleLib reverts with `OracleLib__InvalidPrice` on zero or negative prices
+- **Impact**: All state-changing operations (mint, burn, liquidation) halt when oracle reports invalid data
+- **Rationale**: Operating with broken oracle data could enable arbitrage exploits between oracle price and market price; halting operations is the safer default
+- **Note**: The `getSystemStatus()` view function gracefully returns 0 for UI diagnostics without reverting
 
 #### Price Volatility Between Preview and Execution
 - **Behavior**: `previewMint()` and `previewBurn()` show expected values at current price

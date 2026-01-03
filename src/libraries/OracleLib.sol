@@ -11,6 +11,7 @@ library OracleLib {
     error OracleLib__SequencerDown();
     error OracleLib__SequencerGracePeriod();
     error OracleLib__StalePrice();
+    error OracleLib__InvalidPrice();
 
     /// @notice Check if the L2 sequencer is up and grace period has passed.
     /// @param sequencerFeed The Chainlink sequencer uptime feed.
@@ -48,7 +49,8 @@ library OracleLib {
     /// @param sequencerFeed The sequencer uptime feed (can be address(0) to skip).
     /// @param gracePeriod The sequencer grace period in seconds.
     /// @param timeout The staleness timeout in seconds.
-    /// @return price The validated price (returns 0 if price <= 0 instead of reverting).
+    /// @return price The validated price.
+    /// @dev Reverts on zero or negative prices to prevent operations during oracle failures.
     function getValidatedPrice(
         AggregatorV3Interface oracle,
         AggregatorV3Interface sequencerFeed,
@@ -61,8 +63,8 @@ library OracleLib {
 
         checkStaleness(updatedAt, timeout);
 
-        // Return 0 for invalid prices (caller handles this case)
-        if (rawPrice <= 0) return 0;
+        // Revert on invalid prices - broken oracle should halt operations
+        if (rawPrice <= 0) revert OracleLib__InvalidPrice();
 
         return uint256(rawPrice);
     }

@@ -313,10 +313,9 @@ contract OracleEdgeCasesTest is Test {
         assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
     }
 
-    /// @notice Test: Zero price is treated as below CAP (design behavior)
-    /// @dev OracleLib returns 0 for invalid prices, and 0 < CAP so mint proceeds
-    /// This documents current behavior - zero price allows minting
-    function test_ZeroPrice_AllowsMint() public {
+    /// @notice Test: Zero price reverts to prevent operations during oracle failures
+    /// @dev OracleLib reverts on invalid prices to halt operations when oracle is broken
+    function test_ZeroPrice_RevertsOnMint() public {
         uint256 mintAmount = 1000 ether;
 
         // Set price to zero
@@ -325,18 +324,16 @@ contract OracleEdgeCasesTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(splitter), type(uint256).max);
 
-        // Mint succeeds because 0 < CAP
+        // Mint reverts because oracle reports invalid price
+        vm.expectRevert(OracleLib.OracleLib__InvalidPrice.selector);
         splitter.mint(mintAmount);
 
         vm.stopPrank();
-
-        // Tokens minted
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
     }
 
-    /// @notice Test: Negative price is treated as below CAP (design behavior)
-    /// @dev OracleLib returns 0 for invalid prices, and 0 < CAP so mint proceeds
-    function test_NegativePrice_AllowsMint() public {
+    /// @notice Test: Negative price reverts to prevent operations during oracle failures
+    /// @dev OracleLib reverts on invalid prices to halt operations when oracle is broken
+    function test_NegativePrice_RevertsOnMint() public {
         uint256 mintAmount = 1000 ether;
 
         // Set price negative
@@ -345,13 +342,11 @@ contract OracleEdgeCasesTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(splitter), type(uint256).max);
 
-        // Mint succeeds because returned price is 0 (invalid -> 0)
+        // Mint reverts because oracle reports invalid price
+        vm.expectRevert(OracleLib.OracleLib__InvalidPrice.selector);
         splitter.mint(mintAmount);
 
         vm.stopPrank();
-
-        // Tokens minted
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
     }
 }
 

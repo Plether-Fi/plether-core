@@ -379,9 +379,12 @@ contract SyntheticSplitterFullTest is Test {
         assertEq(s.currentPrice, 201e8);
     }
 
-    function test_GetSystemStatus_OracleZeroPrice() public {
+    /// @notice getSystemStatus() gracefully handles oracle failures for UI diagnostics
+    /// @dev Returns 0 for currentPrice when oracle reports invalid data (view function, no revert)
+    function test_GetSystemStatus_OracleZeroPrice_ReturnsZero() public {
         oracle.setPrice(int256(0));
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
+        // View function returns 0 to indicate oracle error (doesn't revert for UI compatibility)
         assertEq(s.currentPrice, 0);
     }
 
