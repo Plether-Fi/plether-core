@@ -59,7 +59,7 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`MorphoAdapter`](src/MorphoAdapter.sol) | Morpho Blue wrapper for yield generation with CAPO donation attack protection |
+| [`MorphoAdapter`](src/MorphoAdapter.sol) | ERC-4626 wrapper for Morpho Blue yield generation |
 
 ## Ecosystem Integrations
 
@@ -167,7 +167,7 @@ forge doc --build       # Build static site to ./docs/book
 - Oracle staleness checks (8-hour timeout)
 - Oracle bound validation against Curve EMA to prevent price manipulation
 - Flash loan callback validation (initiator + lender checks)
-- CAPO mechanism protects yield adapters from donation attacks
+- Yield adapter uses Morpho's internal accounting (immune to donation attacks)
 
 ## License
 

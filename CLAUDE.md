@@ -86,7 +86,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 - `SyntheticSplitter*.t.sol` - Core protocol tests (unit, concurrent, fuzzy, invariant, preview)
 - `ZapRouter.t.sol` / `LeverageRouter.t.sol` / `BullLeverageRouter.t.sol` - Router tests with MEV protection scenarios
-- `MorphoAdapter.t.sol` - Adapter tests with CAPO mechanism
+- `MorphoAdapter.t.sol` - Adapter tests for Morpho Blue integration
 - Mock contracts in `test/` files (MockToken, MockFlashLender, MockMorpho, MockSplitter, etc.)
 
 ## External Integrations
