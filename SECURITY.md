@@ -132,7 +132,9 @@ SyntheticToken (DXY-BEAR and DXY-BULL) supports ERC-3156 flash mints:
 
 - **Fee**: Zero (no flash mint fee)
 - **Max Amount**: Unlimited (tokens are minted on demand)
-- **Use Case**: ZapRouter uses flash mints for atomic single-sided operations
+- **Use Cases**:
+  - ZapRouter: Flash mints DXY-BEAR for atomic BULL acquisition
+  - BullLeverageRouter: Flash mints DXY-BEAR for closing leveraged positions (single flash loan pattern)
 - **Risk**: Flash-minted tokens could be used in complex attack vectors (e.g., oracle manipulation, governance attacks)
 - **Mitigation**: Tokens must be returned in same transaction; protocol operations validate prices independently
 
@@ -175,6 +177,21 @@ Router contracts assume specific Curve pool structure:
 - **Risk**: If Curve pool is deployed with different indices, all router swaps fail
 - **Mitigation**: Indices are verified during deployment; pool address is immutable
 - **Deviation Check**: BasketOracle validates Chainlink price against Curve `price_oracle()` (max 2% deviation)
+
+### Router Architecture
+
+LeverageRouter and BullLeverageRouter share a common base contract (`LeverageRouterBase`) for consistent behavior:
+
+- **Shared Validation**: Authorization checks, deadline validation, slippage limits (max 1%)
+- **Custom Errors**: All routers use custom errors for gas-efficient reverts and clear error identification
+- **Flash Loan Pattern**: Both routers use single-level flash loans (Morpho for USDC, ERC-3156 for tokens)
+- **Callback Security**: Flash loan callbacks validate `msg.sender` (lender) and `initiator` (self)
+
+| Router | Flash Loan Source | Collateral Token |
+|--------|-------------------|------------------|
+| LeverageRouter | Morpho (USDC) | sDXY-BEAR |
+| BullLeverageRouter | Morpho (USDC) for open, ERC-3156 (DXY-BEAR) for close | sDXY-BULL |
+| ZapRouter | ERC-3156 (DXY-BEAR) | N/A |
 
 ## Emergency Procedures
 
@@ -245,6 +262,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-04 | Added Router Architecture section; documented LeverageRouterBase, custom errors, and single flash loan pattern for BullLeverageRouter close |
 | 2026-01-03 | Added protocol fees, flash mint, decimal handling, StakedToken, and Curve pool documentation |
 | 2026-01-03 | Migrated to Morpho Blue as sole flash loan provider (removed Aave/Balancer dependencies) |
 | 2025-01-03 | Initial security documentation |
