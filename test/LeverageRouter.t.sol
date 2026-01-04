@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/LeverageRouter.sol";
+import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
 import "../src/interfaces/ICurvePool.sol";
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -116,7 +117,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
         // Forgot setAuthorization!
 
-        vm.expectRevert("LeverageRouter not authorized in Morpho");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
         router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -132,7 +133,7 @@ contract LeverageRouterTest is Test {
     }
 
     function test_PreviewOpenLeverage_RevertOnLowLeverage() public {
-        vm.expectRevert("Leverage must be > 1x");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
         router.previewOpenLeverage(1000 * 1e6, 1e18);
     }
 
@@ -155,7 +156,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Principal must be > 0");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
         router.openLeverage(0, 3e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -166,7 +167,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
 
         // Leverage = 1x exactly should revert
-        vm.expectRevert("Leverage must be > 1x");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
         router.openLeverage(1000 * 1e6, 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -177,7 +178,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1e6); // 1 USDC
 
         // Leverage = 1.0001x with 1 USDC = 0.0001 USDC loan which rounds to 0
-        vm.expectRevert("Leverage too low for principal");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
         router.openLeverage(1e6, 1e18 + 100, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -187,7 +188,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), 1000 * 1e6);
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
         router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -196,7 +197,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
         router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -206,7 +207,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), 1000 * 1e6);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
         router.openLeverage(1000 * 1e6, 3e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
@@ -215,7 +216,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
         router.closeLeverage(2000 * 1e6, 3000 * 1e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
@@ -349,7 +350,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
         // Not authorized
 
-        vm.expectRevert("LeverageRouter not authorized in Morpho");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
         router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }

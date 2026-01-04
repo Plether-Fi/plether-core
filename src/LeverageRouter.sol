@@ -75,11 +75,11 @@ contract LeverageRouter is LeverageRouterBase {
         nonReentrant
         whenNotPaused
     {
-        require(principal > 0, "Principal must be > 0");
-        require(block.timestamp <= deadline, "Transaction expired");
-        require(leverage > 1e18, "Leverage must be > 1x");
-        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
-        require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
+        if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
+        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
+        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
         // 1. Calculate Flash Loan Amount
         // If User has $1000 and wants 3x ($3000 exposure):
@@ -87,7 +87,7 @@ contract LeverageRouter is LeverageRouterBase {
         // We have $1000. We need to borrow $2000.
         // Formula: Loan = Principal * (Lev - 1)
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
-        require(loanAmount > 0, "Leverage too low for principal");
+        if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
         // 2. Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
@@ -121,9 +121,9 @@ contract LeverageRouter is LeverageRouterBase {
         nonReentrant
         whenNotPaused
     {
-        require(block.timestamp <= deadline, "Transaction expired");
-        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
-        require(MORPHO.isAuthorized(msg.sender, address(this)), "LeverageRouter not authorized in Morpho");
+        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
         // 1. Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
@@ -146,13 +146,12 @@ contract LeverageRouter is LeverageRouterBase {
     }
 
     /// @dev Morpho flash loan callback. Routes to open or close handler.
+    /// @dev Deadline already validated in entry function, no need to check again.
     function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
         // Validate caller is Morpho
         _validateLender(msg.sender, address(MORPHO));
 
-        // Decode common fields and validate deadline
-        (uint8 operation,, uint256 deadline) = abi.decode(data, (uint8, address, uint256));
-        require(block.timestamp <= deadline, "Transaction expired");
+        uint8 operation = abi.decode(data, (uint8));
 
         if (operation == OP_OPEN) {
             _executeOpen(amount, data);
@@ -220,7 +219,7 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
 
         // 5. Flash loan repayment handled by caller (no fee with Morpho)
-        require(usdcReceived >= loanAmount, "Insufficient USDC from swap");
+        if (usdcReceived < loanAmount) revert LeverageRouterBase__InsufficientOutput();
 
         // 6. Send remaining USDC to user
         uint256 usdcToReturn = usdcReceived - loanAmount;
@@ -283,7 +282,7 @@ contract LeverageRouter is LeverageRouterBase {
         view
         returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt)
     {
-        require(leverage > 1e18, "Leverage must be > 1x");
+        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
 
         loanAmount = (principal * (leverage - 1e18)) / 1e18;
         totalUSDC = principal + loanAmount;

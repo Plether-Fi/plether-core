@@ -134,19 +134,21 @@ contract BullLeverageRouter is LeverageRouterBase {
         nonReentrant
         whenNotPaused
     {
-        require(principal > 0, "Principal must be > 0");
-        require(block.timestamp <= deadline, "Transaction expired");
-        require(leverage > 1e18, "Leverage must be > 1x");
-        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
-        require(MORPHO.isAuthorized(msg.sender, address(this)), "BullLeverageRouter not authorized in Morpho");
-        require(SPLITTER.currentStatus() == ISyntheticSplitter.Status.ACTIVE, "Splitter not active");
+        if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
+        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
+        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) {
+            revert LeverageRouterBase__SplitterNotActive();
+        }
 
         // Calculate Flash Loan Amount
         // If User has $1000 and wants 3x ($3000 exposure):
         // We need to mint $3000 worth of pairs.
         // We have $1000. We need to borrow $2000.
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
-        require(loanAmount > 0, "Leverage too low for principal");
+        if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
         // Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
@@ -183,10 +185,10 @@ contract BullLeverageRouter is LeverageRouterBase {
         nonReentrant
         whenNotPaused
     {
-        require(collateralToWithdraw > 0, "Collateral must be > 0");
-        require(block.timestamp <= deadline, "Transaction expired");
-        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
-        require(MORPHO.isAuthorized(msg.sender, address(this)), "BullLeverageRouter not authorized in Morpho");
+        if (collateralToWithdraw == 0) revert LeverageRouterBase__ZeroCollateral();
+        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
         // Convert staked shares to underlying BULL amount (for pair matching)
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
@@ -196,7 +198,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         if (debtToRepay > 0) {
             // Query: how much USDC do we get for 1 BEAR (1e18)?
             uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
-            require(usdcPerBear > 0, "Invalid Curve price");
+            if (usdcPerBear == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate BEAR needed to sell for debtToRepay USDC
             // Formula: (debt * 1e18) / usdcPerBear, with slippage buffer
@@ -270,19 +272,11 @@ contract BullLeverageRouter is LeverageRouterBase {
     /**
      * @dev Execute open leverage operation in flash loan callback.
      */
+    /// @dev Deadline already validated in entry function, no need to check again.
     function _executeOpen(uint256 loanAmount, bytes calldata data) private {
         // Decode: (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut)
-        (
-            ,
-            address user,
-            uint256 deadline,
-            uint256 principal,
-            uint256 leverage,
-            uint256 maxSlippageBps,
-            uint256 minSwapOut
-        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
-
-        require(block.timestamp <= deadline, "Transaction expired");
+        (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minSwapOut) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         // 1. Total USDC = Principal + Flash Loan
         uint256 totalUSDC = principal + loanAmount;
@@ -327,26 +321,24 @@ contract BullLeverageRouter is LeverageRouterBase {
      * 7. Transfer remaining USDC to user
      * 8. Emit LeverageClosed event
      */
+    /// @dev Deadline already validated in entry function, no need to check again.
     function _executeClose(uint256 flashAmount, uint256 flashFee, bytes calldata data) private {
         // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps)
         (
             ,
-            address user,
-            uint256 deadline,
+            address user,,
             uint256 collateralToWithdraw,
             uint256 debtToRepay,
             uint256 extraBearForDebt,
             uint256 maxSlippageBps
         ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
-        require(block.timestamp <= deadline, "Transaction expired");
-
         // 1. If debt exists, sell extra BEAR for USDC to repay it
         if (debtToRepay > 0 && extraBearForDebt > 0) {
             // Sell extraBearForDebt BEAR → USDC (with slippage protection)
             uint256 minUsdcFromSale = (debtToRepay * (10_000 - maxSlippageBps)) / 10_000;
             uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt, minUsdcFromSale);
-            require(usdcFromSale >= debtToRepay, "Insufficient USDC from BEAR sale");
+            if (usdcFromSale < debtToRepay) revert LeverageRouterBase__InsufficientOutput();
         }
 
         // 2. Repay user's debt on Morpho (if any)
@@ -376,7 +368,7 @@ contract BullLeverageRouter is LeverageRouterBase {
 
             // Estimate USDC needed using Curve price discovery
             uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
-            require(bearPerUsdc > 0, "Invalid Curve price");
+            if (bearPerUsdc == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate USDC needed with slippage buffer
             uint256 estimatedUsdcNeeded = (bearToBuy * 1e6) / bearPerUsdc;
@@ -384,7 +376,7 @@ contract BullLeverageRouter is LeverageRouterBase {
 
             // Verify we have enough USDC
             uint256 usdcBalance = USDC.balanceOf(address(this));
-            require(usdcBalance >= maxUsdcToSpend, "Insufficient USDC for BEAR buyback");
+            if (usdcBalance < maxUsdcToSpend) revert LeverageRouterBase__InsufficientOutput();
 
             // Swap USDC → BEAR with min_dy = bearToBuy
             CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, bearToBuy);
@@ -421,7 +413,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         view
         returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt)
     {
-        require(leverage > 1e18, "Leverage must be > 1x");
+        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
 
         loanAmount = (principal * (leverage - 1e18)) / 1e18;
         totalUSDC = principal + loanAmount;

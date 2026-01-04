@@ -46,6 +46,14 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     event ZapBurn(address indexed user, uint256 tokensIn, uint256 usdcOut);
 
     error ZapRouter__ZeroAddress();
+    error ZapRouter__ZeroAmount();
+    error ZapRouter__Expired();
+    error ZapRouter__SlippageExceedsMax();
+    error ZapRouter__SplitterNotActive();
+    error ZapRouter__BearPriceAboveCap();
+    error ZapRouter__InsufficientOutput();
+    error ZapRouter__InvalidCurvePrice();
+    error ZapRouter__SolvencyBreach();
 
     constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool)
         Ownable(msg.sender)
@@ -87,14 +95,14 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         nonReentrant
         whenNotPaused
     {
-        require(usdcAmount > 0, "Amount must be > 0");
-        require(block.timestamp <= deadline, "Transaction expired");
-        require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
-        require(SPLITTER.currentStatus() == ISyntheticSplitter.Status.ACTIVE, "Splitter not active");
+        if (usdcAmount == 0) revert ZapRouter__ZeroAmount();
+        if (block.timestamp > deadline) revert ZapRouter__Expired();
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert ZapRouter__SlippageExceedsMax();
+        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) revert ZapRouter__SplitterNotActive();
 
         // 1. Get Spot Price
         uint256 priceBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
-        require(priceBear < CAP_PRICE, "Bear price > Cap");
+        if (priceBear >= CAP_PRICE) revert ZapRouter__BearPriceAboveCap();
 
         // 2. Calculate Bull Price (e.g., $2.00 - $1.10 = $0.90)
         uint256 priceBull = CAP_PRICE - priceBear;
@@ -131,8 +139,8 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param deadline Unix timestamp after which the transaction reverts.
     function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external nonReentrant whenNotPaused {
-        require(bullAmount > 0, "Amount > 0");
-        require(block.timestamp <= deadline, "Expired");
+        if (bullAmount == 0) revert ZapRouter__ZeroAmount();
+        if (block.timestamp > deadline) revert ZapRouter__Expired();
 
         // 1. Pull Bull Tokens from User
         DXY_BULL.safeTransferFrom(msg.sender, address(this), bullAmount);
@@ -202,7 +210,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // 3. Sweep Dust
         // Check if we successfully minted enough to repay (Safety Check)
         uint256 currentBalance = DXY_BEAR.balanceOf(address(this));
-        require(currentBalance >= repayAmount, "Solvency Breach: Not enough Bear minted");
+        if (currentBalance < repayAmount) revert ZapRouter__SolvencyBreach();
 
         if (currentBalance > repayAmount) {
             uint256 surplus = currentBalance - repayAmount;
@@ -211,7 +219,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
 
         // 4. Transfer DXY-BULL to user and emit event
         uint256 tokensOut = DXY_BULL.balanceOf(address(this));
-        require(tokensOut >= minAmountOut, "Slippage too high");
+        if (tokensOut < minAmountOut) revert ZapRouter__InsufficientOutput();
         DXY_BULL.safeTransfer(user, tokensOut);
 
         emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc);
@@ -237,7 +245,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Step A: Get price for 1 USDC
         // "How much Bear do I get for 1 USDC?"
         uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
-        require(bearFromOneUsdc > 0, "Pool liquidity error");
+        if (bearFromOneUsdc == 0) revert ZapRouter__InvalidCurvePrice();
 
         // Step B: Calculate Linear Requirement
         // (Debt / Rate) = USDC needed
@@ -263,11 +271,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
 
         // Verify we actually bought enough (Solvency Check)
         uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
-        require(bearBalance >= debtBear, "Burn Solvency: Not enough Bear bought");
+        if (bearBalance < debtBear) revert ZapRouter__SolvencyBreach();
 
         // 5. Send remaining USDC to User (The Exit)
         uint256 remainingUsdc = USDC.balanceOf(address(this));
-        require(remainingUsdc >= minUsdcOut, "Slippage: Burn");
+        if (remainingUsdc < minUsdcOut) revert ZapRouter__InsufficientOutput();
         USDC.safeTransfer(user, remainingUsdc);
 
         // 6. Sweep Dust Bear

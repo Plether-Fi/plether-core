@@ -66,6 +66,15 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable, Pausable, Reentr
     // ==========================================
 
     error LeverageRouterBase__ZeroAddress();
+    error LeverageRouterBase__ZeroPrincipal();
+    error LeverageRouterBase__ZeroCollateral();
+    error LeverageRouterBase__Expired();
+    error LeverageRouterBase__LeverageTooLow();
+    error LeverageRouterBase__SlippageExceedsMax();
+    error LeverageRouterBase__NotAuthorized();
+    error LeverageRouterBase__InsufficientOutput();
+    error LeverageRouterBase__InvalidCurvePrice();
+    error LeverageRouterBase__SplitterNotActive();
 
     // ==========================================
     // CONSTRUCTOR

@@ -106,7 +106,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        vm.expectRevert("Bear price > Cap");
+        vm.expectRevert(ZapRouter.ZapRouter__BearPriceAboveCap.selector);
         zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -116,7 +116,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), usdcInput);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(ZapRouter.ZapRouter__SlippageExceedsMax.selector);
         zapRouter.zapMint(usdcInput, 0, 200, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -125,7 +125,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(zapRouter), 0);
 
-        vm.expectRevert("Amount must be > 0");
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAmount.selector);
         zapRouter.zapMint(0, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -302,7 +302,7 @@ contract ZapRouterTest is Test {
 
     function test_ZapBurn_ZeroAmount_Reverts() public {
         vm.startPrank(alice);
-        vm.expectRevert("Amount > 0");
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAmount.selector);
         zapRouter.zapBurn(0, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -313,7 +313,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         dxyBull.approve(address(zapRouter), 100 * 1e18);
 
-        vm.expectRevert("Expired");
+        vm.expectRevert(ZapRouter.ZapRouter__Expired.selector);
         zapRouter.zapBurn(100 * 1e18, 0, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -326,7 +326,7 @@ contract ZapRouterTest is Test {
         dxyBull.approve(address(zapRouter), 100 * 1e18);
 
         // Expect way more USDC than possible
-        vm.expectRevert("Slippage: Burn");
+        vm.expectRevert(ZapRouter.ZapRouter__InsufficientOutput.selector);
         zapRouter.zapBurn(100 * 1e18, 500 * 1e6, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -416,7 +416,7 @@ contract ZapRouterTest is Test {
         // Burn 100 pairs -> get 200 USDC
         // Buy BEAR at $1.50 -> 200 USDC buys ~133 BEAR
         // 133 < 150 -> revert!
-        vm.expectRevert("Burn Solvency: Not enough Bear bought");
+        vm.expectRevert(ZapRouter.ZapRouter__SolvencyBreach.selector);
         zapRouter.zapBurn(100 * 1e18, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/BullLeverageRouter.sol";
+import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
 import "../src/base/FlashLoanBase.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
@@ -120,7 +121,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         // Skip auth
 
-        vm.expectRevert("BullLeverageRouter not authorized in Morpho");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
         router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -133,7 +134,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
         router.openLeverage(principal, leverage, 50, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -146,7 +147,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Leverage must be > 1x");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
         router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -159,7 +160,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
         router.openLeverage(principal, leverage, 101, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -168,7 +169,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
         router.closeLeverage(2000 * 1e6, 3000 * 1e18, 101, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -238,7 +239,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Principal must be > 0");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
         router.openLeverage(0, 2e18, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -253,7 +254,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Splitter not active");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector);
         router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -345,7 +346,7 @@ contract BullLeverageRouterTest is Test {
         // 300 USDC < 2000 USDC Debt -> Revert
         splitter.setRedemptionRate(10); // 10%
 
-        vm.expectRevert("Insufficient USDC for BEAR buyback");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector);
         router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -390,7 +391,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         // Skip authorization
 
-        vm.expectRevert("BullLeverageRouter not authorized in Morpho");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
         router.closeLeverage(debtToRepay, collateralToWithdraw, 50, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -402,7 +403,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
         router.closeLeverage(debtToRepay, collateralToWithdraw, 50, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -677,7 +678,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
 
-        vm.expectRevert("Principal must be > 0");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
         router.openLeverage(0, 3 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }

@@ -13,6 +13,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
+import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
 import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
 import {IERC3156FlashLender, IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 
@@ -1083,7 +1084,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
 
         vm.startPrank(alice);
         // Should revert because whale moved the price
-        vm.expectRevert("Slippage too high");
+        vm.expectRevert(ZapRouter.ZapRouter__InsufficientOutput.selector);
         zapRouter.zapMint(userAmount, minOut, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
@@ -1336,7 +1337,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         // Set deadline in the past
         uint256 expiredDeadline = block.timestamp - 1;
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(ZapRouter.ZapRouter__Expired.selector);
         zapRouter.zapMint(userAmount, 0, 100, expiredDeadline);
         vm.stopPrank();
     }
@@ -1346,7 +1347,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), 1000e6);
 
-        vm.expectRevert("Transaction expired");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
         leverageRouter.openLeverage(1000e6, 2e18, 100, block.timestamp - 1);
         vm.stopPrank();
     }
@@ -1360,7 +1361,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IERC20(USDC).approve(address(zapRouter), 1000e6);
 
         // Try to set slippage > 1% (MAX_SLIPPAGE_BPS = 100)
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(ZapRouter.ZapRouter__SlippageExceedsMax.selector);
         zapRouter.zapMint(1000e6, 0, 200, block.timestamp + 1 hours); // 2% slippage
         vm.stopPrank();
     }
@@ -1370,7 +1371,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), 1000e6);
 
-        vm.expectRevert("Slippage exceeds maximum");
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
         leverageRouter.openLeverage(1000e6, 2e18, 200, block.timestamp + 1 hours); // 2%
         vm.stopPrank();
     }
