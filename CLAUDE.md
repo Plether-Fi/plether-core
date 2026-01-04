@@ -94,3 +94,10 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - **Chainlink**: AggregatorV3Interface for price feeds
 - **Curve**: ICurvePool for USDC/DXY-BEAR swaps (indices: USDC=0, DXY-BEAR=1)
 - **Morpho Blue**: IMorpho for lending with staked tokens (sDXY-BEAR, sDXY-BULL) as collateral, and yield via MorphoAdapter
+
+## Documentation Standards
+
+Always keep documentation up to date and consistent when making code changes:
+- **Natspec**: Update function/contract comments when behavior changes
+- **README.md**: Update if architecture, usage, or setup instructions change
+- **SECURITY.md**: Update if security model, trust assumptions, or risk factors change
