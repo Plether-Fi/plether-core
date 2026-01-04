@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import "forge-std/Test.sol";
 import "../src/LeverageRouter.sol";
 import "../src/interfaces/ICurvePool.sol";
-import {IMorphoFlashLoanCallback} from "../src/interfaces/IMorpho.sol";
+import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 

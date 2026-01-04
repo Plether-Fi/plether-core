@@ -39,9 +39,6 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     uint256 private constant ACTION_MINT = 0;
     uint256 private constant ACTION_BURN = 1;
 
-    // Transient state for passing swap result from callback to main function
-    uint256 private _lastSwapOut;
-
     // Events
     event ZapMint(
         address indexed user, uint256 usdcIn, uint256 tokensOut, uint256 maxSlippageBps, uint256 actualSwapOut
@@ -117,16 +114,12 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // 5. Initiate Flash Loan
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        bytes memory data = abi.encode(ACTION_MINT, msg.sender, usdcAmount, minSwapOut);
+        // Encode all data needed for callback including event emission
+        bytes memory data = abi.encode(ACTION_MINT, msg.sender, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps);
 
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
-        // 6. Final Transfer
-        uint256 tokensOut = DXY_BULL.balanceOf(address(this));
-        require(tokensOut >= minAmountOut, "Slippage too high");
-        DXY_BULL.safeTransfer(msg.sender, tokensOut);
-
-        emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, _lastSwapOut);
+        // Event emitted in _handleMint callback
     }
 
     // =================================================================
@@ -148,12 +141,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // To merge and unlock collateral, we need 1 Bear for every 1 Bull.
         uint256 flashAmount = bullAmount;
 
-        // Encode ACTION_BURN
+        // Encode ACTION_BURN with all data needed for callback
         bytes memory data = abi.encode(ACTION_BURN, msg.sender, bullAmount, minUsdcOut);
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
-        // 3. Final Check (USDC sent in callback)
-        emit ZapBurn(msg.sender, bullAmount, _lastSwapOut);
+        // Event emitted in _handleBurn callback
     }
 
     // =================================================================
@@ -169,13 +161,12 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
 
         // Decode Action Flag First
-        (uint256 action, address user, uint256 amountIn, uint256 minOut) =
-            abi.decode(data, (uint256, address, uint256, uint256));
+        uint256 action = abi.decode(data, (uint256));
 
         if (action == ACTION_MINT) {
-            _handleMint(amount, fee, user, minOut);
+            _handleMint(amount, fee, data);
         } else {
-            _handleBurn(amount, fee, user, minOut);
+            _handleBurn(amount, fee, data);
         }
 
         return CALLBACK_SUCCESS;
@@ -186,10 +177,13 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         revert FlashLoan__InvalidOperation();
     }
 
-    function _handleMint(uint256 loanAmount, uint256 fee, address user, uint256 minSwapOut) internal {
+    function _handleMint(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
+        // Decode: (action, user, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps)
+        (, address user, uint256 usdcAmount, uint256 minSwapOut, uint256 minAmountOut, uint256 maxSlippageBps) =
+            abi.decode(data, (uint256, address, uint256, uint256, uint256, uint256));
+
         // 1. Swap Borrowed Bear -> USDC via Curve
         uint256 swappedUsdc = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, loanAmount, minSwapOut);
-        _lastSwapOut = swappedUsdc;
 
         // Use balance check as source of truth (handles dust/fee-on-transfer edge cases)
         uint256 totalUsdc = USDC.balanceOf(address(this));
@@ -201,11 +195,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Note: Splitter is already approved for max in constructor
         SPLITTER.mint(mintAmount);
 
-        // 3. Repay the Flash Loan
+        // 2. Repay the Flash Loan
         uint256 repayAmount = loanAmount + fee;
         DXY_BEAR.safeIncreaseAllowance(msg.sender, repayAmount);
 
-        // 4. Sweep Dust
+        // 3. Sweep Dust
         // Check if we successfully minted enough to repay (Safety Check)
         uint256 currentBalance = DXY_BEAR.balanceOf(address(this));
         require(currentBalance >= repayAmount, "Solvency Breach: Not enough Bear minted");
@@ -214,9 +208,20 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
             uint256 surplus = currentBalance - repayAmount;
             DXY_BEAR.safeTransfer(user, surplus);
         }
+
+        // 4. Transfer DXY-BULL to user and emit event
+        uint256 tokensOut = DXY_BULL.balanceOf(address(this));
+        require(tokensOut >= minAmountOut, "Slippage too high");
+        DXY_BULL.safeTransfer(user, tokensOut);
+
+        emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc);
     }
 
-    function _handleBurn(uint256 loanAmount, uint256 fee, address user, uint256 minUsdcOut) internal {
+    function _handleBurn(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
+        // Decode: (action, user, bullAmount, minUsdcOut)
+        (, address user, uint256 bullAmount, uint256 minUsdcOut) =
+            abi.decode(data, (uint256, address, uint256, uint256));
+
         // State: We have `loanAmount` Bear (Borrowed) + `loanAmount` Bull (From User)
 
         // 1. Combine to Unlock USDC
@@ -271,7 +276,8 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
             DXY_BEAR.safeTransfer(user, bearBalance - debtBear);
         }
 
-        _lastSwapOut = remainingUsdc;
+        // 7. Emit event
+        emit ZapBurn(user, bullAmount, remainingUsdc);
     }
 
     // ==========================================

@@ -4,14 +4,10 @@ pragma solidity 0.8.33;
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
-import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
-import {FlashLoanBase} from "./base/FlashLoanBase.sol";
+import {MarketParams} from "./interfaces/IMorpho.sol";
+import {LeverageRouterBase} from "./base/LeverageRouterBase.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title BullLeverageRouter
@@ -32,7 +28,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │                  3. Stake DXY-BULL → sDXY-BULL                          │
 ///      │                  4. Deposit sDXY-BULL to Morpho (user's collateral)     │
 ///      │                  5. Borrow USDC from Morpho to cover flash repayment    │
-///      │   3. Emit LeverageOpened event                                          │
+///      │                  6. Emit LeverageOpened event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
 /// @dev STATE MACHINE - CLOSE LEVERAGE (Nested Flash Loans):
@@ -50,21 +46,14 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │                                 1. Redeem DXY-BEAR + DXY-BULL → USDC    │
 ///      │                                 2. Buy DXY-BEAR on Curve to repay mint  │
 ///      │                  5. Transfer remaining USDC to user                     │
-///      │   2. Emit LeverageClosed event                                          │
+///      │                  6. Emit LeverageClosed event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
-contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
+contract BullLeverageRouter is LeverageRouterBase {
     using SafeERC20 for IERC20;
 
-    // Constants
-    uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage
-    uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
-    uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
-
-    // Operation types for flash loan callback
-    uint8 private constant OP_OPEN = 1;
-    uint8 private constant OP_CLOSE = 2;
-    uint8 private constant OP_CLOSE_REDEEM = 3; // Nested flash mint callback for close
+    // Operation type for nested flash mint callback
+    uint8 private constant OP_CLOSE_REDEEM = 3;
 
     // Events
     event LeverageOpened(
@@ -85,38 +74,13 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
         uint256 maxSlippageBps
     );
 
-    // ==========================================
-    // TRANSIENT STATE (callback → caller communication)
-    // ==========================================
-    // These variables pass results from flash loan callbacks back to the
-    // initiating function for event emission. Reset after each operation.
-
-    /// @dev Open operation results (set in _executeOpen, read in openLeverage)
-    uint256 private _lastDxyBullReceived;
-    uint256 private _lastDebtIncurred;
-
-    /// @dev Close operation results (set in _executeClose, read in closeLeverage)
-    uint256 private _lastCollateralWithdrawn;
-    uint256 private _lastUsdcReturned;
-
-    // Note: Nested flash loan state (_closeUser, _closeUsdcFlashAmount, _closeUsdcFlashFee)
-    // is now passed via callback data to prevent stale state attacks on revert.
-
     // Dependencies
-    IMorpho public immutable MORPHO;
     ISyntheticSplitter public immutable SPLITTER;
-    ICurvePool public immutable CURVE_POOL;
-    IERC20 public immutable USDC;
-    IERC20 public immutable DXY_BEAR;
     IERC20 public immutable DXY_BULL;
     IERC4626 public immutable STAKED_DXY_BULL; // Staked token (Morpho collateral)
-    // Morpho Market ID Configuration (sDXY-BULL as collateral)
-    MarketParams public marketParams;
 
     // Cached from Splitter (immutable)
     uint256 public immutable CAP; // 8 decimals (oracle format)
-
-    error BullLeverageRouter__ZeroAddress();
 
     constructor(
         address _morpho,
@@ -127,19 +91,12 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
         address _dxyBull,
         address _stakedDxyBull,
         MarketParams memory _marketParams
-    ) Ownable(msg.sender) {
-        if (_morpho == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_splitter == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_curvePool == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_usdc == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_dxyBear == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_dxyBull == address(0)) revert BullLeverageRouter__ZeroAddress();
-        if (_stakedDxyBull == address(0)) revert BullLeverageRouter__ZeroAddress();
-        MORPHO = IMorpho(_morpho);
+    ) LeverageRouterBase(_morpho, _curvePool, _usdc, _dxyBear) {
+        if (_splitter == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_dxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_stakedDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
+
         SPLITTER = ISyntheticSplitter(_splitter);
-        CURVE_POOL = ICurvePool(_curvePool);
-        USDC = IERC20(_usdc);
-        DXY_BEAR = IERC20(_dxyBear);
         DXY_BULL = IERC20(_dxyBull);
         STAKED_DXY_BULL = IERC4626(_stakedDxyBull);
         marketParams = _marketParams;
@@ -207,16 +164,13 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
         uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
         uint256 minSwapOut = (expectedUsdcFromSale * (10_000 - maxSlippageBps)) / 10_000;
 
-        // Encode data for callback
-        bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, minSwapOut);
+        // Encode data for callback (includes all data needed for event emission)
+        bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minSwapOut);
 
         // Initiate Morpho Flash Loan (fee-free)
         MORPHO.flashLoan(address(USDC), loanAmount, data);
 
-        // Emit event for off-chain tracking
-        emit LeverageOpened(
-            msg.sender, principal, leverage, loanAmount, _lastDxyBullReceived, _lastDebtIncurred, maxSlippageBps
-        );
+        // Event emitted in _executeOpen callback
     }
 
     /**
@@ -244,11 +198,10 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
             MORPHO.flashLoan(address(USDC), debtToRepay, data);
         } else {
             // No debt to repay: directly unwind position without flash loan
-            _executeCloseNoDbt(msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
+            _executeCloseNoDebt(msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
         }
 
-        // Emit event for off-chain tracking
-        emit LeverageClosed(msg.sender, debtToRepay, _lastCollateralWithdrawn, _lastUsdcReturned, maxSlippageBps);
+        // Event emitted in _executeClose or _executeCloseNoDebt
     }
 
     /**
@@ -308,9 +261,16 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
      * @dev Execute open leverage operation in flash loan callback.
      */
     function _executeOpen(uint256 loanAmount, bytes calldata data) private {
-        // Decode: (op, user, deadline, principal, minSwapOut)
-        (, address user, uint256 deadline, uint256 principal, uint256 minSwapOut) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256));
+        // Decode: (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut)
+        (
+            ,
+            address user,
+            uint256 deadline,
+            uint256 principal,
+            uint256 leverage,
+            uint256 maxSlippageBps,
+            uint256 minSwapOut
+        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         require(block.timestamp <= deadline, "Transaction expired");
 
@@ -327,20 +287,21 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
         uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearBalance, minSwapOut);
 
         // 4. Stake DXY-BULL to get sDXY-BULL
-        uint256 dxyBullBalance = DXY_BULL.balanceOf(address(this));
-        _lastDxyBullReceived = dxyBullBalance;
-        uint256 stakedShares = STAKED_DXY_BULL.deposit(dxyBullBalance, address(this));
+        uint256 dxyBullReceived = DXY_BULL.balanceOf(address(this));
+        uint256 stakedShares = STAKED_DXY_BULL.deposit(dxyBullReceived, address(this));
 
         // 5. Deposit sDXY-BULL collateral to Morpho on behalf of the USER
         MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
         // 6. Borrow USDC from Morpho to repay flash loan (no fee with Morpho)
         // We already have usdcFromSale, so only borrow the remaining amount needed
-        uint256 debtToIncur = loanAmount > usdcFromSale ? loanAmount - usdcFromSale : 0;
-        _lastDebtIncurred = debtToIncur;
-        if (debtToIncur > 0) {
-            MORPHO.borrow(marketParams, debtToIncur, 0, user, address(this));
+        uint256 debtIncurred = loanAmount > usdcFromSale ? loanAmount - usdcFromSale : 0;
+        if (debtIncurred > 0) {
+            MORPHO.borrow(marketParams, debtIncurred, 0, user, address(this));
         }
+
+        // 7. Emit event for off-chain tracking
+        emit LeverageOpened(user, principal, leverage, loanAmount, dxyBullReceived, debtIncurred, maxSlippageBps);
     }
 
     /**
@@ -352,6 +313,7 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
      * 3. Unstake to get DXY-BULL
      * 4. Initiate nested DXY-BEAR flash mint → triggers _executeCloseRedeem
      * 5. After nested callback returns: transfer remaining USDC to user
+     * 6. Emit LeverageClosed event
      */
     function _executeClose(uint256 loanAmount, bytes calldata data) private {
         // Decode: (op, user, deadline, collateralToWithdraw, maxSlippageBps)
@@ -367,7 +329,6 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
 
         // 2. Withdraw user's sDXY-BULL collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
-        _lastCollateralWithdrawn = collateralToWithdraw;
 
         // 3. Unstake sDXY-BULL to get DXY-BULL
         uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
@@ -385,10 +346,12 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
 
         // 5. Send remaining USDC to user
         uint256 usdcToReturn = usdcBalance - loanAmount;
-        _lastUsdcReturned = usdcToReturn;
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
         }
+
+        // 6. Emit event for off-chain tracking
+        emit LeverageClosed(user, loanAmount, collateralToWithdraw, usdcToReturn, maxSlippageBps);
     }
 
     /**
@@ -402,13 +365,13 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
      * 2. Unstake to get DXY-BULL
      * 3. Initiate DXY-BEAR flash mint → triggers _executeCloseRedeem
      * 4. Transfer all USDC to user
+     * 5. Emit LeverageClosed event
      */
-    function _executeCloseNoDbt(address user, uint256 deadline, uint256 collateralToWithdraw, uint256 maxSlippageBps)
+    function _executeCloseNoDebt(address user, uint256 deadline, uint256 collateralToWithdraw, uint256 maxSlippageBps)
         private
     {
         // 1. Withdraw user's sDXY-BULL collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
-        _lastCollateralWithdrawn = collateralToWithdraw;
 
         // 2. Unstake sDXY-BULL to get DXY-BULL
         uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
@@ -421,10 +384,12 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
 
         // 4. Send all USDC to user (no flash loan to repay)
         uint256 usdcBalance = USDC.balanceOf(address(this));
-        _lastUsdcReturned = usdcBalance;
         if (usdcBalance > 0) {
             USDC.safeTransfer(user, usdcBalance);
         }
+
+        // 5. Emit event for off-chain tracking
+        emit LeverageClosed(user, 0, collateralToWithdraw, usdcBalance, maxSlippageBps);
     }
 
     /**
@@ -547,19 +512,5 @@ contract BullLeverageRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard
         uint256 totalCosts = debtToRepay + usdcForBearBuyback;
 
         expectedReturn = expectedUSDC > totalCosts ? expectedUSDC - totalCosts : 0;
-    }
-
-    // ==========================================
-    // ADMIN FUNCTIONS
-    // ==========================================
-
-    /// @notice Pause the router. Blocks openLeverage and closeLeverage.
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /// @notice Unpause the router.
-    function unpause() external onlyOwner {
-        _unpause();
     }
 }

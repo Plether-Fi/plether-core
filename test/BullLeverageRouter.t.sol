@@ -9,7 +9,7 @@ import "../src/interfaces/ISyntheticSplitter.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {IMorphoFlashLoanCallback} from "../src/interfaces/IMorpho.sol";
+import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 
 contract BullLeverageRouterTest is Test {
     BullLeverageRouter public router;
