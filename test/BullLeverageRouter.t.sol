@@ -365,15 +365,16 @@ contract BullLeverageRouterTest is Test {
 
         // With CAP=$2 pricing:
         // After open: supplied = 1500e18 DXY-BULL, borrowed = 500e6 USDC
-        // Close flow:
-        // 1. Flash loan: 500 USDC (to repay Morpho debt)
-        // 2. Redeem 1500e18 pairs: 3000 USDC
-        // 3. Buy 1500e18 BEAR on Curve: ~1500 USDC (1:1 in mock, with slippage buffer)
-        // 4. Repay flash loan: 500 USDC
-        // 5. Leftover returned to user
-        // Note: Mock curve doesn't actually apply slippage, just validates minOut
-        // Total USDC returned = redemption - buyback - flash loan repay + any surplus
-        uint256 expectedUsdcReturned = 985 * 1e6;
+        // Close flow (single flash mint):
+        // 1. Flash mint: 2005e18 BEAR (1500 for pairs + 505 for debt with 1% buffer)
+        // 2. Sell 505e18 BEAR → 505 USDC
+        // 3. Repay 500 USDC Morpho debt
+        // 4. Withdraw 1500e18 sDXY-BULL → 1500e18 DXY-BULL
+        // 5. Redeem 1500e18 pairs: 3000 USDC
+        // 6. Buy 2005e18 BEAR on Curve: ~2025 USDC (with 1% buffer on estimate)
+        // 7. Leftover returned to user
+        // Total USDC = 5 (surplus from step 2) + 3000 (redeem) - 2025.05 (buyback) ≈ 979.95 USDC
+        uint256 expectedUsdcReturned = 979950000;
 
         vm.expectEmit(true, false, false, true);
         emit BullLeverageRouter.LeverageClosed(alice, borrowed, supplied, expectedUsdcReturned, maxSlippageBps);

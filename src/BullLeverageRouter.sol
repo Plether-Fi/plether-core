@@ -13,7 +13,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @title BullLeverageRouter
 /// @notice Leverage router for DXY-BULL positions via Morpho Blue.
 /// @dev Uses Morpho flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.
-///      Close operation uses Morpho flash loan (USDC) + DXY-BEAR flash mint to unwind positions.
+///      Close operation uses a single DXY-BEAR flash mint for simplicity and gas efficiency.
 ///      Uses Morpho's fee-free flash loans for capital efficiency.
 ///
 /// @dev STATE MACHINE - OPEN LEVERAGE:
@@ -31,29 +31,24 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │                  6. Emit LeverageOpened event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
-/// @dev STATE MACHINE - CLOSE LEVERAGE (Nested Flash Loans):
+/// @dev STATE MACHINE - CLOSE LEVERAGE (Single Flash Mint):
 ///      ┌─────────────────────────────────────────────────────────────────────────┐
 ///      │ closeLeverage(debtToRepay, collateralToWithdraw)                        │
-///      │   1. Flash loan USDC from Morpho (fee-free)                             │
-///      │      └──► onMorphoFlashLoan(OP_CLOSE)                                   │
+///      │   1. Flash mint DXY-BEAR (collateral + extra for debt repayment)        │
+///      │      └──► onFlashLoan(OP_CLOSE)                                         │
 ///      │            └──► _executeClose()                                         │
-///      │                  1. Repay user's Morpho debt with flash loaned USDC     │
-///      │                  2. Withdraw user's sDXY-BULL from Morpho               │
-///      │                  3. Unstake sDXY-BULL → DXY-BULL                        │
-///      │                  4. Flash mint DXY-BEAR (equal to DXY-BULL amount)      │
-///      │                     └──► onFlashLoan(OP_CLOSE_REDEEM)  [NESTED]         │
-///      │                           └──► _executeCloseRedeem()                    │
-///      │                                 1. Redeem DXY-BEAR + DXY-BULL → USDC    │
-///      │                                 2. Buy DXY-BEAR on Curve to repay mint  │
-///      │                  5. Transfer remaining USDC to user                     │
-///      │                  6. Emit LeverageClosed event                           │
+///      │                  1. Sell extra DXY-BEAR on Curve → USDC                 │
+///      │                  2. Repay user's Morpho debt with USDC from sale        │
+///      │                  3. Withdraw user's sDXY-BULL from Morpho               │
+///      │                  4. Unstake sDXY-BULL → DXY-BULL                        │
+///      │                  5. Redeem DXY-BEAR + DXY-BULL → USDC                   │
+///      │                  6. Buy DXY-BEAR on Curve to repay flash mint           │
+///      │                  7. Transfer remaining USDC to user                     │
+///      │                  8. Emit LeverageClosed event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
 contract BullLeverageRouter is LeverageRouterBase {
     using SafeERC20 for IERC20;
-
-    // Operation type for nested flash mint callback
-    uint8 private constant OP_CLOSE_REDEEM = 3;
 
     // Events
     event LeverageOpened(
@@ -175,10 +170,10 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /**
      * @notice Close a Leveraged DXY-BULL Position in one transaction.
-     * @dev Uses Morpho flash loan (USDC) + DXY-BEAR flash mint to unwind positions.
-     *      If debtToRepay is 0, skips flash loan and directly unwinds position.
-     * @param debtToRepay Amount of USDC debt to repay (flash loaned). Can be 0 if no debt.
-     * @param collateralToWithdraw Amount of DXY-BULL collateral to withdraw.
+     * @dev Uses a single DXY-BEAR flash mint to unwind positions efficiently.
+     *      If debt exists, extra BEAR is flash minted and sold for USDC to repay.
+     * @param debtToRepay Amount of USDC debt to repay. Can be 0 if no debt.
+     * @param collateralToWithdraw Amount of sDXY-BULL collateral to withdraw.
      * @param maxSlippageBps Maximum slippage tolerance in basis points.
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
@@ -188,20 +183,40 @@ contract BullLeverageRouter is LeverageRouterBase {
         nonReentrant
         whenNotPaused
     {
+        require(collateralToWithdraw > 0, "Collateral must be > 0");
         require(block.timestamp <= deadline, "Transaction expired");
         require(maxSlippageBps <= MAX_SLIPPAGE_BPS, "Slippage exceeds maximum");
         require(MORPHO.isAuthorized(msg.sender, address(this)), "BullLeverageRouter not authorized in Morpho");
 
+        // Convert staked shares to underlying BULL amount (for pair matching)
+        uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
+
+        // Calculate extra BEAR needed to sell for debt repayment
+        uint256 extraBearForDebt = 0;
         if (debtToRepay > 0) {
-            // Standard path: flash loan USDC to repay debt
-            bytes memory data = abi.encode(OP_CLOSE, msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
-            MORPHO.flashLoan(address(USDC), debtToRepay, data);
-        } else {
-            // No debt to repay: directly unwind position without flash loan
-            _executeCloseNoDebt(msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
+            // Query: how much USDC do we get for 1 BEAR (1e18)?
+            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+            require(usdcPerBear > 0, "Invalid Curve price");
+
+            // Calculate BEAR needed to sell for debtToRepay USDC
+            // Formula: (debt * 1e18) / usdcPerBear, with slippage buffer
+            extraBearForDebt = (debtToRepay * 1e18) / usdcPerBear;
+            // Add slippage buffer (extra % to ensure we get enough USDC)
+            extraBearForDebt = extraBearForDebt + (extraBearForDebt * maxSlippageBps / 10_000);
         }
 
-        // Event emitted in _executeClose or _executeCloseNoDebt
+        // Total BEAR to flash mint: enough for pair redemption + extra for debt
+        uint256 flashAmount = dxyBullAmount + extraBearForDebt;
+
+        // Encode data for callback
+        bytes memory data = abi.encode(
+            OP_CLOSE, msg.sender, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps
+        );
+
+        // Single flash mint handles entire close operation
+        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
+
+        // Event emitted in _executeClose callback
     }
 
     /**
@@ -209,7 +224,6 @@ contract BullLeverageRouter is LeverageRouterBase {
      *
      * Routes to the appropriate handler based on operation type:
      * - OP_OPEN (1): USDC flash loan for opening leverage position
-     * - OP_CLOSE (2): USDC flash loan for closing leverage (phase 1)
      */
     function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
         // Validate caller is Morpho
@@ -219,8 +233,6 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         if (operation == OP_OPEN) {
             _executeOpen(amount, data);
-        } else if (operation == OP_CLOSE) {
-            _executeClose(amount, data);
         } else {
             revert FlashLoan__InvalidOperation();
         }
@@ -233,23 +245,21 @@ contract BullLeverageRouter is LeverageRouterBase {
      * @dev ERC-3156 flash loan callback for DXY-BEAR flash mints.
      *
      * Routes to:
-     * - OP_CLOSE_REDEEM (3): DXY-BEAR flash mint for pair redemption (phase 2, nested)
+     * - OP_CLOSE (2): DXY-BEAR flash mint for closing leverage position
      *
      * Lender validation: Must be called by DXY-BEAR token (flash mint)
      */
-    function onFlashLoan(address initiator, address token, uint256 amount, uint256 fee, bytes calldata data)
+    function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
         returns (bytes32)
     {
-        _validateInitiator(initiator);
+        _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
 
         uint8 operation = abi.decode(data, (uint8));
 
-        if (operation == OP_CLOSE_REDEEM) {
-            // Phase: CLOSE (2/2) - Nested DXY-BEAR flash mint for pair redemption
-            _validateLender(msg.sender, address(DXY_BEAR));
-            _executeCloseRedeem(amount, fee, data);
+        if (operation == OP_CLOSE) {
+            _executeClose(amount, fee, data);
         } else {
             revert FlashLoan__InvalidOperation();
         }
@@ -305,143 +315,91 @@ contract BullLeverageRouter is LeverageRouterBase {
     }
 
     /**
-     * @dev Execute close leverage operation - Phase 1 of 2 (Morpho USDC flash loan callback).
+     * @dev Execute close leverage operation (single DXY-BEAR flash mint callback).
      *
      * Flow:
-     * 1. Repay Morpho debt with flash loaned USDC
-     * 2. Withdraw sDXY-BULL collateral from Morpho
-     * 3. Unstake to get DXY-BULL
-     * 4. Initiate nested DXY-BEAR flash mint → triggers _executeCloseRedeem
-     * 5. After nested callback returns: transfer remaining USDC to user
-     * 6. Emit LeverageClosed event
+     * 1. If debt exists: Sell extra DXY-BEAR on Curve → USDC
+     * 2. Repay Morpho debt with USDC from sale (if any)
+     * 3. Withdraw sDXY-BULL collateral from Morpho
+     * 4. Unstake sDXY-BULL → DXY-BULL
+     * 5. Redeem DXY-BEAR + DXY-BULL pairs → USDC
+     * 6. Buy back all DXY-BEAR on Curve to repay flash mint
+     * 7. Transfer remaining USDC to user
+     * 8. Emit LeverageClosed event
      */
-    function _executeClose(uint256 loanAmount, bytes calldata data) private {
-        // Decode: (op, user, deadline, collateralToWithdraw, maxSlippageBps)
-        (, address user, uint256 deadline, uint256 collateralToWithdraw, uint256 maxSlippageBps) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256));
+    function _executeClose(uint256 flashAmount, uint256 flashFee, bytes calldata data) private {
+        // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps)
+        (
+            ,
+            address user,
+            uint256 deadline,
+            uint256 collateralToWithdraw,
+            uint256 debtToRepay,
+            uint256 extraBearForDebt,
+            uint256 maxSlippageBps
+        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         require(block.timestamp <= deadline, "Transaction expired");
 
-        // 1. Repay user's debt on Morpho (skip if no debt)
-        if (loanAmount > 0) {
-            MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        // 1. If debt exists, sell extra BEAR for USDC to repay it
+        if (debtToRepay > 0 && extraBearForDebt > 0) {
+            // Sell extraBearForDebt BEAR → USDC (with slippage protection)
+            uint256 minUsdcFromSale = (debtToRepay * (10_000 - maxSlippageBps)) / 10_000;
+            uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt, minUsdcFromSale);
+            require(usdcFromSale >= debtToRepay, "Insufficient USDC from BEAR sale");
         }
 
-        // 2. Withdraw user's sDXY-BULL collateral from Morpho
+        // 2. Repay user's debt on Morpho (if any)
+        if (debtToRepay > 0) {
+            MORPHO.repay(marketParams, debtToRepay, 0, user, "");
+        }
+
+        // 3. Withdraw user's sDXY-BULL collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
 
-        // 3. Unstake sDXY-BULL to get DXY-BULL
+        // 4. Unstake sDXY-BULL to get DXY-BULL
         uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
 
-        // 4. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
-        // Pass outer flash loan params via callback data (not transient storage) to prevent stale state attacks
-        // Note: loanAmount passed for accounting, no fee with Morpho
-        bytes memory redeemData =
-            abi.encode(OP_CLOSE_REDEEM, user, deadline, dxyBullReceived, maxSlippageBps, loanAmount);
-        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), dxyBullReceived, redeemData);
+        // 5. Redeem pairs via Splitter (DXY-BEAR + DXY-BULL → USDC)
+        // We have exactly dxyBullReceived BULL, and (flashAmount - extraBearForDebt) BEAR remaining
+        SPLITTER.burn(dxyBullReceived);
 
-        // After nested callback completes, verify we have enough for flash loan repayment
-        uint256 usdcBalance = USDC.balanceOf(address(this));
-        require(usdcBalance >= loanAmount, "Insufficient USDC from redemption");
+        // 6. Buy back ALL flash-minted BEAR to repay flash mint
+        uint256 repayAmount = flashAmount + flashFee;
 
-        // 5. Send remaining USDC to user
-        uint256 usdcToReturn = usdcBalance - loanAmount;
+        // Current BEAR balance (from minting pairs)
+        uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
+
+        // Need to buy: repayAmount - bearBalance
+        if (repayAmount > bearBalance) {
+            uint256 bearToBuy = repayAmount - bearBalance;
+
+            // Estimate USDC needed using Curve price discovery
+            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+            require(bearPerUsdc > 0, "Invalid Curve price");
+
+            // Calculate USDC needed with slippage buffer
+            uint256 estimatedUsdcNeeded = (bearToBuy * 1e6) / bearPerUsdc;
+            uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
+
+            // Verify we have enough USDC
+            uint256 usdcBalance = USDC.balanceOf(address(this));
+            require(usdcBalance >= maxUsdcToSpend, "Insufficient USDC for BEAR buyback");
+
+            // Swap USDC → BEAR with min_dy = bearToBuy
+            CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, bearToBuy);
+        }
+
+        // 7. Transfer remaining USDC to user
+        uint256 usdcToReturn = USDC.balanceOf(address(this));
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
         }
 
-        // 6. Emit event for off-chain tracking
-        emit LeverageClosed(user, loanAmount, collateralToWithdraw, usdcToReturn, maxSlippageBps);
-    }
+        // 8. Emit event for off-chain tracking
+        emit LeverageClosed(user, debtToRepay, collateralToWithdraw, usdcToReturn, maxSlippageBps);
 
-    /**
-     * @dev Execute close operation when there is no Morpho debt to repay.
-     *
-     * This is a simplified version of _executeClose that skips the outer flash loan
-     * since no USDC is needed to repay debt.
-     *
-     * Flow:
-     * 1. Withdraw sDXY-BULL collateral from Morpho
-     * 2. Unstake to get DXY-BULL
-     * 3. Initiate DXY-BEAR flash mint → triggers _executeCloseRedeem
-     * 4. Transfer all USDC to user
-     * 5. Emit LeverageClosed event
-     */
-    function _executeCloseNoDebt(address user, uint256 deadline, uint256 collateralToWithdraw, uint256 maxSlippageBps)
-        private
-    {
-        // 1. Withdraw user's sDXY-BULL collateral from Morpho
-        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
-
-        // 2. Unstake sDXY-BULL to get DXY-BULL
-        uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
-
-        // 3. Flash mint DXY-BEAR to pair with DXY-BULL for redemption
-        // No outer flash loan, so outerLoanAmount = 0
-        bytes memory redeemData =
-            abi.encode(OP_CLOSE_REDEEM, user, deadline, dxyBullReceived, maxSlippageBps, uint256(0));
-        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), dxyBullReceived, redeemData);
-
-        // 4. Send all USDC to user (no flash loan to repay)
-        uint256 usdcBalance = USDC.balanceOf(address(this));
-        if (usdcBalance > 0) {
-            USDC.safeTransfer(user, usdcBalance);
-        }
-
-        // 5. Emit event for off-chain tracking
-        emit LeverageClosed(user, 0, collateralToWithdraw, usdcBalance, maxSlippageBps);
-    }
-
-    /**
-     * @dev Execute close redemption - Phase 2 of 2 (nested DXY-BEAR flash mint callback).
-     *
-     * Flow:
-     * 1. Redeem DXY-BEAR + DXY-BULL pairs via Splitter → receive USDC
-     * 2. Buy DXY-BEAR on Curve to repay flash mint
-     * 3. Return to _executeClose with USDC balance for final distribution
-     *
-     * Note: Flash mint repayment (burning DXY-BEAR) happens automatically
-     * when this callback returns - the token contract handles it.
-     */
-    function _executeCloseRedeem(uint256 flashMintAmount, uint256 fee, bytes calldata data) private {
-        // Decode: (op, user, deadline, dxyBullAmount, maxSlippageBps, outerLoanAmount)
-        // Note: outerLoanAmount is passed via data (not transient storage) for safety
-        // but is only used in _executeClose after this callback returns
-        (,, uint256 deadline, uint256 dxyBullAmount, uint256 maxSlippageBps,) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256));
-
-        require(block.timestamp <= deadline, "Transaction expired");
-
-        // 1. Redeem pairs via Splitter (DXY-BEAR + DXY-BULL -> USDC)
-        // Both tokens should be in equal amounts. This burns both tokens.
-        SPLITTER.burn(dxyBullAmount);
-
-        // 2. Buy DXY-BEAR back on Curve to repay flash mint
-        // We need flashMintAmount + fee of DXY-BEAR
-        uint256 repayAmount = flashMintAmount + fee;
-
-        // Use Curve's get_dy to estimate USDC needed for buying BEAR
-        // Since Curve only supports "sell exact input", we estimate and add buffer
-        // Query: how much BEAR do we get for 1 USDC?
-        uint256 testUsdcAmount = 1e6; // 1 USDC
-        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, testUsdcAmount);
-        require(bearPerUsdc > 0, "Invalid Curve price");
-
-        // Calculate USDC needed: repayAmount / (BEAR per USDC)
-        // Scale properly: repayAmount * testUsdcAmount / bearPerUsdc
-        uint256 estimatedUsdcNeeded = (repayAmount * testUsdcAmount) / bearPerUsdc;
-
-        // Add slippage buffer (spend more USDC to ensure we get enough BEAR)
-        uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
-
-        // Ensure we don't spend more than we have
-        uint256 usdcBalance = USDC.balanceOf(address(this));
-        require(usdcBalance >= maxUsdcToSpend, "Insufficient USDC for BEAR buyback");
-
-        // Swap USDC for DXY-BEAR with min_dy = repayAmount (must get at least this much)
-        CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, repayAmount);
-
-        // Note: Flash mint repayment happens automatically when callback returns
+        // Flash mint repayment happens automatically when callback returns
         // DXY-BEAR token will burn repayAmount from this contract
     }
 

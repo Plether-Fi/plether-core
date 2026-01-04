@@ -56,8 +56,8 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 **BullLeverageRouter** - Leveraged DXY-BULL positions via Morpho Blue
 - Open: Flash loan USDC → mint pairs via Splitter → sell DXY-BEAR on Curve → stake DXY-BULL → deposit sDXY-BULL to Morpho
-- Close: Uses nested flash loans - USDC flash for debt + DXY-BEAR flash mint for pair redemption
-- Close flow: Repay debt → withdraw sDXY-BULL → unstake to DXY-BULL → flash mint DXY-BEAR → redeem pairs → buy back DXY-BEAR on Curve
+- Close: Single DXY-BEAR flash mint for entire operation
+- Close flow: Flash mint BEAR (collateral + extra for debt) → sell extra BEAR for USDC → repay debt → withdraw sDXY-BULL → unstake → redeem pairs → buy back BEAR
 - Morpho market uses sDXY-BULL as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
