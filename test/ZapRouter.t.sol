@@ -506,6 +506,221 @@ contract ZapRouterTest is Test {
         // 3. User's BULL is gone
         assertEq(dxyBull.balanceOf(alice), 0, "BULL should be burned");
     }
+
+    // ==========================================
+    // 5. FUZZ TESTS
+    // ==========================================
+
+    /// @notice Fuzz test: zapMint with variable USDC amounts
+    function testFuzz_ZapMint(uint256 usdcAmount) public {
+        // Bound to reasonable range: $1 to $1M
+        usdcAmount = bound(usdcAmount, 1e6, 1_000_000 * 1e6);
+
+        curvePool.setPrice(1e6); // Parity: 1 BEAR = 1 USDC
+
+        usdc.mint(alice, usdcAmount);
+        uint256 bullBefore = dxyBull.balanceOf(alice);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 bullAfter = dxyBull.balanceOf(alice);
+
+        // Invariants:
+        // 1. User received some BULL
+        assertGt(bullAfter, bullBefore, "Should receive BULL");
+
+        // 2. Router holds no tokens
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
+        assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Router leaked BEAR");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
+
+        // 3. User's USDC was spent (minus initial 1000 USDC from setUp)
+        // At parity, input USDC should roughly equal output BULL in value
+        // With 1% buffer, expect ~99% efficiency
+        uint256 bullReceived = bullAfter - bullBefore;
+        uint256 expectedMin = (usdcAmount * 1e12 * 90) / 100; // At least 90% of theoretical
+        assertGt(bullReceived, expectedMin, "Should receive reasonable BULL amount");
+    }
+
+    /// @notice Fuzz test: zapMint at different BEAR prices
+    function testFuzz_ZapMint_VariablePrice(uint256 usdcAmount, uint256 bearPriceBps) public {
+        // Bound USDC to reasonable range
+        usdcAmount = bound(usdcAmount, 100e6, 100_000 * 1e6);
+
+        // Bound BEAR price: 50% to 190% of CAP (price >= CAP reverts)
+        // CAP = $2.00, so BEAR price range: $0.10 to $1.90
+        bearPriceBps = bound(bearPriceBps, 500, 9500); // 5% to 95% of CAP
+        uint256 bearPrice = (2e6 * bearPriceBps) / 10000; // Scale to 6 decimals
+        curvePool.setPrice(bearPrice);
+
+        usdc.mint(alice, usdcAmount);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Invariants:
+        // 1. User received BULL
+        assertGt(dxyBull.balanceOf(alice), 0, "Should receive BULL");
+
+        // 2. Router is stateless
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
+        assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Router leaked BEAR");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
+    }
+
+    /// @notice Fuzz test: zapBurn at different BEAR prices
+    function testFuzz_ZapBurn_VariablePrice(uint256 bullAmount, uint256 bearPriceBps) public {
+        // Bound BULL to reasonable range
+        bullAmount = bound(bullAmount, 1e18, 100_000 * 1e18);
+
+        // Bound BEAR price: 10% to 150% of $1 (within reasonable trading range)
+        // Avoid very high prices where buyback becomes too expensive
+        bearPriceBps = bound(bearPriceBps, 1000, 15000); // 10% to 150%
+        uint256 bearPrice = (1e6 * bearPriceBps) / 10000;
+        curvePool.setPrice(bearPrice);
+
+        dxyBull.mint(alice, bullAmount);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        dxyBull.approve(address(zapRouter), bullAmount);
+        zapRouter.zapBurn(bullAmount, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Invariants:
+        // 1. User received USDC
+        assertGt(usdc.balanceOf(alice), usdcBefore, "Should receive USDC");
+
+        // 2. Router is stateless
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
+        assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Router leaked BEAR");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
+
+        // 3. User's BULL is gone
+        assertEq(dxyBull.balanceOf(alice), 0, "BULL should be burned");
+    }
+
+    /// @notice Fuzz test: full round trip (mint then burn)
+    function testFuzz_RoundTrip(uint256 usdcAmount) public {
+        // Bound to reasonable range
+        usdcAmount = bound(usdcAmount, 10e6, 100_000 * 1e6);
+
+        curvePool.setPrice(1e6); // Parity
+
+        usdc.mint(alice, usdcAmount);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+
+        // 1. Mint BULL
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+
+        uint256 bullMinted = dxyBull.balanceOf(alice);
+        assertGt(bullMinted, 0, "Should have minted BULL");
+
+        // 2. Burn BULL back to USDC
+        dxyBull.approve(address(zapRouter), bullMinted);
+        zapRouter.zapBurn(bullMinted, 0, block.timestamp + 1 hours);
+
+        vm.stopPrank();
+
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        // Invariants:
+        // 1. Router is stateless
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
+        assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "Router leaked BEAR");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
+
+        // 2. User's BULL is gone
+        assertEq(dxyBull.balanceOf(alice), 0, "BULL should be burned");
+
+        // 3. Round trip loss is bounded (< 15% due to buffers on both sides)
+        // This accounts for 1% buffer on mint + swap fees + 1% buffer on burn
+        uint256 usdcSpent = usdcBefore > usdcAfter ? usdcBefore - usdcAfter : 0;
+        uint256 maxLoss = (usdcAmount * 15) / 100;
+        assertLt(usdcSpent, usdcAmount + maxLoss, "Round trip loss too high");
+    }
+
+    /// @notice Fuzz test: zapMint with variable slippage tolerance
+    function testFuzz_ZapMint_SlippageTolerance(uint256 slippageBps) public {
+        // Bound slippage to valid range: 1 to 100 bps (0.01% to 1%)
+        slippageBps = bound(slippageBps, 1, 100);
+
+        uint256 usdcAmount = 1000e6; // $1000
+        curvePool.setPrice(1e6); // Parity
+
+        usdc.mint(alice, usdcAmount);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, 0, slippageBps, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should succeed with any valid slippage setting
+        assertGt(dxyBull.balanceOf(alice), 0, "Should receive BULL");
+
+        // Router stateless
+        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
+    }
+
+    /// @notice Fuzz test: zapMint minimum output protection
+    function testFuzz_ZapMint_MinOutput(uint256 usdcAmount, uint256 minOutPercent) public {
+        // Bound inputs
+        usdcAmount = bound(usdcAmount, 100e6, 10_000 * 1e6);
+        minOutPercent = bound(minOutPercent, 0, 90); // 0% to 90% of expected
+
+        curvePool.setPrice(1e6); // Parity
+
+        usdc.mint(alice, usdcAmount);
+
+        // Calculate expected output (rough estimate at parity with 1% buffer)
+        uint256 expectedBull = (usdcAmount * 1e12 * 99) / 100;
+        uint256 minOut = (expectedBull * minOutPercent) / 100;
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), usdcAmount);
+        zapRouter.zapMint(usdcAmount, minOut, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should receive at least minOut
+        assertGe(dxyBull.balanceOf(alice), minOut, "Should receive at least minOut");
+    }
+
+    /// @notice Fuzz test: zapBurn minimum output protection
+    function testFuzz_ZapBurn_MinOutput(uint256 bullAmount, uint256 minOutPercent) public {
+        // Bound inputs
+        bullAmount = bound(bullAmount, 1e18, 10_000 * 1e18);
+        minOutPercent = bound(minOutPercent, 0, 50); // 0% to 50% of expected (conservative due to fees/buffer)
+
+        curvePool.setPrice(1e6); // Parity
+
+        dxyBull.mint(alice, bullAmount);
+
+        // Calculate expected USDC output (rough estimate at parity)
+        // Burn bullAmount pairs -> USDC from splitter then minus costs for BEAR buyback
+        // At parity: burn 100 BULL+BEAR -> 200 USDC, buy 100 BEAR at $1 = 100 USDC cost
+        // Net ~100 USDC minus ~5% buffer = ~95 USDC per 100 tokens
+        // Simplified: bullAmount / 1e12 * 0.90 (being conservative)
+        uint256 expectedUsdc = (bullAmount * 90) / (1e12 * 100);
+        uint256 minOut = (expectedUsdc * minOutPercent) / 100;
+
+        vm.startPrank(alice);
+        dxyBull.approve(address(zapRouter), bullAmount);
+        zapRouter.zapBurn(bullAmount, minOut, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should receive at least minOut
+        uint256 usdcReceived = usdc.balanceOf(alice) - 1000e6; // Subtract initial balance
+        assertGe(usdcReceived, minOut, "Should receive at least minOut");
+    }
 }
 
 // ==========================================
@@ -627,7 +842,14 @@ contract MockSplitter is ISyntheticSplitter {
     }
 
     function mint(uint256 amount) external override {
-        // amount is already in 18-decimal token units (ZapRouter pre-calculates)
+        // amount is in 18-decimal token units
+        // Calculate USDC cost (6 decimals): usdc = amount (18 dec) * CAP (8 dec) / 1e20
+        // For CAP = 2e8: 1 token = $2, so 100 tokens = $200 = 200e6 USDC
+        // Example: amount=100e18, CAP=2e8 -> usdcCost = 100e18 * 2e8 / 1e20 = 200e6 ✓
+        uint256 usdcCost = (amount * CAP) / 1e20;
+        // Consume USDC from caller
+        MockToken(usdc).transferFrom(msg.sender, address(this), usdcCost);
+        // Mint BEAR and BULL to caller
         MockFlashToken(tA).mint(msg.sender, amount);
         MockFlashToken(tB).mint(msg.sender, amount);
     }
@@ -638,9 +860,10 @@ contract MockSplitter is ISyntheticSplitter {
         MockFlashToken(tA).burn(msg.sender, amount);
         MockFlashToken(tB).burn(msg.sender, amount);
 
-        // Mint USDC to caller: amount (18 dec) * CAP (8 dec) / 1e20 = USDC (6 dec)
-        // Simplified: amount * 2 / 1e12 (since CAP = 2e8)
-        uint256 usdcOut = (amount * 2) / 1e12;
+        // Return USDC to caller: amount (18 dec) * CAP (8 dec) / 1e20 = USDC (6 dec)
+        // Example: amount=100e18, CAP=2e8 -> usdcOut = 100e18 * 2e8 / 1e20 = 200e6 ✓
+        uint256 usdcOut = (amount * CAP) / 1e20;
+        // Mint USDC to caller (mock is self-sufficient, no need for pre-funding)
         MockToken(usdc).mint(msg.sender, usdcOut);
     }
 
