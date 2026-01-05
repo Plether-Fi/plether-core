@@ -71,16 +71,11 @@ jobs:
         with:
           version: nightly
 
-      - name: Build with Foundry
-        run: forge build
+      - name: Install Slither
+        run: pip3 install slither-analyzer
 
       - name: Run Slither
-        uses: crytic/slither-action@v0.4.0
-        with:
-          target: src/
-          slither-args: --filter-paths "lib/|test/|script/" --exclude-dependencies
-          fail-on: none
-          sarif: results.sarif
+        run: slither src/ --filter-paths "lib/|test/|script/" --exclude-dependencies --sarif results.sarif || true
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
