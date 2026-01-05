@@ -1,0 +1,15 @@
+{
+  "detectors_to_exclude": [
+    "naming-convention",
+    "timestamp",
+    "divide-before-multiply",
+    "reentrancy-events",
+    "calls-inside-a-loop",
+    "calls-loop",
+    "unused-state",
+    "unused-return",
+    "reentrancy-no-eth"
+  ],
+  "filter_paths": "lib/,test/,script/",
+  "exclude_dependencies": true
+}
