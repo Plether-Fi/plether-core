@@ -112,6 +112,61 @@ contract LeverageRouterTest is Test {
         assertGt(usdc.balanceOf(alice), 0, "Alice got no money back");
     }
 
+    /// @notice Test closing a position with zero debt (no flash loan needed)
+    function test_CloseLeverage_ZeroDebt_Success() public {
+        // Setup: Alice has collateral but NO debt
+        // This tests the _executeCloseNoDebt() path
+        vm.startPrank(alice);
+
+        // Mint BEAR -> stake to sBEAR -> supply to Morpho as collateral
+        dxyBear.mint(alice, 3000 * 1e18);
+        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
+        stakedDxyBear.deposit(3000 * 1e18, alice);
+
+        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
+        // NOTE: No borrow() call - Alice has collateral but zero debt
+
+        // Verify starting state
+        assertEq(morpho.collateralBalance(alice), 3000 * 1e18, "Should have collateral");
+        assertEq(morpho.borrowBalance(alice), 0, "Should have zero debt");
+
+        // Close with zero debt - should use _executeCloseNoDebt path
+        morpho.setAuthorization(address(router), true);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        router.closeLeverage(0, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify: collateral withdrawn, USDC returned to Alice
+        assertEq(morpho.collateralBalance(alice), 0, "Collateral should be cleared");
+        assertEq(morpho.borrowBalance(alice), 0, "Debt should remain zero");
+        assertGt(usdc.balanceOf(alice), usdcBefore, "Alice should receive USDC");
+    }
+
+    /// @notice Test closing partial collateral with zero debt
+    function test_CloseLeverage_ZeroDebt_PartialWithdraw() public {
+        vm.startPrank(alice);
+
+        // Setup: 3000 sBEAR collateral, 0 debt
+        dxyBear.mint(alice, 3000 * 1e18);
+        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
+        stakedDxyBear.deposit(3000 * 1e18, alice);
+
+        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
+
+        morpho.setAuthorization(address(router), true);
+
+        // Withdraw only 1000 of 3000 collateral
+        router.closeLeverage(0, 1000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify: only partial collateral withdrawn
+        assertEq(morpho.collateralBalance(alice), 2000 * 1e18, "Should have 2000 collateral remaining");
+        assertGt(usdc.balanceOf(alice), 0, "Alice should receive some USDC");
+    }
+
     function test_Unauthorized_Reverts() public {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000 * 1e6);
