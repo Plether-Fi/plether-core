@@ -135,11 +135,34 @@ forge coverage          # Generate coverage report
 
 ### Fork Tests
 
-Fork tests run against mainnet state and require an RPC URL:
+Fork tests run against mainnet state using real Chainlink oracles, Curve pools, and Morpho Blue. They require an RPC URL:
 
 ```bash
+# Set RPC URL (or add to .env file)
 export MAINNET_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
-forge test --match-path "test/fork/*" -vvv
+
+# Run all fork tests
+forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC_URL -vvv
+
+# Or source from .env
+source .env && forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC_URL -vvv
+```
+
+**Fork test files:**
+
+| File | Description |
+|------|-------------|
+| `BaseForkTest.sol` | Shared base contract, constants, and test helpers |
+| `ZapRouterFork.t.sol` | ZapRouter integration with real Curve swaps |
+| `FullCycleFork.t.sol` | Complete mint → yield → burn lifecycle |
+| `LeverageRouterFork.t.sol` | Bear and Bull leverage via real Morpho |
+| `SlippageProtectionFork.t.sol` | MEV protection and slippage scenarios |
+| `LiquidationFork.t.sol` | Interest accrual and liquidation mechanics |
+| `BasketOracleFork.t.sol` | Full 6-feed DXY basket oracle validation |
+
+Run a specific fork test file:
+```bash
+source .env && forge test --match-path test/fork/LeverageRouterFork.t.sol --fork-url $MAINNET_RPC_URL -vvv
 ```
 
 ### Format
