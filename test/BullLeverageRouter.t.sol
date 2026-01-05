@@ -706,6 +706,179 @@ contract BullLeverageRouterTest is Test {
         assertEq(suppliedAfter, 0, "Collateral should be cleared");
         assertEq(borrowedAfter, 0, "Debt should remain zero");
     }
+
+    // ==========================================
+    // FUZZ TESTS (Additional)
+    // ==========================================
+
+    /// @notice Fuzz test: closeLeverage with random debt and collateral ratios
+    /// @dev Tests partial closes with various debt/collateral combinations
+    /// @dev Ensures collateral ratio is sufficient to cover debt (with margin for slippage)
+    function testFuzz_CloseLeverage(uint256 debtRatio, uint256 collateralRatio) public {
+        // Bound ratios to 0-100%
+        debtRatio = bound(debtRatio, 0, 100);
+
+        // Setup: Create a position first (3x leverage on $10,000)
+        // With 3x leverage: collateral value ~= principal * 3, debt ~= principal * 2
+        // To repay X% of debt, we need at least X% * (2/3) of collateral value
+        // We use collateralRatio >= debtRatio to ensure sufficient collateral with margin
+        uint256 minCollateralRatio = debtRatio > 0 ? debtRatio : 10;
+        collateralRatio = bound(collateralRatio, minCollateralRatio, 100);
+
+        uint256 principal = 10_000e6;
+        uint256 leverage = 3e18;
+
+        usdc.mint(alice, principal);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6); // Fund curve for swaps
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        // Get position state
+        (uint256 totalCollateral, uint256 totalDebt) = morpho.positions(alice);
+
+        // Calculate amounts to close based on ratios
+        uint256 debtToRepay = (totalDebt * debtRatio) / 100;
+        uint256 collateralToWithdraw = (totalCollateral * collateralRatio) / 100;
+
+        // Skip if values are zero
+        if (collateralToWithdraw == 0) {
+            vm.stopPrank();
+            return;
+        }
+
+        // Close partial position
+        router.closeLeverage(debtToRepay, collateralToWithdraw, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify state after close
+        (uint256 remainingCollateral, uint256 remainingDebt) = morpho.positions(alice);
+
+        assertEq(remainingCollateral, totalCollateral - collateralToWithdraw, "Collateral should decrease");
+        assertEq(remainingDebt, totalDebt - debtToRepay, "Debt should decrease");
+    }
+
+    /// @notice Fuzz test: Full round trip (open then close) returns reasonable value
+    /// @dev Verifies user doesn't lose excessive funds in a round trip
+    function testFuzz_RoundTrip(uint256 principal, uint256 leverage) public {
+        // Bound inputs - BULL positions have more slippage so use tighter bounds
+        principal = bound(principal, 1000e6, 100_000e6); // $1k to $100k
+        leverage = bound(leverage, 2e18, 5e18); // 2x to 5x
+
+        // Setup with ample liquidity
+        usdc.mint(alice, principal);
+        usdc.mint(address(morpho), principal * 100);
+        usdc.mint(address(curvePool), principal * 100);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        // Open position
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        // Immediately close entire position
+        (uint256 collateral, uint256 debt) = morpho.positions(alice);
+
+        router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        // BULL round trips have more slippage (2 swaps each direction)
+        // User should get back at least 90% in mock environment
+        assertGe(usdcAfter, (usdcBefore * 90) / 100, "Round trip should return >= 90%");
+
+        // Position should be fully closed
+        (uint256 collateralAfter, uint256 debtAfter) = morpho.positions(alice);
+        assertEq(collateralAfter, 0, "All collateral withdrawn");
+        assertEq(debtAfter, 0, "All debt repaid");
+    }
+
+    /// @notice Fuzz test: Various BEAR prices shouldn't break the router
+    function testFuzz_OpenLeverage_VariableBearPrice(uint256 principal, uint256 bearPriceBps) public {
+        // Bound inputs
+        principal = bound(principal, 1000e6, 50_000e6); // $1k to $50k
+        bearPriceBps = bound(bearPriceBps, 8000, 12000); // $0.80 to $1.20 per BEAR
+
+        // Set BEAR price using rate (num/denom = price)
+        // bearPriceBps is in basis points (10000 = 1.00)
+        curvePool.setRate(bearPriceBps, 10000);
+
+        // Setup
+        usdc.mint(alice, principal);
+        usdc.mint(address(morpho), principal * 100);
+        usdc.mint(address(curvePool), principal * 100);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        // Open 2x position
+        router.openLeverage(principal, 2e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify position exists
+        (uint256 collateral,) = morpho.positions(alice);
+        assertGt(collateral, 0, "Should have collateral");
+    }
+
+    /// @notice Fuzz test: Slippage within bounds should succeed
+    function testFuzz_OpenLeverage_SlippageTolerance(uint256 slippageBps) public {
+        // Bound slippage to valid range (0 to MAX_SLIPPAGE_BPS which is 100)
+        slippageBps = bound(slippageBps, 0, 100);
+
+        uint256 principal = 10_000e6;
+        usdc.mint(alice, principal);
+        usdc.mint(address(morpho), principal * 100);
+        usdc.mint(address(curvePool), principal * 100);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+
+        // Should succeed with any valid slippage setting
+        router.openLeverage(principal, 3e18, slippageBps, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateral,) = morpho.positions(alice);
+        assertGt(collateral, 0, "Position should be created");
+    }
+
+    /// @notice Fuzz test: Close with varying debt amounts
+    function testFuzz_CloseLeverage_VariableDebt(uint256 debtPercent) public {
+        // Bound debt repayment to 0-100%
+        debtPercent = bound(debtPercent, 0, 100);
+
+        // Setup: Create a 3x position
+        uint256 principal = 10_000e6;
+
+        usdc.mint(alice, principal);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(principal, 3e18, 100, block.timestamp + 1 hours);
+
+        (uint256 collateral, uint256 debt) = morpho.positions(alice);
+        uint256 debtToRepay = (debt * debtPercent) / 100;
+
+        // Close with specified debt amount, full collateral
+        router.closeLeverage(debtToRepay, collateral, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify
+        (uint256 collateralAfter, uint256 debtAfter) = morpho.positions(alice);
+        assertEq(collateralAfter, 0, "All collateral should be withdrawn");
+        assertEq(debtAfter, debt - debtToRepay, "Debt should be partially repaid");
+    }
 }
 
 // ==========================================
