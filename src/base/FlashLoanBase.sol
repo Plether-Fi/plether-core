@@ -26,12 +26,6 @@ abstract contract FlashLoanBase is IERC3156FlashBorrower, IMorphoFlashLoanCallba
         if (initiator != address(this)) revert FlashLoan__InvalidInitiator();
     }
 
-    /// @notice Validate only the initiator (for contracts with multiple possible lenders).
-    /// @param initiator The initiator passed to the callback (should be this contract).
-    function _validateInitiator(address initiator) internal view {
-        if (initiator != address(this)) revert FlashLoan__InvalidInitiator();
-    }
-
     /// @notice Validate only the lender.
     /// @param lender The actual msg.sender.
     /// @param expectedLender The expected flash lender address.
