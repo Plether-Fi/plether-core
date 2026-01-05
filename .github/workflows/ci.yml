@@ -61,6 +61,9 @@ jobs:
 
   slither:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,7 +81,7 @@ jobs:
         run: slither src/ --filter-paths "lib/|test/|script/" --exclude-dependencies --sarif results.sarif || true
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: results.sarif
