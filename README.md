@@ -151,7 +151,9 @@ forge fmt --check       # Check formatting
 
 ### Documentation
 
-Generate HTML documentation from NatSpec comments:
+**[View Reference Documentation](https://plether-fi.github.io/plether-core/)**
+
+Generate HTML documentation locally from NatSpec comments:
 
 ```bash
 forge doc               # Generate docs to ./docs
@@ -168,6 +170,8 @@ forge doc --build       # Build static site to ./docs/book
 - Oracle bound validation against Curve EMA to prevent price manipulation
 - Flash loan callback validation (initiator + lender checks)
 - Yield adapter uses Morpho's internal accounting (immune to donation attacks)
+
+For detailed security assumptions, trust model, and emergency procedures, see [SECURITY.md](SECURITY.md).
 
 ## License
 

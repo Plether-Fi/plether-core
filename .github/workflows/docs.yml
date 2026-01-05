@@ -29,7 +29,18 @@ jobs:
           version: nightly
 
       - name: Build documentation
-        run: forge doc --build
+        run: |
+          # Generate NatSpec docs
+          forge doc
+
+          # Add SECURITY.md to docs
+          cp SECURITY.md docs/src/SECURITY.md
+          echo "" >> docs/src/SUMMARY.md
+          echo "# Additional Documentation" >> docs/src/SUMMARY.md
+          echo "- [Security](SECURITY.md)" >> docs/src/SUMMARY.md
+
+          # Build the book
+          forge doc --build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
