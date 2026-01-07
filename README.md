@@ -47,6 +47,8 @@ User deposits USDC
 | [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
+> **Note:** The BasketOracle uses **arithmetic weighting** (`Price = Σ(Price_i × Quantity_i)`) rather than the geometric weighting used by the official ICE DXY index. This is a deliberate design choice for: (1) gas efficiency and on-chain feasibility, and (2) eliminating rebalancing requirements, which guarantees protocol solvency.
+
 ### Routing Layer
 
 | Contract | Description |
