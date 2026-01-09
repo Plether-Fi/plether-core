@@ -22,6 +22,13 @@ This document outlines the security assumptions, trust model, known limitations,
 - **Risk**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
 - **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
 
+### External Library Dependencies
+
+#### OpenZeppelin Contracts
+- **Assumption**: OpenZeppelin's audited implementations of ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard, and ERC3156 are secure and behave as documented
+- **Mitigation**: Using pinned versions; OpenZeppelin is the most widely audited Solidity library with extensive formal verification
+- **Risk**: A vulnerability in OpenZeppelin base contracts could affect all inheriting contracts
+
 ### Internal Trust Model
 
 #### Owner/Admin Role
@@ -262,6 +269,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-09 | Added External Library Dependencies section with OpenZeppelin trust assumptions |
 | 2026-01-04 | Added Router Architecture section; documented LeverageRouterBase, custom errors, and single flash loan pattern for BullLeverageRouter close |
 | 2026-01-03 | Added protocol fees, flash mint, decimal handling, StakedToken, and Curve pool documentation |
 | 2026-01-03 | Migrated to Morpho Blue as sole flash loan provider (removed Aave/Balancer dependencies) |
