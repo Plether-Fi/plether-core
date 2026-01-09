@@ -14,7 +14,7 @@ import {ZapRouter} from "../src/ZapRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
-import {MarketParams} from "../src/interfaces/IMorpho.sol";
+import {MarketParams, IMorpho} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 
@@ -118,6 +118,7 @@ contract DeployToSepolia is Script {
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
     uint256 constant LLTV = 0.77e18; // 77% LLTV
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
+    uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
     // Curve Pool Parameters (Twocrypto-NG defaults for stablecoin-like pair)
     uint256 constant CURVE_A = 400000; // Amplification coefficient
@@ -210,8 +211,14 @@ contract DeployToSepolia is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 11: Deploy Routers
-        _deployRouters(deployed);
+        // Step 11: Deploy Routers and create Morpho markets
+        (MarketParams memory bearMarketParams, MarketParams memory bullMarketParams) = _deployRouters(deployed);
+
+        // Step 12: Create Morpho markets
+        _createMorphoMarkets(bearMarketParams, bullMarketParams);
+
+        // Step 13: Seed Morpho markets with USDC liquidity
+        _seedMorphoMarkets(deployed, deployer, bearMarketParams, bullMarketParams);
 
         vm.stopBroadcast();
 
@@ -325,14 +332,17 @@ contract DeployToSepolia is Script {
         oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
     }
 
-    function _deployRouters(DeployedContracts memory d) internal {
+    function _deployRouters(DeployedContracts memory d)
+        internal
+        returns (MarketParams memory bearMarketParams, MarketParams memory bullMarketParams)
+    {
         // Deploy ZapRouter
         d.zapRouter =
             new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), address(d.usdc), d.curvePool);
         console.log("ZapRouter:", address(d.zapRouter));
 
         // Deploy LeverageRouter (BEAR)
-        MarketParams memory bearMarketParams = MarketParams({
+        bearMarketParams = MarketParams({
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBear),
             oracle: address(d.stakedOracleBear),
@@ -346,7 +356,7 @@ contract DeployToSepolia is Script {
         console.log("LeverageRouter:", address(d.leverageRouter));
 
         // Deploy BullLeverageRouter
-        MarketParams memory bullMarketParams = MarketParams({
+        bullMarketParams = MarketParams({
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBull),
             oracle: address(d.stakedOracleBull),
@@ -365,6 +375,40 @@ contract DeployToSepolia is Script {
             bullMarketParams
         );
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
+    }
+
+    function _createMorphoMarkets(MarketParams memory bearMarketParams, MarketParams memory bullMarketParams) internal {
+        IMorpho morpho = IMorpho(MORPHO_BLUE);
+
+        // Create BEAR market (sDXY-BEAR as collateral, USDC as loan token)
+        morpho.createMarket(bearMarketParams);
+        console.log("Morpho BEAR market created");
+
+        // Create BULL market (sDXY-BULL as collateral, USDC as loan token)
+        morpho.createMarket(bullMarketParams);
+        console.log("Morpho BULL market created");
+    }
+
+    function _seedMorphoMarkets(
+        DeployedContracts memory d,
+        address deployer,
+        MarketParams memory bearMarketParams,
+        MarketParams memory bullMarketParams
+    ) internal {
+        IMorpho morpho = IMorpho(MORPHO_BLUE);
+
+        // Mint USDC for Morpho liquidity (100k per market = 200k total)
+        uint256 totalLiquidity = MORPHO_LIQUIDITY * 2;
+        d.usdc.mint(deployer, totalLiquidity);
+        d.usdc.approve(MORPHO_BLUE, totalLiquidity);
+
+        // Supply to BEAR market
+        morpho.supply(bearMarketParams, MORPHO_LIQUIDITY, 0, deployer, "");
+        console.log("Morpho BEAR market seeded with 100k USDC");
+
+        // Supply to BULL market
+        morpho.supply(bullMarketParams, MORPHO_LIQUIDITY, 0, deployer, "");
+        console.log("Morpho BULL market seeded with 100k USDC");
     }
 
     function _logDeployment(DeployedContracts memory d) internal pure {
