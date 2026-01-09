@@ -126,7 +126,8 @@ abstract contract BaseForkTest is Test {
 
         // Mock Pool for Oracle Init (using real price)
         address tempCurvePool = address(new MockCurvePoolForOracle(realOraclePrice));
-        basketOracle = new BasketOracle(feeds, qtys, tempCurvePool, 200);
+        basketOracle = new BasketOracle(feeds, qtys, 200, address(this));
+        basketOracle.setCurvePool(tempCurvePool);
 
         // Create a Morpho yield market for the adapter (USDC lending market)
         // Use a simple mock oracle for the yield market (not critical since we're just supplying)

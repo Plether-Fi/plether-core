@@ -18,6 +18,16 @@ forge coverage           # Generate coverage report
 (source .env && forge test --match-path test/fork/MainnetForkTest.t.sol --fork-url $MAINNET_RPC_URL -vvv)
 ```
 
+## Deployment Commands
+
+```bash
+# Sepolia testnet deployment (requires SEPOLIA_RPC_URL in .env)
+(source .env && forge script script/DeployToSepolia.s.sol --tc DeployToSepolia --rpc-url $SEPOLIA_RPC_URL --broadcast)
+
+# Dry run (simulation without broadcast)
+(source .env && forge script script/DeployToSepolia.s.sol --tc DeployToSepolia --rpc-url $SEPOLIA_RPC_URL)
+```
+
 ## Architecture Overview
 
 Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse (bull/bear) exposure to the US Dollar Index (DXY).

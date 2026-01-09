@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
@@ -15,6 +16,45 @@ import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
+
+// Curve Twocrypto-NG Factory interface
+interface ITwocryptoFactory {
+    function deploy_pool(
+        string memory _name,
+        string memory _symbol,
+        address[2] memory _coins,
+        uint256 implementation_id,
+        uint256 A,
+        uint256 gamma,
+        uint256 mid_fee,
+        uint256 out_fee,
+        uint256 fee_gamma,
+        uint256 allowed_extra_profit,
+        uint256 adjustment_step,
+        uint256 ma_exp_time,
+        uint256 initial_price
+    ) external returns (address);
+}
+
+// Curve Twocrypto pool interface for adding liquidity
+interface ICurveTwocryptoPool {
+    function add_liquidity(uint256[2] memory amounts, uint256 min_mint_amount) external returns (uint256);
+    function token() external view returns (address);
+}
+
+// Mock USDC with 6 decimals and public mint for testnet
+contract MockUSDC is ERC20 {
+    constructor() ERC20("Mock USDC", "USDC") {}
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
 
 // Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
 contract MockV3Aggregator is AggregatorV3Interface {
@@ -67,13 +107,10 @@ contract DeployToSepolia is Script {
     // SEPOLIA ADDRESSES
     // ==========================================
 
-    // USDC address on Sepolia
-    address constant USDC = 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8;
+    // Curve Twocrypto-NG Factory on Sepolia
+    address constant TWOCRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
 
-    // Curve Pool address on Sepolia (placeholder - update with actual pool)
-    address constant CURVE_POOL = address(0x1); // TODO: Replace with actual Curve pool
-
-    // Morpho Blue on Sepolia (same as mainnet, also provides fee-free flash loans)
+    // Morpho Blue on Sepolia
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
     address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
 
@@ -82,11 +119,27 @@ contract DeployToSepolia is Script {
     uint256 constant LLTV = 0.77e18; // 77% LLTV
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
 
+    // Curve Pool Parameters (Twocrypto-NG defaults for stablecoin-like pair)
+    uint256 constant CURVE_A = 400000; // Amplification coefficient
+    uint256 constant CURVE_GAMMA = 145000000000000; // 1.45e14
+    uint256 constant CURVE_MID_FEE = 26000000; // 0.026%
+    uint256 constant CURVE_OUT_FEE = 45000000; // 0.045%
+    uint256 constant CURVE_FEE_GAMMA = 230000000000000; // 2.3e14
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000; // 2e12
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000; // 1.46e14
+    uint256 constant CURVE_MA_EXP_TIME = 866; // ~14 minutes
+    // Initial price must match theoretical DXY price from mock feeds:
+    // EUR: $1.05 * 0.576 + JPY: $0.0064 * 0.136 + GBP: $1.25 * 0.119 +
+    // CAD: $0.73 * 0.091 + SEK: $0.093 * 0.042 + CHF: $1.13 * 0.036 ≈ $0.8654
+    uint256 constant CURVE_INITIAL_PRICE = 865436400000000000; // ~0.865 (DXY-BEAR per USDC)
+
     // ==========================================
     // DEPLOYMENT STATE
     // ==========================================
 
     struct DeployedContracts {
+        MockUSDC usdc;
+        address curvePool;
         BasketOracle basketOracle;
         MockYieldAdapter adapter;
         SyntheticSplitter splitter;
@@ -98,10 +151,13 @@ contract DeployToSepolia is Script {
         StakedToken stakedBull;
         StakedOracle stakedOracleBear;
         StakedOracle stakedOracleBull;
+        ZapRouter zapRouter;
+        LeverageRouter leverageRouter;
+        BullLeverageRouter bullLeverageRouter;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        uint256 privateKey = vm.envUint("SEPOLIA_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
         console.log("Deployer:", deployer);
@@ -109,24 +165,44 @@ contract DeployToSepolia is Script {
 
         vm.startBroadcast(privateKey);
 
-        // Step 1: Deploy BasketOracle with mock feeds
-        deployed.basketOracle = _deployBasketOracle();
+        // Step 1: Deploy MockUSDC
+        deployed.usdc = new MockUSDC();
+        console.log("MockUSDC deployed:", address(deployed.usdc));
 
-        // Step 2: Deploy MockAdapter + Splitter
-        (deployed.adapter, deployed.splitter) = _deploySplitterWithAdapter(address(deployed.basketOracle), deployer);
+        // Step 2: Deploy mock Chainlink feeds
+        (address[] memory feeds, uint256[] memory quantities) = _deployMockFeeds();
 
-        // Get token references
+        // Step 3: Deploy BasketOracle (without Curve pool - will be set later)
+        deployed.basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, deployer);
+        console.log("BasketOracle deployed:", address(deployed.basketOracle));
+
+        // Step 4: Deploy Adapter + Splitter (creates DXY-BEAR/BULL)
+        (deployed.adapter, deployed.splitter) =
+            _deploySplitterWithAdapter(address(deployed.basketOracle), address(deployed.usdc), deployer);
         deployed.dxyBear = deployed.splitter.TOKEN_A();
         deployed.dxyBull = deployed.splitter.TOKEN_B();
+        console.log("DXY-BEAR deployed:", address(deployed.dxyBear));
+        console.log("DXY-BULL deployed:", address(deployed.dxyBull));
 
-        // Step 3: Deploy Morpho Oracles
+        // Step 5: Deploy Curve pool with real DXY-BEAR address
+        deployed.curvePool = _deployCurvePool(address(deployed.usdc), address(deployed.dxyBear));
+        console.log("Curve Pool deployed:", deployed.curvePool);
+
+        // Step 6: Configure BasketOracle with Curve pool
+        deployed.basketOracle.setCurvePool(deployed.curvePool);
+        console.log("BasketOracle configured with Curve pool");
+
+        // Step 7: Seed Curve pool with initial liquidity
+        _seedCurvePool(deployed, deployer);
+
+        // Step 8: Deploy Morpho Oracles
         (deployed.morphoOracleBear, deployed.morphoOracleBull) = _deployMorphoOracles(address(deployed.basketOracle));
 
-        // Step 4: Deploy Staked Tokens
+        // Step 9: Deploy Staked Tokens
         (deployed.stakedBear, deployed.stakedBull) =
             _deployStakedTokens(address(deployed.dxyBear), address(deployed.dxyBull));
 
-        // Step 5: Deploy Staked Oracles
+        // Step 10: Deploy Staked Oracles
         (deployed.stakedOracleBear, deployed.stakedOracleBull) = _deployStakedOracles(
             address(deployed.stakedBear),
             address(deployed.stakedBull),
@@ -134,8 +210,8 @@ contract DeployToSepolia is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 6: Deploy Routers (only if Curve pool is available)
-        _deployRouters(deployed, deployer);
+        // Step 11: Deploy Routers
+        _deployRouters(deployed);
 
         vm.stopBroadcast();
 
@@ -149,9 +225,8 @@ contract DeployToSepolia is Script {
     // INTERNAL HELPERS
     // ==========================================
 
-    function _deployBasketOracle() internal returns (BasketOracle) {
-        // Deploy mock Chainlink feeds for DXY components
-        address[] memory feeds = new address[](6);
+    function _deployMockFeeds() internal returns (address[] memory feeds, uint256[] memory quantities) {
+        feeds = new address[](6);
         feeds[0] = address(new MockV3Aggregator(105000000)); // ~1.05 USD per EUR
         feeds[1] = address(new MockV3Aggregator(640000)); // ~0.0064 USD per JPY
         feeds[2] = address(new MockV3Aggregator(125000000)); // ~1.25 USD per GBP
@@ -159,42 +234,77 @@ contract DeployToSepolia is Script {
         feeds[4] = address(new MockV3Aggregator(9300000)); // ~0.093 USD per SEK
         feeds[5] = address(new MockV3Aggregator(113000000)); // ~1.13 USD per CHF
 
-        // DXY weights (scaled to 1e18)
-        uint256[] memory quantities = new uint256[](6);
+        quantities = new uint256[](6);
         quantities[0] = 576 * 10 ** 15; // EUR: 57.6%
         quantities[1] = 136 * 10 ** 15; // JPY: 13.6%
         quantities[2] = 119 * 10 ** 15; // GBP: 11.9%
         quantities[3] = 91 * 10 ** 15; // CAD: 9.1%
         quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
-
-        return new BasketOracle(feeds, quantities, CURVE_POOL, MAX_DEVIATION_BPS);
     }
 
-    function _deploySplitterWithAdapter(address oracle, address deployer)
+    function _deployCurvePool(address usdc, address dxyBear) internal returns (address pool) {
+        pool = ITwocryptoFactory(TWOCRYPTO_FACTORY)
+            .deploy_pool(
+                "Curve.fi USDC/DXY-BEAR",
+                "crvUSDCDXYBEAR",
+                [usdc, dxyBear],
+                0, // implementation_id (use default)
+                CURVE_A,
+                CURVE_GAMMA,
+                CURVE_MID_FEE,
+                CURVE_OUT_FEE,
+                CURVE_FEE_GAMMA,
+                CURVE_ALLOWED_EXTRA_PROFIT,
+                CURVE_ADJUSTMENT_STEP,
+                CURVE_MA_EXP_TIME,
+                CURVE_INITIAL_PRICE
+            );
+    }
+
+    function _deploySplitterWithAdapter(address oracle, address usdc, address deployer)
         internal
         returns (MockYieldAdapter adapter, SyntheticSplitter splitter)
     {
-        // Predict Splitter address (deployed 1 nonce after adapter)
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
-        // Deploy adapter with predicted splitter address
-        adapter = new MockYieldAdapter(IERC20(USDC), deployer, predictedSplitter);
+        adapter = new MockYieldAdapter(IERC20(usdc), deployer, predictedSplitter);
+        splitter = new SyntheticSplitter(oracle, usdc, address(adapter), CAP, deployer, address(0));
 
-        // Deploy splitter (sequencer uptime feed = address(0) for L1)
-        splitter = new SyntheticSplitter(oracle, USDC, address(adapter), CAP, deployer, address(0));
+        require(address(splitter) == predictedSplitter, "Splitter address mismatch in helper");
+    }
 
-        // Verify prediction was correct
-        require(address(splitter) == predictedSplitter, "Splitter address mismatch");
+    function _seedCurvePool(DeployedContracts memory d, address deployer) internal {
+        // Mint USDC and DXY-BEAR for initial liquidity
+        uint256 usdcAmount = 10_000 * 1e6; // 10k USDC
+        uint256 bearAmount = 10_000 * 1e18; // 10k DXY-BEAR
+
+        // Mint USDC to deployer
+        d.usdc.mint(deployer, usdcAmount);
+
+        // Mint DXY-BEAR via Splitter (requires USDC)
+        // Cost = bearAmount * CAP / 1e20 = 10_000e18 * 2e8 / 1e20 = 20_000e6 USDC
+        uint256 mintCost = (bearAmount * CAP) / 1e20;
+        d.usdc.mint(deployer, mintCost);
+        d.usdc.approve(address(d.splitter), mintCost);
+        d.splitter.mint(bearAmount);
+
+        // Approve Curve pool
+        d.usdc.approve(d.curvePool, usdcAmount);
+        IERC20(address(d.dxyBear)).approve(d.curvePool, bearAmount);
+
+        // Add liquidity
+        ICurveTwocryptoPool(d.curvePool).add_liquidity([usdcAmount, bearAmount], 0);
+        console.log("Curve pool seeded with 10k USDC + 10k DXY-BEAR");
     }
 
     function _deployMorphoOracles(address basketOracle)
         internal
         returns (MorphoOracle oracleBear, MorphoOracle oracleBull)
     {
-        oracleBear = new MorphoOracle(basketOracle, CAP, false); // BEAR: NOT inverse
-        oracleBull = new MorphoOracle(basketOracle, CAP, true); // BULL: IS inverse
+        oracleBear = new MorphoOracle(basketOracle, CAP, false);
+        oracleBull = new MorphoOracle(basketOracle, CAP, true);
     }
 
     function _deployStakedTokens(address bearToken, address bullToken)
@@ -215,59 +325,56 @@ contract DeployToSepolia is Script {
         oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
     }
 
-    function _deployRouters(DeployedContracts memory d, address deployer) internal {
-        if (CURVE_POOL == address(0x1)) {
-            console.log("ZapRouter: SKIPPED (no Curve pool)");
-            console.log("LeverageRouter: SKIPPED (no Curve pool)");
-            console.log("BullLeverageRouter: SKIPPED (no Curve pool)");
-            return;
-        }
-
+    function _deployRouters(DeployedContracts memory d) internal {
         // Deploy ZapRouter
-        ZapRouter zapRouter =
-            new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), USDC, CURVE_POOL);
-        console.log("ZapRouter:", address(zapRouter));
+        d.zapRouter =
+            new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), address(d.usdc), d.curvePool);
+        console.log("ZapRouter:", address(d.zapRouter));
 
         // Deploy LeverageRouter (BEAR)
         MarketParams memory bearMarketParams = MarketParams({
-            loanToken: USDC,
+            loanToken: address(d.usdc),
             collateralToken: address(d.stakedBear),
             oracle: address(d.stakedOracleBear),
             irm: MORPHO_IRM,
             lltv: LLTV
         });
 
-        LeverageRouter leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, CURVE_POOL, USDC, address(d.dxyBear), address(d.stakedBear), bearMarketParams
+        d.leverageRouter = new LeverageRouter(
+            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.dxyBear), address(d.stakedBear), bearMarketParams
         );
-        console.log("LeverageRouter:", address(leverageRouter));
+        console.log("LeverageRouter:", address(d.leverageRouter));
 
         // Deploy BullLeverageRouter
         MarketParams memory bullMarketParams = MarketParams({
-            loanToken: USDC,
+            loanToken: address(d.usdc),
             collateralToken: address(d.stakedBull),
             oracle: address(d.stakedOracleBull),
             irm: MORPHO_IRM,
             lltv: LLTV
         });
 
-        BullLeverageRouter bullLeverageRouter = new BullLeverageRouter(
+        d.bullLeverageRouter = new BullLeverageRouter(
             MORPHO_BLUE,
             address(d.splitter),
-            CURVE_POOL,
-            USDC,
+            d.curvePool,
+            address(d.usdc),
             address(d.dxyBear),
             address(d.dxyBull),
             address(d.stakedBull),
             bullMarketParams
         );
-        console.log("BullLeverageRouter:", address(bullLeverageRouter));
+        console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
     }
 
     function _logDeployment(DeployedContracts memory d) internal pure {
         console.log("========================================");
         console.log("SEPOLIA DEPLOYMENT COMPLETE");
         console.log("========================================");
+        console.log("");
+        console.log("Infrastructure:");
+        console.log("  MockUSDC:            ", address(d.usdc));
+        console.log("  Curve Pool:          ", d.curvePool);
         console.log("");
         console.log("Core Contracts:");
         console.log("  BasketOracle:        ", address(d.basketOracle));
@@ -285,6 +392,11 @@ contract DeployToSepolia is Script {
         console.log("  StakedToken (BULL):  ", address(d.stakedBull));
         console.log("  StakedOracle (BEAR): ", address(d.stakedOracleBear));
         console.log("  StakedOracle (BULL): ", address(d.stakedOracleBull));
+        console.log("");
+        console.log("Routers:");
+        console.log("  ZapRouter:           ", address(d.zapRouter));
+        console.log("  LeverageRouter:      ", address(d.leverageRouter));
+        console.log("  BullLeverageRouter:  ", address(d.bullLeverageRouter));
         console.log("========================================");
     }
 }

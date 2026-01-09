@@ -52,7 +52,8 @@ contract BasketOracleTest is Test {
         quantities[1] = 50 ether; // 50 units
 
         // 200 bps = 2% max deviation
-        basket = new BasketOracle(feeds, quantities, address(curvePool), 200);
+        basket = new BasketOracle(feeds, quantities, 200, address(this));
+        basket.setCurvePool(address(curvePool));
     }
 
     function test_Initialization() public {
@@ -103,7 +104,7 @@ contract BasketOracleTest is Test {
         uint256[] memory quantities = new uint256[](2);
 
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
-        new BasketOracle(feeds, quantities, address(curvePool), 200);
+        new BasketOracle(feeds, quantities, 200, address(this));
     }
 
     function test_Version() public view {
@@ -145,22 +146,52 @@ contract BasketOracleTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(BasketOracle.BasketOracle__InvalidPrice.selector, address(wrongDecimalFeed))
         );
-        new BasketOracle(feeds, quantities, address(curvePool), 200);
+        new BasketOracle(feeds, quantities, 200, address(this));
     }
 
     // ==========================================
     // BOUND VALIDATION TESTS
     // ==========================================
 
-    function test_Revert_ZeroCurvePoolAddress() public {
+    function test_SetCurvePool_OnlyOwner() public {
         address[] memory feeds = new address[](1);
         feeds[0] = address(feedEUR);
 
         uint256[] memory quantities = new uint256[](1);
         quantities[0] = 1 ether;
 
-        vm.expectRevert(BasketOracle.BasketOracle__ZeroAddress.selector);
-        new BasketOracle(feeds, quantities, address(0), 200);
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, address(this));
+
+        vm.prank(address(0xdead));
+        vm.expectRevert(BasketOracle.BasketOracle__Unauthorized.selector);
+        newBasket.setCurvePool(address(curvePool));
+    }
+
+    function test_SetCurvePool_OnlyOnce() public {
+        address[] memory feeds = new address[](1);
+        feeds[0] = address(feedEUR);
+
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1 ether;
+
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, address(this));
+        newBasket.setCurvePool(address(curvePool));
+
+        vm.expectRevert(BasketOracle.BasketOracle__AlreadySet.selector);
+        newBasket.setCurvePool(address(curvePool));
+    }
+
+    function test_SkipsDeviationCheck_WhenPoolNotSet() public {
+        address[] memory feeds = new address[](1);
+        feeds[0] = address(feedEUR);
+
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1 ether;
+
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, address(this));
+        // Don't set curvePool - deviation check should be skipped
+        (, int256 answer,,,) = newBasket.latestRoundData();
+        assertEq(answer, 110_000_000); // EUR price
     }
 
     function test_Revert_PriceDeviationExceedsThreshold() public {

@@ -15,6 +15,30 @@ import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+// Curve Twocrypto-NG Factory interface
+interface ITwocryptoFactory {
+    function deploy_pool(
+        string memory _name,
+        string memory _symbol,
+        address[2] memory _coins,
+        uint256 implementation_id,
+        uint256 A,
+        uint256 gamma,
+        uint256 mid_fee,
+        uint256 out_fee,
+        uint256 fee_gamma,
+        uint256 allowed_extra_profit,
+        uint256 adjustment_step,
+        uint256 ma_exp_time,
+        uint256 initial_price
+    ) external returns (address);
+}
+
+// Curve Twocrypto pool interface for adding liquidity
+interface ICurveTwocryptoPool {
+    function add_liquidity(uint256[2] memory amounts, uint256 min_mint_amount) external returns (uint256);
+}
+
 /**
  * @title DeployToMainnet
  * @notice Production deployment script for Plether protocol on Ethereum mainnet
@@ -52,8 +76,8 @@ contract DeployToMainnet is Script {
     // Stablecoins
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 
-    // Curve Pool (USDC/DXY-BEAR) - To be deployed or use existing
-    address constant CURVE_POOL = address(0); // TODO: Set after Curve pool deployment
+    // Curve Twocrypto-NG Factory on Mainnet
+    address constant TWOCRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
 
     // Morpho Blue (also provides fee-free flash loans)
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
@@ -65,6 +89,17 @@ contract DeployToMainnet is Script {
     uint256 constant LLTV_BULL = 0.77e18; // 77% LLTV for BULL market
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation for basket oracle
 
+    // Curve Pool Parameters (Twocrypto-NG defaults for stablecoin-like pair)
+    uint256 constant CURVE_A = 400000;
+    uint256 constant CURVE_GAMMA = 145000000000000;
+    uint256 constant CURVE_MID_FEE = 26000000;
+    uint256 constant CURVE_OUT_FEE = 45000000;
+    uint256 constant CURVE_FEE_GAMMA = 230000000000000;
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000;
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000;
+    uint256 constant CURVE_MA_EXP_TIME = 866;
+    uint256 constant CURVE_INITIAL_PRICE = 1e18;
+
     // ==========================================
     // DEPLOYMENT STATE
     // ==========================================
@@ -75,6 +110,7 @@ contract DeployToMainnet is Script {
         SyntheticSplitter splitter;
         SyntheticToken dxyBear;
         SyntheticToken dxyBull;
+        address curvePool;
         MorphoOracle morphoOracleBear;
         MorphoOracle morphoOracleBull;
         StakedToken stakedBear;
@@ -87,9 +123,6 @@ contract DeployToMainnet is Script {
     }
 
     function run() external returns (DeployedContracts memory deployed) {
-        // Validate critical addresses
-        require(CURVE_POOL != address(0), "Curve pool address not set");
-
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
         address treasury = vm.envOr("TREASURY", deployer);
@@ -101,9 +134,10 @@ contract DeployToMainnet is Script {
         vm.startBroadcast(privateKey);
 
         // ==========================================
-        // STEP 1: Deploy BasketOracle
+        // STEP 1: Deploy BasketOracle (without Curve pool)
         // ==========================================
-        deployed.basketOracle = _deployBasketOracle();
+        deployed.basketOracle = _deployBasketOracle(deployer);
+        console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // ==========================================
         // STEP 2: Deploy MorphoAdapter + SyntheticSplitter
@@ -114,9 +148,23 @@ contract DeployToMainnet is Script {
         // Get token addresses from Splitter
         deployed.dxyBear = deployed.splitter.TOKEN_A();
         deployed.dxyBull = deployed.splitter.TOKEN_B();
+        console.log("DXY-BEAR deployed:", address(deployed.dxyBear));
+        console.log("DXY-BULL deployed:", address(deployed.dxyBull));
 
         // ==========================================
-        // STEP 3: Deploy Morpho Oracles
+        // STEP 3: Deploy Curve pool via factory
+        // ==========================================
+        deployed.curvePool = _deployCurvePool(address(deployed.dxyBear));
+        console.log("Curve Pool deployed:", deployed.curvePool);
+
+        // ==========================================
+        // STEP 4: Configure BasketOracle with Curve pool
+        // ==========================================
+        deployed.basketOracle.setCurvePool(deployed.curvePool);
+        console.log("BasketOracle configured with Curve pool");
+
+        // ==========================================
+        // STEP 5: Deploy Morpho Oracles
         // ==========================================
         deployed.morphoOracleBear = new MorphoOracle(
             address(deployed.basketOracle),
@@ -131,28 +179,26 @@ contract DeployToMainnet is Script {
         );
 
         // ==========================================
-        // STEP 4: Deploy Staked Tokens
+        // STEP 6: Deploy Staked Tokens
         // ==========================================
         deployed.stakedBear = new StakedToken(IERC20(address(deployed.dxyBear)), "Staked DXY-BEAR", "sDXY-BEAR");
-
         deployed.stakedBull = new StakedToken(IERC20(address(deployed.dxyBull)), "Staked DXY-BULL", "sDXY-BULL");
 
         // ==========================================
-        // STEP 5: Deploy Staked Oracles
+        // STEP 7: Deploy Staked Oracles
         // ==========================================
         deployed.stakedOracleBear = new StakedOracle(address(deployed.stakedBear), address(deployed.morphoOracleBear));
-
         deployed.stakedOracleBull = new StakedOracle(address(deployed.stakedBull), address(deployed.morphoOracleBull));
 
         // ==========================================
-        // STEP 6: Deploy ZapRouter
+        // STEP 8: Deploy ZapRouter
         // ==========================================
         deployed.zapRouter = new ZapRouter(
-            address(deployed.splitter), address(deployed.dxyBear), address(deployed.dxyBull), USDC, CURVE_POOL
+            address(deployed.splitter), address(deployed.dxyBear), address(deployed.dxyBull), USDC, deployed.curvePool
         );
 
         // ==========================================
-        // STEP 7: Deploy LeverageRouter (BEAR leverage)
+        // STEP 9: Deploy LeverageRouter (BEAR leverage)
         // ==========================================
         MarketParams memory bearMarketParams = MarketParams({
             loanToken: USDC,
@@ -163,11 +209,16 @@ contract DeployToMainnet is Script {
         });
 
         deployed.leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, CURVE_POOL, USDC, address(deployed.dxyBear), address(deployed.stakedBear), bearMarketParams
+            MORPHO_BLUE,
+            deployed.curvePool,
+            USDC,
+            address(deployed.dxyBear),
+            address(deployed.stakedBear),
+            bearMarketParams
         );
 
         // ==========================================
-        // STEP 8: Deploy BullLeverageRouter
+        // STEP 10: Deploy BullLeverageRouter
         // ==========================================
         MarketParams memory bullMarketParams = MarketParams({
             loanToken: USDC,
@@ -180,7 +231,7 @@ contract DeployToMainnet is Script {
         deployed.bullLeverageRouter = new BullLeverageRouter(
             MORPHO_BLUE,
             address(deployed.splitter),
-            CURVE_POOL,
+            deployed.curvePool,
             USDC,
             address(deployed.dxyBear),
             address(deployed.dxyBull),
@@ -207,7 +258,7 @@ contract DeployToMainnet is Script {
     // INTERNAL HELPERS
     // ==========================================
 
-    function _deployBasketOracle() internal returns (BasketOracle) {
+    function _deployBasketOracle(address owner) internal returns (BasketOracle) {
         address[] memory feeds = new address[](6);
         feeds[0] = CHAINLINK_EUR_USD;
         feeds[1] = CHAINLINK_JPY_USD;
@@ -216,7 +267,6 @@ contract DeployToMainnet is Script {
         feeds[4] = CHAINLINK_SEK_USD;
         feeds[5] = CHAINLINK_CHF_USD;
 
-        // DXY weights (scaled to 1e18)
         uint256[] memory quantities = new uint256[](6);
         quantities[0] = 576 * 10 ** 15; // EUR: 57.6%
         quantities[1] = 136 * 10 ** 15; // JPY: 13.6%
@@ -225,7 +275,26 @@ contract DeployToMainnet is Script {
         quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
 
-        return new BasketOracle(feeds, quantities, CURVE_POOL, MAX_DEVIATION_BPS);
+        return new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, owner);
+    }
+
+    function _deployCurvePool(address dxyBear) internal returns (address) {
+        return ITwocryptoFactory(TWOCRYPTO_FACTORY)
+            .deploy_pool(
+                "Curve.fi USDC/DXY-BEAR",
+                "crvUSDCDXYBEAR",
+                [USDC, dxyBear],
+                0,
+                CURVE_A,
+                CURVE_GAMMA,
+                CURVE_MID_FEE,
+                CURVE_OUT_FEE,
+                CURVE_FEE_GAMMA,
+                CURVE_ALLOWED_EXTRA_PROFIT,
+                CURVE_ADJUSTMENT_STEP,
+                CURVE_MA_EXP_TIME,
+                CURVE_INITIAL_PRICE
+            );
     }
 
     function _deploySplitterWithAdapter(address oracle, address treasury, address deployer)
@@ -266,6 +335,7 @@ contract DeployToMainnet is Script {
         console.log("  SyntheticSplitter:   ", address(d.splitter));
         console.log("  DXY-BEAR:            ", address(d.dxyBear));
         console.log("  DXY-BULL:            ", address(d.dxyBull));
+        console.log("  Curve Pool:          ", d.curvePool);
         console.log("");
         console.log("Morpho Oracles:");
         console.log("  MorphoOracle (BEAR): ", address(d.morphoOracleBear));

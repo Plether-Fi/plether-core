@@ -144,7 +144,8 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, tempCurvePool, 500);
+        basketOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        basketOracle.setCurvePool(tempCurvePool);
     }
 
     function _calculateBasketPrice() internal view returns (uint256) {
@@ -217,7 +218,8 @@ contract BasketOracleForkTest is Test {
         uint256 expectedPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, tempPool, 500);
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
 
@@ -251,7 +253,8 @@ contract BasketOracleForkTest is Test {
         uint256 expectedPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, tempPool, 500);
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
 
@@ -303,7 +306,8 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, curvePool, 200);
+        basketOracle = new BasketOracle(feeds, quantities, 200, address(this));
+        basketOracle.setCurvePool(curvePool);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
         assertGt(price, 0, "Should return valid price");

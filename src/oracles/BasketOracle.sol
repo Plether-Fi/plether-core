@@ -24,28 +24,36 @@ contract BasketOracle is AggregatorV3Interface {
     // ==========================================
     // BOUND VALIDATOR CONFIG
     // ==========================================
-    ICurvePool public immutable CURVE_POOL;
+    ICurvePool public curvePool;
     uint256 public immutable MAX_DEVIATION_BPS; // e.g. 200 = 2%
+    address public immutable OWNER;
 
     error BasketOracle__InvalidPrice(address feed);
     error BasketOracle__LengthMismatch();
     error BasketOracle__PriceDeviation(uint256 theoretical, uint256 spot);
-    error BasketOracle__ZeroAddress();
+    error BasketOracle__Unauthorized();
+    error BasketOracle__AlreadySet();
 
-    constructor(address[] memory _feeds, uint256[] memory _quantities, address _curvePool, uint256 _maxDeviationBps) {
+    constructor(address[] memory _feeds, uint256[] memory _quantities, uint256 _maxDeviationBps, address _owner) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
-        if (_curvePool == address(0)) revert BasketOracle__ZeroAddress();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
-            // SAFETY CHECK: Ensure feed uses expected precision
             if (feed.decimals() != DECIMALS) revert BasketOracle__InvalidPrice(address(feed));
 
             components.push(Component({feed: feed, quantity: _quantities[i]}));
         }
 
-        CURVE_POOL = ICurvePool(_curvePool);
         MAX_DEVIATION_BPS = _maxDeviationBps;
+        OWNER = _owner;
+    }
+
+    /// @notice Sets the Curve pool address for price deviation checks. Can only be called once.
+    /// @param _curvePool The Curve pool address
+    function setCurvePool(address _curvePool) external {
+        if (msg.sender != OWNER) revert BasketOracle__Unauthorized();
+        if (address(curvePool) != address(0)) revert BasketOracle__AlreadySet();
+        curvePool = ICurvePool(_curvePool);
     }
 
     /// @notice Returns the aggregated basket price from all component feeds.
@@ -94,25 +102,18 @@ contract BasketOracle is AggregatorV3Interface {
     /**
      * @notice Compares Theoretical Price (Chainlink) with Spot Price (Curve).
      * @dev Reverts if the difference exceeds MAX_DEVIATION_BPS.
+     * @dev Skips check if Curve pool is not yet configured.
      */
     function _checkDeviation(uint256 theoreticalPrice8Dec) internal view {
-        // Curve returns 18 decimals usually. Chainlink is 8.
-        // Scale Theoretical to 18 decimals for comparison.
+        ICurvePool pool = curvePool;
+        if (address(pool) == address(0)) return;
+
         uint256 theoretical18 = theoreticalPrice8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+        uint256 spot18 = pool.price_oracle();
 
-        // Get Spot Price (EMA) from Curve V2
-        // Note: Assumes Curve Pool is [USDC, TOKEN] or similar where price_oracle returns
-        // the TOKEN price in USDC (1e18 precision).
-        uint256 spot18 = CURVE_POOL.price_oracle();
+        if (spot18 == 0) revert BasketOracle__InvalidPrice(address(pool));
 
-        // Safety: Spot price must be positive
-        if (spot18 == 0) revert BasketOracle__InvalidPrice(address(CURVE_POOL));
-
-        // Calculate difference
         uint256 diff = theoretical18 > spot18 ? theoretical18 - spot18 : spot18 - theoretical18;
-
-        // Threshold: Use min of theoretical and spot to prevent manipulation
-        // If attacker inflates Chainlink, they can't inflate the threshold
         uint256 basePrice = theoretical18 < spot18 ? theoretical18 : spot18;
         uint256 threshold = (basePrice * MAX_DEVIATION_BPS) / 10000;
 
