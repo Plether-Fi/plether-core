@@ -175,6 +175,70 @@ contract ZapRouterTest is Test {
         assertApproxEqRel(actualTokensOut, expectedTokensOut, 0.01e18, "Actual tokens should be close to preview");
     }
 
+    function test_PreviewZapBurn() public {
+        uint256 bullAmount = 100 * 1e18;
+        curvePool.setPrice(1e6); // Parity: 1 BEAR = 1 USDC
+
+        // Mint some BULL for alice first
+        dxyBull.mint(alice, bullAmount);
+
+        // Get preview
+        (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee) =
+            zapRouter.previewZapBurn(bullAmount);
+
+        // Verify internal consistency
+        assertGt(expectedUsdcFromBurn, 0, "USDC from burn should be non-zero");
+        assertGt(usdcForBearBuyback, 0, "Buyback cost should be non-zero");
+        assertGt(expectedUsdcOut, 0, "Expected USDC out should be non-zero");
+        assertEq(flashFee, 0, "Flash fee should be zero with no fee set");
+
+        // Net out should equal burn proceeds minus buyback cost
+        assertEq(expectedUsdcOut, expectedUsdcFromBurn - usdcForBearBuyback, "Net USDC should be burn - buyback");
+
+        // Verify preview matches actual execution (within 2% due to buffer/slippage)
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        dxyBull.approve(address(zapRouter), bullAmount);
+        zapRouter.zapBurn(bullAmount, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 actualUsdcOut = usdc.balanceOf(alice) - usdcBefore;
+
+        // Actual output should be close to preview (within 2% tolerance for buffer/slippage)
+        assertApproxEqRel(actualUsdcOut, expectedUsdcOut, 0.02e18, "Actual USDC should be close to preview");
+    }
+
+    function test_PreviewZapBurn_ZeroAmount() public view {
+        (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee) =
+            zapRouter.previewZapBurn(0);
+
+        assertEq(expectedUsdcFromBurn, 0, "Should return zero for zero input");
+        assertEq(usdcForBearBuyback, 0, "Should return zero for zero input");
+        assertEq(expectedUsdcOut, 0, "Should return zero for zero input");
+        assertEq(flashFee, 0, "Should return zero for zero input");
+    }
+
+    function test_PreviewZapBurn_WithFlashFee() public {
+        uint256 bullAmount = 100 * 1e18;
+        curvePool.setPrice(1e6);
+
+        // Set a flash fee
+        dxyBear.setFeeBps(10); // 0.1% fee
+
+        (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee) =
+            zapRouter.previewZapBurn(bullAmount);
+
+        // Flash fee should be non-zero
+        assertGt(flashFee, 0, "Flash fee should be non-zero");
+
+        // Buyback should be higher due to flash fee
+        assertGt(usdcForBearBuyback, expectedUsdcFromBurn / 2, "Buyback should account for fee");
+
+        // Net out should still be positive
+        assertGt(expectedUsdcOut, 0, "Expected USDC out should be positive");
+    }
+
     function test_BugFix_DecimalScaling() public {
         // 1. SETUP
         uint256 amountIn = 100e6; // $100 USDC (6 Decimals)
@@ -699,24 +763,28 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapBurn minimum output protection
-    function testFuzz_ZapBurn_MinOutput(uint256 bullAmount) public {
+    function testFuzz_ZapBurn_MinOutput(uint256 bullAmount, uint256 minOutPercent) public {
         // Bound inputs
         bullAmount = bound(bullAmount, 1e18, 10_000 * 1e18);
+        minOutPercent = bound(minOutPercent, 0, 50); // 0% to 50% of expected (conservative due to buffer)
 
         curvePool.setPrice(1e6); // Parity
 
         dxyBull.mint(alice, bullAmount);
         uint256 usdcBefore = usdc.balanceOf(alice);
 
+        // Get expected USDC output from preview function
+        (,, uint256 expectedUsdcOut,) = zapRouter.previewZapBurn(bullAmount);
+        uint256 minOut = (expectedUsdcOut * minOutPercent) / 100;
+
         vm.startPrank(alice);
         dxyBull.approve(address(zapRouter), bullAmount);
-        // Use minOut=0 since no preview function exists for zapBurn
-        zapRouter.zapBurn(bullAmount, 0, block.timestamp + 1 hours);
+        zapRouter.zapBurn(bullAmount, minOut, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        // Should receive positive USDC output
+        // Should receive at least minOut
         uint256 usdcReceived = usdc.balanceOf(alice) - usdcBefore;
-        assertGt(usdcReceived, 0, "Should receive USDC");
+        assertGe(usdcReceived, minOut, "Should receive at least minOut");
 
         // Router should be stateless
         assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");

@@ -187,6 +187,31 @@ contract LeverageRouterTest is Test {
         assertEq(expectedDebt, 2000 * 1e6, "Expected debt mismatch (no fee)");
     }
 
+    function test_PreviewOpenLeverage_MatchesActual() public {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+
+        // Get preview
+        (, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) =
+            router.previewOpenLeverage(principal, leverage);
+
+        // Execute actual operation
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), principal);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify actual matches preview
+        uint256 actualCollateral = morpho.collateralBalance(alice);
+        uint256 actualDebt = morpho.borrowBalance(alice);
+
+        // Collateral is in staked tokens (18 decimals), preview gives DXY-BEAR amount
+        // Allow 1% tolerance due to curve slippage/rounding
+        assertApproxEqRel(actualCollateral, expectedDxyBear, 0.01e18, "Collateral should match preview");
+        assertEq(actualDebt, expectedDebt, "Debt should match preview");
+    }
+
     function test_PreviewOpenLeverage_RevertOnLowLeverage() public {
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
         router.previewOpenLeverage(1000 * 1e6, 1e18);
@@ -199,6 +224,40 @@ contract LeverageRouterTest is Test {
         assertGt(expectedUSDC, 0, "Expected USDC should be > 0");
         assertEq(flashFee, 0, "Flash fee should be 0 (mock)");
         assertGt(expectedReturn, 0, "Expected return should be > 0");
+    }
+
+    function test_PreviewCloseLeverage_MatchesActual() public {
+        // First open a position
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3e18;
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+        usdc.approve(address(router), principal);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        uint256 collateral = morpho.collateralBalance(alice);
+        uint256 debt = morpho.borrowBalance(alice);
+
+        // Get preview for closing
+        (uint256 expectedUSDC,, uint256 expectedReturn) = router.previewCloseLeverage(debt, collateral);
+
+        // Record balance before close
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        // Close the position
+        router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify actual matches preview
+        uint256 actualReturn = usdc.balanceOf(alice) - usdcBefore;
+
+        // Allow 2% tolerance due to curve slippage/rounding
+        assertApproxEqRel(actualReturn, expectedReturn, 0.02e18, "Return should match preview");
+
+        // Position should be closed
+        assertEq(morpho.collateralBalance(alice), 0, "Collateral should be zero");
+        assertEq(morpho.borrowBalance(alice), 0, "Debt should be zero");
     }
 
     function test_PreviewCloseLeverage_ZeroReturn() public view {

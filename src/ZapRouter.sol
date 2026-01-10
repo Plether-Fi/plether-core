@@ -335,6 +335,53 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
     }
 
+    /**
+     * @notice Preview the result of a zapBurn operation.
+     * @param bullAmount The amount of DXY-BULL tokens to sell.
+     * @return expectedUsdcFromBurn USDC received from burning pairs via Splitter.
+     * @return usdcForBearBuyback USDC needed to buy back DXY-BEAR for flash loan repayment.
+     * @return expectedUsdcOut Net USDC the user will receive.
+     * @return flashFee Flash mint fee (if any).
+     */
+    function previewZapBurn(uint256 bullAmount)
+        external
+        view
+        returns (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee)
+    {
+        if (bullAmount == 0) return (0, 0, 0, 0);
+
+        // Flash borrow amount equals bull amount (1:1 for pair burning)
+        uint256 flashAmount = bullAmount;
+
+        // Get flash fee
+        flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
+
+        // USDC from burning pairs: bullAmount tokens at CAP price
+        // Formula from Splitter: usdcRefund = (amount * CAP) / USDC_MULTIPLIER
+        // Simplified: (bullAmount * CAP) / 1e20 = bullAmount * 2e8 / 1e20 = bullAmount / 5e11
+        expectedUsdcFromBurn = (bullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+
+        // Calculate USDC needed to buy back BEAR for repayment
+        uint256 debtBear = flashAmount + flashFee;
+
+        // Get price: how much BEAR do we get for 1 USDC?
+        uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+        if (bearFromOneUsdc == 0) return (expectedUsdcFromBurn, 0, 0, flashFee);
+
+        // Linear USDC requirement: (debtBear * 1e6) / bearFromOneUsdc
+        uint256 usdcLinear = (debtBear * 1e6) / bearFromOneUsdc;
+
+        // Apply 1% safety buffer (matches execution)
+        usdcForBearBuyback = (usdcLinear * 10100) / 10000;
+
+        // Net USDC out = burn proceeds - buyback cost
+        if (expectedUsdcFromBurn > usdcForBearBuyback) {
+            expectedUsdcOut = expectedUsdcFromBurn - usdcForBearBuyback;
+        } else {
+            expectedUsdcOut = 0;
+        }
+    }
+
     // ==========================================
     // ADMIN FUNCTIONS
     // ==========================================
