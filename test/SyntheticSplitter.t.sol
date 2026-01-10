@@ -1391,4 +1391,306 @@ contract SyntheticSplitterTest is Test {
         assertEq(splitter.TOKEN_A().totalSupply(), totalSupplyBefore, "Token supply unchanged");
         assertEq(splitter.TOKEN_A().balanceOf(alice), 0, "No tokens minted");
     }
+
+    // ==========================================
+    // 10. ROUNDING BUFFER EDGE CASE TESTS
+    // ==========================================
+    // These tests verify the +1 rounding buffer in _withdrawFromAdapter:
+    //
+    //   uint256 sharesToRedeem = yieldAdapter.convertToShares(amount);
+    //   if (sharesToRedeem > 0) {
+    //       sharesToRedeem += 1;  // <-- This buffer prevents rounding shortfall
+    //   }
+    //
+    // Without the +1, convertToShares can round DOWN, causing redeem to return
+    // less than the requested amount (breaking solvency).
+
+    /**
+     * @notice Test that +1 buffer handles rounding when exchange rate is unfavorable
+     * @dev Simulates yield accrual that creates non-1:1 exchange rate
+     *
+     * Scenario:
+     * - Adapter has 181 USDC backing 180 shares (yield accrued)
+     * - Exchange rate: 1 share = 1.00555... USDC
+     * - User needs to withdraw 80 USDC
+     * - convertToShares(80) = floor(80 * 180 / 181) = floor(79.558) = 79 shares
+     * - redeem(79 shares) = floor(79 * 181 / 180) = floor(79.438) = 79 USDC
+     * - WITHOUT +1: User gets 79 USDC (1 USDC short!)
+     * - WITH +1: redeem(80 shares) = floor(80 * 181 / 180) = 80 USDC (correct)
+     */
+    function test_RedeemFallback_RoundingBuffer_HandlesYieldAccrual() public {
+        // 1. Setup: Mint tokens to create initial adapter position
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Verify initial state: $20 buffer, $180 in adapter (1:1 ratio)
+        assertEq(usdc.balanceOf(address(splitter)), 20 * 1e6, "Buffer should be $20");
+        assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Adapter shares should be 180");
+
+        // 2. Simulate yield accrual: Add 1 USDC to adapter (makes totalAssets > totalSupply)
+        // This creates exchange rate: 181 USDC / 180 shares = 1.00555... USDC per share
+        usdc.mint(address(adapter), 1 * 1e6);
+
+        // 3. Verify exchange rate is no longer 1:1
+        uint256 totalAssets = adapter.totalAssets();
+        uint256 totalSupply = adapter.totalSupply();
+        assertEq(totalAssets, 181 * 1e6, "Total assets should be 181");
+        assertEq(totalSupply, 180 * 1e6, "Total supply should be 180");
+
+        // 4. Mock withdraw to fail (force redeem fallback path)
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 5. Alice burns 50 tokens ($100 refund needed)
+        // Buffer has $20, needs $80 from adapter via redeem fallback
+        // convertToShares(80e6) = floor(80e6 * 180e6 / 181e6) = floor(79.558...) = 79 shares (rounds down!)
+        // Without +1: redeem(79) = floor(79 * 181 / 180) = 79.438... = 79 USDC (1 USDC short!)
+        // With +1: redeem(80) = floor(80 * 181 / 180) = 80.444... = 80 USDC (sufficient)
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+
+        // 6. Verify Alice received full $100 refund (not $99)
+        uint256 aliceUsdcAfter = usdc.balanceOf(alice);
+        assertEq(aliceUsdcAfter - aliceUsdcBefore, 100 * 1e6, "Alice should receive full $100 refund");
+    }
+
+    /**
+     * @notice Test rounding buffer with extreme exchange rate (2:1)
+     * @dev Simulates scenario where adapter has doubled in value
+     */
+    function test_RedeemFallback_RoundingBuffer_ExtremeExchangeRate() public {
+        // 1. Setup: Mint tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Simulate 100% yield: Double the USDC in adapter
+        // Exchange rate becomes: 360 USDC / 180 shares = 2:1
+        usdc.mint(address(adapter), 180 * 1e6);
+
+        assertEq(adapter.totalAssets(), 360 * 1e6, "Total assets should be 360");
+        assertEq(adapter.totalSupply(), 180 * 1e6, "Total supply should be 180");
+
+        // 3. Mock withdraw to fail
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 4. Burn tokens - needs withdrawal from adapter
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18); // Needs $100, buffer has $20, need $80 from adapter
+        vm.stopPrank();
+
+        // Verify full refund
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Should receive full refund with 2:1 rate");
+    }
+
+    /**
+     * @notice Test rounding buffer with amount that maximizes rounding error
+     * @dev Constructs worst-case rounding scenario
+     */
+    function test_RedeemFallback_RoundingBuffer_WorstCaseRounding() public {
+        // 1. Setup: Mint tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Create exchange rate that maximizes rounding error
+        // Add 999_999 wei to make totalAssets = 180_999_999 / 180_000_000 shares
+        // This creates worst-case rounding for certain withdrawal amounts
+        usdc.mint(address(adapter), 999_999);
+
+        uint256 totalAssets = adapter.totalAssets();
+        uint256 totalSupply = adapter.totalSupply();
+        assertEq(totalAssets, 180_999_999, "Total assets");
+        assertEq(totalSupply, 180_000_000, "Total supply");
+
+        // 3. Mock withdraw to fail
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 4. Burn - this would fail without +1 buffer
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+
+        // Verify Alice got at least the expected refund
+        assertGe(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Should receive at least $100");
+    }
+
+    /**
+     * @notice Fuzz test: rounding buffer works across various exchange rates
+     * @dev Tests that +1 buffer handles arbitrary yield scenarios
+     */
+    function testFuzz_RedeemFallback_RoundingBuffer(uint256 yieldAmount) public {
+        // Bound yield to reasonable range (0 to 100% of principal)
+        yieldAmount = bound(yieldAmount, 1, 180 * 1e6);
+
+        // 1. Setup: Mint tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Add yield to create non-1:1 exchange rate
+        usdc.mint(address(adapter), yieldAmount);
+
+        // 3. Mock withdraw to fail (force redeem fallback)
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 4. Burn tokens
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18); // $100 refund needed
+        vm.stopPrank();
+
+        // 5. Verify Alice received full refund regardless of exchange rate
+        uint256 refundReceived = usdc.balanceOf(alice) - aliceUsdcBefore;
+        assertGe(refundReceived, 100 * 1e6, "Should receive at least $100 with any yield rate");
+    }
+
+    /**
+     * @notice Test that redeem fallback emits correct shares with +1 buffer
+     * @dev Verifies the actual redeem call includes the +1 adjustment
+     */
+    function test_RedeemFallback_RoundingBuffer_VerifySharesCalculation() public {
+        // 1. Setup: Mint tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Add yield to create rounding scenario
+        usdc.mint(address(adapter), 10 * 1e6); // 190 USDC / 180 shares
+
+        // 3. Calculate expected shares for $80 withdrawal
+        // convertToShares(80e6) = floor(80e6 * 180e6 / 190e6) = floor(75.789...) = 75 shares
+        uint256 expectedSharesWithoutBuffer = adapter.convertToShares(80 * 1e6);
+        uint256 expectedSharesWithBuffer = expectedSharesWithoutBuffer + 1;
+
+        // 4. Mock withdraw to fail
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 5. Expect redeem to be called with shares+1
+        vm.expectCall(
+            address(adapter),
+            abi.encodeCall(IERC4626.redeem, (expectedSharesWithBuffer, address(splitter), address(splitter)))
+        );
+
+        // 6. Execute burn
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice Test rounding buffer with emergencyRedeem during liquidation
+     * @dev Verifies buffer works in liquidation scenario too
+     */
+    function test_EmergencyRedeem_RoundingBuffer_DuringLiquidation() public {
+        // 1. Setup: Mint tokens
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // 2. Add yield to create rounding scenario
+        usdc.mint(address(adapter), 5 * 1e6);
+
+        // 3. Trigger liquidation
+        oracle.updatePrice(int256(CAP));
+
+        // 4. Mock withdraw to fail
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        // 5. Emergency redeem should work with +1 buffer
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        splitter.emergencyRedeem(50 * 1e18);
+        vm.stopPrank();
+
+        // Verify full refund received
+        assertGe(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Should receive at least $100");
+    }
+
+    /**
+     * @notice Test that without +1 buffer, certain scenarios would fail
+     * @dev This is a documentation test showing why +1 is necessary
+     *
+     * The math:
+     * - totalAssets = 181 USDC, totalSupply = 180 shares
+     * - Need to withdraw 80 USDC
+     * - convertToShares(80) = floor(80 * 180 / 181) = floor(79.558) = 79 shares
+     * - redeem(79) returns = floor(79 * 181 / 180) = floor(79.438) = 79 USDC
+     * - 79 < 80: USER WOULD BE SHORT BY 1 USDC!
+     * - With +1: redeem(80) returns = floor(80 * 181 / 180) = floor(80.444) = 80 USDC
+     */
+    function test_RedeemFallback_RoundingBuffer_DocumentedMathProof() public {
+        // This test documents the exact math proving why +1 buffer is needed
+
+        // 1. Setup exact scenario from the math above
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Create 181/180 exchange rate
+        usdc.mint(address(adapter), 1 * 1e6);
+
+        // Verify the math
+        uint256 totalAssets = adapter.totalAssets();
+        uint256 totalSupply = adapter.totalSupply();
+        assertEq(totalAssets, 181 * 1e6, "totalAssets = 181");
+        assertEq(totalSupply, 180 * 1e6, "totalSupply = 180");
+
+        // Calculate what convertToShares returns
+        uint256 amountNeeded = 80 * 1e6;
+        uint256 sharesCalculated = adapter.convertToShares(amountNeeded);
+
+        // Prove the rounding happens
+        // sharesCalculated = floor(80e6 * 180e6 / 181e6) = floor(79558011.04...) = 79558011
+        // This is less than 80e6 shares, showing rounding loss
+        assertLt(sharesCalculated, 80 * 1e6, "convertToShares should round down");
+
+        // Prove that redeeming those shares gives less than 80 USDC
+        uint256 assetsFromCalculatedShares = adapter.convertToAssets(sharesCalculated);
+        assertLt(assetsFromCalculatedShares, amountNeeded, "Without +1, we'd be short!");
+
+        // Prove that redeeming shares+1 gives at least 80 USDC
+        uint256 assetsFromSharesPlus1 = adapter.convertToAssets(sharesCalculated + 1);
+        assertGe(assetsFromSharesPlus1, amountNeeded, "With +1, we get enough USDC");
+
+        // Now verify the actual burn works
+        vm.mockCallRevert(
+            address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_DISABLED")
+        );
+
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+        vm.startPrank(alice);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Full refund received thanks to +1 buffer");
+    }
 }
