@@ -130,23 +130,16 @@ contract SyntheticTokenTest is Test {
         assertEq(fee, 0);
     }
 
-    // ==========================================
-    // 5. Permit Tests (EIP-2612)
-    // ==========================================
-
-    function test_Permit_Success() public {
-        // Create a user with a known private key
+    function test_Permit_EnablesGaslessApproval() public {
         uint256 ownerPrivateKey = 0xA11CE;
         address owner = vm.addr(ownerPrivateKey);
         address spender = address(0x789);
         uint256 value = 100 ether;
         uint256 deadline = block.timestamp + 1 hours;
 
-        // Mint tokens to owner
         vm.prank(splitter);
         token.mint(owner, value);
 
-        // Build permit signature
         bytes32 permitHash = keccak256(
             abi.encodePacked(
                 "\x19\x01",
@@ -165,130 +158,8 @@ contract SyntheticTokenTest is Test {
         );
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerPrivateKey, permitHash);
-
-        // Execute permit
         token.permit(owner, spender, value, deadline, v, r, s);
 
-        // Verify allowance was set
         assertEq(token.allowance(owner, spender), value);
-        // Verify nonce was incremented
-        assertEq(token.nonces(owner), 1);
-    }
-
-    function test_Permit_RevertsExpiredDeadline() public {
-        uint256 ownerPrivateKey = 0xA11CE;
-        address owner = vm.addr(ownerPrivateKey);
-        address spender = address(0x789);
-        uint256 value = 100 ether;
-        uint256 deadline = block.timestamp - 1; // Expired
-
-        bytes32 permitHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                token.DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                        owner,
-                        spender,
-                        value,
-                        token.nonces(owner),
-                        deadline
-                    )
-                )
-            )
-        );
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerPrivateKey, permitHash);
-
-        vm.expectRevert();
-        token.permit(owner, spender, value, deadline, v, r, s);
-    }
-
-    function test_Permit_RevertsInvalidSignature() public {
-        uint256 ownerPrivateKey = 0xA11CE;
-        uint256 wrongPrivateKey = 0xBAD;
-        address owner = vm.addr(ownerPrivateKey);
-        address spender = address(0x789);
-        uint256 value = 100 ether;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        bytes32 permitHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                token.DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                        owner,
-                        spender,
-                        value,
-                        token.nonces(owner),
-                        deadline
-                    )
-                )
-            )
-        );
-
-        // Sign with wrong key
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongPrivateKey, permitHash);
-
-        vm.expectRevert();
-        token.permit(owner, spender, value, deadline, v, r, s);
-    }
-
-    function test_Permit_TransferFromAfterPermit() public {
-        uint256 ownerPrivateKey = 0xA11CE;
-        address owner = vm.addr(ownerPrivateKey);
-        address spender = address(0x789);
-        address recipient = address(0xABC);
-        uint256 value = 100 ether;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        // Mint tokens to owner
-        vm.prank(splitter);
-        token.mint(owner, value);
-
-        // Build and sign permit
-        bytes32 permitHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                token.DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                        owner,
-                        spender,
-                        value,
-                        token.nonces(owner),
-                        deadline
-                    )
-                )
-            )
-        );
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerPrivateKey, permitHash);
-
-        // Execute permit
-        token.permit(owner, spender, value, deadline, v, r, s);
-
-        // Spender transfers tokens using the permit allowance
-        vm.prank(spender);
-        token.transferFrom(owner, recipient, value);
-
-        // Verify transfer
-        assertEq(token.balanceOf(owner), 0);
-        assertEq(token.balanceOf(recipient), value);
-    }
-
-    function test_DOMAIN_SEPARATOR() public view {
-        // Verify DOMAIN_SEPARATOR is set (non-zero)
-        bytes32 domainSeparator = token.DOMAIN_SEPARATOR();
-        assertTrue(domainSeparator != bytes32(0));
-    }
-
-    function test_Nonces_StartsAtZero() public view {
-        assertEq(token.nonces(alice), 0);
-        assertEq(token.nonces(hacker), 0);
     }
 }

@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 /**
  * @title StakedToken
@@ -26,6 +27,25 @@ contract StakedToken is ERC4626 {
         // ERC-4626 automatically recognizes this balance increase.
         // totalAssets() goes UP. totalSupply() stays SAME.
         // Result: Price goes UP.
+    }
+
+    /**
+     * @notice Deposit assets with a permit signature (gasless approval).
+     * @dev Combines EIP-2612 permit with ERC-4626 deposit in a single transaction.
+     * @param assets Amount of underlying tokens to deposit
+     * @param receiver Address to receive the vault shares
+     * @param deadline Permit signature expiration timestamp
+     * @param v Signature recovery byte
+     * @param r Signature r component
+     * @param s Signature s component
+     * @return shares Amount of vault shares minted
+     */
+    function depositWithPermit(uint256 assets, address receiver, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+        returns (uint256 shares)
+    {
+        IERC20Permit(asset()).permit(msg.sender, address(this), assets, deadline, v, r, s);
+        return deposit(assets, receiver);
     }
 
     /**
