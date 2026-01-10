@@ -226,14 +226,17 @@ contract OracleEdgeCasesTest is Test {
         // Price changes to $1.50 before burn executes
         oracle.setPrice(150_000_000);
 
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+
         // Burn executes - refund should be at CAP regardless of oracle
         splitter.burn(500 ether);
 
         vm.stopPrank();
 
         // Should have received CAP-based refund (not affected by oracle price)
-        uint256 expectedRefund = (500 ether * CAP) / splitter.USDC_MULTIPLIER();
-        assertGt(usdc.balanceOf(alice), 10_000_000e6 - 2000e6); // Got most of their money back
+        (uint256 expectedRefund,) = splitter.previewBurn(500 ether);
+        uint256 actualRefund = usdc.balanceOf(alice) - aliceUsdcBefore;
+        assertEq(actualRefund, expectedRefund, "Refund should match preview");
     }
 
     /// @notice Test: Preview accurate despite flash price manipulation

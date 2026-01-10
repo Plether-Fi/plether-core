@@ -117,8 +117,8 @@ contract SplitterHandler is Test {
         // Bound amount to reasonable range - include small amounts to catch rounding issues
         amount = bound(amount, 1e15, 100_000 * 1e18);
 
-        // Fair price uses ceiling division (what the contract should charge)
-        uint256 usdcFair = Math.mulDiv(amount, CAP, splitter.USDC_MULTIPLIER(), Math.Rounding.Ceil);
+        // Get expected cost from preview function
+        (uint256 usdcFair,,) = splitter.previewMint(amount);
 
         // Skip if actor doesn't have enough USDC
         if (usdc.balanceOf(currentActor) < usdcFair) return;
@@ -162,7 +162,7 @@ contract SplitterHandler is Test {
         // Burn can fail if paused AND insolvent
         try splitter.burn(amount) {
             ghost_totalBurned += amount;
-            uint256 usdcReturned = (amount * CAP) / splitter.USDC_MULTIPLIER();
+            (uint256 usdcReturned,) = splitter.previewBurn(amount);
             ghost_totalUsdcWithdrawn += usdcReturned;
             burnCalls++;
 

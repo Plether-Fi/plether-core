@@ -60,7 +60,7 @@ contract SyntheticSplitterFuzzTest is Test {
     function testFuzz_Mint_MaintainsSolvency(uint256 amount) public {
         amount = bound(amount, 0.01 ether, MAX_MINT_AMOUNT);
 
-        uint256 usdcNeeded = (amount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 usdcNeeded,,) = splitter.previewMint(amount);
         usdc.mint(alice, usdcNeeded + 1e6);
 
         vm.startPrank(alice);
@@ -82,11 +82,10 @@ contract SyntheticSplitterFuzzTest is Test {
         // Use smaller range to maximize rounding impact
         amount = bound(amount, 1e15, 1e20);
 
-        // Calculate floor (actual) vs ceiling (fair) price
-        uint256 usdcActual = (amount * CAP) / splitter.USDC_MULTIPLIER();
-        uint256 usdcFair = Math.mulDiv(amount, CAP, splitter.USDC_MULTIPLIER(), Math.Rounding.Ceil);
+        // Get expected cost from preview function
+        (uint256 usdcExpected,,) = splitter.previewMint(amount);
 
-        usdc.mint(alice, usdcFair + 1e6);
+        usdc.mint(alice, usdcExpected + 1e6);
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
 
         vm.startPrank(alice);
@@ -97,8 +96,13 @@ contract SyntheticSplitterFuzzTest is Test {
         uint256 aliceBalanceAfter = usdc.balanceOf(alice);
         uint256 actualPaid = aliceBalanceBefore - aliceBalanceAfter;
 
-        // User must pay at least the fair (ceiling) price
-        assertGe(actualPaid, usdcFair, "ROUNDING EXPLOIT: User paid less than fair price");
+        // User should pay exactly what preview said
+        assertEq(actualPaid, usdcExpected, "Should pay preview amount");
+
+        // Verify security property: user pays at least fair value (ceiling rounding)
+        assertGe(
+            actualPaid * splitter.USDC_MULTIPLIER(), amount * CAP, "ROUNDING EXPLOIT: User paid less than fair price"
+        );
     }
 
     /// @notice Fuzz test with edge-case amounts designed to maximize rounding benefit
@@ -114,8 +118,9 @@ contract SyntheticSplitterFuzzTest is Test {
 
         if (exploitAmount == 0) return;
 
-        uint256 fairPrice = Math.mulDiv(exploitAmount, CAP, usdcMultiplier, Math.Rounding.Ceil);
-        usdc.mint(alice, fairPrice + 1e6);
+        // Get expected cost from preview function
+        (uint256 expectedPrice,,) = splitter.previewMint(exploitAmount);
+        usdc.mint(alice, expectedPrice + 1e6);
         uint256 balanceBefore = usdc.balanceOf(alice);
 
         vm.startPrank(alice);
@@ -125,7 +130,11 @@ contract SyntheticSplitterFuzzTest is Test {
 
         uint256 actualPaid = balanceBefore - usdc.balanceOf(alice);
 
-        assertGe(actualPaid, fairPrice, "ROUNDING EXPLOIT: Edge case amount exploited");
+        // User should pay exactly what preview said
+        assertEq(actualPaid, expectedPrice, "Should pay preview amount");
+
+        // Verify security property: user pays at least fair value
+        assertGe(actualPaid * usdcMultiplier, exploitAmount * CAP, "ROUNDING EXPLOIT: Edge case amount exploited");
     }
 
     function testFuzz_MintBurn_TokenParity(uint256 mintAmount, uint256 burnAmount) public {
@@ -135,7 +144,7 @@ contract SyntheticSplitterFuzzTest is Test {
         uint256 minBurnForRefund = splitter.USDC_MULTIPLIER() / CAP;
         burnAmount = bound(burnAmount, minBurnForRefund, mintAmount);
 
-        uint256 cost = (mintAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 cost,,) = splitter.previewMint(mintAmount);
         usdc.mint(alice, cost + 1e6);
 
         vm.startPrank(alice);
@@ -151,7 +160,7 @@ contract SyntheticSplitterFuzzTest is Test {
     function testFuzz_BurnWhilePaused_IfSolvent(uint256 amount) public {
         amount = bound(amount, 1 ether, MAX_MINT_AMOUNT);
 
-        uint256 cost = (amount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 cost,,) = splitter.previewMint(amount);
         usdc.mint(alice, cost + 1e6);
         vm.startPrank(alice);
         usdc.approve(address(splitter), type(uint256).max);
@@ -172,7 +181,7 @@ contract SyntheticSplitterFuzzTest is Test {
         uint256 poolSize = bound(uint256(poolLiquidity), 100 * 1e6, 100_000_000_000 * 1e6);
         uint256 yield = bound(uint256(yieldAmount), 1 * 1e6, poolSize * 2);
         uint256 mintAmt = 10_000 * 1e18;
-        uint256 cost = (mintAmt * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 cost,,) = splitter.previewMint(mintAmt);
         usdc.mint(alice, cost + 1e6);
 
         vm.startPrank(alice);

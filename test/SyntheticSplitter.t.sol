@@ -92,8 +92,8 @@ contract SyntheticSplitterTest is Test {
         uint256 minAmountFor1Usdc = usdcMultiplier / CAP;
         uint256 almostDoubleAmount = minAmountFor1Usdc * 2 - 1;
 
-        // Calculate fair price (ceiling division)
-        uint256 fairPrice = (almostDoubleAmount * CAP + usdcMultiplier - 1) / usdcMultiplier;
+        // Use preview to get expected price
+        (uint256 expectedPrice,,) = splitter.previewMint(almostDoubleAmount);
 
         // Actually call the contract to see what it charges
         address attacker = address(0xBAD);
@@ -106,8 +106,11 @@ contract SyntheticSplitterTest is Test {
         uint256 actualCharged = balanceBefore - usdc.balanceOf(attacker);
         vm.stopPrank();
 
-        // Contract should charge the fair (ceiling) price
-        assertEq(actualCharged, fairPrice, "Mint should round UP to favor protocol");
+        // Contract should charge the preview price
+        assertEq(actualCharged, expectedPrice, "Mint should charge preview amount");
+
+        // Verify security property: user paid at least fair value (rounds UP)
+        assertGe(actualCharged * usdcMultiplier, almostDoubleAmount * CAP, "Mint should round UP to favor protocol");
     }
 
     /**
@@ -128,9 +131,12 @@ contract SyntheticSplitterTest is Test {
 
         uint256 usdcBefore = usdc.balanceOf(attacker);
         uint256 totalTokensMinted = 0;
+        uint256 expectedTotalCost = 0;
         uint256 iterations = 100;
 
         for (uint256 i = 0; i < iterations; i++) {
+            (uint256 previewCost,,) = splitter.previewMint(exploitAmount);
+            expectedTotalCost += previewCost;
             splitter.mint(exploitAmount);
             totalTokensMinted += exploitAmount;
         }
@@ -138,29 +144,33 @@ contract SyntheticSplitterTest is Test {
 
         uint256 usdcSpent = usdcBefore - usdc.balanceOf(attacker);
 
-        // Calculate fair cost (ceiling division)
-        uint256 fairCost = (totalTokensMinted * CAP + usdcMultiplier - 1) / usdcMultiplier;
+        // User should have paid the sum of preview costs
+        assertEq(usdcSpent, expectedTotalCost, "User should pay sum of preview costs");
 
-        // User should have paid at least the fair cost (no profit from rounding)
-        assertGe(usdcSpent, fairCost, "User should pay at least fair cost");
+        // Verify security property: total paid covers fair value of all tokens
+        assertGe(usdcSpent * usdcMultiplier, totalTokensMinted * CAP, "User should pay at least fair cost");
 
         emit log_named_uint("Tokens minted (wei)", totalTokensMinted);
         emit log_named_uint("USDC spent", usdcSpent);
-        emit log_named_uint("Fair cost (rounded up)", fairCost);
+        emit log_named_uint("Expected cost (from preview)", expectedTotalCost);
     }
 
     /**
-     * @notice Verify that previewMint returns the correct (ceiling) price
+     * @notice Verify that previewMint returns a ceiling-rounded price
+     * @dev Verifies the security property: preview covers fair value
      */
     function test_PreviewMint_RoundsUp() public {
         uint256 usdcMultiplier = splitter.USDC_MULTIPLIER();
         uint256 exploitAmount = (usdcMultiplier / CAP) * 2 - 1;
 
         (uint256 previewRequired,,) = splitter.previewMint(exploitAmount);
-        uint256 fairPrice = (exploitAmount * CAP + usdcMultiplier - 1) / usdcMultiplier;
+        uint256 floorPrice = (exploitAmount * CAP) / usdcMultiplier;
 
-        // previewMint should return the fair (rounded UP) price
-        assertEq(previewRequired, fairPrice, "previewMint should round UP");
+        // previewMint should return at least the floor price
+        assertGe(previewRequired, floorPrice, "previewMint should be at least floor");
+
+        // Verify security property: preview covers fair value (ceiling rounding)
+        assertGe(previewRequired * usdcMultiplier, exploitAmount * CAP, "previewMint should round UP");
     }
 
     // ==========================================

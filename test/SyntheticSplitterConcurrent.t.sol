@@ -233,7 +233,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
-        uint256 expectedRefundEach = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 expectedRefundEach,) = splitter.previewBurn(burnAmount);
         uint256 aliceBefore = usdc.balanceOf(alice);
         uint256 bobBefore = usdc.balanceOf(bob);
         uint256 carolBefore = usdc.balanceOf(carol);
@@ -343,7 +343,7 @@ contract SyntheticSplitterConcurrentTest is Test {
             address(unlimitedAdapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("WITHDRAW_FAILED")
         );
 
-        uint256 expectedRefundEach = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 expectedRefundEach,) = splitter.previewBurn(burnAmount);
         uint256 aliceBefore = usdc.balanceOf(alice);
         uint256 bobBefore = usdc.balanceOf(bob);
         uint256 carolBefore = usdc.balanceOf(carol);
@@ -417,7 +417,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.mint(mintAmount);
 
         // Verify Alice got her refund
-        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
         assertEq(splitter.TOKEN_A().balanceOf(alice), aliceTokensBefore - burnAmount);
 
@@ -462,7 +462,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(burnChunk);
 
         // Verify Alice got all her refunds
-        uint256 expectedTotal = (burnChunk * 3 * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 refundPerChunk,) = splitter.previewBurn(burnChunk);
+        uint256 expectedTotal = refundPerChunk * 3;
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedTotal);
 
         // Verify remaining tokens
@@ -500,7 +501,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(burnAmount);
 
         // Verify burn succeeded
-        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
         assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
 
@@ -625,7 +626,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(burnAmount);
 
         // Verify burn succeeded
-        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
+        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
 
         // emergencyRedeem also works (only needs BEAR - BULL is worthless at CAP)
@@ -634,8 +635,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         vm.prank(alice);
         splitter.emergencyRedeem(emergencyAmount);
 
-        // Verify emergency redeem succeeded
-        expectedRefund = (emergencyAmount * CAP) / splitter.USDC_MULTIPLIER();
+        // Verify emergency redeem succeeded (uses same pricing as burn)
+        (expectedRefund,) = splitter.previewBurn(emergencyAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
     }
 
