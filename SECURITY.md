@@ -133,6 +133,21 @@ When `harvestYield()` is called, surplus yield is distributed:
 - If staking address is not set, treasury receives 100% of non-caller share
 - Fee percentages are hardcoded and cannot be changed
 
+#### Morpho Token Rewards
+
+Morpho may distribute token rewards (e.g., MORPHO) to suppliers via their Universal Rewards Distributor (URD). These are separate from lending yield:
+
+| Aspect | Details |
+|--------|---------|
+| Distribution | Merkle-based claims requiring off-chain proofs |
+| Claiming | Protocol owner calls `claimRewards()` on MorphoAdapter |
+| Recipient | Protocol owner specifies destination address |
+| Frequency | Dependent on Morpho's reward campaigns |
+
+- Rewards are **not** automatically distributed to stakers
+- Protocol owner (same admin role as SyntheticSplitter) has full discretion over reward token destination
+- Requires `setUrd()` to configure the URD contract address before claiming
+
 ### Flash Mint Capability
 
 SyntheticToken (DXY-BEAR and DXY-BULL) supports ERC-3156 flash mints:
@@ -269,6 +284,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-11 | Reduced harvest caller reward from 1% to 0.1%; added Morpho token rewards documentation |
 | 2026-01-09 | Added External Library Dependencies section with OpenZeppelin trust assumptions |
 | 2026-01-04 | Added Router Architecture section; documented LeverageRouterBase, custom errors, and single flash loan pattern for BullLeverageRouter close |
 | 2026-01-03 | Added protocol fees, flash mint, decimal handling, StakedToken, and Curve pool documentation |
