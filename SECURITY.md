@@ -125,9 +125,9 @@ When `harvestYield()` is called, surplus yield is distributed:
 
 | Recipient | Share | Purpose |
 |-----------|-------|---------|
-| Caller | 1% | Incentive to call harvest |
+| Caller | 0.1% | Incentive to call harvest |
 | Treasury | 20% | Protocol/developer performance fee |
-| Staking | 79% | Distributed to stakers |
+| Staking | 79.9% | Distributed to stakers |
 
 - Performance fee only applies to yield generated, not principal
 - If staking address is not set, treasury receives 100% of non-caller share

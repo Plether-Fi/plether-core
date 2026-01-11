@@ -526,14 +526,14 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
         // --- MATH CHECK ---
         // Surplus: 100 USDC
-        // 1. Bob Reward (1%): 1 USDC
-        assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 1 * 1e6, 10);
+        // 1. Bob Reward (0.1%): 0.1 USDC
+        assertApproxEqAbs(usdc.balanceOf(bob), INITIAL_BALANCE + 100_000, 10);
 
-        // Treasury (20% of 99): ~19.8 USDC -> 19_800_000
-        assertApproxEqAbs(usdc.balanceOf(treasury), 19_800_000, 10);
+        // Treasury (20% of 99.9): ~19.98 USDC -> 19_980_000
+        assertApproxEqAbs(usdc.balanceOf(treasury), 19_980_000, 10);
 
-        // Staking (80% of 99): ~79.2 USDC -> 79_200_000
-        assertApproxEqAbs(usdc.balanceOf(staking), 79_200_000, 10);
+        // Staking (remaining of 99.9): ~79.92 USDC -> 79_920_000
+        assertApproxEqAbs(usdc.balanceOf(staking), 79_920_000, 10);
     }
 
     function test_Adapter_RejectsNonSplitterDeposits() public {
@@ -603,8 +603,8 @@ contract SyntheticSplitterTest is Test {
         usdc.mint(address(adapter), 100 * 1e6);
         // 5. Harvest
         splitter.harvestYield();
-        // Assert: stakingShare goes to treasury (total treasury = 20% + 80% = 99% of remaining after callerCut)
-        assertApproxEqAbs(usdc.balanceOf(treasury), 99 * 1e6, 10); // Rough check
+        // Assert: stakingShare goes to treasury (total treasury = 99.9% of remaining after 0.1% callerCut)
+        assertApproxEqAbs(usdc.balanceOf(treasury), 99_900_000, 10);
     }
 
     // ==========================================

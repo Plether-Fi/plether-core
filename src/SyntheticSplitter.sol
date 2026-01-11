@@ -60,7 +60,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     uint256 public constant TIMELOCK_DELAY = 7 days;
     uint256 public lastUnpauseTime;
 
-    uint256 public constant HARVEST_REWARD_PERCENT = 1;
+    uint256 public constant HARVEST_REWARD_BPS = 10;
     uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
 
     // Liquidation State
@@ -421,7 +421,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         // Note: The actual harvest logic limits withdrawal to `adapterAssets` if surplus > adapterAssets.
         uint256 harvestableAmount = (adapterAssets > totalSurplus) ? totalSurplus : adapterAssets;
 
-        callerReward = (harvestableAmount * HARVEST_REWARD_PERCENT) / 100;
+        callerReward = (harvestableAmount * HARVEST_REWARD_BPS) / 10000;
         uint256 remaining = harvestableAmount - callerReward;
         treasuryShare = (remaining * 20) / 100;
         stakingShare = remaining - treasuryShare;
@@ -430,7 +430,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     }
 
     /// @notice Permissionless yield harvesting from the adapter.
-    /// @dev Distributes surplus: 1% to caller, 20% to treasury, 79% to staking.
+    /// @dev Distributes surplus: 0.1% to caller, 20% to treasury, 79.9% to staking.
     function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
@@ -459,7 +459,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
 
         // Distribute based on actual harvested
-        uint256 callerCut = (harvested * HARVEST_REWARD_PERCENT) / 100;
+        uint256 callerCut = (harvested * HARVEST_REWARD_BPS) / 10000;
         uint256 remaining = harvested - callerCut;
         uint256 treasuryShare = (remaining * 20) / 100;
         uint256 stakingShare = remaining - treasuryShare;
