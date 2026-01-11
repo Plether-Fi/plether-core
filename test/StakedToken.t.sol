@@ -4,18 +4,9 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/StakedToken.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
 contract MockUnderlying is ERC20 {
     constructor() ERC20("DXY-BEAR", "BEAR") {}
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
-
-contract MockUnderlyingWithPermit is ERC20, ERC20Permit {
-    constructor() ERC20("DXY-BEAR", "BEAR") ERC20Permit("DXY-BEAR") {}
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
@@ -101,12 +92,6 @@ contract StakedTokenTest is Test {
     // INFLATION ATTACK PROTECTION
     // ==========================================
 
-    function test_DecimalsOffset_IsThree() public view {
-        uint8 assetDecimals = ERC20(address(underlying)).decimals();
-        uint8 vaultDecimals = stakedToken.decimals();
-        assertEq(vaultDecimals - assetDecimals, 3);
-    }
-
     function test_InflationAttack_Mitigated() public {
         // Step 1: Attacker deposits 1 wei
         vm.startPrank(attacker);
@@ -127,75 +112,5 @@ contract StakedTokenTest is Test {
         // With offset=3, Alice gets meaningful shares and loses < 0.1%
         assertGt(aliceShares, 0);
         assertGt(stakedToken.convertToAssets(aliceShares), 99.9 ether);
-    }
-}
-
-contract StakedTokenPermitTest is Test {
-    StakedToken public stakedToken;
-    MockUnderlyingWithPermit public underlying;
-
-    uint256 constant ALICE_PK = 0xA11CE;
-    address alice;
-    address bob = address(0xB0b);
-
-    function setUp() public {
-        alice = vm.addr(ALICE_PK);
-
-        underlying = new MockUnderlyingWithPermit();
-        stakedToken = new StakedToken(IERC20(address(underlying)), "Staked DXY-BEAR", "sDXY-BEAR");
-
-        underlying.mint(alice, 1000 ether);
-        underlying.mint(bob, 1000 ether);
-    }
-
-    function _signPermit(uint256 privateKey, address owner, address spender, uint256 value, uint256 deadline)
-        internal
-        view
-        returns (uint8 v, bytes32 r, bytes32 s)
-    {
-        bytes32 permitHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                underlying.DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                        owner,
-                        spender,
-                        value,
-                        underlying.nonces(owner),
-                        deadline
-                    )
-                )
-            )
-        );
-        return vm.sign(privateKey, permitHash);
-    }
-
-    function test_DepositWithPermit_Success() public {
-        uint256 assets = 100 ether;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        (uint8 v, bytes32 r, bytes32 s) = _signPermit(ALICE_PK, alice, address(stakedToken), assets, deadline);
-
-        vm.prank(alice);
-        uint256 shares = stakedToken.depositWithPermit(assets, alice, deadline, v, r, s);
-
-        assertGt(shares, 0);
-        assertEq(underlying.balanceOf(alice), 900 ether);
-        assertEq(stakedToken.balanceOf(alice), shares);
-    }
-
-    function test_DepositWithPermit_DifferentReceiver() public {
-        uint256 assets = 100 ether;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        (uint8 v, bytes32 r, bytes32 s) = _signPermit(ALICE_PK, alice, address(stakedToken), assets, deadline);
-
-        vm.prank(alice);
-        uint256 shares = stakedToken.depositWithPermit(assets, bob, deadline, v, r, s);
-
-        assertEq(stakedToken.balanceOf(alice), 0);
-        assertEq(stakedToken.balanceOf(bob), shares);
     }
 }

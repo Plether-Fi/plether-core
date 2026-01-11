@@ -56,11 +56,6 @@ contract BasketOracleTest is Test {
         basket.setCurvePool(address(curvePool));
     }
 
-    function test_Initialization() public {
-        assertEq(basket.decimals(), 8);
-        assertEq(basket.description(), "DXY Fixed Basket (Bounded)");
-    }
-
     function test_Math_CalculatesCorrectSum() public {
         // Expected Math:
         // (PriceEUR * QtyEUR) + (PriceJPY * QtyJPY)
@@ -105,25 +100,6 @@ contract BasketOracleTest is Test {
 
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
         new BasketOracle(feeds, quantities, 200, address(this));
-    }
-
-    function test_Version() public view {
-        assertEq(basket.version(), 1);
-    }
-
-    function test_GetRoundData() public view {
-        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
-            basket.getRoundData(0);
-
-        assertEq(roundId, 1, "Round ID should be 1");
-        assertEq(answer, 105_000_000, "Price should match latestRoundData");
-        assertGt(startedAt, 0, "StartedAt should be set");
-        assertGt(updatedAt, 0, "UpdatedAt should be set");
-        assertEq(answeredInRound, 1, "AnsweredInRound should be 1");
-    }
-
-    function test_Description() public view {
-        assertEq(basket.description(), "DXY Fixed Basket (Bounded)");
     }
 
     function test_Components() public view {

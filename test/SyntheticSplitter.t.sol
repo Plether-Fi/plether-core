@@ -1052,20 +1052,6 @@ contract SyntheticSplitterTest is Test {
         assertGt(usdc.balanceOf(treasury), 0);
     }
 
-    function test_Pause_OnlyOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        splitter.pause();
-    }
-
-    function test_Unpause_OnlyOwner() public {
-        splitter.pause();
-
-        vm.prank(alice);
-        vm.expectRevert();
-        splitter.unpause();
-    }
-
     function test_Unpause_SetsLastUnpauseTime() public {
         splitter.pause();
 

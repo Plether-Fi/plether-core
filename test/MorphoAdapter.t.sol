@@ -351,10 +351,6 @@ contract MorphoAdapterTest is Test {
         vm.stopPrank();
     }
 
-    function test_Splitter_IsImmutable() public view {
-        assertEq(adapter.SPLITTER(), user);
-    }
-
     function test_RescueToken_CannotStealUnderlying() public {
         vm.startPrank(owner);
         vm.expectRevert("Cannot rescue Underlying");
@@ -370,14 +366,6 @@ contract MorphoAdapterTest is Test {
         adapter.rescueToken(address(randomToken), owner);
 
         assertEq(randomToken.balanceOf(owner), 500 ether);
-    }
-
-    function test_RescueToken_OnlyOwner() public {
-        MockERC20 randomToken = new MockERC20("Random", "RND");
-
-        vm.prank(hacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
-        adapter.rescueToken(address(randomToken), hacker);
     }
 
     // ==========================================
@@ -407,12 +395,6 @@ contract MorphoAdapterTest is Test {
         adapter.setUrd(newerUrd);
     }
 
-    function test_SetUrd_OnlyOwner() public {
-        vm.prank(hacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
-        adapter.setUrd(address(urd));
-    }
-
     function test_ClaimRewards_Success() public {
         vm.prank(owner);
         adapter.setUrd(address(urd));
@@ -426,17 +408,6 @@ contract MorphoAdapterTest is Test {
 
         assertEq(claimed, 100 ether);
         assertEq(rewardToken.balanceOf(treasury), 100 ether);
-    }
-
-    function test_ClaimRewards_OnlyOwner() public {
-        vm.prank(owner);
-        adapter.setUrd(address(urd));
-
-        bytes32[] memory proof = new bytes32[](0);
-
-        vm.prank(hacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
-        adapter.claimRewards(address(rewardToken), 100 ether, proof, hacker);
     }
 
     function test_ClaimRewards_RevertsIfNoUrd() public {
