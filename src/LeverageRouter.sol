@@ -81,31 +81,19 @@ contract LeverageRouter is LeverageRouterBase {
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
         if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
-        // 1. Calculate Flash Loan Amount
-        // If User has $1000 and wants 3x ($3000 exposure):
-        // We need to buy $3000 worth of DXY-BEAR.
-        // We have $1000. We need to borrow $2000.
-        // Formula: Loan = Principal * (Lev - 1)
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
         if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
-        // 2. Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
-        // 3. Calculate minimum DXY-BEAR output based on REAL MARKET PRICE
-        // Use get_dy to find real market expectation, NOT 1:1 assumption
         uint256 totalUSDC = principal + loanAmount;
         uint256 expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
 
         uint256 minDxyBear = (expectedDxyBear * (10000 - maxSlippageBps)) / 10000;
 
-        // 4. Encode data for callback (includes all data needed for event emission)
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minDxyBear);
 
-        // 5. Initiate Morpho Flash Loan (fee-free)
         MORPHO.flashLoan(address(USDC), loanAmount, data);
-
-        // Event emitted in _executeOpen callback
     }
 
     /**

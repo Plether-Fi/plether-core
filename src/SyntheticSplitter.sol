@@ -172,8 +172,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     function mint(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
-        // Check adapter unless we are in emergency mode,
-        // but generally we shouldn't mint if no adapter is connected.
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
         uint256 price = _getOraclePrice();
@@ -181,15 +179,11 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
             revert Splitter__LiquidationActive();
         }
 
-        // Round UP to favor protocol (prevents rounding exploit)
         uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
         require(usdcNeeded > 0, "Amount too small");
 
-        // 1. Pull USDC: User -> Splitter
         USDC.safeTransferFrom(msg.sender, address(this), usdcNeeded);
 
-        // 2. Buffer Logic
-        // Keep 10% in Splitter, Send 90% to Adapter
         uint256 keepAmount = (usdcNeeded * BUFFER_PERCENT) / 100;
         uint256 depositAmount = usdcNeeded - keepAmount;
 

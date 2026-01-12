@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -100,34 +101,23 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert ZapRouter__SlippageExceedsMax();
         if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) revert ZapRouter__SplitterNotActive();
 
-        // 1. Get Spot Price
         uint256 priceBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
         if (priceBear >= CAP_PRICE) revert ZapRouter__BearPriceAboveCap();
 
-        // 2. Calculate Bull Price (e.g., $2.00 - $1.10 = $0.90)
         uint256 priceBull = CAP_PRICE - priceBear;
-
-        // 3. Calculate Theoretical Max Borrow
-        // Example: $1000 / $0.90 = 1111 Bear Tokens
         uint256 theoreticalFlash = (usdcAmount * 1e18) / priceBull;
 
-        // Apply solvency buffer to cover swap fees (~0.04%) and rounding
-        uint256 bufferBps = 100; // 1% buffer
+        uint256 bufferBps = 100;
         uint256 flashAmount = (theoreticalFlash * (10000 - bufferBps)) / 10000;
 
-        // 4. Calculate Expected Swap Output (with Price Impact)
         uint256 expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
         uint256 minSwapOut = (expectedSwapOut * (10000 - maxSlippageBps)) / 10000;
 
-        // 5. Initiate Flash Loan
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // Encode all data needed for callback including event emission
         bytes memory data = abi.encode(ACTION_MINT, msg.sender, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps);
 
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
-
-        // Event emitted in _handleMint callback
     }
 
     // =================================================================
@@ -139,21 +129,35 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param deadline Unix timestamp after which the transaction reverts.
     function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external nonReentrant whenNotPaused {
+        _zapBurnCore(bullAmount, minUsdcOut, deadline);
+    }
+
+    /// @notice Sell DXY-BULL tokens for USDC with a permit signature (gasless approval).
+    /// @param bullAmount Amount of DXY-BULL to sell.
+    /// @param minUsdcOut Minimum USDC to receive (slippage protection).
+    /// @param deadline Unix timestamp after which the transaction reverts.
+    /// @param v Signature recovery byte.
+    /// @param r Signature r component.
+    /// @param s Signature s component.
+    function zapBurnWithPermit(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        IERC20Permit(address(DXY_BULL)).permit(msg.sender, address(this), bullAmount, deadline, v, r, s);
+        _zapBurnCore(bullAmount, minUsdcOut, deadline);
+    }
+
+    function _zapBurnCore(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) internal {
         if (bullAmount == 0) revert ZapRouter__ZeroAmount();
         if (block.timestamp > deadline) revert ZapRouter__Expired();
 
-        // 1. Pull Bull Tokens from User
         DXY_BULL.safeTransferFrom(msg.sender, address(this), bullAmount);
 
-        // 2. Flash Borrow Matching Bear Tokens
-        // To merge and unlock collateral, we need 1 Bear for every 1 Bull.
         uint256 flashAmount = bullAmount;
 
-        // Encode ACTION_BURN with all data needed for callback
         bytes memory data = abi.encode(ACTION_BURN, msg.sender, bullAmount, minUsdcOut);
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
-
-        // Event emitted in _handleBurn callback
     }
 
     // =================================================================

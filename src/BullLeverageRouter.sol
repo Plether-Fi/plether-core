@@ -143,31 +143,19 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__SplitterNotActive();
         }
 
-        // Calculate Flash Loan Amount
-        // If User has $1000 and wants 3x ($3000 exposure):
-        // We need to mint $3000 worth of pairs.
-        // We have $1000. We need to borrow $2000.
         uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
         if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
-        // Pull User Funds
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
-        // Calculate minimum USDC output from selling DXY-BEAR using Curve price discovery
-        // Splitter mints at CAP price: tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
-        // For CAP=$2, $1 USDC → 0.5 pairs (0.5e18 of each token)
         uint256 totalUSDC = principal + loanAmount;
         uint256 dxyBearAmount = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
         uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
         uint256 minSwapOut = (expectedUsdcFromSale * (10_000 - maxSlippageBps)) / 10_000;
 
-        // Encode data for callback (includes all data needed for event emission)
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minSwapOut);
 
-        // Initiate Morpho Flash Loan (fee-free)
         MORPHO.flashLoan(address(USDC), loanAmount, data);
-
-        // Event emitted in _executeOpen callback
     }
 
     /**
