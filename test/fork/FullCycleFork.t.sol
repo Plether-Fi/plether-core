@@ -31,10 +31,10 @@ contract FullCycleForkTest is BaseForkTest {
     /// @param utilizationPercent Percentage of supplied assets to borrow (1-100)
     function _simulateYield(uint256 utilizationPercent) internal {
         uint256 adapterAssets = yieldAdapter.totalAssets();
-        if (adapterAssets == 0) return;
+        require(adapterAssets > 0, "_simulateYield: adapter has no assets");
 
         uint256 borrowAmount = (adapterAssets * utilizationPercent) / 100;
-        if (borrowAmount == 0) return;
+        require(borrowAmount > 0, "_simulateYield: borrow amount is 0");
 
         // Borrower supplies WETH collateral and borrows USDC
         vm.startPrank(borrower);
@@ -231,6 +231,8 @@ contract FullCycleForkTest is BaseForkTest {
                 adapterAssetsBefore = yieldAdapter.totalAssets();
             } catch {}
         }
+
+        require(totalHarvested > 0, "Yield simulation failed: no yield harvested");
 
         // PHASE 4: REPAY LOAN
         {
