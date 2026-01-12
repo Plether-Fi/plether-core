@@ -9,6 +9,7 @@ import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.
 import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICurveCryptoFactory} from "./BaseForkTest.sol";
+import {OracleLib} from "../../src/libraries/OracleLib.sol";
 
 /// @notice Mock SEK/USD feed (not available on mainnet Chainlink)
 contract MockSEKFeed is AggregatorV3Interface {
@@ -401,6 +402,48 @@ contract BasketOracleForkTest is Test {
         (uint256 usdcRequired,,) = splitter.previewMint(600_000e18);
         IERC20(USDC).approve(address(splitter), usdcRequired);
         splitter.mint(600_000e18);
+    }
+
+    function test_StaleOracle_BlocksMintOnMainnet() public {
+        _deployProtocolWithBasket();
+
+        uint256 mintAmount = 1000e18;
+        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
+        IERC20(USDC).approve(address(splitter), usdcRequired);
+
+        // Warp 9 hours past the feed's updatedAt (staleness threshold is 8 hours)
+        vm.warp(block.timestamp + 9 hours);
+
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
+        splitter.mint(mintAmount);
+    }
+
+    function test_StaleOracle_RecoveryAfterFreshUpdate() public {
+        _deployProtocolWithBasket();
+
+        vm.warp(block.timestamp + 9 hours);
+
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
+        splitter.previewMint(1000e18);
+
+        _mockFreshFeed(CL_EUR_USD);
+        _mockFreshFeed(CL_JPY_USD);
+        _mockFreshFeed(CL_GBP_USD);
+        _mockFreshFeed(CL_CAD_USD);
+        _mockFreshFeed(CL_CHF_USD);
+        sekFeed.setPrice(9500000);
+
+        (uint256 usdcRequired,,) = splitter.previewMint(1000e18);
+        assertGt(usdcRequired, 0);
+    }
+
+    function _mockFreshFeed(address feed) internal {
+        (, int256 price,,,) = AggregatorV3Interface(feed).latestRoundData();
+        vm.mockCall(
+            feed,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), price, block.timestamp, block.timestamp, uint80(1))
+        );
     }
 }
 
