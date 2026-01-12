@@ -322,13 +322,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Calculate Bull Price
         uint256 priceBull = CAP_PRICE - priceBear;
 
-        // Calculate Dynamic Flash Amount
-        flashAmount = (usdcAmount * 1e18) / priceBull;
+        // Calculate Dynamic Flash Amount (matches execution logic)
+        uint256 theoreticalFlash = (usdcAmount * 1e18) / priceBull;
+        flashAmount = (theoreticalFlash * (10000 - SAFETY_BUFFER_BPS)) / 10000;
 
-        // Include buffer in preview to match execution
-        if (flashAmount > 1e13) flashAmount -= 1e13;
-
-        expectedSwapOut = (flashAmount * priceBear) / 1e18;
+        expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
         totalUSDC = usdcAmount + expectedSwapOut;
 
         // Minting pairs: 2 USDC -> 1 Pair (assuming CAP=$2)

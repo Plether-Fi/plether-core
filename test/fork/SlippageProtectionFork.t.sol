@@ -404,4 +404,115 @@ contract SlippageProtectionForkTest is BaseForkTest {
         assertGe(sum, minSum, "Token prices sum below CAP - 5%");
         assertLe(sum, maxSum, "Token prices sum above CAP + 5%");
     }
+
+    // ==========================================
+    // PREVIEW FUNCTION ACCURACY TESTS
+    // These tests should FAIL, demonstrating bugs
+    // ==========================================
+
+    /// @notice previewZapMint uses linear interpolation, should match actual within 0.1%
+    function test_PreviewZapMint_ShouldMatchActual() public {
+        uint256 usdcAmount = 10_000e6;
+
+        (,,, uint256 previewTokensOut,) = zapRouter.previewZapMint(usdcAmount);
+
+        vm.startPrank(alice);
+        IERC20(USDC).approve(address(zapRouter), usdcAmount);
+        uint256 bullBefore = IERC20(bullToken).balanceOf(alice);
+        zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+        uint256 actualTokensOut = IERC20(bullToken).balanceOf(alice) - bullBefore;
+        vm.stopPrank();
+
+        console.log("previewZapMint - Preview tokens:", previewTokensOut);
+        console.log("previewZapMint - Actual tokens:", actualTokensOut);
+
+        assertApproxEqRel(
+            actualTokensOut, previewTokensOut, 0.001e18, "BUG: previewZapMint should match actual within 0.1%"
+        );
+    }
+
+    /// @notice previewZapBurn uses linear interpolation for buyback cost
+    function test_PreviewZapBurn_ShouldMatchActual() public {
+        uint256 zapAmount = 10_000e6;
+        vm.startPrank(alice);
+        IERC20(USDC).approve(address(zapRouter), zapAmount);
+        zapRouter.zapMint(zapAmount, 0, 100, block.timestamp + 1 hours);
+        uint256 bullBalance = IERC20(bullToken).balanceOf(alice);
+        vm.stopPrank();
+
+        (,, uint256 previewUsdcOut,) = zapRouter.previewZapBurn(bullBalance);
+
+        vm.startPrank(alice);
+        IERC20(bullToken).approve(address(zapRouter), bullBalance);
+        uint256 usdcBefore = IERC20(USDC).balanceOf(alice);
+        zapRouter.zapBurn(bullBalance, 0, block.timestamp + 1 hours);
+        uint256 actualUsdcOut = IERC20(USDC).balanceOf(alice) - usdcBefore;
+        vm.stopPrank();
+
+        console.log("previewZapBurn - Preview USDC:", previewUsdcOut);
+        console.log("previewZapBurn - Actual USDC:", actualUsdcOut);
+
+        assertApproxEqRel(
+            actualUsdcOut, previewUsdcOut, 0.001e18, "BUG: previewZapBurn should match actual within 0.1%"
+        );
+    }
+
+    /// @notice previewCloseLeverage uses linear interpolation for buyback cost
+    function test_PreviewCloseLeverage_ShouldMatchActual() public {
+        uint256 principal = 10_000e6;
+        uint256 leverage = 2e18;
+
+        vm.startPrank(alice);
+        IMorpho(MORPHO).setAuthorization(address(bullLeverageRouter), true);
+        IERC20(USDC).approve(address(bullLeverageRouter), principal);
+        bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+
+        bytes32 marketId = keccak256(abi.encode(bullMarketParams));
+        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
+        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
+        uint256 debt = (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares;
+
+        (,, uint256 previewReturn) = bullLeverageRouter.previewCloseLeverage(debt, collateral);
+
+        uint256 usdcBefore = IERC20(USDC).balanceOf(alice);
+        bullLeverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        uint256 actualReturn = IERC20(USDC).balanceOf(alice) - usdcBefore;
+        vm.stopPrank();
+
+        console.log("previewCloseLeverage - Preview return:", previewReturn);
+        console.log("previewCloseLeverage - Actual return:", actualReturn);
+
+        assertApproxEqRel(
+            actualReturn, previewReturn, 0.001e18, "BUG: previewCloseLeverage should match actual within 0.1%"
+        );
+    }
+
+    /// @notice Preview accuracy should hold across different trade sizes
+    function test_PreviewAccuracy_AcrossMultipleTradeSizes() public {
+        uint256[] memory amounts = new uint256[](3);
+        amounts[0] = 1_000e6;
+        amounts[1] = 5_000e6;
+        amounts[2] = 10_000e6;
+
+        for (uint256 i = 0; i < amounts.length; i++) {
+            uint256 usdcAmount = amounts[i];
+            deal(USDC, alice, usdcAmount);
+
+            (,,, uint256 previewTokensOut,) = zapRouter.previewZapMint(usdcAmount);
+
+            vm.startPrank(alice);
+            IERC20(USDC).approve(address(zapRouter), usdcAmount);
+            uint256 bullBefore = IERC20(bullToken).balanceOf(alice);
+            zapRouter.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours);
+            uint256 actualTokensOut = IERC20(bullToken).balanceOf(alice) - bullBefore;
+            vm.stopPrank();
+
+            console.log("Amount USDC:", usdcAmount / 1e6);
+            console.log("Preview:", previewTokensOut);
+            console.log("Actual:", actualTokensOut);
+            console.log("---");
+
+            assertApproxEqRel(actualTokensOut, previewTokensOut, 0.001e18, "Preview should match actual within 0.1%");
+        }
+    }
 }

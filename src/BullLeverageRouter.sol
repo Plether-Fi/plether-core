@@ -430,25 +430,76 @@ contract BullLeverageRouter is LeverageRouterBase {
         view
         returns (uint256 expectedUSDC, uint256 usdcForBearBuyback, uint256 expectedReturn)
     {
-        // Convert staked shares to underlying BULL amount (shares have 1000x offset)
+        // Convert staked shares to underlying BULL amount
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
 
         // Redeeming pairs at CAP: usdc = tokens * CAP / DecimalConstants.USDC_TO_TOKEN_SCALE
         expectedUSDC = (dxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
 
-        // Estimate USDC needed to buy back DXY-BEAR for flash mint repayment
-        uint256 testUsdcAmount = 1e6; // 1 USDC
-        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, testUsdcAmount);
-        if (bearPerUsdc > 0) {
-            usdcForBearBuyback = (dxyBullAmount * testUsdcAmount) / bearPerUsdc;
-        } else {
-            // Fallback: use CAP pricing
-            usdcForBearBuyback = (dxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        // Calculate extra BEAR needed to sell for debt repayment (mirrors closeLeverage logic)
+        uint256 extraBearForDebt = 0;
+        uint256 usdcFromBearSale = 0;
+        if (debtToRepay > 0) {
+            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+            if (usdcPerBear > 0) {
+                // Calculate BEAR needed without slippage buffer (conservative estimate)
+                extraBearForDebt = (debtToRepay * 1e18) / usdcPerBear;
+                // Estimate actual USDC from selling this BEAR
+                usdcFromBearSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
+            }
         }
 
-        // No flash fee with Morpho
-        uint256 totalCosts = debtToRepay + usdcForBearBuyback;
+        // Total BEAR to buy back: dxyBullAmount + extraBearForDebt (flash fee is negligible)
+        // After burn, bearBalance=0, so we need to buy back the full flash amount
+        uint256 totalBearToBuyBack = dxyBullAmount + extraBearForDebt;
 
-        expectedReturn = expectedUSDC > totalCosts ? expectedUSDC - totalCosts : 0;
+        // Calculate USDC needed using get_dy for accurate AMM pricing
+        usdcForBearBuyback = _estimateUsdcForBearBuyback(totalBearToBuyBack);
+
+        // Net USDC flow:
+        // + expectedUSDC (from burning pairs)
+        // + usdcFromBearSale (from selling extra BEAR)
+        // - debtToRepay (paid to Morpho)
+        // - usdcForBearBuyback (to buy back flash-minted BEAR)
+        uint256 totalInflows = expectedUSDC + usdcFromBearSale;
+        uint256 totalOutflows = debtToRepay + usdcForBearBuyback;
+
+        expectedReturn = totalInflows > totalOutflows ? totalInflows - totalOutflows : 0;
+    }
+
+    /**
+     * @dev Estimate USDC needed to buy a specific amount of BEAR using binary search.
+     */
+    function _estimateUsdcForBearBuyback(uint256 bearAmount) private view returns (uint256) {
+        if (bearAmount == 0) return 0;
+
+        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+        if (bearPerUsdc == 0) {
+            return (bearAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        }
+
+        // Binary search for accurate USDC estimate
+        uint256 low = (bearAmount * 1e6) / bearPerUsdc;
+        uint256 high = low + (low / 5); // Start with 20% buffer
+
+        // Ensure high is sufficient
+        uint256 bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, high);
+        while (bearAtHigh < bearAmount && high < type(uint128).max) {
+            high = high * 2;
+            bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, high);
+        }
+
+        // Binary search to find minimum USDC
+        for (uint256 i = 0; i < 20; i++) {
+            uint256 mid = (low + high) / 2;
+            uint256 bearOut = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, mid);
+            if (bearOut >= bearAmount) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        return high;
     }
 }
