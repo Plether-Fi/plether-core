@@ -370,8 +370,7 @@ contract SyntheticSplitterTest is Test {
     // ==========================================
     // 4. LIQUIDATION & EMERGENCY
     // ==========================================
-    function test_EmergencyRedeem_OnlyWorksIfLiquidated() public {
-        // Normal price
+    function test_EmergencyRedeem_RevertsIfNotLiquidated() public {
         oracle.updatePrice(100_000_000);
         vm.startPrank(alice);
         vm.expectRevert(SyntheticSplitter.Splitter__NotLiquidated.selector);
@@ -554,36 +553,22 @@ contract SyntheticSplitterTest is Test {
         assertEq(adapter.totalSupply(), 0);
     }
 
-    function test_Harvest_UsesRedeemToAvoidRounding() public {
-        // 1. Setup: Mint 100 Tokens ($200 Liability)
+    function test_Harvest_FallsBackToRedeemWhenWithdrawReverts() public {
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
         vm.stopPrank();
-        // 2. FORCE SURPLUS: Donate massive amount to Splitter Buffer
-        // Liability = $200. We add $1000 to buffer.
-        // Buffer = $1020. Adapter = $180.
-        // Total = $1200. Liability = $200. Surplus = $1000.
-        // Since Surplus ($1000) > Adapter Assets ($180), the logic MUST try to empty the adapter.
+
         usdc.mint(address(splitter), 1000 * 1e6);
-        // 3. Setup Expectation
-        // We want to verify that 'redeem' is called, NOT 'withdraw'.
 
         vm.startPrank(bob);
-        // A. Simulate 'withdraw' reverting (The Bug)
-        // If the contract calls withdraw(180), we make it revert with the specific 4626 error
-        // indicating it asked for too many shares due to rounding.
         vm.mockCallRevert(
             address(adapter),
             abi.encodeWithSelector(IERC4626.withdraw.selector),
             abi.encodeWithSignature("ERC4626ExceededMaxWithdraw(address,uint256,uint256)", address(0), 0, 0)
         );
-        // B. Expect 'redeem' to be called (The Fix)
-        // The contract should skip withdraw and call redeem instead.
         vm.expectCall(address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector));
-        // 4. Execution
         splitter.harvestYield();
-
         vm.stopPrank();
     }
 
@@ -987,15 +972,12 @@ contract SyntheticSplitterTest is Test {
         assertEq(uint256(splitter.currentStatus()), uint256(ISyntheticSplitter.Status.PAUSED));
     }
 
-    function test_PreviewHarvest_ReturnsFalseWhenNoSurplus() public {
-        // 1. Mint tokens so there's liability but no surplus
+    function test_PreviewHarvest_CannotHarvestWhenNoSurplus() public {
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
         vm.stopPrank();
 
-        // 2. Check harvestable - should return (false, 0, 0, 0, 0)
-        // since totalHoldings ($200) == requiredBacking ($200)
         (bool canHarvest, uint256 surplus,,,) = splitter.previewHarvest();
         assertFalse(canHarvest);
         assertEq(surplus, 0);

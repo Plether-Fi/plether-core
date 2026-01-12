@@ -328,8 +328,7 @@ contract BullLeverageRouterTest is Test {
         assertGe(dxyBear.balanceOf(address(router)), 0, "Router may hold BEAR dust");
     }
 
-    function test_CloseLeverage_Revert_Insolvent() public {
-        // 1. Open Position
+    function test_CloseLeverage_RevertsWhenRedemptionOutputInsufficient() public {
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 3 * 1e18;
 
@@ -340,11 +339,7 @@ contract BullLeverageRouterTest is Test {
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
-        // 2. Mock a catastrophic event where Splitter redemption pays out only 10%
-        // The user owes 2000 USDC Flash Loan, but redemption of 1500 pairs only gives
-        // 3000 * 0.10 = 300 USDC.
-        // 300 USDC < 2000 USDC Debt -> Revert
-        splitter.setRedemptionRate(10); // 10%
+        splitter.setRedemptionRate(10);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector);
         router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);

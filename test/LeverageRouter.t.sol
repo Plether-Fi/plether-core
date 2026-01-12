@@ -427,18 +427,14 @@ contract LeverageRouterTest is Test {
         assertEq(morpho.borrowBalance(alice), 100 * 1e6, "Debt should be 0.1x");
     }
 
-    /// @notice Test principal = 1 wei (smallest possible) - actually succeeds
-    function test_OpenLeverage_TinyPrincipal_1Wei() public {
+    function test_OpenLeverage_SucceedsWithMinimalPrincipal() public {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), 1);
 
-        // With 1 wei USDC and 3x leverage, loan = 2 wei
-        // This actually succeeds because loan > 0
         router.openLeverage(1, 3e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
-        // Tiny position created
         assertGt(morpho.collateralBalance(alice), 0, "Should have tiny collateral");
         assertEq(morpho.borrowBalance(alice), 2, "Debt should be 2 wei");
     }
