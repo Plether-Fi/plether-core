@@ -59,11 +59,9 @@ contract MockUSDC is ERC20 {
 // Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
 contract MockV3Aggregator is AggregatorV3Interface {
     int256 private immutable _price;
-    uint256 private immutable _updatedAt;
 
     constructor(int256 price_) {
         _price = price_;
-        _updatedAt = block.timestamp;
     }
 
     function decimals() external pure override returns (uint8) {
@@ -78,13 +76,13 @@ contract MockV3Aggregator is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80 _roundId)
+    function getRoundData(uint80)
         external
         view
         override
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
-        return (0, _price, 0, _updatedAt, 0);
+        return (0, _price, 0, block.timestamp, 0);
     }
 
     function latestRoundData()
@@ -93,7 +91,7 @@ contract MockV3Aggregator is AggregatorV3Interface {
         override
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
-        return (0, _price, 0, _updatedAt, 0);
+        return (0, _price, 0, block.timestamp, 0);
     }
 }
 
@@ -211,14 +209,8 @@ contract DeployToSepolia is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 11: Deploy Routers and create Morpho markets
-        (MarketParams memory bearMarketParams, MarketParams memory bullMarketParams) = _deployRouters(deployed);
-
-        // Step 12: Create Morpho markets
-        _createMorphoMarkets(bearMarketParams, bullMarketParams);
-
-        // Step 13: Seed Morpho markets with USDC liquidity
-        _seedMorphoMarkets(deployed, deployer, bearMarketParams, bullMarketParams);
+        // Step 11: Deploy Routers
+        _deployRouters(deployed);
 
         vm.stopBroadcast();
 
@@ -332,10 +324,9 @@ contract DeployToSepolia is Script {
         oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
     }
 
-    function _deployRouters(DeployedContracts memory d)
-        internal
-        returns (MarketParams memory bearMarketParams, MarketParams memory bullMarketParams)
-    {
+    function _deployRouters(DeployedContracts memory d) internal {
+        MarketParams memory bearMarketParams;
+        MarketParams memory bullMarketParams;
         // Deploy ZapRouter
         d.zapRouter =
             new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), address(d.usdc), d.curvePool);
