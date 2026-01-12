@@ -283,7 +283,8 @@ contract DeployToSepolia is Script {
         d.usdc.mint(deployer, usdcAmount);
 
         // Mint DXY-BEAR via Splitter (requires USDC)
-        uint256 mintCost = (bearAmount * CAP) / 1e20;
+        // Add 1 to account for rounding up in splitter.mint()
+        uint256 mintCost = (bearAmount * CAP) / 1e20 + 1;
         d.usdc.mint(deployer, mintCost);
         d.usdc.approve(address(d.splitter), mintCost);
         d.splitter.mint(bearAmount);
