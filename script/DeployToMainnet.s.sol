@@ -275,7 +275,7 @@ contract DeployToMainnet is Script {
         quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
 
-        return new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, owner);
+        return new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP, owner);
     }
 
     function _deployCurvePool(address dxyBear) internal returns (address) {

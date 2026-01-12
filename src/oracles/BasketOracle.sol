@@ -26,6 +26,7 @@ contract BasketOracle is AggregatorV3Interface {
     // ==========================================
     ICurvePool public curvePool;
     uint256 public immutable MAX_DEVIATION_BPS; // e.g. 200 = 2%
+    uint256 public immutable CAP; // Price cap in 8 decimals (e.g., 2e8 = $2.00)
     address public immutable OWNER;
 
     error BasketOracle__InvalidPrice(address feed);
@@ -34,7 +35,13 @@ contract BasketOracle is AggregatorV3Interface {
     error BasketOracle__Unauthorized();
     error BasketOracle__AlreadySet();
 
-    constructor(address[] memory _feeds, uint256[] memory _quantities, uint256 _maxDeviationBps, address _owner) {
+    constructor(
+        address[] memory _feeds,
+        uint256[] memory _quantities,
+        uint256 _maxDeviationBps,
+        uint256 _cap,
+        address _owner
+    ) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
@@ -45,6 +52,7 @@ contract BasketOracle is AggregatorV3Interface {
         }
 
         MAX_DEVIATION_BPS = _maxDeviationBps;
+        CAP = _cap;
         OWNER = _owner;
     }
 
@@ -100,25 +108,28 @@ contract BasketOracle is AggregatorV3Interface {
     }
 
     /**
-     * @notice Compares Theoretical Price (Chainlink) with Spot Price (Curve).
+     * @notice Compares Theoretical DXY-BEAR price with Curve spot price.
+     * @dev Curve pool returns DXY-BEAR price, so we convert theoretical DXY to DXY-BEAR: CAP - DXY.
      * @dev Reverts if the difference exceeds MAX_DEVIATION_BPS.
      * @dev Skips check if Curve pool is not yet configured.
      */
-    function _checkDeviation(uint256 theoreticalPrice8Dec) internal view {
+    function _checkDeviation(uint256 theoreticalDxy8Dec) internal view {
         ICurvePool pool = curvePool;
         if (address(pool) == address(0)) return;
 
-        uint256 theoretical18 = theoreticalPrice8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
-        uint256 spot18 = pool.price_oracle();
+        uint256 cap18 = CAP * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+        uint256 dxy18 = theoreticalDxy8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+        uint256 theoreticalBear18 = cap18 - dxy18;
 
-        if (spot18 == 0) revert BasketOracle__InvalidPrice(address(pool));
+        uint256 spotBear18 = pool.price_oracle();
+        if (spotBear18 == 0) revert BasketOracle__InvalidPrice(address(pool));
 
-        uint256 diff = theoretical18 > spot18 ? theoretical18 - spot18 : spot18 - theoretical18;
-        uint256 basePrice = theoretical18 < spot18 ? theoretical18 : spot18;
+        uint256 diff = theoreticalBear18 > spotBear18 ? theoreticalBear18 - spotBear18 : spotBear18 - theoreticalBear18;
+        uint256 basePrice = theoreticalBear18 < spotBear18 ? theoreticalBear18 : spotBear18;
         uint256 threshold = (basePrice * MAX_DEVIATION_BPS) / 10000;
 
         if (diff > threshold) {
-            revert BasketOracle__PriceDeviation(theoretical18, spot18);
+            revert BasketOracle__PriceDeviation(theoreticalBear18, spotBear18);
         }
     }
 

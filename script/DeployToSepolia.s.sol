@@ -172,7 +172,7 @@ contract DeployToSepolia is Script {
         (address[] memory feeds, uint256[] memory quantities) = _deployMockFeeds();
 
         // Step 3: Deploy BasketOracle (without Curve pool - will be set later)
-        deployed.basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, deployer);
+        deployed.basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP, deployer);
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates DXY-BEAR/BULL)

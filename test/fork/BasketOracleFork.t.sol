@@ -94,6 +94,9 @@ contract BasketOracleForkTest is Test {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     uint256 constant FORK_BLOCK = 24_136_062;
 
+    uint256 constant CAP = 2e8; // $2.00 cap (8 decimals)
+    uint256 constant CAP_SCALED = 2e18; // CAP in 18 decimals
+
     uint256 constant CURVE_A = 2000000;
     uint256 constant CURVE_GAMMA = 50000000000000;
     uint256 constant CURVE_MID_FEE = 5000000;
@@ -131,7 +134,9 @@ contract BasketOracleForkTest is Test {
 
         calculatedBasketPrice = _calculateBasketPrice();
 
-        address tempCurvePool = address(new MockCurvePoolForOracleBasket(calculatedBasketPrice * 1e10));
+        // Mock Curve pool returns DXY-BEAR price = CAP - DXY
+        uint256 bearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        address tempCurvePool = address(new MockCurvePoolForOracleBasket(bearPrice));
 
         address[] memory feeds = new address[](6);
         feeds[0] = CL_EUR_USD;
@@ -149,7 +154,7 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, 500, CAP, address(this));
         basketOracle.setCurvePool(tempCurvePool);
     }
 
@@ -220,10 +225,11 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        uint256 expectedPrice = calculatedBasketPrice * 1e10;
-        address tempPool = address(new MockCurvePoolForOracleBasket(expectedPrice));
+        // DXY-BEAR price = CAP - DXY (use original basket price for comparison)
+        uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, CAP, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -255,10 +261,11 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        uint256 expectedPrice = calculatedBasketPrice * 1e10;
-        address tempPool = address(new MockCurvePoolForOracleBasket(expectedPrice));
+        // DXY-BEAR price = CAP - DXY (use original basket price for comparison)
+        uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, 500, CAP, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -292,8 +299,9 @@ contract BasketOracleForkTest is Test {
     }
 
     function test_FullBasket_DeviationCheckWithRealPool() public {
-        uint256 initialPrice18 = calculatedBasketPrice * 1e10;
-        curvePool = _deployCurvePool(initialPrice18);
+        // Curve initial price is DXY-BEAR = CAP - DXY
+        uint256 initialBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        curvePool = _deployCurvePool(initialBearPrice);
 
         address[] memory feeds = new address[](6);
         feeds[0] = CL_EUR_USD;
@@ -311,7 +319,7 @@ contract BasketOracleForkTest is Test {
         quantities[4] = WEIGHT_SEK;
         quantities[5] = WEIGHT_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, 200, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, 200, CAP, address(this));
         basketOracle.setCurvePool(curvePool);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
@@ -468,6 +476,8 @@ contract DeviationCheckForkTest is Test {
     uint256 constant CURVE_MA_HALF_TIME = 866;
 
     uint256 constant MAX_DEVIATION_BPS = 200; // 2%
+    uint256 constant CAP_8DEC = 2e8; // $2.00 cap (8 decimals)
+    uint256 constant CAP_18DEC = 2e18; // CAP in 18 decimals
 
     BasketOracle public basketOracle;
     SyntheticSplitter public splitter;
@@ -476,6 +486,7 @@ contract DeviationCheckForkTest is Test {
     address public bearToken;
 
     uint256 public oraclePrice18;
+    uint256 public bearPrice18;
 
     function setUp() public {
         try vm.envString("MAINNET_RPC_URL") returns (string memory url) {
@@ -490,12 +501,13 @@ contract DeviationCheckForkTest is Test {
         vm.warp(updatedAt + 1 hours);
 
         oraclePrice18 = uint256(eurPrice) * 1e10;
+        bearPrice18 = CAP_18DEC - oraclePrice18;
 
         _deployProtocol();
     }
 
     function test_deviationCheck_passesWhenAligned() public {
-        curvePool = _deployCurvePoolAtPrice(oraclePrice18);
+        curvePool = _deployCurvePoolAtPrice(bearPrice18);
         basketOracle.setCurvePool(curvePool);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
@@ -510,7 +522,7 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_passesAt1Percent() public {
-        uint256 deviatedPrice = (oraclePrice18 * 101) / 100; // +1%
+        uint256 deviatedPrice = (bearPrice18 * 101) / 100; // +1%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
@@ -519,7 +531,7 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_passesAtBoundary() public {
-        uint256 deviatedPrice = (oraclePrice18 * 10199) / 10000; // +1.99%
+        uint256 deviatedPrice = (bearPrice18 * 10199) / 10000; // +1.99%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
@@ -528,18 +540,18 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_revertsOver2Percent() public {
-        uint256 deviatedPrice = (oraclePrice18 * 103) / 100; // +3%
+        uint256 deviatedPrice = (bearPrice18 * 103) / 100; // +3%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
         vm.expectRevert(
-            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, oraclePrice18, deviatedPrice)
+            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, bearPrice18, deviatedPrice)
         );
         basketOracle.latestRoundData();
     }
 
     function test_deviationCheck_revertsNegativeDeviation() public {
-        uint256 deviatedPrice = (oraclePrice18 * 97) / 100; // -3%
+        uint256 deviatedPrice = (bearPrice18 * 97) / 100; // -3%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
@@ -548,7 +560,7 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_blocksMint() public {
-        uint256 deviatedPrice = (oraclePrice18 * 105) / 100; // +5%
+        uint256 deviatedPrice = (bearPrice18 * 105) / 100; // +5%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
@@ -561,7 +573,7 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_blocksPreviewMint() public {
-        uint256 deviatedPrice = (oraclePrice18 * 105) / 100; // +5%
+        uint256 deviatedPrice = (bearPrice18 * 105) / 100; // +5%
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
@@ -570,9 +582,7 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_burn_doesNotCheckOracle() public {
-        // Note: burn() uses CAP directly, not the oracle price
-        // This test documents that burn works even when oracle is deviated
-        curvePool = _deployCurvePoolAtPrice(oraclePrice18);
+        curvePool = _deployCurvePoolAtPrice(bearPrice18);
         basketOracle.setCurvePool(curvePool);
 
         uint256 mintAmount = 100e18;
@@ -581,7 +591,7 @@ contract DeviationCheckForkTest is Test {
         splitter.mint(mintAmount);
 
         // Manipulate price to cause deviation
-        MockCurvePoolForOracleBasket(curvePool).setPrice((oraclePrice18 * 105) / 100);
+        MockCurvePoolForOracleBasket(curvePool).setPrice((bearPrice18 * 105) / 100);
 
         // Burn still works because it doesn't query oracle
         IERC20(bearToken).approve(address(splitter), mintAmount);
@@ -592,14 +602,14 @@ contract DeviationCheckForkTest is Test {
     }
 
     function test_deviationCheck_recoversAfterRealignment() public {
-        uint256 deviatedPrice = (oraclePrice18 * 105) / 100;
+        uint256 deviatedPrice = (bearPrice18 * 105) / 100;
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
         vm.expectRevert();
         basketOracle.latestRoundData();
 
-        MockCurvePoolForOracleBasket(curvePool).setPrice(oraclePrice18);
+        MockCurvePoolForOracleBasket(curvePool).setPrice(bearPrice18);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
         assertGt(price, 0, "Should recover after realignment");
@@ -611,7 +621,7 @@ contract DeviationCheckForkTest is Test {
         uint256[] memory quantities = new uint256[](1);
         quantities[0] = 1e18;
 
-        basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP_8DEC, address(this));
 
         address yieldOracle = address(new MockMorphoOracleForYieldBasket());
         MarketParams memory yieldParams = MarketParams({
