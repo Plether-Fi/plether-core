@@ -82,6 +82,10 @@ abstract contract BaseForkTest is Test {
     uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000;
     uint256 constant CURVE_MA_HALF_TIME = 600;
 
+    // CAP scaled to 18 decimals for Curve price calculations
+    // CAP = 2e8 (8 decimals) -> 2e18 (18 decimals)
+    uint256 constant CAP_SCALED = 2e18;
+
     // ==========================================
     // PROTOCOL STATE
     // ==========================================
@@ -95,6 +99,7 @@ abstract contract BaseForkTest is Test {
     address public bearToken;
 
     uint256 public realOraclePrice;
+    uint256 public bearPrice; // CAP - DXY, the fair value of DXY-BEAR
 
     // ==========================================
     // SETUP HELPERS
@@ -113,6 +118,7 @@ abstract contract BaseForkTest is Test {
     function _fetchPriceAndWarp() internal {
         (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
         realOraclePrice = uint256(price) * 1e10;
+        bearPrice = CAP_SCALED - realOraclePrice;
         vm.warp(updatedAt + 1 hours);
     }
 
@@ -172,16 +178,16 @@ abstract contract BaseForkTest is Test {
                 CURVE_FEE_GAMMA,
                 CURVE_ADJUSTMENT_STEP,
                 CURVE_MA_HALF_TIME,
-                realOraclePrice
+                bearPrice
             );
 
         require(curvePool != address(0), "Pool Deployment Failed");
 
-        // Add Liquidity
+        // Add Liquidity at bearPrice (USDC per DXY-BEAR)
         IERC20(USDC).approve(curvePool, type(uint256).max);
         IERC20(bearToken).approve(curvePool, type(uint256).max);
 
-        uint256 usdcAmount = (bearLiquidity * realOraclePrice) / 1e18 / 1e12;
+        uint256 usdcAmount = (bearLiquidity * bearPrice) / 1e18 / 1e12;
         uint256[2] memory amounts = [usdcAmount, bearLiquidity];
 
         (bool success,) = curvePool.call(abi.encodeWithSignature("add_liquidity(uint256[2],uint256)", amounts, 0));

@@ -127,10 +127,10 @@ contract DeployToSepolia is Script {
     uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000; // 2e12
     uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000; // 1.46e14
     uint256 constant CURVE_MA_EXP_TIME = 866; // ~14 minutes
-    // Initial price must match theoretical DXY price from mock feeds:
-    // EUR: $1.05 * 0.576 + JPY: $0.0064 * 0.136 + GBP: $1.25 * 0.119 +
-    // CAD: $0.73 * 0.091 + SEK: $0.093 * 0.042 + CHF: $1.13 * 0.036 ≈ $0.8654
-    uint256 constant CURVE_INITIAL_PRICE = 865436400000000000; // ~0.865 (DXY-BEAR per USDC)
+    // Initial price is DXY-BEAR value = CAP - DXY
+    // DXY from mock feeds ≈ $0.8654, CAP = $2.00
+    // DXY-BEAR price = $2.00 - $0.8654 = $1.1346
+    uint256 constant CURVE_INITIAL_PRICE = 1134563600000000000; // ~1.135 (USDC per DXY-BEAR)
 
     // ==========================================
     // DEPLOYMENT STATE
@@ -275,10 +275,9 @@ contract DeployToSepolia is Script {
     }
 
     function _seedCurvePool(DeployedContracts memory d, address deployer) internal {
-        // Calculate amounts that match CURVE_INITIAL_PRICE so spot price equals price_scale
-        // CURVE_INITIAL_PRICE is DXY-BEAR per USDC (scaled by 1e18)
+        // Seed with balanced liquidity at CURVE_INITIAL_PRICE (USDC per DXY-BEAR)
         uint256 usdcAmount = 10_000 * 1e6; // 10k USDC
-        uint256 bearAmount = (usdcAmount * CURVE_INITIAL_PRICE) / 1e6; // ~8.65k DXY-BEAR
+        uint256 bearAmount = (usdcAmount * 1e30) / CURVE_INITIAL_PRICE; // ~8.8k DXY-BEAR
 
         // Mint USDC to deployer
         d.usdc.mint(deployer, usdcAmount);
