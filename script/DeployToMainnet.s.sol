@@ -89,9 +89,9 @@ contract DeployToMainnet is Script {
     uint256 constant LLTV_BULL = 0.77e18; // 77% LLTV for BULL market
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation for basket oracle
 
-    // Curve Pool Parameters (Twocrypto-NG defaults for stablecoin-like pair)
-    uint256 constant CURVE_A = 400000;
-    uint256 constant CURVE_GAMMA = 145000000000000;
+    // Curve Pool Parameters (optimized for low slippage)
+    uint256 constant CURVE_A = 320000;
+    uint256 constant CURVE_GAMMA = 1000000000000000; // 1e15 (0.001)
     uint256 constant CURVE_MID_FEE = 26000000;
     uint256 constant CURVE_OUT_FEE = 45000000;
     uint256 constant CURVE_FEE_GAMMA = 230000000000000;

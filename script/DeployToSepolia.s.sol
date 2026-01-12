@@ -120,9 +120,9 @@ contract DeployToSepolia is Script {
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
-    // Curve Pool Parameters (Twocrypto-NG defaults for stablecoin-like pair)
-    uint256 constant CURVE_A = 400000; // Amplification coefficient
-    uint256 constant CURVE_GAMMA = 145000000000000; // 1.45e14
+    // Curve Pool Parameters (optimized for low slippage)
+    uint256 constant CURVE_A = 320000; // Amplification coefficient
+    uint256 constant CURVE_GAMMA = 1000000000000000; // 1e15 (0.001)
     uint256 constant CURVE_MID_FEE = 26000000; // 0.026%
     uint256 constant CURVE_OUT_FEE = 45000000; // 0.045%
     uint256 constant CURVE_FEE_GAMMA = 230000000000000; // 2.3e14
@@ -283,15 +283,15 @@ contract DeployToSepolia is Script {
     }
 
     function _seedCurvePool(DeployedContracts memory d, address deployer) internal {
-        // Mint USDC and DXY-BEAR for initial liquidity
+        // Calculate amounts that match CURVE_INITIAL_PRICE so spot price equals price_scale
+        // CURVE_INITIAL_PRICE is DXY-BEAR per USDC (scaled by 1e18)
         uint256 usdcAmount = 10_000 * 1e6; // 10k USDC
-        uint256 bearAmount = 10_000 * 1e18; // 10k DXY-BEAR
+        uint256 bearAmount = (usdcAmount * CURVE_INITIAL_PRICE) / 1e6; // ~8.65k DXY-BEAR
 
         // Mint USDC to deployer
         d.usdc.mint(deployer, usdcAmount);
 
         // Mint DXY-BEAR via Splitter (requires USDC)
-        // Cost = bearAmount * CAP / 1e20 = 10_000e18 * 2e8 / 1e20 = 20_000e6 USDC
         uint256 mintCost = (bearAmount * CAP) / 1e20;
         d.usdc.mint(deployer, mintCost);
         d.usdc.approve(address(d.splitter), mintCost);
@@ -303,7 +303,7 @@ contract DeployToSepolia is Script {
 
         // Add liquidity
         ICurveTwocryptoPool(d.curvePool).add_liquidity([usdcAmount, bearAmount], 0);
-        console.log("Curve pool seeded with 10k USDC + 10k DXY-BEAR");
+        console.log("Curve pool seeded with liquidity matching initial price");
     }
 
     function _deployMorphoOracles(address basketOracle)
