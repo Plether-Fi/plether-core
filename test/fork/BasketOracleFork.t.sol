@@ -53,7 +53,7 @@ contract MockMorphoOracleForYieldBasket {
     }
 }
 
-/// @notice Mock Curve pool for oracle initialization
+/// @notice Mock Curve pool for oracle initialization (with setPrice for testing)
 contract MockCurvePoolForOracleBasket {
     uint256 public oraclePrice;
 
@@ -63,6 +63,10 @@ contract MockCurvePoolForOracleBasket {
 
     function price_oracle() external view returns (uint256) {
         return oraclePrice;
+    }
+
+    function setPrice(uint256 _price) external {
+        oraclePrice = _price;
     }
 }
 
@@ -397,5 +401,199 @@ contract BasketOracleForkTest is Test {
         (uint256 usdcRequired,,) = splitter.previewMint(600_000e18);
         IERC20(USDC).approve(address(splitter), usdcRequired);
         splitter.mint(600_000e18);
+    }
+}
+
+/// @title Deviation Check Fork Tests
+/// @notice Tests that the 2% deviation circuit breaker works correctly
+contract DeviationCheckForkTest is Test {
+    address constant CL_EUR_USD = 0xb49f677943BC038e9857d61E7d053CaA2C1734C1;
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant CURVE_CRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
+    address constant MORPHO = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+    address constant ADAPTIVE_CURVE_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    uint256 constant FORK_BLOCK = 24_136_062;
+
+    uint256 constant CURVE_A = 320000;
+    uint256 constant CURVE_GAMMA = 1000000000000000; // 1e15
+    uint256 constant CURVE_MID_FEE = 26000000;
+    uint256 constant CURVE_OUT_FEE = 45000000;
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000;
+    uint256 constant CURVE_FEE_GAMMA = 230000000000000;
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000;
+    uint256 constant CURVE_MA_HALF_TIME = 866;
+
+    uint256 constant MAX_DEVIATION_BPS = 200; // 2%
+
+    BasketOracle public basketOracle;
+    SyntheticSplitter public splitter;
+    MorphoAdapter public yieldAdapter;
+    address public curvePool;
+    address public bearToken;
+
+    uint256 public oraclePrice18;
+
+    function setUp() public {
+        try vm.envString("MAINNET_RPC_URL") returns (string memory url) {
+            vm.createSelectFork(url, FORK_BLOCK);
+        } catch {
+            revert("Missing MAINNET_RPC_URL");
+        }
+
+        deal(USDC, address(this), 10_000_000e6);
+
+        (, int256 eurPrice,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR_USD).latestRoundData();
+        vm.warp(updatedAt + 1 hours);
+
+        oraclePrice18 = uint256(eurPrice) * 1e10;
+
+        _deployProtocol();
+    }
+
+    function test_deviationCheck_passesWhenAligned() public {
+        curvePool = _deployCurvePoolAtPrice(oraclePrice18);
+        basketOracle.setCurvePool(curvePool);
+
+        (, int256 price,,,) = basketOracle.latestRoundData();
+        assertGt(price, 0, "Should return valid price when aligned");
+
+        uint256 mintAmount = 100e18;
+        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
+        IERC20(USDC).approve(address(splitter), usdcRequired);
+        splitter.mint(mintAmount);
+
+        assertEq(IERC20(bearToken).balanceOf(address(this)), mintAmount, "Mint should succeed");
+    }
+
+    function test_deviationCheck_passesAt1Percent() public {
+        uint256 deviatedPrice = (oraclePrice18 * 101) / 100; // +1%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        (, int256 price,,,) = basketOracle.latestRoundData();
+        assertGt(price, 0, "Should pass at 1% deviation");
+    }
+
+    function test_deviationCheck_passesAtBoundary() public {
+        uint256 deviatedPrice = (oraclePrice18 * 10199) / 10000; // +1.99%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        (, int256 price,,,) = basketOracle.latestRoundData();
+        assertGt(price, 0, "Should pass at 1.99% deviation");
+    }
+
+    function test_deviationCheck_revertsOver2Percent() public {
+        uint256 deviatedPrice = (oraclePrice18 * 103) / 100; // +3%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, oraclePrice18, deviatedPrice)
+        );
+        basketOracle.latestRoundData();
+    }
+
+    function test_deviationCheck_revertsNegativeDeviation() public {
+        uint256 deviatedPrice = (oraclePrice18 * 97) / 100; // -3%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        vm.expectRevert();
+        basketOracle.latestRoundData();
+    }
+
+    function test_deviationCheck_blocksMint() public {
+        uint256 deviatedPrice = (oraclePrice18 * 105) / 100; // +5%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        uint256 mintAmount = 100e18;
+        // Approve max since previewMint will also revert
+        IERC20(USDC).approve(address(splitter), type(uint256).max);
+
+        vm.expectRevert();
+        splitter.mint(mintAmount);
+    }
+
+    function test_deviationCheck_blocksPreviewMint() public {
+        uint256 deviatedPrice = (oraclePrice18 * 105) / 100; // +5%
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        vm.expectRevert();
+        splitter.previewMint(100e18);
+    }
+
+    function test_burn_doesNotCheckOracle() public {
+        // Note: burn() uses CAP directly, not the oracle price
+        // This test documents that burn works even when oracle is deviated
+        curvePool = _deployCurvePoolAtPrice(oraclePrice18);
+        basketOracle.setCurvePool(curvePool);
+
+        uint256 mintAmount = 100e18;
+        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
+        IERC20(USDC).approve(address(splitter), usdcRequired);
+        splitter.mint(mintAmount);
+
+        // Manipulate price to cause deviation
+        MockCurvePoolForOracleBasket(curvePool).setPrice((oraclePrice18 * 105) / 100);
+
+        // Burn still works because it doesn't query oracle
+        IERC20(bearToken).approve(address(splitter), mintAmount);
+        IERC20(splitter.TOKEN_B()).approve(address(splitter), mintAmount);
+        splitter.burn(mintAmount);
+
+        assertEq(IERC20(bearToken).balanceOf(address(this)), 0, "Burn should succeed");
+    }
+
+    function test_deviationCheck_recoversAfterRealignment() public {
+        uint256 deviatedPrice = (oraclePrice18 * 105) / 100;
+        curvePool = _deployCurvePoolAtPrice(deviatedPrice);
+        basketOracle.setCurvePool(curvePool);
+
+        vm.expectRevert();
+        basketOracle.latestRoundData();
+
+        MockCurvePoolForOracleBasket(curvePool).setPrice(oraclePrice18);
+
+        (, int256 price,,,) = basketOracle.latestRoundData();
+        assertGt(price, 0, "Should recover after realignment");
+    }
+
+    function _deployProtocol() internal {
+        address[] memory feeds = new address[](1);
+        feeds[0] = CL_EUR_USD;
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1e18;
+
+        basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, address(this));
+
+        address yieldOracle = address(new MockMorphoOracleForYieldBasket());
+        MarketParams memory yieldParams = MarketParams({
+            loanToken: USDC,
+            collateralToken: WETH,
+            oracle: yieldOracle,
+            irm: ADAPTIVE_CURVE_IRM,
+            lltv: 860000000000000000
+        });
+
+        IMorpho(MORPHO).createMarket(yieldParams);
+
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+
+        yieldAdapter = new MorphoAdapter(IERC20(USDC), MORPHO, yieldParams, address(this), predictedSplitter);
+        splitter =
+            new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, address(this), address(0));
+
+        require(address(splitter) == predictedSplitter, "Splitter address mismatch");
+
+        bearToken = address(splitter.TOKEN_A());
+    }
+
+    function _deployCurvePoolAtPrice(uint256 initialPrice) internal returns (address) {
+        return address(new MockCurvePoolForOracleBasket(initialPrice));
     }
 }
