@@ -76,6 +76,7 @@ contract BasketOracle is AggregatorV3Interface {
 
         MAX_DEVIATION_BPS = _maxDeviationBps;
         CAP = _cap;
+        // slither-disable-next-line missing-zero-check
         OWNER = _owner;
     }
 
