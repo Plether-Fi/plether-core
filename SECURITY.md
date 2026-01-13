@@ -19,7 +19,8 @@ This document outlines the security assumptions, trust model, known limitations,
 #### Morpho Blue
 - **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, liquidations, and flash loans
 - **Mitigation**: Router contracts validate authorization before operations; flash loan callbacks validate caller and initiator
-- **Risk**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
+- **Risk (Bugs)**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
+- **Risk (Liquidity)**: If Morpho market utilization is high (all supplied USDC is borrowed), adapter withdrawals revert. Burns exceeding the local buffer will fail until Morpho liquidity returns. The `ejectLiquidity()` emergency function is also affected—it cannot withdraw from an illiquid market. Users may be temporarily unable to redeem even if the protocol is solvent.
 - **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
 
 ### External Library Dependencies
@@ -104,8 +105,9 @@ This provides users time to exit if they disagree with proposed changes.
 
 - **Local Buffer**: 10% of deposited USDC kept in Splitter for immediate redemptions
 - **Adapter Deployment**: 90% deployed to yield adapter
-- **Risk**: Large concurrent redemptions may require waiting for adapter withdrawal
-- **Mitigation**: Harvest function can be called to rebalance
+- **Risk**: Burns exceeding the local buffer require adapter withdrawal. If Morpho market is illiquid, burns revert with `Splitter__AdapterWithdrawFailed`
+- **Mitigation**: 10% buffer absorbs normal withdrawal patterns; Morpho interest rates incentivize repayments when utilization is high
+- **Note**: Buffer ratio is enforced at mint time only; no automatic rebalancing occurs
 
 ### Protocol Fees
 
@@ -284,6 +286,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-13 | Documented Morpho liquidity risk: burns revert if adapter withdrawal fails due to high market utilization |
 | 2026-01-11 | Reduced harvest caller reward from 1% to 0.1%; added Morpho token rewards documentation |
 | 2026-01-09 | Added External Library Dependencies section with OpenZeppelin trust assumptions |
 | 2026-01-04 | Added Router Architecture section; documented LeverageRouterBase, custom errors, and single flash loan pattern for BullLeverageRouter close |
