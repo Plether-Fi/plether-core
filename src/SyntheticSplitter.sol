@@ -79,8 +79,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     event LiquidationTriggered(uint256 price);
     event EmergencyRedeemed(address indexed user, uint256 amount);
     event YieldHarvested(uint256 totalSurplus, uint256 treasuryAmt, uint256 stakingAmt);
-    event FeesProposed(address treasury, address staking, uint256 activationTime);
-    event FeesUpdated(address treasury, address staking);
+    event FeesProposed(address indexed treasury, address indexed staking, uint256 activationTime);
+    event FeesUpdated(address indexed treasury, address indexed staking);
     event EmergencyEjected(uint256 amountRecovered);
 
     error Splitter__ZeroAddress();
