@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../src/ZapRouter.sol";
-import "../src/base/FlashLoanBase.sol";
-import "../src/interfaces/ICurvePool.sol";
-import "../src/interfaces/ISyntheticSplitter.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "forge-std/Test.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
+import {FlashLoanBase} from "../src/base/FlashLoanBase.sol";
+import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
+import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
+import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test, console} from "forge-std/Test.sol";
 
 contract ZapRouterTest is Test {
 

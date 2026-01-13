@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../src/StakedToken.sol";
-import "../src/oracles/StakedOracle.sol";
-import "./utils/MockAave.sol";
-import "forge-std/Test.sol";
+import {StakedToken} from "../src/StakedToken.sol";
+import {IOracle, StakedOracle} from "../src/oracles/StakedOracle.sol";
+import {MockERC20} from "./utils/MockAave.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 /// @notice Mock oracle that implements IOracle interface
 contract MockUnderlyingOracle is IOracle {

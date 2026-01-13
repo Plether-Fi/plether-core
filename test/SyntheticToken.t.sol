@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../src/SyntheticToken.sol";
-import "forge-std/Test.sol";
+import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract SyntheticTokenTest is Test {
 

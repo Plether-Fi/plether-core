@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../src/oracles/MorphoOracle.sol";
-import "./utils/MockOracle.sol"; // Reusing the Mock from Step 2
-import "forge-std/Test.sol";
+import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
+import {MockOracle} from "./utils/MockOracle.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract MorphoOracleTest is Test {
 

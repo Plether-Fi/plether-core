@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../src/SyntheticSplitter.sol";
-import "../src/interfaces/AggregatorV3Interface.sol";
-import "../src/libraries/OracleLib.sol";
-import "./utils/MockYieldAdapter.sol";
-import "forge-std/Test.sol";
+import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "../src/libraries/OracleLib.sol";
+import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 /**
  * @title OracleEdgeCasesTest

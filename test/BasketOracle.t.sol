@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../src/oracles/BasketOracle.sol";
-import "./utils/MockOracle.sol";
-import "forge-std/Test.sol";
+import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {BasketOracle} from "../src/oracles/BasketOracle.sol";
+import {MockOracle} from "./utils/MockOracle.sol";
+import {Test} from "forge-std/Test.sol";
 
 // Mock Curve Pool for bound validation
 contract MockCurvePool {

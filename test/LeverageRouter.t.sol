@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "../src/LeverageRouter.sol";
+import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
-import "../src/interfaces/ICurvePool.sol";
+import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "forge-std/Test.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract LeverageRouterTest is Test {
 

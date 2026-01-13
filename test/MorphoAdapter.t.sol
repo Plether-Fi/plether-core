@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../src/MorphoAdapter.sol";
-import "./utils/MockAave.sol"; // Reuse MockERC20
-import "forge-std/Test.sol";
+import {IUniversalRewardsDistributor, MorphoAdapter} from "../src/MorphoAdapter.sol";
+import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
+import {MockERC20} from "./utils/MockAave.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 // Simple Mock USDC for testing (6 decimals standard)
 contract MockUSDC is MockERC20 {
