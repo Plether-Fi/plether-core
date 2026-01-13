@@ -323,6 +323,112 @@ contract BasketOracleTest is Test {
         newBasket.setCurvePool(address(curvePool));
     }
 
+    // ==========================================
+    // TIMESTAMP TRACKING TESTS
+    // ==========================================
+
+    function test_UpdatedAt_ReturnsOldestTimestamp() public {
+        vm.warp(10 hours);
+        uint256 olderTimestamp = block.timestamp - 1 hours;
+        uint256 newerTimestamp = block.timestamp;
+
+        feedEUR.setUpdatedAt(newerTimestamp);
+        feedJPY.setUpdatedAt(olderTimestamp);
+
+        (,,, uint256 updatedAt,) = basket.latestRoundData();
+
+        assertEq(updatedAt, olderTimestamp, "Should return oldest feed timestamp");
+    }
+
+    function test_UpdatedAt_ReturnsOldestWhenFirstFeedIsOlder() public {
+        vm.warp(10 hours);
+        uint256 olderTimestamp = block.timestamp - 2 hours;
+        uint256 newerTimestamp = block.timestamp;
+
+        feedEUR.setUpdatedAt(olderTimestamp);
+        feedJPY.setUpdatedAt(newerTimestamp);
+
+        (,,, uint256 updatedAt,) = basket.latestRoundData();
+
+        assertEq(updatedAt, olderTimestamp, "Should return oldest feed timestamp");
+    }
+
+    // ==========================================
+    // DEVIATION CHECK BRANCH COVERAGE
+    // ==========================================
+
+    function test_DeviationCheck_WhenTheoreticalGreaterThanSpot() public {
+        // DXY = $1.05, CAP = $2.00, theoreticalBear = $0.95 (0.95 ether)
+        // Set spot BELOW theoretical to exercise the first branch of the ternary
+        // (theoreticalBear18 > spotBear18 ? theoreticalBear18 - spotBear18 : ...)
+        curvePool.setPrice(0.94 ether); // spot < theoretical, within 2% threshold
+
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertEq(answer, 105_000_000);
+    }
+
+    function test_DeviationCheck_RevertsWhenTheoreticalGreaterThanSpotExceedsThreshold() public {
+        // theoreticalBear = $0.95, set spot 5% lower to exceed 2% threshold
+        curvePool.setPrice(0.9 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BasketOracle.BasketOracle__PriceDeviation.selector,
+                0.95 ether, // theoreticalBear
+                0.9 ether // spotBear
+            )
+        );
+        basket.latestRoundData();
+    }
+
+    function test_DeviationCheck_RevertsWhenSpotIsDoubleTheoretical() public {
+        // theoreticalBear = $0.95, set spot to 2x theoretical
+        // This catches modulo mutation: 1.90 % 0.95 = 0 (wrong) vs 1.90 - 0.95 = 0.95 (correct)
+        curvePool.setPrice(1.9 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BasketOracle.BasketOracle__PriceDeviation.selector,
+                0.95 ether, // theoreticalBear
+                1.9 ether // spotBear
+            )
+        );
+        basket.latestRoundData();
+    }
+
+    function test_DeviationCheck_RevertsWhenSpotIsHalfTheoretical() public {
+        // theoreticalBear = $0.95, set spot to half theoretical
+        // This catches modulo mutation in first branch: 0.95 % 0.475 = 0 (wrong) vs 0.95 - 0.475 = 0.475 (correct)
+        curvePool.setPrice(0.475 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BasketOracle.BasketOracle__PriceDeviation.selector,
+                0.95 ether, // theoreticalBear
+                0.475 ether // spotBear
+            )
+        );
+        basket.latestRoundData();
+    }
+
+    function test_DeviationCheck_RevertsAtExactBoundary() public {
+        // theoreticalBear = $0.95, spot = $0.931
+        // diff = 0.019 ether
+        // threshold using min(0.931) = 0.01862 ether -> diff > threshold, REVERT
+        // threshold using max(0.95) = 0.019 ether -> diff == threshold, PASS
+        // This catches basePrice selection mutation
+        curvePool.setPrice(0.931 ether);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BasketOracle.BasketOracle__PriceDeviation.selector,
+                0.95 ether, // theoreticalBear
+                0.931 ether // spotBear
+            )
+        );
+        basket.latestRoundData();
+    }
+
 }
 
 // Helper mock with wrong decimals (6 instead of 8)
