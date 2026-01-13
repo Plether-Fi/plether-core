@@ -413,7 +413,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         // Note: The actual harvest logic limits withdrawal to `adapterAssets` if surplus > adapterAssets.
         uint256 harvestableAmount = (adapterAssets > totalSurplus) ? totalSurplus : adapterAssets;
 
-        callerReward = (harvestableAmount * HARVEST_REWARD_BPS) / 10000;
+        callerReward = (harvestableAmount * HARVEST_REWARD_BPS) / 10_000;
         uint256 remaining = harvestableAmount - callerReward;
         treasuryShare = (remaining * 20) / 100;
         stakingShare = remaining - treasuryShare;
@@ -451,7 +451,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
 
         // Distribute based on actual harvested
-        uint256 callerCut = (harvested * HARVEST_REWARD_BPS) / 10000;
+        uint256 callerCut = (harvested * HARVEST_REWARD_BPS) / 10_000;
         uint256 remaining = harvested - callerCut;
         uint256 treasuryShare = (remaining * 20) / 100;
         uint256 stakingShare = remaining - treasuryShare;

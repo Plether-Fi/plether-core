@@ -97,7 +97,7 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 totalUSDC = principal + loanAmount;
         uint256 expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
 
-        uint256 minDxyBear = (expectedDxyBear * (10000 - maxSlippageBps)) / 10000;
+        uint256 minDxyBear = (expectedDxyBear * (10_000 - maxSlippageBps)) / 10_000;
 
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minDxyBear);
 
@@ -126,7 +126,7 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
         // Use get_dy to find real market expectation
         uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
-        uint256 minUsdcOut = (expectedUSDC * (10000 - maxSlippageBps)) / 10000;
+        uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
 
         if (debtToRepay > 0) {
             // Standard path: flash loan USDC to repay debt

@@ -134,10 +134,10 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         uint256 priceBull = CAP_PRICE - priceBear;
         uint256 theoreticalFlash = (usdcAmount * 1e18) / priceBull;
 
-        uint256 flashAmount = (theoreticalFlash * (10000 - SAFETY_BUFFER_BPS)) / 10000;
+        uint256 flashAmount = (theoreticalFlash * (10_000 - SAFETY_BUFFER_BPS)) / 10_000;
 
         uint256 expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
-        uint256 minSwapOut = (expectedSwapOut * (10000 - maxSlippageBps)) / 10000;
+        uint256 minSwapOut = (expectedSwapOut * (10_000 - maxSlippageBps)) / 10_000;
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
@@ -299,7 +299,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         // Step C: Apply Safety Buffer
         // We swap slightly more USDC to handle slippage/fees and guarantee we get enough Bear.
         // Any excess Bear is swept to user.
-        uint256 usdcToSwap = (usdcLinear * (10000 + SAFETY_BUFFER_BPS)) / 10000;
+        uint256 usdcToSwap = (usdcLinear * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
         // Sanity Check: Do we have enough USDC?
         uint256 totalUsdc = USDC.balanceOf(address(this));
@@ -364,7 +364,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
 
         // Calculate Dynamic Flash Amount (matches execution logic)
         uint256 theoreticalFlash = (usdcAmount * 1e18) / priceBull;
-        flashAmount = (theoreticalFlash * (10000 - SAFETY_BUFFER_BPS)) / 10000;
+        flashAmount = (theoreticalFlash * (10_000 - SAFETY_BUFFER_BPS)) / 10_000;
 
         expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
         totalUSDC = usdcAmount + expectedSwapOut;
@@ -414,7 +414,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         uint256 usdcLinear = (debtBear * 1e6) / bearFromOneUsdc;
 
         // Apply safety buffer (matches execution)
-        usdcForBearBuyback = (usdcLinear * (10000 + SAFETY_BUFFER_BPS)) / 10000;
+        usdcForBearBuyback = (usdcLinear * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
         // Net USDC out = burn proceeds - buyback cost
         if (expectedUsdcFromBurn > usdcForBearBuyback) {
