@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import "../src/oracles/StakedOracle.sol";
 import "../src/StakedToken.sol";
+import "../src/oracles/StakedOracle.sol";
 import "./utils/MockAave.sol";
+import "forge-std/Test.sol";
 
 /// @notice Mock oracle that implements IOracle interface
 contract MockUnderlyingOracle is IOracle {
+
     uint256 public mockPrice;
 
-    constructor(uint256 _price) {
+    constructor(
+        uint256 _price
+    ) {
         mockPrice = _price;
     }
 
@@ -18,12 +21,16 @@ contract MockUnderlyingOracle is IOracle {
         return mockPrice;
     }
 
-    function setPrice(uint256 _price) external {
+    function setPrice(
+        uint256 _price
+    ) external {
         mockPrice = _price;
     }
+
 }
 
 contract StakedOracleTest is Test {
+
     StakedOracle public stakedOracle;
     StakedToken public vault;
     MockUnderlyingOracle public underlyingOracle;
@@ -208,13 +215,16 @@ contract StakedOracleTest is Test {
         // Price should remain same (no yield added)
         assertEq(priceAfterAlice, priceAfterBob);
     }
+
 }
 
 /// @notice Mock USDC with 6 decimals
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
+
 }

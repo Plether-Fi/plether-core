@@ -9,6 +9,7 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 /// @notice Aggregates multiple Chainlink feeds into a weighted DXY basket price.
 /// @dev Price = Sum(Price_i * Quantity_i). Includes bound validation against Curve spot.
 contract BasketOracle is AggregatorV3Interface {
+
     /// @notice Component feed with its basket weight.
     struct Component {
         AggregatorV3Interface feed;
@@ -80,7 +81,9 @@ contract BasketOracle is AggregatorV3Interface {
 
     /// @notice Sets the Curve pool for deviation validation (one-time only).
     /// @param _curvePool Curve USDC/DXY-BEAR pool address.
-    function setCurvePool(address _curvePool) external {
+    function setCurvePool(
+        address _curvePool
+    ) external {
         if (msg.sender != OWNER) revert BasketOracle__Unauthorized();
         if (address(curvePool) != address(0)) revert BasketOracle__AlreadySet();
         curvePool = ICurvePool(_curvePool);
@@ -131,7 +134,9 @@ contract BasketOracle is AggregatorV3Interface {
 
     /// @dev Validates basket price against Curve spot. Reverts on excessive deviation.
     /// @param theoreticalDxy8Dec Computed basket price (8 decimals).
-    function _checkDeviation(uint256 theoreticalDxy8Dec) internal view {
+    function _checkDeviation(
+        uint256 theoreticalDxy8Dec
+    ) internal view {
         ICurvePool pool = curvePool;
         if (address(pool) == address(0)) return;
 
@@ -167,7 +172,10 @@ contract BasketOracle is AggregatorV3Interface {
     }
 
     /// @notice Returns latest data for any round ID (delegates to latestRoundData).
-    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
         return this.latestRoundData();
     }
+
 }

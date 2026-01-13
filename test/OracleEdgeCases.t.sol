@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "./utils/MockYieldAdapter.sol";
 import "../src/interfaces/AggregatorV3Interface.sol";
 import "../src/libraries/OracleLib.sol";
+import "./utils/MockYieldAdapter.sol";
+import "forge-std/Test.sol";
 
 /**
  * @title OracleEdgeCasesTest
@@ -17,6 +17,7 @@ import "../src/libraries/OracleLib.sol";
  *      - TOCTOU (Time-of-Check-to-Time-of-Use) vulnerabilities
  */
 contract OracleEdgeCasesTest is Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter adapter;
     MockUSDC usdc;
@@ -30,7 +31,7 @@ contract OracleEdgeCasesTest is Test {
     uint256 constant CAP = 200_000_000; // $2.00
 
     function setUp() public {
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         usdc = new MockUSDC();
         oracle = new MockOracle(100_000_000, block.timestamp, block.timestamp); // $1.00
@@ -351,6 +352,7 @@ contract OracleEdgeCasesTest is Test {
 
         vm.stopPrank();
     }
+
 }
 
 // ==========================================
@@ -358,6 +360,7 @@ contract OracleEdgeCasesTest is Test {
 // ==========================================
 
 contract MockUSDC is IERC20 {
+
     string public constant name = "USDC";
     string public constant symbol = "USDC";
     uint256 public totalSupply;
@@ -368,17 +371,27 @@ contract MockUSDC is IERC20 {
         return 6;
     }
 
-    function transfer(address to, uint256 amount) public returns (bool) {
+    function transfer(
+        address to,
+        uint256 amount
+    ) public returns (bool) {
         return transferFrom(msg.sender, to, amount);
     }
 
-    function approve(address spender, uint256 amount) public returns (bool) {
+    function approve(
+        address spender,
+        uint256 amount
+    ) public returns (bool) {
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) public returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public returns (bool) {
         if (from != msg.sender && allowance[from][msg.sender] != type(uint256).max) {
             require(allowance[from][msg.sender] >= amount, "ERC20: insufficient allowance");
             allowance[from][msg.sender] -= amount;
@@ -390,34 +403,49 @@ contract MockUSDC is IERC20 {
         return true;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         balanceOf[to] += amount;
         totalSupply += amount;
         emit Transfer(address(0), to, amount);
     }
+
 }
 
 contract MockOracle is AggregatorV3Interface {
+
     int256 public price;
     uint256 public startedAt;
     uint256 public updatedAt;
 
-    constructor(int256 _price, uint256 _startedAt, uint256 _updatedAt) {
+    constructor(
+        int256 _price,
+        uint256 _startedAt,
+        uint256 _updatedAt
+    ) {
         price = _price;
         startedAt = _startedAt;
         updatedAt = _updatedAt;
     }
 
-    function setPrice(int256 _price) external {
+    function setPrice(
+        int256 _price
+    ) external {
         price = _price;
         updatedAt = block.timestamp;
     }
 
-    function setAnswer(int256 _answer) external {
+    function setAnswer(
+        int256 _answer
+    ) external {
         price = _answer;
     }
 
-    function setStartedAt(uint256 _startedAt) external {
+    function setStartedAt(
+        uint256 _startedAt
+    ) external {
         startedAt = _startedAt;
     }
 
@@ -433,11 +461,14 @@ contract MockOracle is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
 
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
+
 }

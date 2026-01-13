@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "./utils/MockYieldAdapter.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
+import "./utils/MockYieldAdapter.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import "forge-std/Test.sol";
 
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
+
 }
 
 contract SyntheticSplitterFuzzTest is Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter adapter;
     MockUSDC usdc;
@@ -32,7 +35,7 @@ contract SyntheticSplitterFuzzTest is Test {
     uint256 constant MAX_MINT_AMOUNT = 1_000_000_000 * 1e18;
 
     function setUp() public {
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         usdc = new MockUSDC();
         aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc));
@@ -57,7 +60,9 @@ contract SyntheticSplitterFuzzTest is Test {
         vm.warp(block.timestamp + 3601);
     }
 
-    function testFuzz_Mint_MaintainsSolvency(uint256 amount) public {
+    function testFuzz_Mint_MaintainsSolvency(
+        uint256 amount
+    ) public {
         amount = bound(amount, 0.01 ether, MAX_MINT_AMOUNT);
 
         (uint256 usdcNeeded,,) = splitter.previewMint(amount);
@@ -78,7 +83,9 @@ contract SyntheticSplitterFuzzTest is Test {
 
     /// @notice Verify that users pay at least fair price (catches rounding exploits)
     /// @dev Uses small amounts where rounding has maximum impact
-    function testFuzz_Mint_UserPaysFairPrice(uint256 amount) public {
+    function testFuzz_Mint_UserPaysFairPrice(
+        uint256 amount
+    ) public {
         // Use smaller range to maximize rounding impact
         amount = bound(amount, 1e15, 1e20);
 
@@ -106,7 +113,9 @@ contract SyntheticSplitterFuzzTest is Test {
     }
 
     /// @notice Fuzz test with edge-case amounts designed to maximize rounding benefit
-    function testFuzz_Mint_EdgeCaseAmounts(uint256 multiplier) public {
+    function testFuzz_Mint_EdgeCaseAmounts(
+        uint256 multiplier
+    ) public {
         // Generate amounts just below clean USDC boundaries
         multiplier = bound(multiplier, 1, 1000);
 
@@ -137,7 +146,10 @@ contract SyntheticSplitterFuzzTest is Test {
         assertGe(actualPaid * usdcMultiplier, exploitAmount * CAP, "ROUNDING EXPLOIT: Edge case amount exploited");
     }
 
-    function testFuzz_MintBurn_TokenParity(uint256 mintAmount, uint256 burnAmount) public {
+    function testFuzz_MintBurn_TokenParity(
+        uint256 mintAmount,
+        uint256 burnAmount
+    ) public {
         mintAmount = bound(mintAmount, 1 ether, MAX_MINT_AMOUNT);
 
         // Minimum burn amount for non-zero USDC refund: USDC_MULTIPLIER / CAP = 5e11
@@ -157,7 +169,9 @@ contract SyntheticSplitterFuzzTest is Test {
         assertEq(splitter.TOKEN_A().totalSupply(), splitter.TOKEN_B().totalSupply(), "Token Parity Broken");
     }
 
-    function testFuzz_BurnWhilePaused_IfSolvent(uint256 amount) public {
+    function testFuzz_BurnWhilePaused_IfSolvent(
+        uint256 amount
+    ) public {
         amount = bound(amount, 1 ether, MAX_MINT_AMOUNT);
 
         (uint256 cost,,) = splitter.previewMint(amount);
@@ -176,7 +190,10 @@ contract SyntheticSplitterFuzzTest is Test {
         assertEq(splitter.TOKEN_A().balanceOf(alice), 0);
     }
 
-    function testFuzz_HarvestMath(uint96 poolLiquidity, uint96 yieldAmount) public {
+    function testFuzz_HarvestMath(
+        uint96 poolLiquidity,
+        uint96 yieldAmount
+    ) public {
         // Constrain inputs
         uint256 poolSize = bound(uint256(poolLiquidity), 100 * 1e6, 100_000_000_000 * 1e6);
         uint256 yield = bound(uint256(yieldAmount), 1 * 1e6, poolSize * 2);
@@ -220,4 +237,5 @@ contract SyntheticSplitterFuzzTest is Test {
             fail("Harvest crashed (Panic/Overflow)");
         }
     }
+
 }

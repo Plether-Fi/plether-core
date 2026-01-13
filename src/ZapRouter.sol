@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
-import {FlashLoanBase} from "./base/FlashLoanBase.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title ZapRouter
@@ -18,6 +18,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @dev Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL.
 ///      For DXY-BEAR, users should swap directly on Curve instead.
 contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
+
     using SafeERC20 for IERC20;
 
     /// @notice Maximum allowed slippage in basis points (1% = 100 bps).
@@ -83,9 +84,13 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param _dxyBull DXY-BULL token address.
     /// @param _usdc USDC token address.
     /// @param _curvePool Curve USDC/DXY-BEAR pool address.
-    constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool)
-        Ownable(msg.sender)
-    {
+    constructor(
+        address _splitter,
+        address _dxyBear,
+        address _dxyBull,
+        address _usdc,
+        address _curvePool
+    ) Ownable(msg.sender) {
         if (_splitter == address(0)) revert ZapRouter__ZeroAddress();
         if (_dxyBear == address(0)) revert ZapRouter__ZeroAddress();
         if (_dxyBull == address(0)) revert ZapRouter__ZeroAddress();
@@ -118,11 +123,12 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
      * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function zapMint(uint256 usdcAmount, uint256 minAmountOut, uint256 maxSlippageBps, uint256 deadline)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function zapMint(
+        uint256 usdcAmount,
+        uint256 minAmountOut,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
         if (usdcAmount == 0) revert ZapRouter__ZeroAmount();
         if (block.timestamp > deadline) revert ZapRouter__Expired();
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert ZapRouter__SlippageExceedsMax();
@@ -154,7 +160,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param bullAmount Amount of DXY-BULL to sell.
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param deadline Unix timestamp after which the transaction reverts.
-    function zapBurn(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) external nonReentrant whenNotPaused {
+    function zapBurn(
+        uint256 bullAmount,
+        uint256 minUsdcOut,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
         _zapBurnCore(bullAmount, minUsdcOut, deadline);
     }
 
@@ -165,16 +175,23 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param v Signature recovery byte.
     /// @param r Signature r component.
     /// @param s Signature s component.
-    function zapBurnWithPermit(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function zapBurnWithPermit(
+        uint256 bullAmount,
+        uint256 minUsdcOut,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
         IERC20Permit(address(DXY_BULL)).permit(msg.sender, address(this), bullAmount, deadline, v, r, s);
         _zapBurnCore(bullAmount, minUsdcOut, deadline);
     }
 
-    function _zapBurnCore(uint256 bullAmount, uint256 minUsdcOut, uint256 deadline) internal {
+    function _zapBurnCore(
+        uint256 bullAmount,
+        uint256 minUsdcOut,
+        uint256 deadline
+    ) internal {
         if (bullAmount == 0) revert ZapRouter__ZeroAmount();
         if (block.timestamp > deadline) revert ZapRouter__Expired();
 
@@ -196,11 +213,13 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param fee Flash loan fee (always 0 for SyntheticToken).
     /// @param data Encoded operation parameters.
     /// @return CALLBACK_SUCCESS on successful execution.
-    function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
-        external
-        override
-        returns (bytes32)
-    {
+    function onFlashLoan(
+        address initiator,
+        address,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata data
+    ) external override returns (bytes32) {
         _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
 
         // Decode Action Flag First
@@ -217,7 +236,10 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Morpho flash loan callback - not used by ZapRouter.
     /// @dev Always reverts as ZapRouter only uses ERC-3156 flash mints.
-    function onMorphoFlashLoan(uint256, bytes calldata) external pure override {
+    function onMorphoFlashLoan(
+        uint256,
+        bytes calldata
+    ) external pure override {
         revert FlashLoan__InvalidOperation();
     }
 
@@ -225,7 +247,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param loanAmount Amount of DXY-BEAR borrowed.
     /// @param fee Flash loan fee (always 0).
     /// @param data Encoded mint parameters (action, user, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps).
-    function _handleMint(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
+    function _handleMint(
+        uint256 loanAmount,
+        uint256 fee,
+        bytes calldata data
+    ) internal {
         // Decode: (action, user, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps)
         (, address user, uint256 usdcAmount, uint256 minSwapOut, uint256 minAmountOut, uint256 maxSlippageBps) =
             abi.decode(data, (uint256, address, uint256, uint256, uint256, uint256));
@@ -269,7 +295,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     /// @param loanAmount Amount of DXY-BEAR borrowed.
     /// @param fee Flash loan fee (always 0).
     /// @param data Encoded burn parameters (action, user, bullAmount, minUsdcOut).
-    function _handleBurn(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
+    function _handleBurn(
+        uint256 loanAmount,
+        uint256 fee,
+        bytes calldata data
+    ) internal {
         // Decode: (action, user, bullAmount, minUsdcOut)
         (, address user, uint256 bullAmount, uint256 minUsdcOut) =
             abi.decode(data, (uint256, address, uint256, uint256));
@@ -345,7 +375,9 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
      * @return expectedTokensOut Expected DXY-BULL tokens to receive.
      * @return flashFee Flash mint fee (if any).
      */
-    function previewZapMint(uint256 usdcAmount)
+    function previewZapMint(
+        uint256 usdcAmount
+    )
         external
         view
         returns (
@@ -385,7 +417,9 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
      * @return expectedUsdcOut Net USDC the user will receive.
      * @return flashFee Flash mint fee (if any).
      */
-    function previewZapBurn(uint256 bullAmount)
+    function previewZapBurn(
+        uint256 bullAmount
+    )
         external
         view
         returns (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee)
@@ -437,4 +471,5 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     function unpause() external onlyOwner {
         _unpause();
     }
+
 }

@@ -2,12 +2,12 @@
 pragma solidity 0.8.33;
 
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
-import {MarketParams} from "./interfaces/IMorpho.sol";
 import {LeverageRouterBase} from "./base/LeverageRouterBase.sol";
+import {MarketParams} from "./interfaces/IMorpho.sol";
+import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title BullLeverageRouter
@@ -48,6 +48,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
 contract BullLeverageRouter is LeverageRouterBase {
+
     using SafeERC20 for IERC20;
 
     /// @notice Emitted when a leveraged DXY-BULL position is opened.
@@ -143,11 +144,12 @@ contract BullLeverageRouter is LeverageRouterBase {
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function openLeverage(uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 deadline)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function openLeverage(
+        uint256 principal,
+        uint256 leverage,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
         if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
         if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
         if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
@@ -182,11 +184,12 @@ contract BullLeverageRouter is LeverageRouterBase {
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
-    function closeLeverage(uint256 debtToRepay, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 deadline)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function closeLeverage(
+        uint256 debtToRepay,
+        uint256 collateralToWithdraw,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
         if (collateralToWithdraw == 0) revert LeverageRouterBase__ZeroCollateral();
         if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
@@ -226,7 +229,10 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
     /// @param amount Amount of USDC borrowed.
     /// @param data Encoded open operation parameters.
-    function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
+    function onMorphoFlashLoan(
+        uint256 amount,
+        bytes calldata data
+    ) external override {
         // Validate caller is Morpho
         _validateLender(msg.sender, address(MORPHO));
 
@@ -248,11 +254,13 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @param fee Flash loan fee (always 0 for SyntheticToken).
     /// @param data Encoded close operation parameters.
     /// @return CALLBACK_SUCCESS on successful execution.
-    function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
-        external
-        override
-        returns (bytes32)
-    {
+    function onFlashLoan(
+        address initiator,
+        address,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata data
+    ) external override returns (bytes32) {
         _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
 
         uint8 operation = abi.decode(data, (uint8));
@@ -269,7 +277,10 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @dev Executes open leverage operation within Morpho flash loan callback.
     /// @param loanAmount Amount of USDC borrowed from Morpho.
     /// @param data Encoded parameters (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut).
-    function _executeOpen(uint256 loanAmount, bytes calldata data) private {
+    function _executeOpen(
+        uint256 loanAmount,
+        bytes calldata data
+    ) private {
         // Decode: (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut)
         (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minSwapOut) =
             abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
@@ -308,7 +319,11 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @param flashAmount Amount of DXY-BEAR flash minted.
     /// @param flashFee Flash mint fee (always 0).
     /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps).
-    function _executeClose(uint256 flashAmount, uint256 flashFee, bytes calldata data) private {
+    function _executeClose(
+        uint256 flashAmount,
+        uint256 flashFee,
+        bytes calldata data
+    ) private {
         // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps)
         (
             ,
@@ -394,11 +409,10 @@ contract BullLeverageRouter is LeverageRouterBase {
      * @return expectedDxyBull Expected DXY-BULL tokens received.
      * @return expectedDebt Expected Morpho debt (flash repayment - USDC from DXY-BEAR sale).
      */
-    function previewOpenLeverage(uint256 principal, uint256 leverage)
-        external
-        view
-        returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt)
-    {
+    function previewOpenLeverage(
+        uint256 principal,
+        uint256 leverage
+    ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt) {
         if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
 
         loanAmount = (principal * (leverage - 1e18)) / 1e18;
@@ -423,11 +437,10 @@ contract BullLeverageRouter is LeverageRouterBase {
      * @return usdcForBearBuyback Expected USDC needed to buy back DXY-BEAR.
      * @return expectedReturn Expected USDC returned to user after all repayments.
      */
-    function previewCloseLeverage(uint256 debtToRepay, uint256 collateralToWithdraw)
-        external
-        view
-        returns (uint256 expectedUSDC, uint256 usdcForBearBuyback, uint256 expectedReturn)
-    {
+    function previewCloseLeverage(
+        uint256 debtToRepay,
+        uint256 collateralToWithdraw
+    ) external view returns (uint256 expectedUSDC, uint256 usdcForBearBuyback, uint256 expectedReturn) {
         // Convert staked shares to underlying BULL amount
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
 
@@ -468,7 +481,9 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.
     /// @param bearAmount Target DXY-BEAR amount to acquire.
     /// @return Estimated USDC needed (with slippage margin).
-    function _estimateUsdcForBearBuyback(uint256 bearAmount) private view returns (uint256) {
+    function _estimateUsdcForBearBuyback(
+        uint256 bearAmount
+    ) private view returns (uint256) {
         if (bearAmount == 0) return 0;
 
         uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
@@ -500,4 +515,5 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         return high;
     }
+
 }

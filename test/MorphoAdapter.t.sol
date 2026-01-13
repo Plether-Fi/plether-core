@@ -1,28 +1,33 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/MorphoAdapter.sol";
 import "./utils/MockAave.sol"; // Reuse MockERC20
+import "forge-std/Test.sol";
 
 // Simple Mock USDC for testing (6 decimals standard)
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
+
 }
 
 // Mock Morpho Blue
 contract MockMorpho is IMorpho {
+
     mapping(bytes32 => mapping(address => uint256)) public supplyShares;
     mapping(bytes32 => uint256) public totalSupplyAssets;
     mapping(bytes32 => uint256) public totalSupplyShares;
 
     IERC20 public loanToken;
 
-    constructor(address _loanToken) {
+    constructor(
+        address _loanToken
+    ) {
         loanToken = IERC20(_loanToken);
     }
 
@@ -32,11 +37,7 @@ contract MockMorpho is IMorpho {
         uint256, // shares (unused, we use assets mode)
         address onBehalf,
         bytes calldata
-    )
-        external
-        override
-        returns (uint256 assetsSupplied, uint256 sharesSupplied)
-    {
+    ) external override returns (uint256 assetsSupplied, uint256 sharesSupplied) {
         bytes32 id = keccak256(abi.encode(marketParams));
 
         // Pull tokens
@@ -62,11 +63,7 @@ contract MockMorpho is IMorpho {
         uint256, // shares (unused)
         address onBehalf,
         address receiver
-    )
-        external
-        override
-        returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn)
-    {
+    ) external override returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn) {
         bytes32 id = keccak256(abi.encode(marketParams));
 
         // Calculate shares to burn
@@ -84,11 +81,16 @@ contract MockMorpho is IMorpho {
         return (assets, sharesWithdrawn);
     }
 
-    function position(bytes32 id, address user) external view override returns (uint256, uint128, uint128) {
+    function position(
+        bytes32 id,
+        address user
+    ) external view override returns (uint256, uint128, uint128) {
         return (supplyShares[id][user], 0, 0);
     }
 
-    function market(bytes32 id)
+    function market(
+        bytes32 id
+    )
         external
         view
         override
@@ -105,69 +107,105 @@ contract MockMorpho is IMorpho {
     }
 
     // Stubs for interface compliance (not used by MorphoAdapter)
-    function borrow(MarketParams memory, uint256, uint256, address, address)
-        external
-        pure
-        override
-        returns (uint256, uint256)
-    {
+    function borrow(
+        MarketParams memory,
+        uint256,
+        uint256,
+        address,
+        address
+    ) external pure override returns (uint256, uint256) {
         return (0, 0);
     }
 
-    function repay(MarketParams memory, uint256, uint256, address, bytes calldata)
-        external
-        pure
-        override
-        returns (uint256, uint256)
-    {
+    function repay(
+        MarketParams memory,
+        uint256,
+        uint256,
+        address,
+        bytes calldata
+    ) external pure override returns (uint256, uint256) {
         return (0, 0);
     }
 
-    function isAuthorized(address, address) external pure override returns (bool) {
+    function isAuthorized(
+        address,
+        address
+    ) external pure override returns (bool) {
         return false;
     }
 
-    function setAuthorization(address, bool) external override {}
+    function setAuthorization(
+        address,
+        bool
+    ) external override {}
 
-    function createMarket(MarketParams memory) external override {}
+    function createMarket(
+        MarketParams memory
+    ) external override {}
 
-    function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
+    function idToMarketParams(
+        bytes32
+    ) external pure override returns (MarketParams memory) {
         return MarketParams(address(0), address(0), address(0), address(0), 0);
     }
 
-    function supplyCollateral(MarketParams memory, uint256, address, bytes calldata) external override {}
+    function supplyCollateral(
+        MarketParams memory,
+        uint256,
+        address,
+        bytes calldata
+    ) external override {}
 
-    function withdrawCollateral(MarketParams memory, uint256, address, address) external override {}
+    function withdrawCollateral(
+        MarketParams memory,
+        uint256,
+        address,
+        address
+    ) external override {}
 
-    function accrueInterest(MarketParams memory) external override {}
+    function accrueInterest(
+        MarketParams memory
+    ) external override {}
 
-    function liquidate(MarketParams memory, address, uint256, uint256, bytes calldata)
-        external
-        pure
-        override
-        returns (uint256, uint256)
-    {
+    function liquidate(
+        MarketParams memory,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external pure override returns (uint256, uint256) {
         return (0, 0);
     }
 
-    function flashLoan(address, uint256, bytes calldata) external override {
+    function flashLoan(
+        address,
+        uint256,
+        bytes calldata
+    ) external override {
         // Not used by MorphoAdapter
     }
 
     // Helper: Simulate yield by increasing totalSupplyAssets
-    function simulateYield(bytes32 id, uint256 yieldAmount) external {
+    function simulateYield(
+        bytes32 id,
+        uint256 yieldAmount
+    ) external {
         totalSupplyAssets[id] += yieldAmount;
         // Mint tokens to back the yield
         MockERC20(address(loanToken)).mint(address(this), yieldAmount);
     }
+
 }
 
 // Mock Universal Rewards Distributor
 contract MockURD is IUniversalRewardsDistributor {
+
     MockERC20 public rewardToken;
     mapping(address => uint256) public claimed;
 
-    constructor(address _rewardToken) {
+    constructor(
+        address _rewardToken
+    ) {
         rewardToken = MockERC20(_rewardToken);
     }
 
@@ -176,10 +214,7 @@ contract MockURD is IUniversalRewardsDistributor {
         address reward,
         uint256 claimable,
         bytes32[] calldata // proof (ignored in mock)
-    )
-        external
-        returns (uint256 amount)
-    {
+    ) external returns (uint256 amount) {
         // In real URD, this verifies merkle proof
         // For testing, we just check claimable > claimed
         uint256 alreadyClaimed = claimed[account];
@@ -193,14 +228,18 @@ contract MockURD is IUniversalRewardsDistributor {
 
         return amount;
     }
+
 }
 
 // Mock Reward Token
 contract MockRewardToken is MockERC20 {
+
     constructor() MockERC20("Morpho Token", "MORPHO") {}
+
 }
 
 contract MorphoAdapterTest is Test {
+
     MorphoAdapter adapter;
 
     // Mocks
@@ -469,4 +508,5 @@ contract MorphoAdapterTest is Test {
         vm.expectRevert(MorphoAdapter.MorphoAdapter__InvalidMarket.selector);
         new MorphoAdapter(IERC20(address(usdc)), address(morpho), badParams, owner, user);
     }
+
 }

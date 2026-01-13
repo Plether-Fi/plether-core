@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
+import {IMorpho} from "../../src/interfaces/IMorpho.sol";
 import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IMorpho} from "../../src/interfaces/IMorpho.sol";
+import "forge-std/Test.sol";
 
 /// @title Full Cycle Fork Tests
 /// @notice Tests complete protocol lifecycle: Mint -> Yield -> Burn
 contract FullCycleForkTest is BaseForkTest {
+
     address treasury;
     address alice = address(0xA11CE);
     address bob = address(0xB0B);
@@ -29,7 +30,9 @@ contract FullCycleForkTest is BaseForkTest {
 
     /// @notice Helper to simulate yield by creating borrowers and accruing interest
     /// @param utilizationPercent Percentage of supplied assets to borrow (1-100)
-    function _simulateYield(uint256 utilizationPercent) internal {
+    function _simulateYield(
+        uint256 utilizationPercent
+    ) internal {
         uint256 adapterAssets = yieldAdapter.totalAssets();
         require(adapterAssets > 0, "_simulateYield: adapter has no assets");
 
@@ -127,7 +130,7 @@ contract FullCycleForkTest is BaseForkTest {
     }
 
     function test_FullCycle_MultipleUsers() public {
-        uint256 aliceMint = 5_000e18;
+        uint256 aliceMint = 5000e18;
         uint256 bobMint = 10_000e18;
         uint256 aliceUsdc;
         uint256 bobUsdc;
@@ -266,4 +269,5 @@ contract FullCycleForkTest is BaseForkTest {
 
         assertGt(returned, (usdcRequired * 98) / 100, "Should return >98% of deposit");
     }
+
 }

@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "./utils/MockYieldAdapter.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
+import "./utils/MockYieldAdapter.sol";
+import "forge-std/Test.sol";
 
 // ==========================================
 // MOCKS
 // ==========================================
 
 contract MockERC20 is IERC20 {
+
     string public name;
     string public symbol;
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    constructor(string memory _name, string memory _symbol) {
+    constructor(
+        string memory _name,
+        string memory _symbol
+    ) {
         name = _name;
         symbol = _symbol;
     }
@@ -26,17 +30,27 @@ contract MockERC20 is IERC20 {
         return 18;
     }
 
-    function transfer(address to, uint256 amount) public returns (bool) {
+    function transfer(
+        address to,
+        uint256 amount
+    ) public returns (bool) {
         return transferFrom(msg.sender, to, amount);
     }
 
-    function approve(address spender, uint256 amount) public returns (bool) {
+    function approve(
+        address spender,
+        uint256 amount
+    ) public returns (bool) {
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) public returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public returns (bool) {
         if (from != msg.sender && allowance[from][msg.sender] != type(uint256).max) {
             require(allowance[from][msg.sender] >= amount, "ERC20: insufficient allowance");
             allowance[from][msg.sender] -= amount;
@@ -48,48 +62,69 @@ contract MockERC20 is IERC20 {
         return true;
     }
 
-    function mint(address to, uint256 amount) public {
+    function mint(
+        address to,
+        uint256 amount
+    ) public {
         balanceOf[to] += amount;
         totalSupply += amount;
         emit Transfer(address(0), to, amount);
     }
 
-    function burn(address from, uint256 amount) public {
+    function burn(
+        address from,
+        uint256 amount
+    ) public {
         require(balanceOf[from] >= amount, "Burn too much");
         balanceOf[from] -= amount;
         totalSupply -= amount;
         emit Transfer(from, address(0), amount);
     }
+
 }
 
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public view virtual override returns (uint8) {
         return 6;
     }
+
 }
 
 contract MockAToken is MockERC20 {
-    constructor(string memory n, string memory s) MockERC20(n, s) {}
+
+    constructor(
+        string memory n,
+        string memory s
+    ) MockERC20(n, s) {}
 
     function decimals() public view virtual override returns (uint8) {
         return 6;
     }
+
 }
 
 contract MockOracle is AggregatorV3Interface {
+
     int256 public price;
     uint256 public startedAt;
     uint256 public updatedAt;
 
-    constructor(int256 _price, uint256 _startedAt, uint256 _updatedAt) {
+    constructor(
+        int256 _price,
+        uint256 _startedAt,
+        uint256 _updatedAt
+    ) {
         price = _price;
         startedAt = _startedAt;
         updatedAt = _updatedAt;
     }
 
-    function setPrice(int256 _price) external {
+    function setPrice(
+        int256 _price
+    ) external {
         price = _price;
         updatedAt = block.timestamp;
     }
@@ -106,35 +141,52 @@ contract MockOracle is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
 
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
+
 }
 
 contract MockPool {
+
     address public asset;
     address public aToken;
 
-    constructor(address _asset, address _aToken) {
+    constructor(
+        address _asset,
+        address _aToken
+    ) {
         asset = _asset;
         aToken = _aToken;
     }
 
     //  - Pool calls transferFrom on Asset
-    function supply(address, uint256 amount, address onBehalfOf, uint16) external {
+    function supply(
+        address,
+        uint256 amount,
+        address onBehalfOf,
+        uint16
+    ) external {
         IERC20(asset).transferFrom(msg.sender, aToken, amount);
         MockERC20(aToken).mint(onBehalfOf, amount);
     }
 
-    function withdraw(address, uint256 amount, address to) external returns (uint256) {
+    function withdraw(
+        address,
+        uint256 amount,
+        address to
+    ) external returns (uint256) {
         MockERC20(aToken).burn(msg.sender, amount);
         IERC20(asset).transferFrom(aToken, to, amount);
         return amount;
     }
+
 }
 
 // ==========================================
@@ -142,6 +194,7 @@ contract MockPool {
 // ==========================================
 
 contract SyntheticSplitterConcurrentTest is Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter unlimitedAdapter;
 
@@ -159,12 +212,15 @@ contract SyntheticSplitterConcurrentTest is Test {
 
     uint256 constant CAP = 200_000_000;
 
-    function dealUsdc(address to, uint256 amount) internal {
+    function dealUsdc(
+        address to,
+        uint256 amount
+    ) internal {
         usdc.mint(to, amount);
     }
 
     function setUp() public {
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         usdc = new MockUSDC();
         aUsdc = new MockAToken("aUSDC", "aUSDC");
@@ -368,7 +424,9 @@ contract SyntheticSplitterConcurrentTest is Test {
         assertEq(usdc.balanceOf(carol) - carolBefore, expectedRefundEach);
     }
 
-    function handlerLikeTotalAssets(MockYieldAdapter currentAdapter) internal view returns (uint256) {
+    function handlerLikeTotalAssets(
+        MockYieldAdapter currentAdapter
+    ) internal view returns (uint256) {
         uint256 buffer = usdc.balanceOf(address(splitter));
         uint256 shares = currentAdapter.balanceOf(address(splitter));
         uint256 adapterAssets = shares > 0 ? currentAdapter.convertToAssets(shares) : 0;
@@ -655,4 +713,5 @@ contract SyntheticSplitterConcurrentTest is Test {
 
         assertGe(totalAssets, liabilities, "System should be solvent");
     }
+
 }

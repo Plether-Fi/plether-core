@@ -1,30 +1,33 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import "forge-std/StdInvariant.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "../src/SyntheticSplitter.sol";
-import "./utils/MockYieldAdapter.sol";
 import "../src/libraries/OracleLib.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
+import "./utils/MockYieldAdapter.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import "forge-std/StdInvariant.sol";
+import "forge-std/Test.sol";
 
 // ==========================================
 // MOCK USDC (6 decimals)
 // ==========================================
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
+
 }
 
 // ==========================================
 // HANDLER CONTRACT
 // ==========================================
 contract SplitterHandler is Test {
+
     SyntheticSplitter public splitter;
     MockYieldAdapter public adapter;
     MockUSDC public usdc;
@@ -66,7 +69,10 @@ contract SplitterHandler is Test {
     bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
 
     /// @dev Reverts if error selector is not in the allowed list
-    function _assertExpectedError(bytes memory reason, bytes4[] memory allowed) internal pure {
+    function _assertExpectedError(
+        bytes memory reason,
+        bytes4[] memory allowed
+    ) internal pure {
         if (reason.length < 4) revert("Unknown error (no selector)");
         bytes4 selector = bytes4(reason);
         for (uint256 i = 0; i < allowed.length; i++) {
@@ -78,7 +84,9 @@ contract SplitterHandler is Test {
         }
     }
 
-    modifier useActor(uint256 actorSeed) {
+    modifier useActor(
+        uint256 actorSeed
+    ) {
         currentActor = actors[actorSeed % actors.length];
         vm.startPrank(currentActor);
         _;
@@ -113,7 +121,10 @@ contract SplitterHandler is Test {
     // HANDLER FUNCTIONS
     // ==========================================
 
-    function mint(uint256 actorSeed, uint256 amount) external useActor(actorSeed) {
+    function mint(
+        uint256 actorSeed,
+        uint256 amount
+    ) external useActor(actorSeed) {
         // Bound amount to reasonable range - include small amounts to catch rounding issues
         amount = bound(amount, 1e15, 100_000 * 1e18);
 
@@ -145,7 +156,10 @@ contract SplitterHandler is Test {
         }
     }
 
-    function burn(uint256 actorSeed, uint256 amount) external useActor(actorSeed) {
+    function burn(
+        uint256 actorSeed,
+        uint256 amount
+    ) external useActor(actorSeed) {
         uint256 balance = splitter.TOKEN_A().balanceOf(currentActor);
         if (balance == 0) return;
 
@@ -188,7 +202,9 @@ contract SplitterHandler is Test {
         }
     }
 
-    function harvest(uint256 actorSeed) external useActor(actorSeed) {
+    function harvest(
+        uint256 actorSeed
+    ) external useActor(actorSeed) {
         // Skip if paused (will revert with Pausable error)
         if (splitter.paused()) return;
 
@@ -202,7 +218,9 @@ contract SplitterHandler is Test {
         }
     }
 
-    function simulateYield(uint256 yieldAmount) external {
+    function simulateYield(
+        uint256 yieldAmount
+    ) external {
         // Only simulate yield if splitter has shares in adapter
         uint256 splitterShares = adapter.balanceOf(address(splitter));
         if (splitterShares == 0) return;
@@ -224,7 +242,9 @@ contract SplitterHandler is Test {
         ghost_totalYieldSimulated += yieldAmount;
     }
 
-    function updatePrice(uint256 priceSeed) external {
+    function updatePrice(
+        uint256 priceSeed
+    ) external {
         // Keep price between $0.50 and $1.99 (below CAP to avoid liquidation in normal ops)
         int256 newPrice = int256(bound(priceSeed, 50_000_000, 199_000_000));
         oracle.updatePrice(newPrice);
@@ -251,7 +271,10 @@ contract SplitterHandler is Test {
         oracle.updatePrice(int256(CAP + 1_000_000)); // $2.01
     }
 
-    function emergencyRedeem(uint256 actorSeed, uint256 amount) external useActor(actorSeed) {
+    function emergencyRedeem(
+        uint256 actorSeed,
+        uint256 amount
+    ) external useActor(actorSeed) {
         // Only works if liquidated
         if (!splitter.isLiquidated()) return;
 
@@ -285,12 +308,14 @@ contract SplitterHandler is Test {
     function getTotalLiabilities() external view returns (uint256) {
         return (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
     }
+
 }
 
 // ==========================================
 // INVARIANT TEST CONTRACT
 // ==========================================
 contract SyntheticSplitterInvariantTest is StdInvariant, Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter adapter;
     MockUSDC usdc;
@@ -304,7 +329,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
 
     function setUp() public {
         // Warp to avoid timestamp issues
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         // Deploy mocks
         usdc = new MockUSDC();
@@ -439,12 +464,14 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         console.log("Token B supply:", splitter.TOKEN_B().totalSupply());
         console.log("Is liquidated:", splitter.isLiquidated());
     }
+
 }
 
 // ==========================================
 // LIQUIDATION-FOCUSED INVARIANT TEST
 // ==========================================
 contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter adapter;
     MockUSDC usdc;
@@ -457,7 +484,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
     uint256 constant CAP = 200_000_000;
 
     function setUp() public {
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         usdc = new MockUSDC();
         aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc));
@@ -561,4 +588,5 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
             console.log("Current Bull supply:", splitter.TOKEN_B().totalSupply());
         }
     }
+
 }

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
 import "../src/SyntheticToken.sol";
 import "../src/ZapRouter.sol";
-import "./utils/MockYieldAdapter.sol";
 import "../src/interfaces/AggregatorV3Interface.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "./utils/MockYieldAdapter.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "forge-std/Test.sol";
 
 /**
  * @title IntegrationTest
@@ -19,6 +19,7 @@ import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
  *      - State consistency across operations
  */
 contract IntegrationTest is Test {
+
     // Core contracts
     SyntheticSplitter public splitter;
     ZapRouter public zapRouter;
@@ -44,7 +45,7 @@ contract IntegrationTest is Test {
     uint256 constant CAP = 200_000_000; // $2.00 in 8 decimals
 
     function setUp() public {
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
 
         // Deploy USDC
         usdc = new MockUSDC();
@@ -446,6 +447,7 @@ contract IntegrationTest is Test {
 
         assertGe(totalAssets, liabilities, "System should be solvent");
     }
+
 }
 
 // ==========================================
@@ -453,29 +455,41 @@ contract IntegrationTest is Test {
 // ==========================================
 
 contract MockUSDC is ERC20 {
+
     constructor() ERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
+
 }
 
 contract MockOracle is AggregatorV3Interface {
+
     int256 public price;
     uint256 public startedAt;
     uint256 public updatedAt;
 
-    constructor(int256 _price, uint256 _startedAt, uint256 _updatedAt) {
+    constructor(
+        int256 _price,
+        uint256 _startedAt,
+        uint256 _updatedAt
+    ) {
         price = _price;
         startedAt = _startedAt;
         updatedAt = _updatedAt;
     }
 
-    function setPrice(int256 _price) external {
+    function setPrice(
+        int256 _price
+    ) external {
         price = _price;
         updatedAt = block.timestamp;
     }
@@ -492,30 +506,43 @@ contract MockOracle is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80) external view override returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
 
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, startedAt, updatedAt, 0);
     }
+
 }
 
 contract MockCurvePool {
+
     address public token0; // USDC
     address public token1; // DXY-BEAR
     uint256 public bearPrice = 1e6; // 1 BEAR = 1 USDC (in 6 decimals)
 
-    constructor(address _token0, address _token1) {
+    constructor(
+        address _token0,
+        address _token1
+    ) {
         token0 = _token0;
         token1 = _token1;
     }
 
-    function setPrice(uint256 _price) external {
+    function setPrice(
+        uint256 _price
+    ) external {
         bearPrice = _price;
     }
 
-    function get_dy(uint256 i, uint256 j, uint256 dx) external view returns (uint256) {
+    function get_dy(
+        uint256 i,
+        uint256 j,
+        uint256 dx
+    ) external view returns (uint256) {
         // i=1 (BEAR), j=0 (USDC): sell BEAR for USDC
         if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
         // i=0 (USDC), j=1 (BEAR): buy BEAR with USDC
@@ -523,7 +550,12 @@ contract MockCurvePool {
         return 0;
     }
 
-    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable returns (uint256 dy) {
+    function exchange(
+        uint256 i,
+        uint256 j,
+        uint256 dx,
+        uint256 min_dy
+    ) external payable returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
         require(dy >= min_dy, "Too little received");
 
@@ -551,8 +583,12 @@ contract MockCurvePool {
     }
 
     // Allow seeding the pool with BEAR reserves
-    function seedBearReserves(address bear, uint256 amount) external {
+    function seedBearReserves(
+        address bear,
+        uint256 amount
+    ) external {
         // Caller must have approved this contract
         ERC20(bear).transferFrom(msg.sender, address(this), amount);
     }
+
 }

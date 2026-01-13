@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Test.sol";
 import "../src/oracles/BasketOracle.sol";
 import "./utils/MockOracle.sol";
+import "forge-std/Test.sol";
 
 // Mock Curve Pool for bound validation
 contract MockCurvePool {
+
     uint256 public oraclePrice;
 
-    constructor(uint256 _price) {
+    constructor(
+        uint256 _price
+    ) {
         oraclePrice = _price;
     }
 
@@ -17,13 +20,17 @@ contract MockCurvePool {
         return oraclePrice;
     }
 
-    function setPrice(uint256 _price) external {
+    function setPrice(
+        uint256 _price
+    ) external {
         oraclePrice = _price;
     }
+
 }
 
 // 2. The Test Suite
 contract BasketOracleTest is Test {
+
     BasketOracle public basket;
     MockCurvePool public curvePool;
 
@@ -202,14 +209,19 @@ contract BasketOracleTest is Test {
         vm.expectRevert(abi.encodeWithSelector(BasketOracle.BasketOracle__InvalidPrice.selector, address(curvePool)));
         basket.latestRoundData();
     }
+
 }
 
 // Helper mock with wrong decimals (6 instead of 8)
 contract MockOracleWrongDecimals {
+
     int256 public price;
     string public description;
 
-    constructor(int256 _price, string memory _description) {
+    constructor(
+        int256 _price,
+        string memory _description
+    ) {
         price = _price;
         description = _description;
     }
@@ -221,4 +233,5 @@ contract MockOracleWrongDecimals {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         return (1, price, block.timestamp, block.timestamp, 1);
     }
+
 }

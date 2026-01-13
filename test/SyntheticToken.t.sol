@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Test.sol";
 import "../src/SyntheticToken.sol";
+import "forge-std/Test.sol";
 
 contract SyntheticTokenTest is Test {
+
     SyntheticToken public token;
 
     address public splitter = address(0x123);
@@ -61,4 +62,5 @@ contract SyntheticTokenTest is Test {
         vm.expectRevert(SyntheticToken.SyntheticToken__Unauthorized.selector);
         token.burn(alice, 100 ether);
     }
+
 }

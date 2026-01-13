@@ -7,6 +7,7 @@ pragma solidity 0.8.33;
  * @dev Used by ZapRouter and other integrations.
  */
 interface ISyntheticSplitter {
+
     // ==========================================
     // DATA TYPES
     // ==========================================
@@ -32,21 +33,27 @@ interface ISyntheticSplitter {
      * @dev Requires approval on USDC. Amount is in 18-decimal token units.
      * @param amount The amount of token pairs to mint.
      */
-    function mint(uint256 amount) external;
+    function mint(
+        uint256 amount
+    ) external;
 
     /**
      * @notice Burns equal amounts of DXY-BEAR and DXY-BULL tokens to retrieve collateral.
      * @dev Works when not liquidated. May be restricted when paused and insolvent.
      * @param amount The amount of token pairs to burn.
      */
-    function burn(uint256 amount) external;
+    function burn(
+        uint256 amount
+    ) external;
 
     /**
      * @notice Emergency exit after liquidation. Burns DXY-BEAR for its full CAP value.
      * @dev Only works when protocol is liquidated (price >= CAP).
      * @param amount The amount of DXY-BEAR tokens to burn.
      */
-    function emergencyRedeem(uint256 amount) external;
+    function emergencyRedeem(
+        uint256 amount
+    ) external;
 
     // ==========================================
     // VIEW FUNCTIONS
@@ -63,4 +70,5 @@ interface ISyntheticSplitter {
      * @return The CAP value in 8 decimal format (e.g., 2e8 = $2.00).
      */
     function CAP() external view returns (uint256);
+
 }

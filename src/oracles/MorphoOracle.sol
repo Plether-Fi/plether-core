@@ -6,14 +6,17 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 
 /// @notice Interface for Morpho-compatible price oracles.
 interface IMorphoOracle {
+
     /// @notice Returns price of 1 collateral unit in loan asset terms (1e36 scale).
     function price() external view returns (uint256);
+
 }
 
 /// @title MorphoOracle
 /// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
 /// @dev Supports both DXY-BEAR (direct) and DXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {
+
     /// @notice Source price feed (BasketOracle).
     AggregatorV3Interface public immutable BASKET_ORACLE;
 
@@ -30,7 +33,11 @@ contract MorphoOracle is IMorphoOracle {
     /// @param _basketOracle BasketOracle address.
     /// @param _cap Protocol CAP (8 decimals, e.g., 2e8 = $2.00).
     /// @param _isInverse True for DXY-BULL (CAP - Price), false for DXY-BEAR.
-    constructor(address _basketOracle, uint256 _cap, bool _isInverse) {
+    constructor(
+        address _basketOracle,
+        uint256 _cap,
+        bool _isInverse
+    ) {
         BASKET_ORACLE = AggregatorV3Interface(_basketOracle);
         CAP = _cap;
         IS_INVERSE = _isInverse;
@@ -70,4 +77,5 @@ contract MorphoOracle is IMorphoOracle {
         // Example: Price $1.00 (10^8) * 10^28 = 10^36
         return finalPrice * DecimalConstants.CHAINLINK_TO_MORPHO_SCALE;
     }
+
 }

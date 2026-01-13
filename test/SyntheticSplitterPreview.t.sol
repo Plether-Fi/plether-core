@@ -1,40 +1,54 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
+import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import "forge-std/Test.sol";
 
 // ==========================================
 // MOCKS (all inline)
 // ==========================================
 
 contract MockERC20 is ERC20 {
+
     uint8 private _decimals;
 
-    constructor(string memory name, string memory symbol, uint8 decimals_) ERC20(name, symbol) {
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint8 decimals_
+    ) ERC20(name, symbol) {
         _decimals = decimals_;
     }
 
-    function mint(address to, uint256 amount) public {
+    function mint(
+        address to,
+        uint256 amount
+    ) public {
         _mint(to, amount);
     }
 
     function decimals() public view override returns (uint8) {
         return _decimals;
     }
+
 }
 
 contract MockOracle is AggregatorV3Interface {
+
     int256 public price;
 
-    constructor(int256 _price) {
+    constructor(
+        int256 _price
+    ) {
         price = _price;
     }
 
-    function setPrice(int256 _price) external {
+    function setPrice(
+        int256 _price
+    ) external {
         price = _price;
     }
 
@@ -50,16 +64,20 @@ contract MockOracle is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80) external view override returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, 0, 0, 0);
     }
 
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, price, block.timestamp, block.timestamp, 0);
     }
+
 }
 
 contract MockSequencer is AggregatorV3Interface {
+
     function decimals() external pure override returns (uint8) {
         return 0;
     }
@@ -72,20 +90,26 @@ contract MockSequencer is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80) external view override returns (uint80, int256, uint256, uint256, uint80) {
+    function getRoundData(
+        uint80
+    ) external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, 0, 0, 0, 0);
     }
 
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (0, 0, 0, block.timestamp, 0);
     }
+
 }
 
 contract MockAdapter is IERC4626, ERC20 {
+
     using Math for uint256;
     IERC20 public assetToken;
 
-    constructor(address _asset) ERC20("MockVault", "mvUSDC") {
+    constructor(
+        address _asset
+    ) ERC20("MockVault", "mvUSDC") {
         assetToken = IERC20(_asset);
     }
 
@@ -97,63 +121,93 @@ contract MockAdapter is IERC4626, ERC20 {
         return assetToken.balanceOf(address(this));
     }
 
-    function convertToShares(uint256 assets) public view override returns (uint256) {
+    function convertToShares(
+        uint256 assets
+    ) public view override returns (uint256) {
         uint256 supply = totalSupply();
         return supply == 0 ? assets : assets.mulDiv(supply, totalAssets(), Math.Rounding.Floor);
     }
 
-    function convertToAssets(uint256 shares) public view override returns (uint256) {
+    function convertToAssets(
+        uint256 shares
+    ) public view override returns (uint256) {
         uint256 supply = totalSupply();
         return supply == 0 ? shares : shares.mulDiv(totalAssets(), supply, Math.Rounding.Floor);
     }
 
-    function maxDeposit(address) external pure override returns (uint256) {
+    function maxDeposit(
+        address
+    ) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
-    function maxMint(address) external pure override returns (uint256) {
+    function maxMint(
+        address
+    ) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
-    function maxWithdraw(address) external view override returns (uint256) {
+    function maxWithdraw(
+        address
+    ) external view override returns (uint256) {
         return totalAssets();
     }
 
-    function maxRedeem(address) external view override returns (uint256) {
+    function maxRedeem(
+        address
+    ) external view override returns (uint256) {
         return totalSupply();
     }
 
-    function previewDeposit(uint256 assets) external view override returns (uint256) {
+    function previewDeposit(
+        uint256 assets
+    ) external view override returns (uint256) {
         return convertToShares(assets);
     }
 
-    function previewMint(uint256 shares) external view override returns (uint256) {
+    function previewMint(
+        uint256 shares
+    ) external view override returns (uint256) {
         return convertToAssets(shares);
     }
 
-    function previewWithdraw(uint256 assets) external view override returns (uint256) {
+    function previewWithdraw(
+        uint256 assets
+    ) external view override returns (uint256) {
         return convertToShares(assets);
     }
 
-    function previewRedeem(uint256 shares) external view override returns (uint256) {
+    function previewRedeem(
+        uint256 shares
+    ) external view override returns (uint256) {
         return convertToAssets(shares);
     }
 
-    function deposit(uint256 assets, address receiver) external override returns (uint256) {
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external override returns (uint256) {
         uint256 shares = convertToShares(assets);
         assetToken.transferFrom(msg.sender, address(this), assets);
         _mint(receiver, shares);
         return shares;
     }
 
-    function mint(uint256 shares, address receiver) external override returns (uint256) {
+    function mint(
+        uint256 shares,
+        address receiver
+    ) external override returns (uint256) {
         uint256 assets = convertToAssets(shares);
         assetToken.transferFrom(msg.sender, address(this), assets);
         _mint(receiver, shares);
         return assets;
     }
 
-    function withdraw(uint256 assets, address receiver, address owner) external override returns (uint256) {
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) external override returns (uint256) {
         uint256 shares = convertToShares(assets);
         if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
         _burn(owner, shares);
@@ -161,13 +215,18 @@ contract MockAdapter is IERC4626, ERC20 {
         return shares;
     }
 
-    function redeem(uint256 shares, address receiver, address owner) external override returns (uint256) {
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) external override returns (uint256) {
         if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
         uint256 assets = convertToAssets(shares);
         _burn(owner, shares);
         assetToken.transfer(receiver, assets);
         return assets;
     }
+
 }
 
 // ==========================================
@@ -175,6 +234,7 @@ contract MockAdapter is IERC4626, ERC20 {
 // ==========================================
 
 contract SyntheticSplitterFullTest is Test {
+
     SyntheticSplitter splitter;
     MockERC20 usdc;
     MockOracle oracle;
@@ -203,7 +263,9 @@ contract SyntheticSplitterFullTest is Test {
 
     // ====================== ORIGINAL PREVIEW TESTS ======================
 
-    function testFuzz_PreviewMint(uint256 amount) public {
+    function testFuzz_PreviewMint(
+        uint256 amount
+    ) public {
         uint256 minAmount = splitter.USDC_MULTIPLIER() / splitter.CAP() + 1;
         vm.assume(amount >= minAmount && amount < 1_000_000_000e18);
 
@@ -221,7 +283,10 @@ contract SyntheticSplitterFullTest is Test {
         assertApproxEqAbs(usdc.balanceOf(address(splitter)) - splitterBalBefore, toBuffer, 1, "Incorrect buffer");
     }
 
-    function testFuzz_PreviewBurn_Standard(uint256 mintAmount, uint256 burnAmount) public {
+    function testFuzz_PreviewBurn_Standard(
+        uint256 mintAmount,
+        uint256 burnAmount
+    ) public {
         uint256 minAmount = splitter.USDC_MULTIPLIER() / splitter.CAP() + 1;
         vm.assume(mintAmount > minAmount && mintAmount < 1_000_000e18);
         // burnAmount must be large enough for non-zero USDC refund
@@ -361,7 +426,7 @@ contract SyntheticSplitterFullTest is Test {
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertGt(s.totalAssets, s.totalLiabilities);
-        assertGt(s.collateralRatio, 10000);
+        assertGt(s.collateralRatio, 10_000);
         assertFalse(s.liquidated);
         assertFalse(s.isPaused);
     }
@@ -476,13 +541,13 @@ contract SyntheticSplitterFullTest is Test {
         vm.prank(user);
         splitter.mint(10e18);
 
-        oracle.setPrice(int256(CAP + 50000000)); // 200.05
+        oracle.setPrice(int256(CAP + 50_000_000)); // 200.05
 
         splitter.triggerLiquidation();
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();
         assertTrue(s.liquidated);
-        assertEq(s.currentPrice, CAP + 50000000);
+        assertEq(s.currentPrice, CAP + 50_000_000);
         assertEq(s.capPrice, CAP);
     }
 
@@ -518,4 +583,5 @@ contract SyntheticSplitterFullTest is Test {
         assertTrue(s3.liquidated);
         assertEq(s3.currentPrice, 150e8); // price updated correctly, but system stays dead
     }
+
 }

@@ -19,25 +19,36 @@ struct MarketParams {
 /// @notice Minimal interface for Morpho Blue lending protocol.
 /// @dev See https://docs.morpho.org for full documentation.
 interface IMorpho {
+
     // ==========================================
     // AUTHORIZATION
     // ==========================================
 
     /// @notice Set authorization for an address to act on behalf of the caller
-    function setAuthorization(address authorized, bool newIsAuthorized) external;
+    function setAuthorization(
+        address authorized,
+        bool newIsAuthorized
+    ) external;
 
     /// @notice Check if an address is authorized to act on behalf of another
-    function isAuthorized(address authorizer, address authorized) external view returns (bool);
+    function isAuthorized(
+        address authorizer,
+        address authorized
+    ) external view returns (bool);
 
     // ==========================================
     // MARKET MANAGEMENT
     // ==========================================
 
     /// @notice Create a new market
-    function createMarket(MarketParams memory marketParams) external;
+    function createMarket(
+        MarketParams memory marketParams
+    ) external;
 
     /// @notice Get market ID from params
-    function idToMarketParams(bytes32 id) external view returns (MarketParams memory);
+    function idToMarketParams(
+        bytes32 id
+    ) external view returns (MarketParams memory);
 
     // ==========================================
     // LENDER FUNCTIONS (Supply loan tokens to earn yield)
@@ -66,12 +77,20 @@ interface IMorpho {
     // ==========================================
 
     /// @notice Supply collateral to a Morpho market as a borrower
-    function supplyCollateral(MarketParams memory marketParams, uint256 assets, address onBehalfOf, bytes calldata data)
-        external;
+    function supplyCollateral(
+        MarketParams memory marketParams,
+        uint256 assets,
+        address onBehalfOf,
+        bytes calldata data
+    ) external;
 
     /// @notice Withdraw collateral from a Morpho market as a borrower
-    function withdrawCollateral(MarketParams memory marketParams, uint256 assets, address onBehalfOf, address receiver)
-        external;
+    function withdrawCollateral(
+        MarketParams memory marketParams,
+        uint256 assets,
+        address onBehalfOf,
+        address receiver
+    ) external;
 
     /// @notice Borrow assets from a Morpho market
     function borrow(
@@ -96,7 +115,9 @@ interface IMorpho {
     // ==========================================
 
     /// @notice Accrue interest for a market
-    function accrueInterest(MarketParams memory marketParams) external;
+    function accrueInterest(
+        MarketParams memory marketParams
+    ) external;
 
     // ==========================================
     // LIQUIDATION
@@ -125,20 +146,26 @@ interface IMorpho {
     /// @param assets The amount of tokens to flash loan
     /// @param data Arbitrary data to pass to the callback
     /// @dev Morpho flash loans are fee-free. Callback must repay exact amount.
-    function flashLoan(address token, uint256 assets, bytes calldata data) external;
+    function flashLoan(
+        address token,
+        uint256 assets,
+        bytes calldata data
+    ) external;
 
     // ==========================================
     // VIEW FUNCTIONS
     // ==========================================
 
     /// @notice Get position data for a user in a market
-    function position(bytes32 id, address user)
-        external
-        view
-        returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
+    function position(
+        bytes32 id,
+        address user
+    ) external view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
 
     /// @notice Get market data
-    function market(bytes32 id)
+    function market(
+        bytes32 id
+    )
         external
         view
         returns (
@@ -149,13 +176,19 @@ interface IMorpho {
             uint128 lastUpdate,
             uint128 fee
         );
+
 }
 
 /// @title IMorphoFlashLoanCallback
 /// @notice Callback interface for Morpho flash loan receivers.
 interface IMorphoFlashLoanCallback {
+
     /// @notice Called by Morpho during flash loan execution.
     /// @param assets Amount of tokens borrowed.
     /// @param data Arbitrary data passed through from flashLoan call.
-    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external;
+    function onMorphoFlashLoan(
+        uint256 assets,
+        bytes calldata data
+    ) external;
+
 }

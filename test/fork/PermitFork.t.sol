@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
-import {BaseForkTest} from "./BaseForkTest.sol";
 import {ZapRouter} from "../../src/ZapRouter.sol";
+import {BaseForkTest} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import "forge-std/Test.sol";
 
 /// @title Permit Fork Tests
 /// @notice Tests zapBurnWithPermit which uses DXY-BULL's EIP-2612 permit
 contract PermitForkTest is BaseForkTest {
+
     ZapRouter zapRouter;
 
     uint256 alicePrivateKey = 0xA11CE;
@@ -63,9 +64,8 @@ contract PermitForkTest is BaseForkTest {
         uint256 nonce,
         uint256 deadline
     ) internal view returns (bytes32) {
-        bytes32 PERMIT_TYPEHASH = keccak256(
-            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
-        );
+        bytes32 PERMIT_TYPEHASH =
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
 
         bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonce, deadline));
 
@@ -73,4 +73,5 @@ contract PermitForkTest is BaseForkTest {
 
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
+
 }

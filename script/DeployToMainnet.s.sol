@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Script.sol";
+import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
+import {LeverageRouter} from "../src/LeverageRouter.sol";
+import {MorphoAdapter} from "../src/MorphoAdapter.sol";
+import {StakedToken} from "../src/StakedToken.sol";
+import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
+import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
-import {MorphoAdapter} from "../src/MorphoAdapter.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Script.sol";
 
 // Curve Twocrypto-NG Factory interface
 interface ITwocryptoFactory {
+
     function deploy_pool(
         string memory _name,
         string memory _symbol,
@@ -32,11 +33,17 @@ interface ITwocryptoFactory {
         uint256 ma_exp_time,
         uint256 initial_price
     ) external returns (address);
+
 }
 
 // Curve Twocrypto pool interface for adding liquidity
 interface ICurveTwocryptoPool {
-    function add_liquidity(uint256[2] memory amounts, uint256 min_mint_amount) external returns (uint256);
+
+    function add_liquidity(
+        uint256[2] memory amounts,
+        uint256 min_mint_amount
+    ) external returns (uint256);
+
 }
 
 /**
@@ -57,6 +64,7 @@ interface ICurveTwocryptoPool {
  *      12. BullLeverageRouter (BULL leverage)
  */
 contract DeployToMainnet is Script {
+
     // ==========================================
     // MAINNET ADDRESSES
     // ==========================================
@@ -90,13 +98,13 @@ contract DeployToMainnet is Script {
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation for basket oracle
 
     // Curve Pool Parameters (optimized for low slippage)
-    uint256 constant CURVE_A = 320000;
-    uint256 constant CURVE_GAMMA = 1000000000000000; // 1e15 (0.001)
-    uint256 constant CURVE_MID_FEE = 26000000;
-    uint256 constant CURVE_OUT_FEE = 45000000;
-    uint256 constant CURVE_FEE_GAMMA = 230000000000000;
-    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000;
-    uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000;
+    uint256 constant CURVE_A = 320_000;
+    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15 (0.001)
+    uint256 constant CURVE_MID_FEE = 26_000_000;
+    uint256 constant CURVE_OUT_FEE = 45_000_000;
+    uint256 constant CURVE_FEE_GAMMA = 230_000_000_000_000;
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
     uint256 constant CURVE_MA_EXP_TIME = 866;
     uint256 constant CURVE_INITIAL_PRICE = 1e18;
 
@@ -258,7 +266,9 @@ contract DeployToMainnet is Script {
     // INTERNAL HELPERS
     // ==========================================
 
-    function _deployBasketOracle(address owner) internal returns (BasketOracle) {
+    function _deployBasketOracle(
+        address owner
+    ) internal returns (BasketOracle) {
         address[] memory feeds = new address[](6);
         feeds[0] = CHAINLINK_EUR_USD;
         feeds[1] = CHAINLINK_JPY_USD;
@@ -278,7 +288,9 @@ contract DeployToMainnet is Script {
         return new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP, owner);
     }
 
-    function _deployCurvePool(address dxyBear) internal returns (address) {
+    function _deployCurvePool(
+        address dxyBear
+    ) internal returns (address) {
         return ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
                 "Curve.fi USDC/DXY-BEAR",
@@ -297,10 +309,11 @@ contract DeployToMainnet is Script {
             );
     }
 
-    function _deploySplitterWithAdapter(address oracle, address treasury, address deployer)
-        internal
-        returns (MorphoAdapter adapter, SyntheticSplitter splitter)
-    {
+    function _deploySplitterWithAdapter(
+        address oracle,
+        address treasury,
+        address deployer
+    ) internal returns (MorphoAdapter adapter, SyntheticSplitter splitter) {
         // Predict Splitter address (deployed 1 nonce after adapter)
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
@@ -324,7 +337,9 @@ contract DeployToMainnet is Script {
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
     }
 
-    function _logDeployment(DeployedContracts memory d) internal pure {
+    function _logDeployment(
+        DeployedContracts memory d
+    ) internal pure {
         console.log("========================================");
         console.log("DEPLOYMENT COMPLETE");
         console.log("========================================");
@@ -354,7 +369,9 @@ contract DeployToMainnet is Script {
         console.log("========================================");
     }
 
-    function _verifyDeployment(DeployedContracts memory d) internal view {
+    function _verifyDeployment(
+        DeployedContracts memory d
+    ) internal view {
         console.log("");
         console.log("Verifying deployment...");
 
@@ -376,4 +393,5 @@ contract DeployToMainnet is Script {
 
         console.log("All verifications passed!");
     }
+
 }

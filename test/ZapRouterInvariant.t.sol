@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
-import "forge-std/StdInvariant.sol";
 import "../src/ZapRouter.sol";
 import "../src/interfaces/ICurvePool.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "forge-std/StdInvariant.sol";
+import "forge-std/Test.sol";
 
 // ==========================================
 // MOCK CONTRACTS FOR INVARIANT TESTS
 // ==========================================
 
 contract InvMockToken is ERC20 {
+
     uint8 private _decimals;
 
-    constructor(string memory name, string memory symbol, uint8 dec) ERC20(name, symbol) {
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint8 dec
+    ) ERC20(name, symbol) {
         _decimals = dec;
     }
 
@@ -24,20 +29,32 @@ contract InvMockToken is ERC20 {
         return _decimals;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount) external {
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
         _burn(from, amount);
     }
+
 }
 
 contract InvMockFlashToken is ERC20, IERC3156FlashLender {
+
     uint8 private _decimals;
     bytes32 public constant CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
 
-    constructor(string memory name, string memory symbol, uint8 dec) ERC20(name, symbol) {
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint8 dec
+    ) ERC20(name, symbol) {
         _decimals = dec;
     }
 
@@ -45,57 +62,85 @@ contract InvMockFlashToken is ERC20, IERC3156FlashLender {
         return _decimals;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount) external {
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
         _burn(from, amount);
     }
 
-    function maxFlashLoan(address token) external view override returns (uint256) {
+    function maxFlashLoan(
+        address token
+    ) external view override returns (uint256) {
         return token == address(this) ? type(uint256).max - totalSupply() : 0;
     }
 
-    function flashFee(address token, uint256) external view override returns (uint256) {
+    function flashFee(
+        address token,
+        uint256
+    ) external view override returns (uint256) {
         require(token == address(this), "Invalid token");
         return 0;
     }
 
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
+    function flashLoan(
+        IERC3156FlashBorrower receiver,
+        address token,
+        uint256 amount,
+        bytes calldata data
+    ) external override returns (bool) {
         require(token == address(this), "Invalid token");
         _mint(address(receiver), amount);
         require(receiver.onFlashLoan(msg.sender, token, amount, 0, data) == CALLBACK_SUCCESS, "Callback failed");
         _burn(address(receiver), amount);
         return true;
     }
+
 }
 
 contract InvMockCurvePool is ICurvePool {
+
     address public token0; // USDC
     address public token1; // dxyBear
     uint256 public bearPrice = 1e6; // 1 BEAR = 1 USDC
 
-    constructor(address _token0, address _token1) {
+    constructor(
+        address _token0,
+        address _token1
+    ) {
         token0 = _token0;
         token1 = _token1;
     }
 
-    function setPrice(uint256 _price) external {
+    function setPrice(
+        uint256 _price
+    ) external {
         bearPrice = _price;
     }
 
-    function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256) {
+    function get_dy(
+        uint256 i,
+        uint256 j,
+        uint256 dx
+    ) external view override returns (uint256) {
         if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
         if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
         return 0;
     }
 
-    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
+    function exchange(
+        uint256 i,
+        uint256 j,
+        uint256 dx,
+        uint256 min_dy
+    ) external payable override returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
         require(dy >= min_dy, "Too little received");
         address tokenIn = i == 0 ? token0 : token1;
@@ -108,16 +153,22 @@ contract InvMockCurvePool is ICurvePool {
     function price_oracle() external view override returns (uint256) {
         return bearPrice * 1e12;
     }
+
 }
 
 contract InvMockSplitter is ISyntheticSplitter {
+
     address public tA; // BEAR
     address public tB; // BULL
     address public usdc;
     Status private _status = Status.ACTIVE;
     uint256 public constant CAP_VALUE = 2e8; // $2.00 in 8 decimals
 
-    constructor(address _tA, address _tB, address _usdc) {
+    constructor(
+        address _tA,
+        address _tB,
+        address _usdc
+    ) {
         tA = _tA;
         tB = _tB;
         usdc = _usdc;
@@ -131,25 +182,34 @@ contract InvMockSplitter is ISyntheticSplitter {
         return _status;
     }
 
-    function setStatus(Status newStatus) external {
+    function setStatus(
+        Status newStatus
+    ) external {
         _status = newStatus;
     }
 
-    function mint(uint256 amount) external override {
+    function mint(
+        uint256 amount
+    ) external override {
         uint256 usdcCost = (amount * CAP_VALUE) / 1e20;
         InvMockToken(usdc).transferFrom(msg.sender, address(this), usdcCost);
         InvMockFlashToken(tA).mint(msg.sender, amount);
         InvMockFlashToken(tB).mint(msg.sender, amount);
     }
 
-    function burn(uint256 amount) external override {
+    function burn(
+        uint256 amount
+    ) external override {
         InvMockFlashToken(tA).burn(msg.sender, amount);
         InvMockFlashToken(tB).burn(msg.sender, amount);
         uint256 usdcOut = (amount * CAP_VALUE) / 1e20;
         InvMockToken(usdc).mint(msg.sender, usdcOut);
     }
 
-    function emergencyRedeem(uint256) external override {}
+    function emergencyRedeem(
+        uint256
+    ) external override {}
+
 }
 
 // ==========================================
@@ -157,6 +217,7 @@ contract InvMockSplitter is ISyntheticSplitter {
 // ==========================================
 
 contract ZapRouterHandler is Test {
+
     ZapRouter public router;
     InvMockToken public usdc;
     InvMockFlashToken public dxyBear;
@@ -176,7 +237,9 @@ contract ZapRouterHandler is Test {
     uint256 public ghost_totalBullBurned;
     uint256 public ghost_totalUsdcReturned;
 
-    modifier useActor(uint256 actorSeed) {
+    modifier useActor(
+        uint256 actorSeed
+    ) {
         currentActor = actors[actorSeed % actors.length];
         vm.startPrank(currentActor);
         _;
@@ -211,7 +274,10 @@ contract ZapRouterHandler is Test {
         }
     }
 
-    function zapMint(uint256 actorSeed, uint256 usdcAmount) external useActor(actorSeed) {
+    function zapMint(
+        uint256 actorSeed,
+        uint256 usdcAmount
+    ) external useActor(actorSeed) {
         // Bound inputs
         usdcAmount = bound(usdcAmount, 10e6, 100_000e6); // $10 to $100k
 
@@ -230,7 +296,10 @@ contract ZapRouterHandler is Test {
         }
     }
 
-    function zapBurn(uint256 actorSeed, uint256 bullAmount) external useActor(actorSeed) {
+    function zapBurn(
+        uint256 actorSeed,
+        uint256 bullAmount
+    ) external useActor(actorSeed) {
         uint256 bullBalance = dxyBull.balanceOf(currentActor);
 
         // Skip if no BULL to burn
@@ -251,7 +320,10 @@ contract ZapRouterHandler is Test {
         }
     }
 
-    function zapMintThenBurn(uint256 actorSeed, uint256 usdcAmount) external useActor(actorSeed) {
+    function zapMintThenBurn(
+        uint256 actorSeed,
+        uint256 usdcAmount
+    ) external useActor(actorSeed) {
         // Bound inputs
         usdcAmount = bound(usdcAmount, 100e6, 10_000e6); // $100 to $10k
 
@@ -288,9 +360,12 @@ contract ZapRouterHandler is Test {
         return actors.length;
     }
 
-    function getActor(uint256 index) external view returns (address) {
+    function getActor(
+        uint256 index
+    ) external view returns (address) {
         return actors[index % actors.length];
     }
+
 }
 
 // ==========================================
@@ -298,6 +373,7 @@ contract ZapRouterHandler is Test {
 // ==========================================
 
 contract ZapRouterInvariantTest is StdInvariant, Test {
+
     ZapRouter public router;
     InvMockToken public usdc;
     InvMockFlashToken public dxyBear;
@@ -351,4 +427,5 @@ contract ZapRouterInvariantTest is StdInvariant, Test {
         console.log("Total BULL burned:", handler.ghost_totalBullBurned());
         console.log("Total USDC returned:", handler.ghost_totalUsdcReturned());
     }
+
 }

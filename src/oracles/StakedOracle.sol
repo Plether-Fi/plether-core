@@ -6,14 +6,17 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 
 /// @notice Interface for price oracles.
 interface IOracle {
+
     /// @notice Returns price of 1 collateral unit in loan asset terms.
     function price() external view returns (uint256);
+
 }
 
 /// @title StakedOracle
 /// @notice Prices ERC4626 vault shares by combining underlying price with exchange rate.
 /// @dev Price = UnderlyingPrice * ExchangeRate. Used for sDXY-BEAR/sDXY-BULL in Morpho.
 contract StakedOracle is IOracle {
+
     /// @notice The staking vault (sDXY-BEAR or sDXY-BULL).
     IERC4626 public immutable VAULT;
 
@@ -29,7 +32,10 @@ contract StakedOracle is IOracle {
     /// @notice Creates staked oracle for a vault.
     /// @param _vault ERC4626 staking vault address.
     /// @param _underlyingOracle Price oracle for the underlying DXY token.
-    constructor(address _vault, address _underlyingOracle) {
+    constructor(
+        address _vault,
+        address _underlyingOracle
+    ) {
         VAULT = IERC4626(_vault);
         UNDERLYING_ORACLE = IOracle(_underlyingOracle);
         // We need decimals to scale the exchange rate correctly
@@ -47,4 +53,5 @@ contract StakedOracle is IOracle {
 
         return (rawPrice * assetsPerShare) / UNDERLYING_DECIMALS;
     }
+
 }

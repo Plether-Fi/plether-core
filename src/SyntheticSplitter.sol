@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {SyntheticToken} from "./SyntheticToken.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
-import {SyntheticToken} from "./SyntheticToken.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title SyntheticSplitter
@@ -21,6 +21,7 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 ///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
 ///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
 contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyGuard {
+
     using SafeERC20 for IERC20;
 
     // ==========================================
@@ -157,11 +158,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
      * @return depositToAdapter Amount that will be sent to Yield Source
      * @return keptInBuffer Amount that will stay in Splitter contract
      */
-    function previewMint(uint256 mintAmount)
-        external
-        view
-        returns (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer)
-    {
+    function previewMint(
+        uint256 mintAmount
+    ) external view returns (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer) {
         if (mintAmount == 0) return (0, 0, 0);
         if (isLiquidated) revert Splitter__LiquidationActive();
 
@@ -179,7 +178,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
     /// @notice Mint DXY-BEAR and DXY-BULL tokens by depositing USDC collateral.
     /// @param amount The amount of token pairs to mint (18 decimals).
-    function mint(uint256 amount) external nonReentrant whenNotPaused {
+    function mint(
+        uint256 amount
+    ) external nonReentrant whenNotPaused {
         if (amount == 0) revert Splitter__ZeroAmount();
         if (isLiquidated) revert Splitter__LiquidationActive();
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
@@ -218,11 +219,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
      * @return usdcToReturn Total USDC user will receive
      * @return withdrawnFromAdapter Amount pulled from Yield Source to cover shortage
      */
-    function previewBurn(uint256 burnAmount)
-        external
-        view
-        returns (uint256 usdcToReturn, uint256 withdrawnFromAdapter)
-    {
+    function previewBurn(
+        uint256 burnAmount
+    ) external view returns (uint256 usdcToReturn, uint256 withdrawnFromAdapter) {
         if (burnAmount == 0) return (0, 0);
 
         // 1. Solvency Check (Simulates the paused logic)
@@ -249,7 +248,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
     /// @notice Burn DXY-BEAR and DXY-BULL tokens to redeem USDC collateral.
     /// @param amount The amount of token pairs to burn (18 decimals).
-    function burn(uint256 amount) external nonReentrant {
+    function burn(
+        uint256 amount
+    ) external nonReentrant {
         if (amount == 0) revert Splitter__ZeroAmount();
 
         // If paused, enforce 100% solvency to prevent race to exit
@@ -283,7 +284,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
     /// @dev Withdraws USDC from yield adapter with redeem fallback.
     /// @param amount USDC amount to withdraw (6 decimals).
-    function _withdrawFromAdapter(uint256 amount) internal {
+    function _withdrawFromAdapter(
+        uint256 amount
+    ) internal {
         try yieldAdapter.withdraw(amount, address(this), address(this)) {
         // Success via withdraw
         }
@@ -321,7 +324,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     /// @notice Emergency redemption when protocol is liquidated (price >= CAP).
     /// @dev Only burns DXY-BEAR tokens at CAP price. DXY-BULL becomes worthless.
     /// @param amount The amount of DXY-BEAR tokens to redeem (18 decimals).
-    function emergencyRedeem(uint256 amount) external nonReentrant {
+    function emergencyRedeem(
+        uint256 amount
+    ) external nonReentrant {
         if (!isLiquidated) {
             uint256 price = _getOraclePrice();
             if (price >= CAP) {
@@ -487,7 +492,10 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     /// @notice Propose new fee receiver addresses (7-day timelock).
     /// @param _treasury New treasury address.
     /// @param _staking New staking address (can be zero to send all to treasury).
-    function proposeFeeReceivers(address _treasury, address _staking) external onlyOwner {
+    function proposeFeeReceivers(
+        address _treasury,
+        address _staking
+    ) external onlyOwner {
         if (_treasury == address(0)) revert Splitter__ZeroAddress();
         pendingFees = FeeConfig(_treasury, _staking);
         feesActivationTime = block.timestamp + TIMELOCK_DELAY;
@@ -511,7 +519,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
     /// @notice Propose a new yield adapter (7-day timelock).
     /// @param _newAdapter Address of the new ERC4626-compliant adapter.
-    function proposeAdapter(address _newAdapter) external onlyOwner {
+    function proposeAdapter(
+        address _newAdapter
+    ) external onlyOwner {
         if (_newAdapter == address(0)) revert Splitter__ZeroAddress();
         pendingAdapter = _newAdapter;
         adapterActivationTime = block.timestamp + TIMELOCK_DELAY;
@@ -640,4 +650,5 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     function _getOraclePrice() internal view returns (uint256) {
         return OracleLib.getValidatedPrice(ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
     }
+
 }

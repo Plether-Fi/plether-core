@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Script.sol";
-import "forge-std/console2.sol";
+import {StakedToken} from "../src/StakedToken.sol";
+import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Script.sol";
+import "forge-std/console2.sol";
 
 /**
  * @title VerifyDeployment
@@ -23,6 +23,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *      5. Router functionality
  */
 contract VerifyDeployment is Script {
+
     // ==========================================
     // DEPLOYED ADDRESSES (update after deploy)
     // ==========================================
@@ -300,4 +301,5 @@ contract VerifyDeployment is Script {
         require(usdcAfter > usdcBefore, "USDC not received from burn");
         console2.log("[OK] Burn successful - received USDC:", usdcAfter - usdcBefore);
     }
+
 }

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
-import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
-import {ZapRouter} from "../../src/ZapRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
+import {ZapRouter} from "../../src/ZapRouter.sol";
 import {StakedOracle} from "../../src/oracles/StakedOracle.sol";
+import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Test.sol";
 
 /// @title ZapRouter Fork Tests
 /// @notice Tests ZapRouter with real Curve pool on mainnet fork
 contract ZapRouterForkTest is BaseForkTest {
+
     StakedToken stBull;
     StakedToken stBear;
     ZapRouter zapRouter;
@@ -88,4 +89,5 @@ contract ZapRouterForkTest is BaseForkTest {
         assertGt(usdcReturned, 97e6, "Should return >97% of original USDC");
         assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
     }
+
 }

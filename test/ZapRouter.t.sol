@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Test.sol";
 import "../src/ZapRouter.sol";
 import "../src/base/FlashLoanBase.sol";
 import "../src/interfaces/ICurvePool.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
+import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "forge-std/Test.sol";
 
 contract ZapRouterTest is Test {
+
     ZapRouter public zapRouter;
 
     // Mocks
@@ -534,7 +535,9 @@ contract ZapRouterTest is Test {
         assertGt(usdc.balanceOf(alice), 1000 * 1e6, "Should have more USDC than started");
     }
 
-    function testFuzz_ZapBurn(uint256 bullAmount) public {
+    function testFuzz_ZapBurn(
+        uint256 bullAmount
+    ) public {
         // Bound to reasonable range
         bullAmount = bound(bullAmount, 1e18, 1_000_000 * 1e18);
 
@@ -567,7 +570,9 @@ contract ZapRouterTest is Test {
     // ==========================================
 
     /// @notice Fuzz test: zapMint with variable USDC amounts
-    function testFuzz_ZapMint(uint256 usdcAmount) public {
+    function testFuzz_ZapMint(
+        uint256 usdcAmount
+    ) public {
         // Bound to reasonable range: $1 to $1M
         usdcAmount = bound(usdcAmount, 1e6, 1_000_000 * 1e6);
 
@@ -601,14 +606,17 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapMint at different BEAR prices
-    function testFuzz_ZapMint_VariablePrice(uint256 usdcAmount, uint256 bearPriceBps) public {
+    function testFuzz_ZapMint_VariablePrice(
+        uint256 usdcAmount,
+        uint256 bearPriceBps
+    ) public {
         // Bound USDC to reasonable range
         usdcAmount = bound(usdcAmount, 100e6, 100_000 * 1e6);
 
         // Bound BEAR price: 50% to 190% of CAP (price >= CAP reverts)
         // CAP = $2.00, so BEAR price range: $0.10 to $1.90
         bearPriceBps = bound(bearPriceBps, 500, 9500); // 5% to 95% of CAP
-        uint256 bearPrice = (2e6 * bearPriceBps) / 10000; // Scale to 6 decimals
+        uint256 bearPrice = (2e6 * bearPriceBps) / 10_000; // Scale to 6 decimals
         curvePool.setPrice(bearPrice);
 
         usdc.mint(alice, usdcAmount);
@@ -629,14 +637,17 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapBurn at different BEAR prices
-    function testFuzz_ZapBurn_VariablePrice(uint256 bullAmount, uint256 bearPriceBps) public {
+    function testFuzz_ZapBurn_VariablePrice(
+        uint256 bullAmount,
+        uint256 bearPriceBps
+    ) public {
         // Bound BULL to reasonable range
         bullAmount = bound(bullAmount, 1e18, 100_000 * 1e18);
 
         // Bound BEAR price: 10% to 150% of $1 (within reasonable trading range)
         // Avoid very high prices where buyback becomes too expensive
-        bearPriceBps = bound(bearPriceBps, 1000, 15000); // 10% to 150%
-        uint256 bearPrice = (1e6 * bearPriceBps) / 10000;
+        bearPriceBps = bound(bearPriceBps, 1000, 15_000); // 10% to 150%
+        uint256 bearPrice = (1e6 * bearPriceBps) / 10_000;
         curvePool.setPrice(bearPrice);
 
         dxyBull.mint(alice, bullAmount);
@@ -661,7 +672,9 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: full round trip (mint then burn)
-    function testFuzz_RoundTrip(uint256 usdcAmount) public {
+    function testFuzz_RoundTrip(
+        uint256 usdcAmount
+    ) public {
         // Bound to reasonable range
         usdcAmount = bound(usdcAmount, 10e6, 100_000 * 1e6);
 
@@ -704,7 +717,9 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapMint with variable slippage tolerance
-    function testFuzz_ZapMint_SlippageTolerance(uint256 slippageBps) public {
+    function testFuzz_ZapMint_SlippageTolerance(
+        uint256 slippageBps
+    ) public {
         // Bound slippage to valid range: 1 to 100 bps (0.01% to 1%)
         slippageBps = bound(slippageBps, 1, 100);
 
@@ -727,7 +742,10 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapMint minimum output protection
-    function testFuzz_ZapMint_MinOutput(uint256 usdcAmount, uint256 minOutPercent) public {
+    function testFuzz_ZapMint_MinOutput(
+        uint256 usdcAmount,
+        uint256 minOutPercent
+    ) public {
         // Bound inputs
         usdcAmount = bound(usdcAmount, 100e6, 10_000 * 1e6);
         minOutPercent = bound(minOutPercent, 0, 90); // 0% to 90% of expected
@@ -750,7 +768,10 @@ contract ZapRouterTest is Test {
     }
 
     /// @notice Fuzz test: zapBurn minimum output protection
-    function testFuzz_ZapBurn_MinOutput(uint256 bullAmount, uint256 minOutPercent) public {
+    function testFuzz_ZapBurn_MinOutput(
+        uint256 bullAmount,
+        uint256 minOutPercent
+    ) public {
         // Bound inputs
         bullAmount = bound(bullAmount, 1e18, 10_000 * 1e18);
         minOutPercent = bound(minOutPercent, 0, 50); // 0% to 50% of expected (conservative due to buffer)
@@ -777,6 +798,7 @@ contract ZapRouterTest is Test {
         assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "Router leaked BULL");
         assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router leaked USDC");
     }
+
 }
 
 // ==========================================
@@ -784,42 +806,68 @@ contract ZapRouterTest is Test {
 // ==========================================
 
 contract MockToken is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
 
-    function mint(address to, uint256 amount) external {
+    constructor(
+        string memory name,
+        string memory symbol
+    ) ERC20(name, symbol) {}
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
+
 }
 
 contract MockFlashToken is ERC20, IERC3156FlashLender {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
+
+    constructor(
+        string memory name,
+        string memory symbol
+    ) ERC20(name, symbol) {}
     uint256 public feeBps = 0;
 
-    function setFeeBps(uint256 _feeBps) external {
+    function setFeeBps(
+        uint256 _feeBps
+    ) external {
         feeBps = _feeBps;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount) external {
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
         _burn(from, amount);
     }
 
-    function maxFlashLoan(address) external pure override returns (uint256) {
+    function maxFlashLoan(
+        address
+    ) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
-    function flashFee(address, uint256 amount) public view override returns (uint256) {
-        return (amount * feeBps) / 10000;
+    function flashFee(
+        address,
+        uint256 amount
+    ) public view override returns (uint256) {
+        return (amount * feeBps) / 10_000;
     }
 
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
+    function flashLoan(
+        IERC3156FlashBorrower receiver,
+        address token,
+        uint256 amount,
+        bytes calldata data
+    ) external override returns (bool) {
         uint256 fee = flashFee(token, amount);
         _mint(address(receiver), amount);
         require(
@@ -829,36 +877,56 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
         _burn(address(receiver), amount + fee);
         return true;
     }
+
 }
 
 contract MockCurvePool is ICurvePool {
+
     address public token0; // USDC
     address public token1; // dxyBear
     uint256 public bearPrice = 1e6; // Price of 1 BEAR in USDC (6 decimals). Default $1.00
 
-    constructor(address _token0, address _token1) {
+    constructor(
+        address _token0,
+        address _token1
+    ) {
         token0 = _token0;
         token1 = _token1;
     }
 
-    function setPrice(uint256 _price) external {
+    function setPrice(
+        uint256 _price
+    ) external {
         bearPrice = _price;
     }
 
-    function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256) {
+    function get_dy(
+        uint256 i,
+        uint256 j,
+        uint256 dx
+    ) external view override returns (uint256) {
         if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
         if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
         return 0;
     }
 
-    function get_dx(uint256 i, uint256 j, uint256 dy) external view returns (uint256) {
+    function get_dx(
+        uint256 i,
+        uint256 j,
+        uint256 dy
+    ) external view returns (uint256) {
         // Inverse of get_dy (not in ICurvePool interface but useful for testing)
         if (i == 1 && j == 0) return (dy * 1e18) / bearPrice;
         if (i == 0 && j == 1) return (dy * bearPrice) / 1e18;
         return 0;
     }
 
-    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
+    function exchange(
+        uint256 i,
+        uint256 j,
+        uint256 dx,
+        uint256 min_dy
+    ) external payable override returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
         require(dy >= min_dy, "Too little received");
 
@@ -875,29 +943,40 @@ contract MockCurvePool is ICurvePool {
     function price_oracle() external view override returns (uint256) {
         return bearPrice * 1e12; // Scale 6 decimals to 18 decimals
     }
+
 }
 
 contract MockSplitter is ISyntheticSplitter {
+
     address public tA; // BEAR
     address public tB; // BULL
     address public usdc;
     Status private _status = Status.ACTIVE;
     uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
 
-    constructor(address _tA, address _tB) {
+    constructor(
+        address _tA,
+        address _tB
+    ) {
         tA = _tA;
         tB = _tB;
     }
 
-    function setUsdc(address _usdc) external {
+    function setUsdc(
+        address _usdc
+    ) external {
         usdc = _usdc;
     }
 
-    function setStatus(Status newStatus) external {
+    function setStatus(
+        Status newStatus
+    ) external {
         _status = newStatus;
     }
 
-    function mint(uint256 amount) external override {
+    function mint(
+        uint256 amount
+    ) external override {
         // amount is in 18-decimal token units
         // Calculate USDC cost (6 decimals): usdc = amount (18 dec) * CAP (8 dec) / 1e20
         // For CAP = 2e8: 1 token = $2, so 100 tokens = $200 = 200e6 USDC
@@ -910,7 +989,9 @@ contract MockSplitter is ISyntheticSplitter {
         MockFlashToken(tB).mint(msg.sender, amount);
     }
 
-    function burn(uint256 amount) external override {
+    function burn(
+        uint256 amount
+    ) external override {
         // Real Splitter burns directly from caller (SyntheticToken gives Splitter burn rights)
         // Simulate this by calling burn on the MockFlashToken
         MockFlashToken(tA).burn(msg.sender, amount);
@@ -923,9 +1004,12 @@ contract MockSplitter is ISyntheticSplitter {
         MockToken(usdc).mint(msg.sender, usdcOut);
     }
 
-    function emergencyRedeem(uint256) external override {}
+    function emergencyRedeem(
+        uint256
+    ) external override {}
 
     function currentStatus() external view override returns (Status) {
         return _status;
     }
+
 }

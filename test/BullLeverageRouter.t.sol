@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Test.sol";
 import "../src/BullLeverageRouter.sol";
-import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
 import "../src/base/FlashLoanBase.sol";
+import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
 import "../src/interfaces/ICurvePool.sol";
+import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
+import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
+import "forge-std/Test.sol";
 
 contract BullLeverageRouterTest is Test {
+
     BullLeverageRouter public router;
 
     // Mocks
@@ -44,7 +45,7 @@ contract BullLeverageRouterTest is Test {
             collateralToken: address(stakedDxyBull),
             oracle: address(0),
             irm: address(0),
-            lltv: 900000000000000000 // 90%
+            lltv: 900_000_000_000_000_000 // 90%
         });
 
         router = new BullLeverageRouter(
@@ -370,7 +371,7 @@ contract BullLeverageRouterTest is Test {
         // 6. Buy 2005e18 BEAR on Curve: ~2025 USDC (with 1% buffer on estimate)
         // 7. Leftover returned to user
         // Total USDC = 5 (surplus from step 2) + 3000 (redeem) - 2025.05 (buyback) ≈ 979.95 USDC
-        uint256 expectedUsdcReturned = 979950000;
+        uint256 expectedUsdcReturned = 979_950_000;
 
         vm.expectEmit(true, false, false, true);
         emit BullLeverageRouter.LeverageClosed(alice, borrowed, supplied, expectedUsdcReturned, maxSlippageBps);
@@ -432,7 +433,10 @@ contract BullLeverageRouterTest is Test {
     // FUZZ TESTS
     // ==========================================
 
-    function testFuzz_OpenLeverage(uint256 principal, uint256 leverageMultiplier) public {
+    function testFuzz_OpenLeverage(
+        uint256 principal,
+        uint256 leverageMultiplier
+    ) public {
         // Bound inputs
         principal = bound(principal, 1e6, 1_000_000 * 1e6);
         leverageMultiplier = bound(leverageMultiplier, 1.1e18, 10e18);
@@ -465,7 +469,10 @@ contract BullLeverageRouterTest is Test {
         assertEq(borrowed, expectedBorrowed, "Borrowed USDC mismatch");
     }
 
-    function testFuzz_OpenAndCloseLeverage(uint256 principal, uint256 leverageMultiplier) public {
+    function testFuzz_OpenAndCloseLeverage(
+        uint256 principal,
+        uint256 leverageMultiplier
+    ) public {
         // Bound inputs
         principal = bound(principal, 1e6, 1_000_000 * 1e6);
         leverageMultiplier = bound(leverageMultiplier, 1.1e18, 10e18);
@@ -769,7 +776,10 @@ contract BullLeverageRouterTest is Test {
     /// @notice Fuzz test: closeLeverage with random debt and collateral ratios
     /// @dev Tests partial closes with various debt/collateral combinations
     /// @dev Ensures collateral ratio is sufficient to cover debt (with margin for slippage)
-    function testFuzz_CloseLeverage(uint256 debtRatio, uint256 collateralRatio) public {
+    function testFuzz_CloseLeverage(
+        uint256 debtRatio,
+        uint256 collateralRatio
+    ) public {
         // Bound ratios to 0-100%
         debtRatio = bound(debtRatio, 0, 100);
 
@@ -818,7 +828,10 @@ contract BullLeverageRouterTest is Test {
 
     /// @notice Fuzz test: Full round trip (open then close) returns reasonable value
     /// @dev Verifies user doesn't lose excessive funds in a round trip
-    function testFuzz_RoundTrip(uint256 principal, uint256 leverage) public {
+    function testFuzz_RoundTrip(
+        uint256 principal,
+        uint256 leverage
+    ) public {
         // Bound inputs - BULL positions have more slippage so use tighter bounds
         principal = bound(principal, 1000e6, 100_000e6); // $1k to $100k
         leverage = bound(leverage, 2e18, 5e18); // 2x to 5x
@@ -856,14 +869,17 @@ contract BullLeverageRouterTest is Test {
     }
 
     /// @notice Fuzz test: Various BEAR prices shouldn't break the router
-    function testFuzz_OpenLeverage_VariableBearPrice(uint256 principal, uint256 bearPriceBps) public {
+    function testFuzz_OpenLeverage_VariableBearPrice(
+        uint256 principal,
+        uint256 bearPriceBps
+    ) public {
         // Bound inputs
         principal = bound(principal, 1000e6, 50_000e6); // $1k to $50k
-        bearPriceBps = bound(bearPriceBps, 8000, 12000); // $0.80 to $1.20 per BEAR
+        bearPriceBps = bound(bearPriceBps, 8000, 12_000); // $0.80 to $1.20 per BEAR
 
         // Set BEAR price using rate (num/denom = price)
         // bearPriceBps is in basis points (10000 = 1.00)
-        curvePool.setRate(bearPriceBps, 10000);
+        curvePool.setRate(bearPriceBps, 10_000);
 
         // Setup
         usdc.mint(alice, principal);
@@ -884,7 +900,9 @@ contract BullLeverageRouterTest is Test {
     }
 
     /// @notice Fuzz test: Slippage within bounds should succeed
-    function testFuzz_OpenLeverage_SlippageTolerance(uint256 slippageBps) public {
+    function testFuzz_OpenLeverage_SlippageTolerance(
+        uint256 slippageBps
+    ) public {
         // Bound slippage to valid range (0 to MAX_SLIPPAGE_BPS which is 100)
         slippageBps = bound(slippageBps, 0, 100);
 
@@ -906,7 +924,9 @@ contract BullLeverageRouterTest is Test {
     }
 
     /// @notice Fuzz test: Close with varying debt amounts
-    function testFuzz_CloseLeverage_VariableDebt(uint256 debtPercent) public {
+    function testFuzz_CloseLeverage_VariableDebt(
+        uint256 debtPercent
+    ) public {
         // Bound debt repayment to 0-100%
         debtPercent = bound(debtPercent, 0, 100);
 
@@ -934,6 +954,7 @@ contract BullLeverageRouterTest is Test {
         assertEq(collateralAfter, 0, "All collateral should be withdrawn");
         assertEq(debtAfter, debt - debtToRepay, "Debt should be partially repaid");
     }
+
 }
 
 // ==========================================
@@ -941,9 +962,14 @@ contract BullLeverageRouterTest is Test {
 // ==========================================
 
 contract MockToken is ERC20 {
+
     uint8 private _decimals;
 
-    constructor(string memory name, string memory symbol, uint8 dec) ERC20(name, symbol) {
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint8 dec
+    ) ERC20(name, symbol) {
         _decimals = dec;
     }
 
@@ -951,29 +977,46 @@ contract MockToken is ERC20 {
         return _decimals;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount) external {
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
         _burn(from, amount);
     }
+
 }
 
 contract MockStakedToken is ERC20 {
+
     MockToken public underlying;
 
-    constructor(address _underlying) ERC20("Staked Token", "sTKN") {
+    constructor(
+        address _underlying
+    ) ERC20("Staked Token", "sTKN") {
         underlying = MockToken(_underlying);
     }
 
-    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external returns (uint256 shares) {
         underlying.transferFrom(msg.sender, address(this), assets);
         shares = assets; // 1:1 for simplicity
         _mint(receiver, shares);
     }
 
-    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) external returns (uint256 assets) {
         if (msg.sender != owner) {
             _spendAllowance(owner, msg.sender, shares);
         }
@@ -982,41 +1025,62 @@ contract MockStakedToken is ERC20 {
         underlying.transfer(receiver, assets);
     }
 
-    function previewRedeem(uint256 shares) external pure returns (uint256) {
+    function previewRedeem(
+        uint256 shares
+    ) external pure returns (uint256) {
         return shares; // 1:1 for simplicity
     }
+
 }
 
 contract MockFlashToken is ERC20, IERC3156FlashLender {
+
     uint256 private _feeBps = 0;
 
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
+    constructor(
+        string memory name,
+        string memory symbol
+    ) ERC20(name, symbol) {}
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
 
-    function burn(address from, uint256 amount) external {
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
         _burn(from, amount);
     }
 
-    function setFeeBps(uint256 bps) external {
+    function setFeeBps(
+        uint256 bps
+    ) external {
         _feeBps = bps;
     }
 
-    function maxFlashLoan(address) external pure override returns (uint256) {
+    function maxFlashLoan(
+        address
+    ) external pure override returns (uint256) {
         return type(uint256).max;
     }
 
-    function flashFee(address, uint256 amount) public view override returns (uint256) {
-        return (amount * _feeBps) / 10000;
+    function flashFee(
+        address,
+        uint256 amount
+    ) public view override returns (uint256) {
+        return (amount * _feeBps) / 10_000;
     }
 
-    function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 amount, bytes calldata data)
-        external
-        override
-        returns (bool)
-    {
+    function flashLoan(
+        IERC3156FlashBorrower receiver,
+        address token,
+        uint256 amount,
+        bytes calldata data
+    ) external override returns (bool) {
         uint256 fee = flashFee(token, amount);
         _mint(address(receiver), amount);
         require(
@@ -1026,9 +1090,11 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
         _burn(address(receiver), amount + fee);
         return true;
     }
+
 }
 
 contract MockCurvePool is ICurvePool {
+
     address public token0; // USDC (index 0)
     address public token1; // DXY-BEAR (index 1)
 
@@ -1038,23 +1104,36 @@ contract MockCurvePool is ICurvePool {
     uint256 public rateDenom = 1;
     uint256 public slippageBps = 0; // Simulated slippage in basis points
 
-    constructor(address _token0, address _token1) {
+    constructor(
+        address _token0,
+        address _token1
+    ) {
         token0 = _token0;
         token1 = _token1;
     }
 
-    function setRate(uint256 num, uint256 denom) external {
+    function setRate(
+        uint256 num,
+        uint256 denom
+    ) external {
         rateNum = num;
         rateDenom = denom;
     }
 
     /// @notice Set slippage to simulate MEV attacks
     /// @param _slippageBps Slippage in basis points (100 = 1%)
-    function setSlippage(uint256 _slippageBps) external {
+    function setSlippage(
+        uint256 _slippageBps
+    ) external {
         slippageBps = _slippageBps;
     }
 
-    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external payable override returns (uint256 dy) {
+    function exchange(
+        uint256 i,
+        uint256 j,
+        uint256 dx,
+        uint256 min_dy
+    ) external payable override returns (uint256 dy) {
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;
 
@@ -1073,7 +1152,7 @@ contract MockCurvePool is ICurvePool {
         dy = (dy * rateNum) / rateDenom;
 
         // Apply slippage to simulate MEV/price movement
-        dy = (dy * (10000 - slippageBps)) / 10000;
+        dy = (dy * (10_000 - slippageBps)) / 10_000;
 
         require(dy >= min_dy, "Too little received");
         // Burn input tokens and mint output tokens
@@ -1082,7 +1161,11 @@ contract MockCurvePool is ICurvePool {
         return dy;
     }
 
-    function get_dy(uint256 i, uint256 j, uint256 dx) external view override returns (uint256 dy) {
+    function get_dy(
+        uint256 i,
+        uint256 j,
+        uint256 dx
+    ) external view override returns (uint256 dy) {
         // get_dy returns quoted price WITHOUT slippage (as in real Curve)
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;
@@ -1105,9 +1188,11 @@ contract MockCurvePool is ICurvePool {
     function price_oracle() external pure override returns (uint256) {
         return 1e18; // Default 1:1 price in 18 decimals
     }
+
 }
 
 contract MockMorpho is IMorpho {
+
     mapping(address => mapping(address => bool)) public _isAuthorized;
     mapping(address => ActionData) public positions;
     address public usdc;
@@ -1118,47 +1203,66 @@ contract MockMorpho is IMorpho {
         uint256 borrowed;
     }
 
-    function setTokens(address _usdc, address _collateral) external {
+    function setTokens(
+        address _usdc,
+        address _collateral
+    ) external {
         usdc = _usdc;
         collateralToken = _collateral;
     }
 
-    function setAuthorization(address operator, bool approved) external override {
+    function setAuthorization(
+        address operator,
+        bool approved
+    ) external override {
         _isAuthorized[msg.sender][operator] = approved;
     }
 
-    function isAuthorized(address authorizer, address authorized) external view override returns (bool) {
+    function isAuthorized(
+        address authorizer,
+        address authorized
+    ) external view override returns (bool) {
         return _isAuthorized[authorizer][authorized];
     }
 
-    function createMarket(MarketParams memory) external override {}
+    function createMarket(
+        MarketParams memory
+    ) external override {}
 
-    function idToMarketParams(bytes32) external pure override returns (MarketParams memory) {
+    function idToMarketParams(
+        bytes32
+    ) external pure override returns (MarketParams memory) {
         return MarketParams(address(0), address(0), address(0), address(0), 0);
     }
 
     // Lending functions (supply/withdraw loan tokens)
-    function supply(MarketParams memory, uint256 assets, uint256, address, bytes calldata)
-        external
-        override
-        returns (uint256, uint256)
-    {
+    function supply(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address,
+        bytes calldata
+    ) external override returns (uint256, uint256) {
         return (assets, 0);
     }
 
-    function withdraw(MarketParams memory, uint256 assets, uint256, address, address)
-        external
-        override
-        returns (uint256, uint256)
-    {
+    function withdraw(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address,
+        address
+    ) external override returns (uint256, uint256) {
         return (assets, 0);
     }
 
     // Collateral functions
-    function supplyCollateral(MarketParams memory, uint256 assets, address onBehalfOf, bytes calldata)
-        external
-        override
-    {
+    function supplyCollateral(
+        MarketParams memory,
+        uint256 assets,
+        address onBehalfOf,
+        bytes calldata
+    ) external override {
         if (msg.sender != onBehalfOf) {
             require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
@@ -1166,10 +1270,12 @@ contract MockMorpho is IMorpho {
         IERC20(collateralToken).transferFrom(msg.sender, address(this), assets);
     }
 
-    function withdrawCollateral(MarketParams memory, uint256 assets, address onBehalfOf, address receiver)
-        external
-        override
-    {
+    function withdrawCollateral(
+        MarketParams memory,
+        uint256 assets,
+        address onBehalfOf,
+        address receiver
+    ) external override {
         if (msg.sender != onBehalfOf) {
             require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
@@ -1177,11 +1283,13 @@ contract MockMorpho is IMorpho {
         IERC20(collateralToken).transfer(receiver, assets);
     }
 
-    function borrow(MarketParams memory, uint256 assets, uint256, address onBehalfOf, address receiver)
-        external
-        override
-        returns (uint256, uint256)
-    {
+    function borrow(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address onBehalfOf,
+        address receiver
+    ) external override returns (uint256, uint256) {
         if (msg.sender != onBehalfOf) {
             require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
@@ -1190,11 +1298,13 @@ contract MockMorpho is IMorpho {
         return (assets, 0);
     }
 
-    function repay(MarketParams memory, uint256 assets, uint256, address onBehalfOf, bytes calldata)
-        external
-        override
-        returns (uint256, uint256)
-    {
+    function repay(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address onBehalfOf,
+        bytes calldata
+    ) external override returns (uint256, uint256) {
         if (msg.sender != onBehalfOf) {
             require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
@@ -1203,26 +1313,38 @@ contract MockMorpho is IMorpho {
         return (assets, 0);
     }
 
-    function position(bytes32, address) external pure override returns (uint256, uint128, uint128) {
+    function position(
+        bytes32,
+        address
+    ) external pure override returns (uint256, uint128, uint128) {
         return (0, 0, 0);
     }
 
-    function market(bytes32) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
+    function market(
+        bytes32
+    ) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
         return (0, 0, 0, 0, 0, 0);
     }
 
-    function accrueInterest(MarketParams memory) external override {}
+    function accrueInterest(
+        MarketParams memory
+    ) external override {}
 
-    function liquidate(MarketParams memory, address, uint256, uint256, bytes calldata)
-        external
-        pure
-        override
-        returns (uint256, uint256)
-    {
+    function liquidate(
+        MarketParams memory,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external pure override returns (uint256, uint256) {
         return (0, 0);
     }
 
-    function flashLoan(address token, uint256 assets, bytes calldata data) external override {
+    function flashLoan(
+        address token,
+        uint256 assets,
+        bytes calldata data
+    ) external override {
         // Mint tokens to borrower (simulating flash loan)
         MockToken(token).mint(msg.sender, assets);
         // Invoke callback
@@ -1231,9 +1353,11 @@ contract MockMorpho is IMorpho {
         IERC20(token).transferFrom(msg.sender, address(this), assets);
         MockToken(token).burn(address(this), assets);
     }
+
 }
 
 contract MockSplitter is ISyntheticSplitter {
+
     address public dxyBear;
     address public dxyBull;
     address public usdc;
@@ -1241,21 +1365,31 @@ contract MockSplitter is ISyntheticSplitter {
     uint256 public redemptionRate = 100; // Percentage of payout (100 = 100%)
     uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
 
-    constructor(address _dxyBear, address _dxyBull, address _usdc) {
+    constructor(
+        address _dxyBear,
+        address _dxyBull,
+        address _usdc
+    ) {
         dxyBear = _dxyBear;
         dxyBull = _dxyBull;
         usdc = _usdc;
     }
 
-    function setStatus(Status newStatus) external {
+    function setStatus(
+        Status newStatus
+    ) external {
         _status = newStatus;
     }
 
-    function setRedemptionRate(uint256 rate) external {
+    function setRedemptionRate(
+        uint256 rate
+    ) external {
         redemptionRate = rate;
     }
 
-    function mint(uint256 amount) external override {
+    function mint(
+        uint256 amount
+    ) external override {
         // amount is token amount (18 decimals), matching real SyntheticSplitter
         // Calculate USDC to pull: usdc = tokens * CAP / 1e20 = tokens * 2e8 / 1e20 = tokens * 2 / 1e12
         uint256 usdcNeeded = (amount * 2) / 1e12;
@@ -1264,7 +1398,9 @@ contract MockSplitter is ISyntheticSplitter {
         MockToken(dxyBull).mint(msg.sender, amount);
     }
 
-    function burn(uint256 amount) external override {
+    function burn(
+        uint256 amount
+    ) external override {
         // Burn both tokens, mint USDC at CAP pricing
         // amount is in token units (18 decimals), USDC is 6 decimals
         // CAP = $2.00, so 1 pair redeems to $2.00 USDC
@@ -1279,9 +1415,12 @@ contract MockSplitter is ISyntheticSplitter {
         MockToken(usdc).mint(msg.sender, usdcAmount);
     }
 
-    function emergencyRedeem(uint256) external override {}
+    function emergencyRedeem(
+        uint256
+    ) external override {}
 
     function currentStatus() external view override returns (Status) {
         return _status;
     }
+
 }

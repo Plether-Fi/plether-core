@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -15,6 +15,7 @@ import {FlashLoanBase} from "./FlashLoanBase.sol";
 /// @notice Abstract base for leverage routers with shared validation and admin logic.
 /// @dev Common infrastructure for LeverageRouter (DXY-BEAR) and BullLeverageRouter (DXY-BULL).
 abstract contract LeverageRouterBase is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
+
     using SafeERC20 for IERC20;
 
     /// @notice Maximum slippage in basis points (1% = 100 bps).
@@ -82,7 +83,12 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable, Pausable, Reentr
     /// @param _curvePool Curve USDC/DXY-BEAR pool address.
     /// @param _usdc USDC token address.
     /// @param _dxyBear DXY-BEAR token address.
-    constructor(address _morpho, address _curvePool, address _usdc, address _dxyBear) Ownable(msg.sender) {
+    constructor(
+        address _morpho,
+        address _curvePool,
+        address _usdc,
+        address _dxyBear
+    ) Ownable(msg.sender) {
         if (_morpho == address(0)) revert LeverageRouterBase__ZeroAddress();
         if (_curvePool == address(0)) revert LeverageRouterBase__ZeroAddress();
         if (_usdc == address(0)) revert LeverageRouterBase__ZeroAddress();
@@ -107,4 +113,5 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable, Pausable, Reentr
     function unpause() external onlyOwner {
         _unpause();
     }
+
 }

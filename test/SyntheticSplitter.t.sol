@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
-import "forge-std/Test.sol";
 import "../src/SyntheticSplitter.sol";
-import "./utils/MockYieldAdapter.sol";
-import "../src/libraries/OracleLib.sol";
 import "../src/interfaces/ISyntheticSplitter.sol";
+import "../src/libraries/OracleLib.sol";
 import "./utils/MockAave.sol";
 import "./utils/MockOracle.sol";
+import "./utils/MockYieldAdapter.sol";
+import "forge-std/Test.sol";
 
 // 6 Decimal USDC Mock
 contract MockUSDC is MockERC20 {
+
     constructor() MockERC20("USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
+
 }
 
 contract SyntheticSplitterTest is Test {
+
     SyntheticSplitter splitter;
     MockYieldAdapter adapter;
 
@@ -35,7 +38,7 @@ contract SyntheticSplitterTest is Test {
 
     function setUp() public {
         // We move to year 2025 to avoid underflow when subtracting 24 hours
-        vm.warp(1735689600);
+        vm.warp(1_735_689_600);
         // 1. Deploy Mocks
         usdc = new MockUSDC();
         aUsdc = new MockAToken("aUSDC", "aUSDC", address(usdc));
@@ -1336,7 +1339,9 @@ contract SyntheticSplitterTest is Test {
      * @notice Fuzz test: adapter failure during mint preserves invariants
      * @dev No partial state changes regardless of mint amount
      */
-    function testFuzz_Mint_AtomicityOnAdapterFailure(uint256 mintAmount) public {
+    function testFuzz_Mint_AtomicityOnAdapterFailure(
+        uint256 mintAmount
+    ) public {
         mintAmount = bound(mintAmount, 1e18, 1_000_000 * 1e18);
 
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
@@ -1503,7 +1508,9 @@ contract SyntheticSplitterTest is Test {
      * @notice Fuzz test: rounding buffer works across various exchange rates
      * @dev Tests that +1 buffer handles arbitrary yield scenarios
      */
-    function testFuzz_RedeemFallback_RoundingBuffer(uint256 yieldAmount) public {
+    function testFuzz_RedeemFallback_RoundingBuffer(
+        uint256 yieldAmount
+    ) public {
         // Bound yield to reasonable range (0 to 100% of principal)
         yieldAmount = bound(yieldAmount, 1, 180 * 1e6);
 
@@ -1661,4 +1668,5 @@ contract SyntheticSplitterTest is Test {
 
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Full refund received thanks to +1 buffer");
     }
+
 }

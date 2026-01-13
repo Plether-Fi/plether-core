@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
-import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
-import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
+import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
+import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
+import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Test.sol";
 
 /// @title Liquidation & Interest Accrual Fork Tests
 /// @notice Tests Morpho liquidation mechanics and interest accumulation
 contract LiquidationForkTest is BaseForkTest {
+
     StakedToken stBear;
     StakedToken stBull;
     LeverageRouter leverageRouter;
@@ -86,7 +87,7 @@ contract LiquidationForkTest is BaseForkTest {
     }
 
     function test_InterestAccrual_PushesLTVHigher() public {
-        uint256 principal = 5_000e6;
+        uint256 principal = 5000e6;
         uint256 leverage = 2e18;
 
         vm.startPrank(alice);
@@ -185,7 +186,7 @@ contract LiquidationForkTest is BaseForkTest {
     }
 
     function test_Liquidation_HealthyPositionCannotBeLiquidated() public {
-        uint256 principal = 5_000e6;
+        uint256 principal = 5000e6;
         uint256 leverage = 15e17;
 
         vm.startPrank(alice);
@@ -272,11 +273,11 @@ contract LiquidationForkTest is BaseForkTest {
         vm.stopPrank();
     }
 
-    function _calculateLTV(bytes32 marketId, address user, MarketParams memory params)
-        internal
-        view
-        returns (uint256 ltv)
-    {
+    function _calculateLTV(
+        bytes32 marketId,
+        address user,
+        MarketParams memory params
+    ) internal view returns (uint256 ltv) {
         (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, user);
         if (collateral == 0) return 0;
 
@@ -287,6 +288,7 @@ contract LiquidationForkTest is BaseForkTest {
         uint256 collateralValue = (uint256(collateral) * oraclePrice) / 1e36;
 
         if (collateralValue == 0) return type(uint256).max;
-        ltv = (debtAssets * 10000) / collateralValue;
+        ltv = (debtAssets * 10_000) / collateralValue;
     }
+
 }

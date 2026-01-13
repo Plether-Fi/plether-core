@@ -7,6 +7,7 @@ import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 /// @notice Library for common oracle validation patterns.
 /// @dev Provides reusable functions for sequencer checks, staleness validation, and price validation.
 library OracleLib {
+
     // Errors
     error OracleLib__SequencerDown();
     error OracleLib__SequencerGracePeriod();
@@ -17,7 +18,10 @@ library OracleLib {
     /// @param sequencerFeed The Chainlink sequencer uptime feed.
     /// @param gracePeriod The grace period in seconds after sequencer comes back up.
     /// @dev Skips check if sequencerFeed is address(0) (e.g., on L1 or testnets).
-    function checkSequencer(AggregatorV3Interface sequencerFeed, uint256 gracePeriod) internal view {
+    function checkSequencer(
+        AggregatorV3Interface sequencerFeed,
+        uint256 gracePeriod
+    ) internal view {
         // Skip check if no feed address is provided
         if (address(sequencerFeed) == address(0)) return;
 
@@ -38,7 +42,10 @@ library OracleLib {
     /// @notice Check if the oracle price is stale.
     /// @param updatedAt The timestamp when the price was last updated.
     /// @param timeout The maximum age in seconds for a valid price.
-    function checkStaleness(uint256 updatedAt, uint256 timeout) internal view {
+    function checkStaleness(
+        uint256 updatedAt,
+        uint256 timeout
+    ) internal view {
         if (updatedAt < block.timestamp - timeout) {
             revert OracleLib__StalePrice();
         }
@@ -68,4 +75,5 @@ library OracleLib {
 
         return uint256(rawPrice);
     }
+
 }

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
-import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
-import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
+import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
+import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
+import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Test.sol";
 
 /// @title LeverageRouter Fork Tests
 /// @notice Tests LeverageRouter with real Curve pool + real Morpho
 contract LeverageRouterForkTest is BaseForkTest {
+
     StakedToken stBear;
     LeverageRouter leverageRouter;
     MorphoOracle morphoOracle;
@@ -106,14 +107,18 @@ contract LeverageRouterForkTest is BaseForkTest {
         assertLt(totalCost, (principal * 5) / 100, "Round-trip cost should be <5%");
     }
 
-    function _getMarketId(MarketParams memory params) internal pure returns (bytes32) {
+    function _getMarketId(
+        MarketParams memory params
+    ) internal pure returns (bytes32) {
         return keccak256(abi.encode(params));
     }
+
 }
 
 /// @title BullLeverageRouter Fork Tests
 /// @notice Tests BullLeverageRouter with real Curve pool + real Morpho
 contract BullLeverageRouterForkTest is BaseForkTest {
+
     StakedToken stBull;
     BullLeverageRouter bullLeverageRouter;
     MorphoOracle morphoOracle;
@@ -235,7 +240,10 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         assertGt(expectedUSDC, 500e6, "Expected USDC should be > 500 (sanity check)");
     }
 
-    function _getMarketId(MarketParams memory params) internal pure returns (bytes32) {
+    function _getMarketId(
+        MarketParams memory params
+    ) internal pure returns (bytes32) {
         return keccak256(abi.encode(params));
     }
+
 }

@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "forge-std/Test.sol";
-import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield, ICurvePoolExtended} from "./BaseForkTest.sol";
-import {ZapRouter} from "../../src/ZapRouter.sol";
-import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
-import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
+import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
+import {ZapRouter} from "../../src/ZapRouter.sol";
+import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
+import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {MarketParams, IMorpho} from "../../src/interfaces/IMorpho.sol";
+import {BaseForkTest, ICurvePoolExtended, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "forge-std/Test.sol";
 
 /// @title Slippage Protection Fork Tests
 /// @notice Adversarial tests proving routers protect users from MEV/price manipulation
 contract SlippageProtectionForkTest is BaseForkTest {
+
     ZapRouter zapRouter;
     StakedToken stBear;
     StakedToken stBull;
@@ -58,7 +59,9 @@ contract SlippageProtectionForkTest is BaseForkTest {
         );
     }
 
-    function _whaleDumpBear(uint256 bearAmount) internal {
+    function _whaleDumpBear(
+        uint256 bearAmount
+    ) internal {
         vm.startPrank(whale);
         (uint256 usdcNeeded,,) = splitter.previewMint(bearAmount);
         IERC20(USDC).approve(address(splitter), usdcNeeded);
@@ -71,7 +74,9 @@ contract SlippageProtectionForkTest is BaseForkTest {
         vm.stopPrank();
     }
 
-    function _whalePumpBear(uint256 usdcAmount) internal {
+    function _whalePumpBear(
+        uint256 usdcAmount
+    ) internal {
         vm.startPrank(whale);
         IERC20(USDC).approve(curvePool, usdcAmount);
         (bool success,) =
@@ -490,8 +495,8 @@ contract SlippageProtectionForkTest is BaseForkTest {
     /// @notice Preview accuracy should hold across different trade sizes
     function test_PreviewAccuracy_AcrossMultipleTradeSizes() public {
         uint256[] memory amounts = new uint256[](3);
-        amounts[0] = 1_000e6;
-        amounts[1] = 5_000e6;
+        amounts[0] = 1000e6;
+        amounts[1] = 5000e6;
         amounts[2] = 10_000e6;
 
         for (uint256 i = 0; i < amounts.length; i++) {
@@ -515,4 +520,5 @@ contract SlippageProtectionForkTest is BaseForkTest {
             assertApproxEqRel(actualTokensOut, previewTokensOut, 0.001e18, "Preview should match actual within 0.1%");
         }
     }
+
 }

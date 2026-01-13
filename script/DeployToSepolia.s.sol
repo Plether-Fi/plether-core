@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "forge-std/Script.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
+import {LeverageRouter} from "../src/LeverageRouter.sol";
+import {StakedToken} from "../src/StakedToken.sol";
+import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {ZapRouter} from "../src/ZapRouter.sol";
+import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
+import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {MockYieldAdapter} from "../test/utils/MockYieldAdapter.sol";
-import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
-import {SyntheticToken} from "../src/SyntheticToken.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
-import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
-import {MarketParams, IMorpho} from "../src/interfaces/IMorpho.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
+import "forge-std/Script.sol";
 
 // Curve Twocrypto-NG Factory interface
 interface ITwocryptoFactory {
+
     function deploy_pool(
         string memory _name,
         string memory _symbol,
@@ -35,32 +36,46 @@ interface ITwocryptoFactory {
         uint256 ma_exp_time,
         uint256 initial_price
     ) external returns (address);
+
 }
 
 // Curve Twocrypto pool interface for adding liquidity
 interface ICurveTwocryptoPool {
-    function add_liquidity(uint256[2] memory amounts, uint256 min_mint_amount) external returns (uint256);
+
+    function add_liquidity(
+        uint256[2] memory amounts,
+        uint256 min_mint_amount
+    ) external returns (uint256);
     function token() external view returns (address);
+
 }
 
 // Mock USDC with 6 decimals and public mint for testnet
 contract MockUSDC is ERC20 {
+
     constructor() ERC20("Mock USDC", "USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
     }
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
+
 }
 
 // Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
 contract MockV3Aggregator is AggregatorV3Interface {
+
     int256 private immutable _price;
 
-    constructor(int256 price_) {
+    constructor(
+        int256 price_
+    ) {
         _price = price_;
     }
 
@@ -76,7 +91,9 @@ contract MockV3Aggregator is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80)
+    function getRoundData(
+        uint80
+    )
         external
         view
         override
@@ -93,6 +110,7 @@ contract MockV3Aggregator is AggregatorV3Interface {
     {
         return (0, _price, 0, block.timestamp, 0);
     }
+
 }
 
 /**
@@ -101,6 +119,7 @@ contract MockV3Aggregator is AggregatorV3Interface {
  * @dev Deploys all contracts in correct dependency order using mock adapters
  */
 contract DeployToSepolia is Script {
+
     // ==========================================
     // SEPOLIA ADDRESSES
     // ==========================================
@@ -119,18 +138,18 @@ contract DeployToSepolia is Script {
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
     // Curve Pool Parameters (optimized for low slippage)
-    uint256 constant CURVE_A = 320000; // Amplification coefficient
-    uint256 constant CURVE_GAMMA = 1000000000000000; // 1e15 (0.001)
-    uint256 constant CURVE_MID_FEE = 26000000; // 0.026%
-    uint256 constant CURVE_OUT_FEE = 45000000; // 0.045%
-    uint256 constant CURVE_FEE_GAMMA = 230000000000000; // 2.3e14
-    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2000000000000; // 2e12
-    uint256 constant CURVE_ADJUSTMENT_STEP = 146000000000000; // 1.46e14
+    uint256 constant CURVE_A = 320_000; // Amplification coefficient
+    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15 (0.001)
+    uint256 constant CURVE_MID_FEE = 26_000_000; // 0.026%
+    uint256 constant CURVE_OUT_FEE = 45_000_000; // 0.045%
+    uint256 constant CURVE_FEE_GAMMA = 230_000_000_000_000; // 2.3e14
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000; // 2e12
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000; // 1.46e14
     uint256 constant CURVE_MA_EXP_TIME = 866; // ~14 minutes
     // Initial price is DXY-BEAR value = CAP - DXY
     // DXY from mock feeds ≈ $0.8654, CAP = $2.00
     // DXY-BEAR price = $2.00 - $0.8654 = $1.1346
-    uint256 constant CURVE_INITIAL_PRICE = 1134563600000000000; // ~1.135 (USDC per DXY-BEAR)
+    uint256 constant CURVE_INITIAL_PRICE = 1_134_563_600_000_000_000; // ~1.135 (USDC per DXY-BEAR)
 
     // ==========================================
     // DEPLOYMENT STATE
@@ -226,12 +245,12 @@ contract DeployToSepolia is Script {
 
     function _deployMockFeeds() internal returns (address[] memory feeds, uint256[] memory quantities) {
         feeds = new address[](6);
-        feeds[0] = address(new MockV3Aggregator(105000000)); // ~1.05 USD per EUR
-        feeds[1] = address(new MockV3Aggregator(640000)); // ~0.0064 USD per JPY
-        feeds[2] = address(new MockV3Aggregator(125000000)); // ~1.25 USD per GBP
-        feeds[3] = address(new MockV3Aggregator(73000000)); // ~0.73 USD per CAD
-        feeds[4] = address(new MockV3Aggregator(9300000)); // ~0.093 USD per SEK
-        feeds[5] = address(new MockV3Aggregator(113000000)); // ~1.13 USD per CHF
+        feeds[0] = address(new MockV3Aggregator(105_000_000)); // ~1.05 USD per EUR
+        feeds[1] = address(new MockV3Aggregator(640_000)); // ~0.0064 USD per JPY
+        feeds[2] = address(new MockV3Aggregator(125_000_000)); // ~1.25 USD per GBP
+        feeds[3] = address(new MockV3Aggregator(73_000_000)); // ~0.73 USD per CAD
+        feeds[4] = address(new MockV3Aggregator(9_300_000)); // ~0.093 USD per SEK
+        feeds[5] = address(new MockV3Aggregator(113_000_000)); // ~1.13 USD per CHF
 
         quantities = new uint256[](6);
         quantities[0] = 576 * 10 ** 15; // EUR: 57.6%
@@ -242,7 +261,10 @@ contract DeployToSepolia is Script {
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
     }
 
-    function _deployCurvePool(address usdc, address dxyBear) internal returns (address pool) {
+    function _deployCurvePool(
+        address usdc,
+        address dxyBear
+    ) internal returns (address pool) {
         pool = ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
                 "Curve.fi USDC/DXY-BEAR",
@@ -261,10 +283,11 @@ contract DeployToSepolia is Script {
             );
     }
 
-    function _deploySplitterWithAdapter(address oracle, address usdc, address deployer)
-        internal
-        returns (MockYieldAdapter adapter, SyntheticSplitter splitter)
-    {
+    function _deploySplitterWithAdapter(
+        address oracle,
+        address usdc,
+        address deployer
+    ) internal returns (MockYieldAdapter adapter, SyntheticSplitter splitter) {
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
@@ -274,7 +297,10 @@ contract DeployToSepolia is Script {
         require(address(splitter) == predictedSplitter, "Splitter address mismatch in helper");
     }
 
-    function _seedCurvePool(DeployedContracts memory d, address deployer) internal {
+    function _seedCurvePool(
+        DeployedContracts memory d,
+        address deployer
+    ) internal {
         // Seed with balanced liquidity at CURVE_INITIAL_PRICE (USDC per DXY-BEAR)
         uint256 usdcAmount = 10_000 * 1e6; // 10k USDC
         uint256 bearAmount = (usdcAmount * 1e30) / CURVE_INITIAL_PRICE; // ~8.8k DXY-BEAR
@@ -298,18 +324,17 @@ contract DeployToSepolia is Script {
         console.log("Curve pool seeded with liquidity matching initial price");
     }
 
-    function _deployMorphoOracles(address basketOracle)
-        internal
-        returns (MorphoOracle oracleBear, MorphoOracle oracleBull)
-    {
+    function _deployMorphoOracles(
+        address basketOracle
+    ) internal returns (MorphoOracle oracleBear, MorphoOracle oracleBull) {
         oracleBear = new MorphoOracle(basketOracle, CAP, false);
         oracleBull = new MorphoOracle(basketOracle, CAP, true);
     }
 
-    function _deployStakedTokens(address bearToken, address bullToken)
-        internal
-        returns (StakedToken stakedBear, StakedToken stakedBull)
-    {
+    function _deployStakedTokens(
+        address bearToken,
+        address bullToken
+    ) internal returns (StakedToken stakedBear, StakedToken stakedBull) {
         stakedBear = new StakedToken(IERC20(bearToken), "Staked DXY-BEAR", "sDXY-BEAR");
         stakedBull = new StakedToken(IERC20(bullToken), "Staked DXY-BULL", "sDXY-BULL");
     }
@@ -324,7 +349,9 @@ contract DeployToSepolia is Script {
         oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
     }
 
-    function _deployRouters(DeployedContracts memory d) internal {
+    function _deployRouters(
+        DeployedContracts memory d
+    ) internal {
         MarketParams memory bearMarketParams;
         MarketParams memory bullMarketParams;
         // Deploy ZapRouter
@@ -368,7 +395,10 @@ contract DeployToSepolia is Script {
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
     }
 
-    function _createMorphoMarkets(MarketParams memory bearMarketParams, MarketParams memory bullMarketParams) internal {
+    function _createMorphoMarkets(
+        MarketParams memory bearMarketParams,
+        MarketParams memory bullMarketParams
+    ) internal {
         IMorpho morpho = IMorpho(MORPHO_BLUE);
 
         // Create BEAR market (sDXY-BEAR as collateral, USDC as loan token)
@@ -402,7 +432,9 @@ contract DeployToSepolia is Script {
         console.log("Morpho BULL market seeded with 100k USDC");
     }
 
-    function _logDeployment(DeployedContracts memory d) internal pure {
+    function _logDeployment(
+        DeployedContracts memory d
+    ) internal pure {
         console.log("========================================");
         console.log("SEPOLIA DEPLOYMENT COMPLETE");
         console.log("========================================");
@@ -434,4 +466,5 @@ contract DeployToSepolia is Script {
         console.log("  BullLeverageRouter:  ", address(d.bullLeverageRouter));
         console.log("========================================");
     }
+
 }

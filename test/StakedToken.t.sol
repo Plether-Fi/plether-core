@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
 import "../src/StakedToken.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "forge-std/Test.sol";
 
 contract MockUnderlying is ERC20 {
+
     constructor() ERC20("DXY-BEAR", "BEAR") {}
 
-    function mint(address to, uint256 amount) external {
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
         _mint(to, amount);
     }
+
 }
 
 contract StakedTokenTest is Test {
+
     StakedToken public stakedToken;
     MockUnderlying public underlying;
 
@@ -113,4 +119,5 @@ contract StakedTokenTest is Test {
         assertGt(aliceShares, 0);
         assertGt(stakedToken.convertToAssets(aliceShares), 99.9 ether);
     }
+
 }
