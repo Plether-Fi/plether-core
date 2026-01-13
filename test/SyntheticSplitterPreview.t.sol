@@ -328,7 +328,7 @@ contract SyntheticSplitterFullTest is Test {
         splitter.pause();
 
         // previewBurn reverts due to insolvency check
-        vm.expectRevert("Paused & Insolvent");
+        vm.expectRevert(SyntheticSplitter.Splitter__Insolvent.selector);
         splitter.previewBurn(1e18);
     }
 

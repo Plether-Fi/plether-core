@@ -44,6 +44,9 @@ contract MorphoAdapter is ERC4626, Ownable {
     /// @notice Thrown when market loan token doesn't match asset.
     error MorphoAdapter__InvalidMarket();
 
+    /// @notice Thrown when attempting to rescue the underlying asset.
+    error MorphoAdapter__CannotRescueUnderlying();
+
     /// @notice Emitted when URD address is updated.
     event UrdUpdated(address indexed oldUrd, address indexed newUrd);
 
@@ -144,7 +147,7 @@ contract MorphoAdapter is ERC4626, Ownable {
     /// @param token Token to rescue.
     /// @param to Recipient address.
     function rescueToken(address token, address to) external onlyOwner {
-        require(token != asset(), "Cannot rescue Underlying");
+        if (token == asset()) revert MorphoAdapter__CannotRescueUnderlying();
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
     }
 
@@ -155,7 +158,7 @@ contract MorphoAdapter is ERC4626, Ownable {
     /// @notice Sets the Universal Rewards Distributor address.
     /// @param _urd URD contract address (cannot be zero).
     function setUrd(address _urd) external onlyOwner {
-        require(_urd != address(0), "URD cannot be zero address");
+        if (_urd == address(0)) revert MorphoAdapter__InvalidAddress();
         address oldUrd = urd;
         urd = _urd;
         emit UrdUpdated(oldUrd, _urd);

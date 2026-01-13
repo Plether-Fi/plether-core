@@ -353,7 +353,7 @@ contract MorphoAdapterTest is Test {
 
     function test_RescueToken_CannotStealUnderlying() public {
         vm.startPrank(owner);
-        vm.expectRevert("Cannot rescue Underlying");
+        vm.expectRevert(MorphoAdapter.MorphoAdapter__CannotRescueUnderlying.selector);
         adapter.rescueToken(address(usdc), owner);
         vm.stopPrank();
     }

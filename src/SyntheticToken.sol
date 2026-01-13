@@ -16,6 +16,9 @@ contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
     /// @notice Thrown when a non-Splitter address attempts to mint or burn.
     error SyntheticToken__Unauthorized();
 
+    /// @notice Thrown when zero address provided for splitter.
+    error SyntheticToken__ZeroAddress();
+
     /// @dev Restricts function access to the Splitter contract only.
     modifier onlySplitter() {
         if (msg.sender != SPLITTER) {
@@ -32,7 +35,7 @@ contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
         ERC20(_name, _symbol)
         ERC20Permit(_name)
     {
-        require(_splitter != address(0), "Invalid splitter address");
+        if (_splitter == address(0)) revert SyntheticToken__ZeroAddress();
         SPLITTER = _splitter;
     }
 

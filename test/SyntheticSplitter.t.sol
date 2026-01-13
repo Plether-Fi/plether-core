@@ -60,15 +60,15 @@ contract SyntheticSplitterTest is Test {
     // 0. CONSTRUCTOR AND SETUP
     // ==========================================
     function test_Constructor_RevertsOnInvalidArgs() public {
-        vm.expectRevert("Invalid Oracle");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         new SyntheticSplitter(address(0), address(usdc), address(adapter), CAP, treasury, address(0));
-        vm.expectRevert("Invalid USDC");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         new SyntheticSplitter(address(oracle), address(0), address(adapter), CAP, treasury, address(0));
-        vm.expectRevert("Invalid Adapter");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         new SyntheticSplitter(address(oracle), address(usdc), address(0), CAP, treasury, address(0));
-        vm.expectRevert("Invalid Cap");
+        vm.expectRevert(SyntheticSplitter.Splitter__InvalidCap.selector);
         new SyntheticSplitter(address(oracle), address(usdc), address(adapter), 0, treasury, address(0));
-        vm.expectRevert("Invalid Treasury");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, address(0), address(0));
     }
 
@@ -279,7 +279,7 @@ contract SyntheticSplitterTest is Test {
 
         // Expect Revert due to Solvency Check
         // Assets ($20 Buffer + $179 Adapter = $199) < Liabilities ($200)
-        vm.expectRevert(bytes("Paused & Insolvent"));
+        vm.expectRevert(SyntheticSplitter.Splitter__Insolvent.selector);
         splitter.burn(50 * 1e18);
 
         vm.stopPrank();
@@ -658,7 +658,7 @@ contract SyntheticSplitterTest is Test {
     }
 
     function test_ProposeFeeReceivers_RevertsInvalidTreasury() public {
-        vm.expectRevert("Invalid Treasury");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         splitter.proposeFeeReceivers(address(0), staking);
     }
 
@@ -674,7 +674,7 @@ contract SyntheticSplitterTest is Test {
     }
 
     function test_ProposeAdapter_RevertsInvalidAdapter() public {
-        vm.expectRevert("Invalid Adapter");
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         splitter.proposeAdapter(address(0));
     }
 

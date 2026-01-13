@@ -82,10 +82,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     event FeesUpdated(address treasury, address staking);
     event EmergencyEjected(uint256 amountRecovered);
 
-    // Errors
+    error Splitter__ZeroAddress();
+    error Splitter__InvalidCap();
     error Splitter__ZeroAmount();
     error Splitter__ZeroRefund();
     error Splitter__AdapterNotSet();
+    error Splitter__AdapterInsufficientLiquidity();
     error Splitter__LiquidationActive();
     error Splitter__NotLiquidated();
     error Splitter__TimelockActive();
@@ -94,6 +96,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     error Splitter__GovernanceLocked();
     error Splitter__InsufficientHarvest();
     error Splitter__AdapterWithdrawFailed();
+    error Splitter__Insolvent();
 
     // Structs for Views
     struct SystemStatus {
@@ -122,11 +125,11 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         address _treasury,
         address _sequencerUptimeFeed
     ) Ownable(msg.sender) {
-        require(_oracle != address(0), "Invalid Oracle");
-        require(_usdc != address(0), "Invalid USDC");
-        require(_yieldAdapter != address(0), "Invalid Adapter");
-        require(_cap > 0, "Invalid Cap");
-        require(_treasury != address(0), "Invalid Treasury");
+        if (_oracle == address(0)) revert Splitter__ZeroAddress();
+        if (_usdc == address(0)) revert Splitter__ZeroAddress();
+        if (_yieldAdapter == address(0)) revert Splitter__ZeroAddress();
+        if (_cap == 0) revert Splitter__InvalidCap();
+        if (_treasury == address(0)) revert Splitter__ZeroAddress();
 
         ORACLE = AggregatorV3Interface(_oracle);
         USDC = IERC20(_usdc);
@@ -187,7 +190,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         }
 
         uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
-        require(usdcNeeded > 0, "Amount too small");
+        if (usdcNeeded == 0) revert Splitter__ZeroAmount();
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcNeeded);
 
@@ -238,7 +241,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
             // Optional: Check if adapter actually has this liquidity
             // logical constraint to warn frontend if withdrawal will fail
             uint256 maxWithdraw = yieldAdapter.maxWithdraw(address(this));
-            require(maxWithdraw >= withdrawnFromAdapter, "Adapter Insufficient Liquidity");
+            if (maxWithdraw < withdrawnFromAdapter) revert Splitter__AdapterInsufficientLiquidity();
         } else {
             withdrawnFromAdapter = 0;
         }
@@ -485,7 +488,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     /// @param _treasury New treasury address.
     /// @param _staking New staking address (can be zero to send all to treasury).
     function proposeFeeReceivers(address _treasury, address _staking) external onlyOwner {
-        require(_treasury != address(0), "Invalid Treasury");
+        if (_treasury == address(0)) revert Splitter__ZeroAddress();
         pendingFees = FeeConfig(_treasury, _staking);
         feesActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit FeesProposed(_treasury, _staking, feesActivationTime);
@@ -509,7 +512,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     /// @notice Propose a new yield adapter (7-day timelock).
     /// @param _newAdapter Address of the new ERC4626-compliant adapter.
     function proposeAdapter(address _newAdapter) external onlyOwner {
-        require(_newAdapter != address(0), "Invalid Adapter");
+        if (_newAdapter == address(0)) revert Splitter__ZeroAddress();
         pendingAdapter = _newAdapter;
         adapterActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit AdapterProposed(_newAdapter, adapterActivationTime);
@@ -629,7 +632,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         if (paused()) {
             uint256 totalAssets = _getTotalAssets();
             uint256 totalLiabilities = _getTotalLiabilities();
-            require(totalAssets >= totalLiabilities, "Paused & Insolvent");
+            if (totalAssets < totalLiabilities) revert Splitter__Insolvent();
         }
     }
 
