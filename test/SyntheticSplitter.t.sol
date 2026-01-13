@@ -580,6 +580,44 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
     }
 
+    function test_Harvest_RevertsWhenSlippageExceeds10Percent() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Add yield to trigger harvest (above $50 threshold)
+        usdc.mint(address(adapter), 100 * 1e6);
+
+        // Mock withdraw to "succeed" but not actually transfer USDC
+        // This simulates adapter returning less than expected
+        vm.mockCall(address(adapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode(0));
+
+        vm.expectRevert(SyntheticSplitter.Splitter__InsufficientHarvest.selector);
+        splitter.harvestYield();
+    }
+
+    function test_Harvest_SucceedsWithAcceptableSlippage() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Setup fee receivers
+        splitter.proposeFeeReceivers(treasury, staking);
+        vm.warp(block.timestamp + 8 days);
+        splitter.finalizeFeeReceivers();
+
+        // Add yield (100 USDC surplus)
+        usdc.mint(address(adapter), 100 * 1e6);
+
+        // Harvest should succeed - real adapter returns full amount
+        splitter.harvestYield();
+
+        // Verify harvest completed (treasury received funds)
+        assertGt(usdc.balanceOf(treasury), 0);
+    }
+
     function test_Harvest_RoutesToTreasuryIfNoStaking() public {
         // 1. Setup: Mint 100 Tokens ($200)
         vm.startPrank(alice);

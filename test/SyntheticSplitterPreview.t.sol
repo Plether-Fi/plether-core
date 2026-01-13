@@ -313,6 +313,25 @@ contract SyntheticSplitterFullTest is Test {
         assertEq(actualWithdrawal, fromAdapter, "Incorrect adapter usage");
     }
 
+    function test_PreviewBurn_RevertsWhenAdapterInsufficientLiquidity() public {
+        vm.prank(user);
+        splitter.mint(100e18);
+
+        // Drain local buffer completely
+        uint256 buffer = usdc.balanceOf(address(splitter));
+        vm.prank(address(splitter));
+        usdc.transfer(address(0xdead), buffer);
+
+        // Drain most of adapter's assets so maxWithdraw < needed
+        uint256 adapterBalance = usdc.balanceOf(address(adapter));
+        vm.prank(address(adapter));
+        usdc.transfer(address(0xdead), adapterBalance - 1e6);
+
+        // previewBurn needs more than adapter can provide
+        vm.expectRevert(SyntheticSplitter.Splitter__AdapterInsufficientLiquidity.selector);
+        splitter.previewBurn(100e18);
+    }
+
     function test_PreviewBurn_LowBuffer() public {
         uint256 mintAmount = 100e18;
         vm.prank(user);
