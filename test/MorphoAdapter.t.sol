@@ -436,6 +436,12 @@ contract MorphoAdapterTest is Test {
         adapter.setUrd(newerUrd);
     }
 
+    function test_SetUrd_RevertsOnZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(MorphoAdapter.MorphoAdapter__InvalidAddress.selector);
+        adapter.setUrd(address(0));
+    }
+
     function test_ClaimRewards_Success() public {
         vm.prank(owner);
         adapter.setUrd(address(urd));
@@ -482,6 +488,14 @@ contract MorphoAdapterTest is Test {
 
         assertEq(claimed, 100 ether);
         assertEq(rewardToken.balanceOf(address(adapter)), 100 ether);
+    }
+
+    function test_ClaimRewardsToSelf_RevertsIfNoUrd() public {
+        bytes32[] memory proof = new bytes32[](0);
+
+        vm.prank(owner);
+        vm.expectRevert(MorphoAdapter.MorphoAdapter__InvalidAddress.selector);
+        adapter.claimRewardsToSelf(address(rewardToken), 100 ether, proof);
     }
 
     // ==========================================
