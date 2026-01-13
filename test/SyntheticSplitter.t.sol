@@ -719,6 +719,18 @@ contract SyntheticSplitterTest is Test {
         splitter.finalizeFeeReceivers(); // Before warp
     }
 
+    function test_FinalizeFeeReceivers_UpdatesAddresses() public {
+        address newTreasury = makeAddr("newTreasury");
+        address newStaking = makeAddr("newStaking");
+
+        splitter.proposeFeeReceivers(newTreasury, newStaking);
+        vm.warp(block.timestamp + 8 days);
+        splitter.finalizeFeeReceivers();
+
+        assertEq(splitter.treasury(), newTreasury);
+        assertEq(splitter.staking(), newStaking);
+    }
+
     function test_ProposeAdapter_RevertsInvalidAdapter() public {
         vm.expectRevert(SyntheticSplitter.Splitter__ZeroAddress.selector);
         splitter.proposeAdapter(address(0));
