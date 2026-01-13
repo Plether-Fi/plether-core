@@ -6,6 +6,7 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 
 import {LeverageRouterBase} from "./base/LeverageRouterBase.sol";
 import {MarketParams} from "./interfaces/IMorpho.sol";
+import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title LeverageRouter
 /// @notice Leverage router for DXY-BEAR positions via Morpho Blue.
@@ -87,11 +88,11 @@ contract LeverageRouter is LeverageRouterBase {
     ) external nonReentrant whenNotPaused {
         if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
         if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
         if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
-        uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        uint256 loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
         USDC.safeTransferFrom(msg.sender, address(this), principal);
@@ -293,9 +294,9 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage
     ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) {
-        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
 
-        loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;
 
         // Use get_dy for accurate preview

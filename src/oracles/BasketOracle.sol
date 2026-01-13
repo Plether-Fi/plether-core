@@ -107,8 +107,8 @@ contract BasketOracle is AggregatorV3Interface {
             // Safety: Price must be positive
             if (price <= 0) revert BasketOracle__InvalidPrice(address(components[i].feed));
 
-            // Math: Price (8 dec) * Quantity (18 dec) / 1e18 = 8 decimals
-            int256 value = (price * int256(components[i].quantity)) / 1e18;
+            // Math: Price (8 dec) * Quantity (18 dec) / ONE_WAD = 8 decimals
+            int256 value = (price * int256(components[i].quantity)) / int256(DecimalConstants.ONE_WAD);
             totalPrice += value;
 
             // The basket is only as fresh as its oldest component

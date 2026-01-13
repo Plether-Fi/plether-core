@@ -152,14 +152,14 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) external nonReentrant whenNotPaused {
         if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
         if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
         if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
         if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) {
             revert LeverageRouterBase__SplitterNotActive();
         }
 
-        uint256 loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        uint256 loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
 
         USDC.safeTransferFrom(msg.sender, address(this), principal);
@@ -201,13 +201,13 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Calculate extra BEAR needed to sell for debt repayment
         uint256 extraBearForDebt = 0;
         if (debtToRepay > 0) {
-            // Query: how much USDC do we get for 1 BEAR (1e18)?
-            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+            // Query: how much USDC do we get for 1 BEAR (DecimalConstants.ONE_WAD)?
+            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
             if (usdcPerBear == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate BEAR needed to sell for debtToRepay USDC
-            // Formula: (debt * 1e18) / usdcPerBear, with slippage buffer
-            extraBearForDebt = (debtToRepay * 1e18) / usdcPerBear;
+            // Formula: (debt * DecimalConstants.ONE_WAD) / usdcPerBear, with slippage buffer
+            extraBearForDebt = (debtToRepay * DecimalConstants.ONE_WAD) / usdcPerBear;
             // Add slippage buffer (extra % to ensure we get enough USDC)
             extraBearForDebt = extraBearForDebt + (extraBearForDebt * maxSlippageBps / 10_000);
         }
@@ -368,11 +368,11 @@ contract BullLeverageRouter is LeverageRouterBase {
             uint256 bearToBuy = repayAmount - bearBalance;
 
             // Estimate USDC needed using Curve price discovery
-            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
             if (bearPerUsdc == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate USDC needed with slippage buffer
-            uint256 estimatedUsdcNeeded = (bearToBuy * 1e6) / bearPerUsdc;
+            uint256 estimatedUsdcNeeded = (bearToBuy * DecimalConstants.ONE_USDC) / bearPerUsdc;
             uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
 
             // Verify we have enough USDC
@@ -413,9 +413,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage
     ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt) {
-        if (leverage <= 1e18) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
 
-        loanAmount = (principal * (leverage - 1e18)) / 1e18;
+        loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;
         // Splitter mints at CAP price: tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
         expectedDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
@@ -451,10 +451,10 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 extraBearForDebt = 0;
         uint256 usdcFromBearSale = 0;
         if (debtToRepay > 0) {
-            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, 1e18);
+            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
             if (usdcPerBear > 0) {
                 // Calculate BEAR needed without slippage buffer (conservative estimate)
-                extraBearForDebt = (debtToRepay * 1e18) / usdcPerBear;
+                extraBearForDebt = (debtToRepay * DecimalConstants.ONE_WAD) / usdcPerBear;
                 // Estimate actual USDC from selling this BEAR
                 usdcFromBearSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
             }
@@ -486,13 +486,13 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) private view returns (uint256) {
         if (bearAmount == 0) return 0;
 
-        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, 1e6);
+        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
         if (bearPerUsdc == 0) {
             return (bearAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         }
 
         // Binary search for accurate USDC estimate
-        uint256 low = (bearAmount * 1e6) / bearPerUsdc;
+        uint256 low = (bearAmount * DecimalConstants.ONE_USDC) / bearPerUsdc;
         uint256 high = low + (low / 5); // Start with 20% buffer
 
         // Ensure high is sufficient
