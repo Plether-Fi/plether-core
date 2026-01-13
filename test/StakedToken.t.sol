@@ -4,11 +4,12 @@ pragma solidity ^0.8.20;
 import {StakedToken} from "../src/StakedToken.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract MockUnderlying is ERC20 {
+contract MockUnderlying is ERC20, ERC20Permit {
 
-    constructor() ERC20("DXY-BEAR", "BEAR") {}
+    constructor() ERC20("DXY-BEAR", "BEAR") ERC20Permit("DXY-BEAR") {}
 
     function mint(
         address to,
@@ -119,6 +120,85 @@ contract StakedTokenTest is Test {
         // With offset=3, Alice gets meaningful shares and loses < 0.1%
         assertGt(aliceShares, 0);
         assertGt(stakedToken.convertToAssets(aliceShares), 99.9 ether);
+    }
+
+    // ==========================================
+    // DEPOSIT WITH PERMIT
+    // ==========================================
+
+    function test_DepositWithPermit_Success() public {
+        uint256 privateKey = 0x1234;
+        address signer = vm.addr(privateKey);
+        uint256 depositAmount = 100 ether;
+
+        underlying.mint(signer, depositAmount);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 nonce = underlying.nonces(signer);
+
+        bytes32 permitHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                underlying.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                        signer,
+                        address(stakedToken),
+                        depositAmount,
+                        nonce,
+                        deadline
+                    )
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, permitHash);
+
+        vm.prank(signer);
+        uint256 shares = stakedToken.depositWithPermit(depositAmount, signer, deadline, v, r, s);
+
+        assertGt(shares, 0);
+        assertEq(stakedToken.balanceOf(signer), shares);
+        assertEq(underlying.balanceOf(signer), 0);
+    }
+
+    function test_DepositWithPermit_DifferentReceiver() public {
+        uint256 privateKey = 0x5678;
+        address signer = vm.addr(privateKey);
+        address receiver = address(0xBEEF);
+        uint256 depositAmount = 50 ether;
+
+        underlying.mint(signer, depositAmount);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 nonce = underlying.nonces(signer);
+
+        bytes32 permitHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                underlying.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                        signer,
+                        address(stakedToken),
+                        depositAmount,
+                        nonce,
+                        deadline
+                    )
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, permitHash);
+
+        vm.prank(signer);
+        uint256 shares = stakedToken.depositWithPermit(depositAmount, receiver, deadline, v, r, s);
+
+        assertGt(shares, 0);
+        assertEq(stakedToken.balanceOf(receiver), shares);
+        assertEq(stakedToken.balanceOf(signer), 0);
     }
 
 }
