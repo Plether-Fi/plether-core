@@ -216,26 +216,26 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     /**
      * @notice Simulates a burn to see USDC return
      * @param burnAmount The amount of TokenA/B the user wants to burn
-     * @return usdcToReturn Total USDC user will receive
+     * @return usdcRefund Total USDC user will receive
      * @return withdrawnFromAdapter Amount pulled from Yield Source to cover shortage
      */
     function previewBurn(
         uint256 burnAmount
-    ) external view returns (uint256 usdcToReturn, uint256 withdrawnFromAdapter) {
+    ) external view returns (uint256 usdcRefund, uint256 withdrawnFromAdapter) {
         if (burnAmount == 0) return (0, 0);
 
         // 1. Solvency Check (Simulates the paused logic)
         _requireSolventIfPaused();
 
         // 2. Calculate Refund
-        usdcToReturn = (burnAmount * CAP) / USDC_MULTIPLIER;
-        if (usdcToReturn == 0) revert Splitter__ZeroRefund();
+        usdcRefund = (burnAmount * CAP) / USDC_MULTIPLIER;
+        if (usdcRefund == 0) revert Splitter__ZeroRefund();
 
         // 3. Calculate Liquidity Source
         uint256 localBalance = USDC.balanceOf(address(this));
 
-        if (localBalance < usdcToReturn) {
-            withdrawnFromAdapter = usdcToReturn - localBalance;
+        if (localBalance < usdcRefund) {
+            withdrawnFromAdapter = usdcRefund - localBalance;
 
             // Optional: Check if adapter actually has this liquidity
             // logical constraint to warn frontend if withdrawal will fail
