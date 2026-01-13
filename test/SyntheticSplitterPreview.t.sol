@@ -359,6 +359,27 @@ contract SyntheticSplitterFullTest is Test {
 
     // ====================== NEW EDGE CASE TESTS ======================
 
+    function test_PreviewMint_ZeroAmount_ReturnsZeros() public {
+        (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer) = splitter.previewMint(0);
+        assertEq(usdcRequired, 0);
+        assertEq(depositToAdapter, 0);
+        assertEq(keptInBuffer, 0);
+    }
+
+    function test_PreviewMint_RevertsWhenLiquidated() public {
+        vm.prank(user);
+        splitter.mint(1e18);
+
+        oracle.setPrice(int256(CAP + 1));
+        splitter.triggerLiquidation();
+
+        // Price recovers below CAP, but liquidation flag persists
+        oracle.setPrice(int256(100e8));
+
+        vm.expectRevert(SyntheticSplitter.Splitter__LiquidationActive.selector);
+        splitter.previewMint(1e18);
+    }
+
     function test_PreviewMint_RevertsWhenPriceAtOrAboveCap() public {
         vm.prank(user);
         splitter.mint(1e18);

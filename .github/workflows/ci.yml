@@ -31,6 +31,9 @@ jobs:
       - name: Run tests
         run: forge test -vvv --no-match-path "test/fork/*"
 
+      - name: Check gas snapshots
+        run: forge snapshot --check --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"
+
   coverage:
     runs-on: ubuntu-latest
     steps:
