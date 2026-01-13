@@ -110,6 +110,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable {
         address _newPool
     ) external onlyOwner {
         if (address(curvePool) == address(0)) revert BasketOracle__InvalidProposal();
+        // slither-disable-next-line missing-zero-check
         pendingCurvePool = _newPool;
         curvePoolActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit CurvePoolProposed(_newPool, curvePoolActivationTime);
