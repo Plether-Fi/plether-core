@@ -14,28 +14,45 @@ interface IUniversalRewardsDistributor {
         returns (uint256 amount);
 }
 
-/**
- * @title MorphoAdapter
- * @notice An ERC-4626 compliant wrapper for Morpho Blue.
- * @dev Interchangeable with YieldAdapter (Aave) - same interface for SyntheticSplitter
- */
+/// @title MorphoAdapter
+/// @notice ERC4626-compliant wrapper for Morpho Blue lending.
+/// @dev Interchangeable with other yield adapters. Only accepts deposits from SyntheticSplitter.
 contract MorphoAdapter is ERC4626, Ownable {
     using SafeERC20 for IERC20;
 
+    /// @notice Morpho Blue protocol contract.
     IMorpho public immutable MORPHO;
+
+    /// @notice Morpho market parameters for this adapter.
     MarketParams public marketParams;
+
+    /// @notice Computed market ID (keccak256 of marketParams).
     bytes32 public immutable MARKET_ID;
+
+    /// @notice SyntheticSplitter authorized to deposit/withdraw.
     address public immutable SPLITTER;
 
-    // Rewards
-    address public urd; // Universal Rewards Distributor
+    /// @notice Universal Rewards Distributor for Morpho incentives.
+    address public urd;
 
+    /// @notice Thrown when caller is not the SyntheticSplitter.
     error MorphoAdapter__OnlySplitter();
+
+    /// @notice Thrown when a zero address is provided.
     error MorphoAdapter__InvalidAddress();
+
+    /// @notice Thrown when market loan token doesn't match asset.
     error MorphoAdapter__InvalidMarket();
 
+    /// @notice Emitted when URD address is updated.
     event UrdUpdated(address indexed oldUrd, address indexed newUrd);
 
+    /// @notice Deploys adapter with Morpho market configuration.
+    /// @param _asset Underlying asset (USDC).
+    /// @param _morpho Morpho Blue protocol address.
+    /// @param _marketParams Market parameters (must have loanToken == _asset).
+    /// @param _owner Admin address for rewards and rescue.
+    /// @param _splitter SyntheticSplitter authorized to deposit.
     constructor(IERC20 _asset, address _morpho, MarketParams memory _marketParams, address _owner, address _splitter)
         ERC4626(_asset)
         ERC20("Morpho Yield Wrapper", "myUSDC")
@@ -58,18 +75,19 @@ contract MorphoAdapter is ERC4626, Ownable {
     // ERC-4626 OVERRIDES
     // ==========================================
 
-    /**
-     * @dev Total assets = our supply position in Morpho Blue
-     */
+    /// @notice Returns total USDC value of this adapter's Morpho position.
+    /// @return Total assets including accrued interest.
     function totalAssets() public view override returns (uint256) {
         (uint256 supplyShares,,) = MORPHO.position(MARKET_ID, address(this));
         if (supplyShares == 0) return 0;
         return _convertMorphoSharesToAssets(supplyShares);
     }
 
-    /**
-     * @dev Hook called after user deposits. Only SPLITTER can deposit.
-     */
+    /// @dev Deposits assets to Morpho after ERC4626 share minting.
+    /// @param caller Must be SPLITTER.
+    /// @param receiver Receiver of vault shares.
+    /// @param assets Amount of USDC to deposit.
+    /// @param shares Amount of vault shares minted.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
         if (caller != SPLITTER) revert MorphoAdapter__OnlySplitter();
 
@@ -80,9 +98,12 @@ contract MorphoAdapter is ERC4626, Ownable {
         MORPHO.supply(marketParams, assets, 0, address(this), "");
     }
 
-    /**
-     * @dev Hook called before user withdraws. Pull from Morpho.
-     */
+    /// @dev Withdraws assets from Morpho before ERC4626 share burning.
+    /// @param caller Caller requesting withdrawal.
+    /// @param receiver Receiver of withdrawn assets.
+    /// @param owner Owner of vault shares being burned.
+    /// @param assets Amount of USDC to withdraw.
+    /// @param shares Amount of vault shares burned.
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
         internal
         override
@@ -98,16 +119,16 @@ contract MorphoAdapter is ERC4626, Ownable {
     // MORPHO HELPERS
     // ==========================================
 
-    /**
-     * @dev Compute market ID from MarketParams (keccak256 hash)
-     */
+    /// @dev Computes market ID from parameters (keccak256 hash).
+    /// @param params Market parameters struct.
+    /// @return Market identifier used by Morpho.
     function _computeMarketId(MarketParams memory params) internal pure returns (bytes32) {
         return keccak256(abi.encode(params));
     }
 
-    /**
-     * @dev Convert Morpho supply shares to assets
-     */
+    /// @dev Converts Morpho supply shares to asset amount.
+    /// @param shares Morpho supply shares.
+    /// @return Equivalent asset amount.
     function _convertMorphoSharesToAssets(uint256 shares) internal view returns (uint256) {
         (uint128 totalSupplyAssets, uint128 totalSupplyShares,,,,) = MORPHO.market(MARKET_ID);
 
@@ -119,9 +140,9 @@ contract MorphoAdapter is ERC4626, Ownable {
     // SAFETY
     // ==========================================
 
-    /**
-     * @notice Recover tokens stuck in the contract (EXCEPT the underlying asset).
-     */
+    /// @notice Recovers stuck tokens (excluding the underlying asset).
+    /// @param token Token to rescue.
+    /// @param to Recipient address.
     function rescueToken(address token, address to) external onlyOwner {
         require(token != asset(), "Cannot rescue Underlying");
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
@@ -131,10 +152,8 @@ contract MorphoAdapter is ERC4626, Ownable {
     // REWARDS (Universal Rewards Distributor)
     // ==========================================
 
-    /**
-     * @notice Set the Universal Rewards Distributor address
-     * @param _urd The URD contract address
-     */
+    /// @notice Sets the Universal Rewards Distributor address.
+    /// @param _urd URD contract address (cannot be zero).
     function setUrd(address _urd) external onlyOwner {
         require(_urd != address(0), "URD cannot be zero address");
         address oldUrd = urd;
@@ -142,14 +161,12 @@ contract MorphoAdapter is ERC4626, Ownable {
         emit UrdUpdated(oldUrd, _urd);
     }
 
-    /**
-     * @notice Claim rewards from Morpho's Universal Rewards Distributor
-     * @param reward The reward token address
-     * @param claimable The total claimable amount (from merkle tree)
-     * @param proof The merkle proof
-     * @param to The address to receive the rewards
-     * @return claimed The amount claimed
-     */
+    /// @notice Claims rewards and transfers to specified address.
+    /// @param reward Reward token address.
+    /// @param claimable Total claimable amount from merkle tree.
+    /// @param proof Merkle proof for claim.
+    /// @param to Recipient of claimed rewards.
+    /// @return claimed Amount successfully claimed and transferred.
     function claimRewards(address reward, uint256 claimable, bytes32[] calldata proof, address to)
         external
         onlyOwner
@@ -167,13 +184,11 @@ contract MorphoAdapter is ERC4626, Ownable {
         }
     }
 
-    /**
-     * @notice Claim rewards directly to this contract (for compounding or manual handling)
-     * @param reward The reward token address
-     * @param claimable The total claimable amount (from merkle tree)
-     * @param proof The merkle proof
-     * @return claimed The amount claimed
-     */
+    /// @notice Claims rewards to this contract for compounding.
+    /// @param reward Reward token address.
+    /// @param claimable Total claimable amount from merkle tree.
+    /// @param proof Merkle proof for claim.
+    /// @return claimed Amount successfully claimed.
     function claimRewardsToSelf(address reward, uint256 claimable, bytes32[] calldata proof)
         external
         onlyOwner

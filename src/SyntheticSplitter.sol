@@ -107,6 +107,13 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         uint256 adapterAssets; // USDC value held in yield adapter
     }
 
+    /// @notice Deploys the SyntheticSplitter and creates DXY-BEAR and DXY-BULL tokens.
+    /// @param _oracle Chainlink-compatible price feed for DXY basket.
+    /// @param _usdc USDC token address (6 decimals).
+    /// @param _yieldAdapter ERC4626-compliant yield adapter for USDC deposits.
+    /// @param _cap Maximum DXY price (8 decimals). Triggers liquidation when breached.
+    /// @param _treasury Treasury address for fee distribution.
+    /// @param _sequencerUptimeFeed L2 sequencer uptime feed (address(0) for L1/testnets).
     constructor(
         address _oracle,
         address _usdc,
@@ -271,11 +278,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit Burned(msg.sender, amount);
     }
 
-    /**
-     * @dev Internal helper to withdraw from adapter with redeem fallback.
-     * Tries withdraw() first, falls back to redeem() if withdraw fails.
-     * Reverts with Splitter__AdapterWithdrawFailed if both fail.
-     */
+    /// @dev Withdraws USDC from yield adapter with redeem fallback.
+    /// @param amount USDC amount to withdraw (6 decimals).
     function _withdrawFromAdapter(uint256 amount) internal {
         try yieldAdapter.withdraw(amount, address(this), address(this)) {
         // Success via withdraw
@@ -300,10 +304,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     // 3. LIQUIDATION & EMERGENCY
     // ==========================================
 
-    /**
-     * @notice Permissionless function to lock the protocol into Liquidated state.
-     * @dev Call this if Price >= CAP to prevent the system from "reviving" if price drops later.
-     */
+    /// @notice Locks the protocol into liquidated state when price >= CAP.
+    /// @dev Permissionless. Prevents system revival if price drops after breach.
     function triggerLiquidation() external nonReentrant {
         uint256 price = _getOraclePrice();
         if (price < CAP) revert Splitter__NotLiquidated();
@@ -345,10 +347,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit EmergencyRedeemed(msg.sender, amount);
     }
 
-    /**
-     * @notice "Ejection Seat": Pulls ALL funds from Aave to Splitter.
-     * @dev Bypasses timelock. Used if Aave is buggy or about to pause.
-     */
+    /// @notice Emergency exit: withdraws all funds from yield adapter.
+    /// @dev Bypasses timelock. Auto-pauses protocol. Use if adapter is compromised.
     function ejectLiquidity() external onlyOwner {
         if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
 
@@ -370,14 +370,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     // 4. HARVEST (Permissionless)
     // ==========================================
 
-    /**
-     * @notice Checks if there is yield to harvest and calculates distribution
-     * @return canHarvest True if surplus > MIN_SURPLUS_THRESHOLD
-     * @return totalSurplus Total surplus available (assets - liabilities)
-     * @return callerReward Amount sent to msg.sender
-     * @return treasuryShare Amount sent to treasury
-     * @return stakingShare Amount sent to staking
-     */
+    /// @notice Previews yield harvest amounts and eligibility.
+    /// @return canHarvest True if surplus exceeds MIN_SURPLUS_THRESHOLD.
+    /// @return totalSurplus Available surplus (total assets - liabilities).
+    /// @return callerReward Caller incentive (0.1% of harvest).
+    /// @return treasuryShare Treasury allocation (20% of remaining).
+    /// @return stakingShare Staking allocation (79.9% of remaining).
     function previewHarvest()
         external
         view
@@ -474,7 +472,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     // 5. GOVERNANCE
     // ==========================================
 
-    // --- Helper: Centralized Security Check ---
+    /// @dev Enforces 7-day cooldown after unpause for governance actions.
     function _checkLiveness() internal view {
         if (paused()) revert Splitter__GovernanceLocked();
         // Using TIMELOCK_DELAY (7 days) as the Cooldown
@@ -575,9 +573,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         return Status.ACTIVE;
     }
 
-    /**
-     * @notice Returns high-level system metrics for UI dashboards
-     */
+    /// @notice Returns comprehensive system metrics for dashboards.
+    /// @return status Struct containing price, collateral ratio, and liquidity data.
     function getSystemStatus() external view returns (SystemStatus memory status) {
         status.capPrice = CAP;
         status.liquidated = isLiquidated;

@@ -5,30 +5,33 @@ import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156
 import {IMorphoFlashLoanCallback} from "../interfaces/IMorpho.sol";
 
 /// @title FlashLoanBase
-/// @notice Abstract base contract for flash loan borrowers with common validation logic.
-/// @dev Provides shared constants, errors, and validation helpers for routers.
-///      Supports both Morpho flash loans and ERC-3156 flash mints (for SyntheticToken).
+/// @notice Abstract base for flash loan borrowers with validation logic.
+/// @dev Supports both Morpho flash loans and ERC-3156 flash mints.
 abstract contract FlashLoanBase is IERC3156FlashBorrower, IMorphoFlashLoanCallback {
-    // ERC-3156 callback success value (used for SyntheticToken flash mints)
+    /// @dev ERC-3156 callback success return value.
     bytes32 internal constant CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
 
-    // Errors
+    /// @notice Thrown when flash loan callback called by wrong lender.
     error FlashLoan__InvalidLender();
+
+    /// @notice Thrown when flash loan initiator is not this contract.
     error FlashLoan__InvalidInitiator();
+
+    /// @notice Thrown when callback receives unknown operation type.
     error FlashLoan__InvalidOperation();
 
-    /// @notice Validate flash loan callback parameters.
-    /// @param lender The actual msg.sender (should be the expected lender).
-    /// @param expectedLender The expected flash lender address.
-    /// @param initiator The initiator passed to the callback (should be this contract).
+    /// @dev Validates ERC-3156 flash loan callback parameters.
+    /// @param lender Actual msg.sender.
+    /// @param expectedLender Expected flash lender address.
+    /// @param initiator Initiator passed to callback (must be this contract).
     function _validateFlashLoan(address lender, address expectedLender, address initiator) internal view {
         if (lender != expectedLender) revert FlashLoan__InvalidLender();
         if (initiator != address(this)) revert FlashLoan__InvalidInitiator();
     }
 
-    /// @notice Validate only the lender.
-    /// @param lender The actual msg.sender.
-    /// @param expectedLender The expected flash lender address.
+    /// @dev Validates that msg.sender is the expected lender.
+    /// @param lender Actual msg.sender.
+    /// @param expectedLender Expected flash lender address.
     function _validateLender(address lender, address expectedLender) internal pure {
         if (lender != expectedLender) revert FlashLoan__InvalidLender();
     }

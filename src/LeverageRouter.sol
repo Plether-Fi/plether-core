@@ -15,7 +15,7 @@ import {LeverageRouterBase} from "./base/LeverageRouterBase.sol";
 contract LeverageRouter is LeverageRouterBase {
     using SafeERC20 for IERC20;
 
-    // Events
+    /// @notice Emitted when a leveraged DXY-BEAR position is opened.
     event LeverageOpened(
         address indexed user,
         uint256 principal,
@@ -26,6 +26,7 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
+    /// @notice Emitted when a leveraged DXY-BEAR position is closed.
     event LeverageClosed(
         address indexed user,
         uint256 debtRepaid,
@@ -34,9 +35,16 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
-    // Staked token for Morpho collateral
+    /// @notice StakedToken vault for DXY-BEAR (used as Morpho collateral).
     IERC4626 public immutable STAKED_DXY_BEAR;
 
+    /// @notice Deploys LeverageRouter with Morpho market configuration.
+    /// @param _morpho Morpho Blue protocol address.
+    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _usdc USDC token address.
+    /// @param _dxyBear DXY-BEAR token address.
+    /// @param _stakedDxyBear sDXY-BEAR staking vault address.
+    /// @param _marketParams Morpho market parameters for sDXY-BEAR/USDC.
     constructor(
         address _morpho,
         address _curvePool,
@@ -133,8 +141,9 @@ contract LeverageRouter is LeverageRouterBase {
         // Event emitted in _executeClose or _executeCloseNoDebt
     }
 
-    /// @dev Morpho flash loan callback. Routes to open or close handler.
-    /// @dev Deadline already validated in entry function, no need to check again.
+    /// @notice Morpho flash loan callback. Routes to open or close handler.
+    /// @param amount Amount of USDC borrowed.
+    /// @param data Encoded operation parameters.
     function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
         // Validate caller is Morpho
         _validateLender(msg.sender, address(MORPHO));
@@ -152,14 +161,15 @@ contract LeverageRouter is LeverageRouterBase {
         // Constructor grants max approval, so no additional approval needed.
     }
 
-    /// @dev ERC-3156 flash loan callback - not used but required by FlashLoanBase.
+    /// @notice ERC-3156 flash loan callback - not used by LeverageRouter.
+    /// @dev Always reverts as LeverageRouter only uses Morpho flash loans.
     function onFlashLoan(address, address, uint256, uint256, bytes calldata) external pure override returns (bytes32) {
         revert FlashLoan__InvalidOperation();
     }
 
-    /**
-     * @dev Execute open leverage operation in flash loan callback.
-     */
+    /// @dev Executes open leverage operation within Morpho flash loan callback.
+    /// @param loanAmount Amount of USDC borrowed from Morpho.
+    /// @param data Encoded parameters (op, user, deadline, principal, leverage, maxSlippageBps, minDxyBear).
     function _executeOpen(uint256 loanAmount, bytes calldata data) private {
         // Decode open-specific data: (op, user, deadline, principal, leverage, maxSlippageBps, minDxyBear)
         (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minDxyBear) =
@@ -184,9 +194,9 @@ contract LeverageRouter is LeverageRouterBase {
         emit LeverageOpened(user, principal, leverage, loanAmount, dxyBearReceived, debtIncurred, maxSlippageBps);
     }
 
-    /**
-     * @dev Execute close leverage operation in flash loan callback.
-     */
+    /// @dev Executes close leverage operation within Morpho flash loan callback.
+    /// @param loanAmount Amount of USDC borrowed from Morpho to repay debt.
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, maxSlippageBps, minUsdcOut).
     function _executeClose(uint256 loanAmount, bytes calldata data) private {
         // Decode close-specific data: (op, user, deadline, collateralToWithdraw, maxSlippageBps, minUsdcOut)
         (, address user,, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 minUsdcOut) =
@@ -219,18 +229,11 @@ contract LeverageRouter is LeverageRouterBase {
         emit LeverageClosed(user, loanAmount, collateralToWithdraw, usdcToReturn, maxSlippageBps);
     }
 
-    /**
-     * @dev Execute close operation when there is no Morpho debt to repay.
-     *
-     * This is a simplified version of _executeClose that skips the flash loan
-     * since no USDC is needed to repay debt.
-     *
-     * Flow:
-     * 1. Withdraw sDXY-BEAR collateral from Morpho
-     * 2. Unstake to get DXY-BEAR
-     * 3. Swap DXY-BEAR -> USDC via Curve
-     * 4. Transfer all USDC to user
-     */
+    /// @dev Closes position without flash loan when user has no Morpho debt.
+    /// @param user Position owner receiving USDC.
+    /// @param collateralToWithdraw Amount of sDXY-BEAR shares to withdraw.
+    /// @param maxSlippageBps Maximum slippage for Curve swap.
+    /// @param minUsdcOut Minimum USDC to receive after swap.
     function _executeCloseNoDebt(address user, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 minUsdcOut)
         private
     {

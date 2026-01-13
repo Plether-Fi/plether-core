@@ -50,7 +50,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 contract BullLeverageRouter is LeverageRouterBase {
     using SafeERC20 for IERC20;
 
-    // Events
+    /// @notice Emitted when a leveraged DXY-BULL position is opened.
     event LeverageOpened(
         address indexed user,
         uint256 principal,
@@ -61,6 +61,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
+    /// @notice Emitted when a leveraged DXY-BULL position is closed.
     event LeverageClosed(
         address indexed user,
         uint256 debtRepaid,
@@ -69,14 +70,27 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
-    // Dependencies
+    /// @notice SyntheticSplitter for minting/burning token pairs.
     ISyntheticSplitter public immutable SPLITTER;
+
+    /// @notice DXY-BULL token (collateral for bull positions).
     IERC20 public immutable DXY_BULL;
-    IERC4626 public immutable STAKED_DXY_BULL; // Staked token (Morpho collateral)
 
-    // Cached from Splitter (immutable)
-    uint256 public immutable CAP; // 8 decimals (oracle format)
+    /// @notice StakedToken vault for DXY-BULL (used as Morpho collateral).
+    IERC4626 public immutable STAKED_DXY_BULL;
 
+    /// @notice Protocol CAP price (8 decimals, oracle format).
+    uint256 public immutable CAP;
+
+    /// @notice Deploys BullLeverageRouter with Morpho market configuration.
+    /// @param _morpho Morpho Blue protocol address.
+    /// @param _splitter SyntheticSplitter contract address.
+    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _usdc USDC token address.
+    /// @param _dxyBear DXY-BEAR token address.
+    /// @param _dxyBull DXY-BULL token address.
+    /// @param _stakedDxyBull sDXY-BULL staking vault address.
+    /// @param _marketParams Morpho market parameters for sDXY-BULL/USDC.
     constructor(
         address _morpho,
         address _splitter,
@@ -209,12 +223,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Event emitted in _executeClose callback
     }
 
-    /**
-     * @dev Morpho flash loan callback for USDC flash loans.
-     *
-     * Routes to the appropriate handler based on operation type:
-     * - OP_OPEN (1): USDC flash loan for opening leverage position
-     */
+    /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
+    /// @param amount Amount of USDC borrowed.
+    /// @param data Encoded open operation parameters.
     function onMorphoFlashLoan(uint256 amount, bytes calldata data) external override {
         // Validate caller is Morpho
         _validateLender(msg.sender, address(MORPHO));
@@ -231,14 +242,12 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Constructor grants max approval, so no additional approval needed.
     }
 
-    /**
-     * @dev ERC-3156 flash loan callback for DXY-BEAR flash mints.
-     *
-     * Routes to:
-     * - OP_CLOSE (2): DXY-BEAR flash mint for closing leverage position
-     *
-     * Lender validation: Must be called by DXY-BEAR token (flash mint)
-     */
+    /// @notice ERC-3156 flash loan callback for DXY-BEAR flash mints (OP_CLOSE only).
+    /// @param initiator Address that initiated the flash loan (must be this contract).
+    /// @param amount Amount of DXY-BEAR borrowed.
+    /// @param fee Flash loan fee (always 0 for SyntheticToken).
+    /// @param data Encoded close operation parameters.
+    /// @return CALLBACK_SUCCESS on successful execution.
     function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
@@ -257,10 +266,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         return CALLBACK_SUCCESS;
     }
 
-    /**
-     * @dev Execute open leverage operation in flash loan callback.
-     */
-    /// @dev Deadline already validated in entry function, no need to check again.
+    /// @dev Executes open leverage operation within Morpho flash loan callback.
+    /// @param loanAmount Amount of USDC borrowed from Morpho.
+    /// @param data Encoded parameters (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut).
     function _executeOpen(uint256 loanAmount, bytes calldata data) private {
         // Decode: (op, user, deadline, principal, leverage, maxSlippageBps, minSwapOut)
         (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minSwapOut) =
@@ -296,20 +304,10 @@ contract BullLeverageRouter is LeverageRouterBase {
         emit LeverageOpened(user, principal, leverage, loanAmount, dxyBullReceived, debtIncurred, maxSlippageBps);
     }
 
-    /**
-     * @dev Execute close leverage operation (single DXY-BEAR flash mint callback).
-     *
-     * Flow:
-     * 1. If debt exists: Sell extra DXY-BEAR on Curve → USDC
-     * 2. Repay Morpho debt with USDC from sale (if any)
-     * 3. Withdraw sDXY-BULL collateral from Morpho
-     * 4. Unstake sDXY-BULL → DXY-BULL
-     * 5. Redeem DXY-BEAR + DXY-BULL pairs → USDC
-     * 6. Buy back all DXY-BEAR on Curve to repay flash mint
-     * 7. Transfer remaining USDC to user
-     * 8. Emit LeverageClosed event
-     */
-    /// @dev Deadline already validated in entry function, no need to check again.
+    /// @dev Executes close leverage operation within DXY-BEAR flash mint callback.
+    /// @param flashAmount Amount of DXY-BEAR flash minted.
+    /// @param flashFee Flash mint fee (always 0).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps).
     function _executeClose(uint256 flashAmount, uint256 flashFee, bytes calldata data) private {
         // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps)
         (
@@ -467,9 +465,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         expectedReturn = totalInflows > totalOutflows ? totalInflows - totalOutflows : 0;
     }
 
-    /**
-     * @dev Estimate USDC needed to buy a specific amount of BEAR using binary search.
-     */
+    /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.
+    /// @param bearAmount Target DXY-BEAR amount to acquire.
+    /// @return Estimated USDC needed (with slippage margin).
     function _estimateUsdcForBearBuyback(uint256 bearAmount) private view returns (uint256) {
         if (bearAmount == 0) return 0;
 

@@ -6,15 +6,17 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
-/**
- * @title StakedToken
- * @notice An ERC-4626 Vault that auto-compounds yield.
- * @dev Exchange rate increases as yield is donated to the vault.
- *      Uses virtual shares offset to protect against inflation attacks.
- */
+/// @title StakedToken
+/// @notice ERC4626 vault for staking DXY-BEAR or DXY-BULL tokens.
+/// @dev Used as Morpho collateral. Exchange rate increases via yield donations.
+///      Implements 1000x virtual share offset to prevent inflation attacks.
 contract StakedToken is ERC4626 {
     using SafeERC20 for IERC20;
 
+    /// @notice Creates a new staking vault for a synthetic token.
+    /// @param _asset The underlying DXY token to stake (DXY-BEAR or DXY-BULL).
+    /// @param _name Vault share name (e.g., "Staked Bear DXY").
+    /// @param _symbol Vault share symbol (e.g., "sDXY-BEAR").
     constructor(IERC20 _asset, string memory _name, string memory _symbol) ERC4626(_asset) ERC20(_name, _symbol) {}
 
     /**
@@ -48,11 +50,7 @@ contract StakedToken is ERC4626 {
         return deposit(assets, receiver);
     }
 
-    /**
-     * @dev Offset for virtual shares to protect against inflation attacks.
-     * With offset of 3, attacker needs 1000x more capital to steal same amount.
-     * See: https://docs.openzeppelin.com/contracts/5.x/erc4626#inflation-attack
-     */
+    /// @dev Virtual share offset (10^3 = 1000x) to prevent inflation attacks.
     function _decimalsOffset() internal pure override returns (uint8) {
         return 3;
     }

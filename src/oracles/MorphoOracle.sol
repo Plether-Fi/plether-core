@@ -4,8 +4,9 @@ pragma solidity 0.8.33;
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 
+/// @notice Interface for Morpho-compatible price oracles.
 interface IMorphoOracle {
-    /// @notice Returns the price of 1 unit of collateral, quoted in the loan asset, scaled to 1e36.
+    /// @notice Returns price of 1 collateral unit in loan asset terms (1e36 scale).
     function price() external view returns (uint256);
 }
 
@@ -13,25 +14,30 @@ interface IMorphoOracle {
 /// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
 /// @dev Supports both DXY-BEAR (direct) and DXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {
+    /// @notice Source price feed (BasketOracle).
     AggregatorV3Interface public immutable BASKET_ORACLE;
-    uint256 public immutable CAP;
-    bool public immutable IS_INVERSE; // True = DXY-BULL (Cap - Price)
 
+    /// @notice Protocol CAP price (8 decimals).
+    uint256 public immutable CAP;
+
+    /// @notice If true, returns CAP - Price (for DXY-BULL).
+    bool public immutable IS_INVERSE;
+
+    /// @notice Thrown when source oracle returns zero or negative price.
     error MorphoOracle__InvalidPrice();
 
-    /**
-     * @param _basketOracle Address of your BasketOracle
-     * @param _cap The Splitter Cap in 8 decimals (e.g. $2.00 = 200,000,000)
-     * @param _isInverse If true, calculates (Cap - Price). If false, returns Price.
-     */
+    /// @notice Creates Morpho-compatible oracle wrapper.
+    /// @param _basketOracle BasketOracle address.
+    /// @param _cap Protocol CAP (8 decimals, e.g., 2e8 = $2.00).
+    /// @param _isInverse True for DXY-BULL (CAP - Price), false for DXY-BEAR.
     constructor(address _basketOracle, uint256 _cap, bool _isInverse) {
         BASKET_ORACLE = AggregatorV3Interface(_basketOracle);
         CAP = _cap;
         IS_INVERSE = _isInverse;
     }
 
-    /// @notice Returns collateral price scaled to 1e36 for Morpho Blue.
-    /// @return The price of 1 unit of collateral in loan token terms.
+    /// @notice Returns collateral price scaled to 1e36.
+    /// @return Price of 1 DXY token in USDC terms (1e36 scale).
     function price() external view override returns (uint256) {
         // 1. Get Price from Basket (8 decimals)
         (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();

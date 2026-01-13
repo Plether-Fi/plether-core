@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-/// @notice Morpho Blue market parameters struct
+/// @notice Morpho Blue market configuration.
+/// @param loanToken Asset being borrowed.
+/// @param collateralToken Asset used as collateral.
+/// @param oracle Price oracle for collateral valuation.
+/// @param irm Interest rate model contract.
+/// @param lltv Liquidation loan-to-value ratio.
 struct MarketParams {
     address loanToken;
     address collateralToken;
     address oracle;
-    address irm; // Interest Rate Model
-    uint256 lltv; // Liquidation LTV
+    address irm;
+    uint256 lltv;
 }
 
-/// @notice Minimal interface for Morpho Blue protocol
+/// @title IMorpho
+/// @notice Minimal interface for Morpho Blue lending protocol.
+/// @dev See https://docs.morpho.org for full documentation.
 interface IMorpho {
     // ==========================================
     // AUTHORIZATION
@@ -144,11 +151,11 @@ interface IMorpho {
         );
 }
 
-/// @notice Callback interface for Morpho flash loans
-/// @dev Contracts receiving flash loans must implement this interface
+/// @title IMorphoFlashLoanCallback
+/// @notice Callback interface for Morpho flash loan receivers.
 interface IMorphoFlashLoanCallback {
-    /// @notice Called by Morpho during a flash loan
-    /// @param assets The amount of tokens borrowed
-    /// @param data The data passed to flashLoan
+    /// @notice Called by Morpho during flash loan execution.
+    /// @param assets Amount of tokens borrowed.
+    /// @param data Arbitrary data passed through from flashLoan call.
     function onMorphoFlashLoan(uint256 assets, bytes calldata data) external;
 }

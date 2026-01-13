@@ -5,36 +5,58 @@ import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../interfaces/ICurvePool.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 
-/**
- * @title BasketOracle
- * @notice Aggregates multiple Chainlink feeds into a single "Basket" price.
- * @dev Uses Arithmetic Sum: Price = Sum(Price_i * Quantity_i)
- * @dev Includes Bound Validator: Reverts if Basket Price deviates from Curve Spot Price.
- */
+/// @title BasketOracle
+/// @notice Aggregates multiple Chainlink feeds into a weighted DXY basket price.
+/// @dev Price = Sum(Price_i * Quantity_i). Includes bound validation against Curve spot.
 contract BasketOracle is AggregatorV3Interface {
+    /// @notice Component feed with its basket weight.
     struct Component {
         AggregatorV3Interface feed;
-        uint256 quantity; // The fixed amount of units (1e18 precision)
+        uint256 quantity;
     }
 
+    /// @notice Array of currency components (EUR, JPY, GBP, CAD, SEK, CHF).
     Component[] public components;
-    uint8 public constant DECIMALS = 8; // Chainlink Standard for Fiat/USD
+
+    /// @notice Chainlink standard decimals for fiat/USD pairs.
+    uint8 public constant DECIMALS = 8;
+
+    /// @notice Oracle description string.
     string public constant DESCRIPTION = "DXY Fixed Basket (Bounded)";
 
-    // ==========================================
-    // BOUND VALIDATOR CONFIG
-    // ==========================================
+    /// @notice Curve pool for deviation validation (set once).
     ICurvePool public curvePool;
-    uint256 public immutable MAX_DEVIATION_BPS; // e.g. 200 = 2%
-    uint256 public immutable CAP; // Price cap in 8 decimals (e.g., 2e8 = $2.00)
+
+    /// @notice Maximum allowed deviation from Curve spot (basis points).
+    uint256 public immutable MAX_DEVIATION_BPS;
+
+    /// @notice Protocol CAP price (8 decimals).
+    uint256 public immutable CAP;
+
+    /// @notice Admin address for setCurvePool.
     address public immutable OWNER;
 
+    /// @notice Thrown when a component feed returns invalid price.
     error BasketOracle__InvalidPrice(address feed);
+
+    /// @notice Thrown when feeds and quantities arrays have different lengths.
     error BasketOracle__LengthMismatch();
+
+    /// @notice Thrown when basket price deviates too far from Curve spot.
     error BasketOracle__PriceDeviation(uint256 theoretical, uint256 spot);
+
+    /// @notice Thrown when non-owner attempts admin action.
     error BasketOracle__Unauthorized();
+
+    /// @notice Thrown when Curve pool is already configured.
     error BasketOracle__AlreadySet();
 
+    /// @notice Creates basket oracle with currency components.
+    /// @param _feeds Array of Chainlink feed addresses.
+    /// @param _quantities Array of basket weights (1e18 precision).
+    /// @param _maxDeviationBps Maximum deviation from Curve (e.g., 200 = 2%).
+    /// @param _cap Protocol CAP price (8 decimals).
+    /// @param _owner Admin address for setCurvePool.
     constructor(
         address[] memory _feeds,
         uint256[] memory _quantities,
@@ -56,8 +78,8 @@ contract BasketOracle is AggregatorV3Interface {
         OWNER = _owner;
     }
 
-    /// @notice Sets the Curve pool address for price deviation checks. Can only be called once.
-    /// @param _curvePool The Curve pool address
+    /// @notice Sets the Curve pool for deviation validation (one-time only).
+    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
     function setCurvePool(address _curvePool) external {
         if (msg.sender != OWNER) revert BasketOracle__Unauthorized();
         if (address(curvePool) != address(0)) revert BasketOracle__AlreadySet();
@@ -107,12 +129,8 @@ contract BasketOracle is AggregatorV3Interface {
         );
     }
 
-    /**
-     * @notice Compares Theoretical DXY-BEAR price with Curve spot price.
-     * @dev Curve pool returns DXY-BEAR price, so we convert theoretical DXY to DXY-BEAR: CAP - DXY.
-     * @dev Reverts if the difference exceeds MAX_DEVIATION_BPS.
-     * @dev Skips check if Curve pool is not yet configured.
-     */
+    /// @dev Validates basket price against Curve spot. Reverts on excessive deviation.
+    /// @param theoreticalDxy8Dec Computed basket price (8 decimals).
     function _checkDeviation(uint256 theoreticalDxy8Dec) internal view {
         ICurvePool pool = curvePool;
         if (address(pool) == address(0)) return;
@@ -133,21 +151,22 @@ contract BasketOracle is AggregatorV3Interface {
         }
     }
 
-    // ==========================================
-    // Boilerplate for Interface Compliance
-    // ==========================================
+    /// @notice Returns oracle decimals (8).
     function decimals() external pure returns (uint8) {
         return DECIMALS;
     }
 
+    /// @notice Returns oracle description.
     function description() external pure returns (string memory) {
         return DESCRIPTION;
     }
 
+    /// @notice Returns oracle version (1).
     function version() external pure returns (uint256) {
         return 1;
     }
 
+    /// @notice Returns latest data for any round ID (delegates to latestRoundData).
     function getRoundData(uint80) external view returns (uint80, int256, uint256, uint256, uint80) {
         return this.latestRoundData();
     }

@@ -20,31 +20,51 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    // Constants
-    uint256 public constant MAX_SLIPPAGE_BPS = 100; // 1% maximum slippage (caps MEV extraction)
-    uint256 public constant SAFETY_BUFFER_BPS = 50; // 0.5% safety buffer for flash loan operations
-    uint256 public constant USDC_INDEX = 0; // USDC index in Curve pool
-    uint256 public constant DXY_BEAR_INDEX = 1; // DXY-BEAR index in Curve pool
+    /// @notice Maximum allowed slippage in basis points (1% = 100 bps).
+    uint256 public constant MAX_SLIPPAGE_BPS = 100;
 
-    // Immutable Dependencies
+    /// @notice Safety buffer for flash loan repayment calculations (0.5% = 50 bps).
+    uint256 public constant SAFETY_BUFFER_BPS = 50;
+
+    /// @notice USDC index in the Curve USDC/DXY-BEAR pool.
+    uint256 public constant USDC_INDEX = 0;
+
+    /// @notice DXY-BEAR index in the Curve USDC/DXY-BEAR pool.
+    uint256 public constant DXY_BEAR_INDEX = 1;
+
+    /// @notice SyntheticSplitter contract for minting/burning pairs.
     ISyntheticSplitter public immutable SPLITTER;
+
+    /// @notice DXY-BEAR token (flash minted for swaps).
     IERC20 public immutable DXY_BEAR;
+
+    /// @notice DXY-BULL token (output of zap operations).
     IERC20 public immutable DXY_BULL;
+
+    /// @notice USDC stablecoin.
     IERC20 public immutable USDC;
+
+    /// @notice Curve pool for USDC/DXY-BEAR swaps.
     ICurvePool public immutable CURVE_POOL;
 
-    // Cached from Splitter (immutable)
-    uint256 public immutable CAP; // 8 decimals (oracle format)
-    uint256 public immutable CAP_PRICE; // 6 decimals (for Curve price comparison)
+    /// @notice Protocol CAP price (8 decimals, oracle format).
+    uint256 public immutable CAP;
 
-    // Action Flags for Flash Loan
+    /// @notice CAP price scaled for Curve comparison (6 decimals).
+    uint256 public immutable CAP_PRICE;
+
+    /// @dev Flash loan action: mint DXY-BULL.
     uint256 private constant ACTION_MINT = 0;
+
+    /// @dev Flash loan action: burn DXY-BULL.
     uint256 private constant ACTION_BURN = 1;
 
-    // Events
+    /// @notice Emitted when user acquires DXY-BULL via zapMint.
     event ZapMint(
         address indexed user, uint256 usdcIn, uint256 tokensOut, uint256 maxSlippageBps, uint256 actualSwapOut
     );
+
+    /// @notice Emitted when user sells DXY-BULL via zapBurn.
     event ZapBurn(address indexed user, uint256 tokensIn, uint256 usdcOut);
 
     error ZapRouter__ZeroAddress();
@@ -57,6 +77,12 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     error ZapRouter__InvalidCurvePrice();
     error ZapRouter__SolvencyBreach();
 
+    /// @notice Deploys ZapRouter with required protocol dependencies.
+    /// @param _splitter SyntheticSplitter contract address.
+    /// @param _dxyBear DXY-BEAR token address.
+    /// @param _dxyBull DXY-BULL token address.
+    /// @param _usdc USDC token address.
+    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
     constructor(address _splitter, address _dxyBear, address _dxyBull, address _usdc, address _curvePool)
         Ownable(msg.sender)
     {
@@ -164,7 +190,12 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
     // FLASH LOAN CALLBACK
     // =================================================================
 
-    /// @dev ERC-3156 flash loan callback. Handles both mint and burn operations.
+    /// @notice ERC-3156 flash loan callback. Routes to mint or burn handler.
+    /// @param initiator Address that initiated the flash loan (must be this contract).
+    /// @param amount Amount of DXY-BEAR borrowed.
+    /// @param fee Flash loan fee (always 0 for SyntheticToken).
+    /// @param data Encoded operation parameters.
+    /// @return CALLBACK_SUCCESS on successful execution.
     function onFlashLoan(address initiator, address, uint256 amount, uint256 fee, bytes calldata data)
         external
         override
@@ -184,11 +215,16 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         return CALLBACK_SUCCESS;
     }
 
-    /// @dev Morpho flash loan callback - not used by ZapRouter.
+    /// @notice Morpho flash loan callback - not used by ZapRouter.
+    /// @dev Always reverts as ZapRouter only uses ERC-3156 flash mints.
     function onMorphoFlashLoan(uint256, bytes calldata) external pure override {
         revert FlashLoan__InvalidOperation();
     }
 
+    /// @dev Executes mint operation within flash loan callback.
+    /// @param loanAmount Amount of DXY-BEAR borrowed.
+    /// @param fee Flash loan fee (always 0).
+    /// @param data Encoded mint parameters (action, user, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps).
     function _handleMint(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
         // Decode: (action, user, usdcAmount, minSwapOut, minAmountOut, maxSlippageBps)
         (, address user, uint256 usdcAmount, uint256 minSwapOut, uint256 minAmountOut, uint256 maxSlippageBps) =
@@ -229,6 +265,10 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc);
     }
 
+    /// @dev Executes burn operation within flash loan callback.
+    /// @param loanAmount Amount of DXY-BEAR borrowed.
+    /// @param fee Flash loan fee (always 0).
+    /// @param data Encoded burn parameters (action, user, bullAmount, minUsdcOut).
     function _handleBurn(uint256 loanAmount, uint256 fee, bytes calldata data) internal {
         // Decode: (action, user, bullAmount, minUsdcOut)
         (, address user, uint256 bullAmount, uint256 minUsdcOut) =
