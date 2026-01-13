@@ -38,7 +38,9 @@ The protocol owner can:
 - Pause/unpause router contracts
 - Propose adapter migrations (7-day timelock)
 - Propose treasury/staking address changes (7-day timelock)
+- Propose BasketOracle Curve pool changes (7-day timelock)
 - Rescue stuck tokens (non-core assets only)
+- Transfer ownership (via Ownable)
 
 The owner **cannot**:
 - Freeze user funds permanently (burn always works, even when paused)
@@ -56,6 +58,7 @@ Critical operations require a 7-day timelock:
 - Adapter migration (yield strategy change)
 - Treasury address change
 - Staking address change
+- BasketOracle Curve pool change (initial setup is immediate)
 
 This provides users time to exit if they disagree with proposed changes.
 
@@ -201,6 +204,7 @@ Router contracts assume specific Curve pool structure:
 - **Risk**: If Curve pool is deployed with different indices, all router swaps fail
 - **Mitigation**: Indices are verified during deployment; pool address is immutable
 - **Deviation Check**: BasketOracle validates Chainlink price against Curve `price_oracle()` (max 2% deviation)
+- **Pool Updates**: BasketOracle Curve pool can be updated via 7-day timelock (`proposeCurvePool` → `finalizeCurvePool`). Initial setup via `setCurvePool` is immediate.
 
 ### Router Architecture
 
@@ -286,6 +290,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-13 | BasketOracle: Added 7-day timelock for Curve pool updates; refactored to use OpenZeppelin Ownable |
 | 2026-01-13 | Documented Morpho liquidity risk: burns revert if adapter withdrawal fails due to high market utilization |
 | 2026-01-11 | Reduced harvest caller reward from 1% to 0.1%; added Morpho token rewards documentation |
 | 2026-01-09 | Added External Library Dependencies section with OpenZeppelin trust assumptions |

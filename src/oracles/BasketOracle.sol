@@ -4,11 +4,12 @@ pragma solidity 0.8.33;
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../interfaces/ICurvePool.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title BasketOracle
 /// @notice Aggregates multiple Chainlink feeds into a weighted DXY basket price.
 /// @dev Price = Sum(Price_i * Quantity_i). Includes bound validation against Curve spot.
-contract BasketOracle is AggregatorV3Interface {
+contract BasketOracle is AggregatorV3Interface, Ownable {
 
     /// @notice Component feed with its basket weight.
     struct Component {
@@ -25,17 +26,23 @@ contract BasketOracle is AggregatorV3Interface {
     /// @notice Oracle description string.
     string public constant DESCRIPTION = "DXY Fixed Basket (Bounded)";
 
-    /// @notice Curve pool for deviation validation (set once).
+    /// @notice Curve pool for deviation validation.
     ICurvePool public curvePool;
+
+    /// @notice Pending Curve pool for timelock-protected updates.
+    address public pendingCurvePool;
+
+    /// @notice Timestamp when pending Curve pool can be finalized.
+    uint256 public curvePoolActivationTime;
+
+    /// @notice Timelock delay for Curve pool updates (7 days).
+    uint256 public constant TIMELOCK_DELAY = 7 days;
 
     /// @notice Maximum allowed deviation from Curve spot (basis points).
     uint256 public immutable MAX_DEVIATION_BPS;
 
     /// @notice Protocol CAP price (8 decimals).
     uint256 public immutable CAP;
-
-    /// @notice Admin address for setCurvePool.
-    address public immutable OWNER;
 
     /// @notice Thrown when a component feed returns invalid price.
     error BasketOracle__InvalidPrice(address feed);
@@ -46,25 +53,34 @@ contract BasketOracle is AggregatorV3Interface {
     /// @notice Thrown when basket price deviates too far from Curve spot.
     error BasketOracle__PriceDeviation(uint256 theoretical, uint256 spot);
 
-    /// @notice Thrown when non-owner attempts admin action.
-    error BasketOracle__Unauthorized();
-
     /// @notice Thrown when Curve pool is already configured.
     error BasketOracle__AlreadySet();
+
+    /// @notice Thrown when timelock period has not elapsed.
+    error BasketOracle__TimelockActive();
+
+    /// @notice Thrown when no pending proposal exists.
+    error BasketOracle__InvalidProposal();
+
+    /// @notice Emitted when a new Curve pool is proposed.
+    event CurvePoolProposed(address indexed newPool, uint256 activationTime);
+
+    /// @notice Emitted when Curve pool is updated.
+    event CurvePoolUpdated(address indexed oldPool, address indexed newPool);
 
     /// @notice Creates basket oracle with currency components.
     /// @param _feeds Array of Chainlink feed addresses.
     /// @param _quantities Array of basket weights (1e18 precision).
     /// @param _maxDeviationBps Maximum deviation from Curve (e.g., 200 = 2%).
     /// @param _cap Protocol CAP price (8 decimals).
-    /// @param _owner Admin address for setCurvePool.
+    /// @param _owner Admin address for Curve pool management.
     constructor(
         address[] memory _feeds,
         uint256[] memory _quantities,
         uint256 _maxDeviationBps,
         uint256 _cap,
         address _owner
-    ) {
+    ) Ownable(_owner) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
@@ -76,18 +92,38 @@ contract BasketOracle is AggregatorV3Interface {
 
         MAX_DEVIATION_BPS = _maxDeviationBps;
         CAP = _cap;
-        // slither-disable-next-line missing-zero-check
-        OWNER = _owner;
     }
 
-    /// @notice Sets the Curve pool for deviation validation (one-time only).
+    /// @notice Sets the Curve pool for deviation validation (initial setup only).
     /// @param _curvePool Curve USDC/DXY-BEAR pool address.
     function setCurvePool(
         address _curvePool
-    ) external {
-        if (msg.sender != OWNER) revert BasketOracle__Unauthorized();
+    ) external onlyOwner {
         if (address(curvePool) != address(0)) revert BasketOracle__AlreadySet();
         curvePool = ICurvePool(_curvePool);
+        emit CurvePoolUpdated(address(0), _curvePool);
+    }
+
+    /// @notice Proposes a new Curve pool (requires 7-day timelock).
+    /// @param _newPool New Curve pool address.
+    function proposeCurvePool(
+        address _newPool
+    ) external onlyOwner {
+        if (address(curvePool) == address(0)) revert BasketOracle__InvalidProposal();
+        pendingCurvePool = _newPool;
+        curvePoolActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit CurvePoolProposed(_newPool, curvePoolActivationTime);
+    }
+
+    /// @notice Finalizes the Curve pool update after timelock expires.
+    function finalizeCurvePool() external onlyOwner {
+        if (pendingCurvePool == address(0)) revert BasketOracle__InvalidProposal();
+        if (block.timestamp < curvePoolActivationTime) revert BasketOracle__TimelockActive();
+
+        address oldPool = address(curvePool);
+        curvePool = ICurvePool(pendingCurvePool);
+        emit CurvePoolUpdated(oldPool, pendingCurvePool);
+        pendingCurvePool = address(0);
     }
 
     /// @notice Returns the aggregated basket price from all component feeds.

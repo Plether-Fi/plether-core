@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Test} from "forge-std/Test.sol";
 
 // Mock Curve Pool for bound validation
@@ -149,7 +150,7 @@ contract BasketOracleTest is Test {
         BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, 2e8, address(this));
 
         vm.prank(address(0xdead));
-        vm.expectRevert(BasketOracle.BasketOracle__Unauthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
         newBasket.setCurvePool(address(curvePool));
     }
 
@@ -209,6 +210,117 @@ contract BasketOracleTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(BasketOracle.BasketOracle__InvalidPrice.selector, address(curvePool)));
         basket.latestRoundData();
+    }
+
+    // ==========================================
+    // CURVE POOL TIMELOCK TESTS
+    // ==========================================
+
+    function test_ProposeCurvePool_OnlyOwner() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+
+        vm.prank(address(0xdead));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
+        basket.proposeCurvePool(address(newPool));
+    }
+
+    function test_ProposeCurvePool_RevertsIfPoolNotSet() public {
+        address[] memory feeds = new address[](1);
+        feeds[0] = address(feedEUR);
+
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1 ether;
+
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, 2e8, address(this));
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidProposal.selector);
+        newBasket.proposeCurvePool(address(curvePool));
+    }
+
+    function test_ProposeCurvePool_SetsPendingAndActivationTime() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+
+        basket.proposeCurvePool(address(newPool));
+
+        assertEq(basket.pendingCurvePool(), address(newPool));
+        assertEq(basket.curvePoolActivationTime(), block.timestamp + 7 days);
+    }
+
+    function test_ProposeCurvePool_EmitsEvent() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+
+        vm.expectEmit(true, false, false, true);
+        emit BasketOracle.CurvePoolProposed(address(newPool), block.timestamp + 7 days);
+
+        basket.proposeCurvePool(address(newPool));
+    }
+
+    function test_FinalizeCurvePool_OnlyOwner() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+        basket.proposeCurvePool(address(newPool));
+
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(address(0xdead));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
+        basket.finalizeCurvePool();
+    }
+
+    function test_FinalizeCurvePool_RevertsIfNoPendingProposal() public {
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidProposal.selector);
+        basket.finalizeCurvePool();
+    }
+
+    function test_FinalizeCurvePool_RevertsBeforeTimelock() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+        basket.proposeCurvePool(address(newPool));
+
+        vm.warp(block.timestamp + 6 days);
+
+        vm.expectRevert(BasketOracle.BasketOracle__TimelockActive.selector);
+        basket.finalizeCurvePool();
+    }
+
+    function test_FinalizeCurvePool_UpdatesPoolAfterTimelock() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+        address oldPool = address(basket.curvePool());
+
+        basket.proposeCurvePool(address(newPool));
+        vm.warp(block.timestamp + 7 days);
+
+        basket.finalizeCurvePool();
+
+        assertEq(address(basket.curvePool()), address(newPool));
+        assertEq(basket.pendingCurvePool(), address(0));
+        assertTrue(address(basket.curvePool()) != oldPool);
+    }
+
+    function test_FinalizeCurvePool_EmitsEvent() public {
+        MockCurvePool newPool = new MockCurvePool(0.95 ether);
+        address oldPool = address(basket.curvePool());
+
+        basket.proposeCurvePool(address(newPool));
+        vm.warp(block.timestamp + 7 days);
+
+        vm.expectEmit(true, true, false, false);
+        emit BasketOracle.CurvePoolUpdated(oldPool, address(newPool));
+
+        basket.finalizeCurvePool();
+    }
+
+    function test_SetCurvePool_EmitsEvent() public {
+        address[] memory feeds = new address[](1);
+        feeds[0] = address(feedEUR);
+
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1 ether;
+
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, 200, 2e8, address(this));
+
+        vm.expectEmit(true, true, false, false);
+        emit BasketOracle.CurvePoolUpdated(address(0), address(curvePool));
+
+        newBasket.setCurvePool(address(curvePool));
     }
 
 }
