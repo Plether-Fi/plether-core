@@ -1800,4 +1800,47 @@ contract SyntheticSplitterTest is Test {
         assertEq(localBalance, 20 * 1e6 + 90 * 1e6, "Three withdrawals accumulated");
     }
 
+    // ==========================================
+    // RESCUE TOKEN
+    // ==========================================
+
+    function test_RescueToken_SucceedsForNonCoreToken() public {
+        MockERC20 randomToken = new MockERC20("Random", "RND");
+        randomToken.mint(address(splitter), 1000 * 1e18);
+
+        assertEq(randomToken.balanceOf(address(splitter)), 1000 * 1e18);
+        assertEq(randomToken.balanceOf(treasury), 0);
+
+        splitter.rescueToken(address(randomToken), treasury);
+
+        assertEq(randomToken.balanceOf(address(splitter)), 0);
+        assertEq(randomToken.balanceOf(treasury), 1000 * 1e18);
+    }
+
+    function test_RescueToken_RevertsForUSDC() public {
+        vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
+        splitter.rescueToken(address(usdc), treasury);
+    }
+
+    function test_RescueToken_RevertsForTokenA() public {
+        address tokenA = address(splitter.TOKEN_A());
+        vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
+        splitter.rescueToken(tokenA, treasury);
+    }
+
+    function test_RescueToken_RevertsForTokenB() public {
+        address tokenB = address(splitter.TOKEN_B());
+        vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
+        splitter.rescueToken(tokenB, treasury);
+    }
+
+    function test_RescueToken_OnlyOwner() public {
+        MockERC20 randomToken = new MockERC20("Random", "RND");
+        randomToken.mint(address(splitter), 1000 * 1e18);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        splitter.rescueToken(address(randomToken), alice);
+    }
+
 }

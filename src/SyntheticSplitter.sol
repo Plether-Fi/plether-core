@@ -83,6 +83,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     event FeesUpdated(address indexed treasury, address indexed staking);
     event EmergencyEjected(uint256 amountRecovered);
     event AdapterWithdrawn(uint256 requested, uint256 withdrawn);
+    event TokenRescued(address indexed token, address indexed to, uint256 amount);
 
     error Splitter__ZeroAddress();
     error Splitter__InvalidCap();
@@ -100,6 +101,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     error Splitter__AdapterWithdrawFailed();
     error Splitter__Insolvent();
     error Splitter__NotPaused();
+    error Splitter__CannotRescueCoreAsset();
 
     // Structs for Views
     struct SystemStatus {
@@ -593,6 +595,21 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     function unpause() external onlyOwner {
         lastUnpauseTime = block.timestamp; // START 7 DAY COUNTDOWN
         _unpause();
+    }
+
+    /// @notice Rescue accidentally sent tokens. Cannot rescue core assets.
+    /// @param token The ERC20 token to rescue.
+    /// @param to The recipient address.
+    function rescueToken(
+        address token,
+        address to
+    ) external onlyOwner {
+        if (token == address(USDC) || token == address(TOKEN_A) || token == address(TOKEN_B)) {
+            revert Splitter__CannotRescueCoreAsset();
+        }
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(to, balance);
+        emit TokenRescued(token, to, balance);
     }
 
     // ==========================================

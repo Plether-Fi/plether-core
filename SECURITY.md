@@ -331,6 +331,10 @@ If tokens are accidentally sent to contracts:
 2. Call `rescueToken(token, recipient)` on the relevant contract
 3. Note: Cannot rescue core assets (USDC, DXY-BEAR, DXY-BULL)
 
+Contracts supporting `rescueToken`:
+- **SyntheticSplitter**: Rescues any token except USDC, DXY-BEAR, DXY-BULL
+- **MorphoAdapter**: Rescues any token except USDC (the underlying asset)
+
 ### Adapter Migration (Emergency)
 
 If yield adapter is compromised:
@@ -372,6 +376,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-14 | Added `rescueToken()` to SyntheticSplitter for recovering accidentally sent tokens (excludes USDC, DXY-BEAR, DXY-BULL) |
 | 2026-01-14 | Added Upgradeability section (non-upgradeable contracts) and Protocol Invariants section (solvency, token, state invariants) |
 | 2026-01-14 | Added Oracle/Market Price Deviation section documenting the 2% deviation check between Chainlink and Curve prices |
 | 2026-01-14 | Added `withdrawFromAdapter()` for gradual liquidity extraction under tight Morpho utilization; documented new emergency procedure |
