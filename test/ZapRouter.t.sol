@@ -472,8 +472,8 @@ contract ZapRouterTest is Test {
         // Flash 100 BEAR, must repay 150 BEAR (100 + 50% fee)
         // Burn 100 pairs -> get 200 USDC
         // Buy BEAR at $1.50 -> 200 USDC buys ~133 BEAR
-        // 133 < 150 -> revert!
-        vm.expectRevert(ZapRouter.ZapRouter__SolvencyBreach.selector);
+        // min_dy = 150 BEAR, but can only get 133 -> Curve reverts
+        vm.expectRevert("Too little received");
         zapRouter.zapBurn(100 * 1e18, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -1011,6 +1011,138 @@ contract MockSplitter is ISyntheticSplitter {
 
     function currentStatus() external view override returns (Status) {
         return _status;
+    }
+
+}
+
+contract MockCurvePoolWithMEV is ICurvePool {
+
+    address public token0; // USDC
+    address public token1; // dxyBear
+    uint256 public bearPrice = 1e6;
+    uint256 public mevExtractionBps = 0; // MEV bot extracts this % during exchange
+
+    constructor(
+        address _token0,
+        address _token1
+    ) {
+        token0 = _token0;
+        token1 = _token1;
+    }
+
+    function setPrice(
+        uint256 _price
+    ) external {
+        bearPrice = _price;
+    }
+
+    function setMevExtraction(
+        uint256 _bps
+    ) external {
+        mevExtractionBps = _bps;
+    }
+
+    function get_dy(
+        uint256 i,
+        uint256 j,
+        uint256 dx
+    ) external view override returns (uint256) {
+        // Returns "expected" output - what user sees before sandwich
+        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
+        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        return 0;
+    }
+
+    function exchange(
+        uint256 i,
+        uint256 j,
+        uint256 dx,
+        uint256 min_dy
+    ) external payable override returns (uint256 dy) {
+        // MEV bot sandwiches: actual output is reduced
+        uint256 expectedDy = this.get_dy(i, j, dx);
+        dy = (expectedDy * (10_000 - mevExtractionBps)) / 10_000;
+
+        require(dy >= min_dy, "Too little received");
+
+        address tokenIn = i == 0 ? token0 : token1;
+        address tokenOut = j == 0 ? token0 : token1;
+
+        MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
+        MockToken(tokenOut).mint(msg.sender, dy);
+
+        return dy;
+    }
+
+    function price_oracle() external view override returns (uint256) {
+        return bearPrice * 1e12;
+    }
+
+}
+
+contract ZapRouterMEVTest is Test {
+
+    ZapRouter public zapRouter;
+    MockToken public usdc;
+    MockFlashToken public dxyBear;
+    MockFlashToken public dxyBull;
+    MockSplitter public splitter;
+    MockCurvePoolWithMEV public curvePool;
+
+    address alice = address(0xA11ce);
+    address mevBot = address(0xB07);
+
+    function setUp() public {
+        usdc = new MockToken("USDC", "USDC");
+        dxyBear = new MockFlashToken("dxyBear", "dxyBear");
+        dxyBull = new MockFlashToken("dxyBull", "dxyBull");
+        splitter = new MockSplitter(address(dxyBear), address(dxyBull));
+        splitter.setUsdc(address(usdc));
+        curvePool = new MockCurvePoolWithMEV(address(usdc), address(dxyBear));
+
+        zapRouter =
+            new ZapRouter(address(splitter), address(dxyBear), address(dxyBull), address(usdc), address(curvePool));
+
+        usdc.mint(alice, 1000 * 1e6);
+        dxyBull.mint(alice, 100 * 1e18);
+    }
+
+    /// @notice MEV extraction beyond buffer reverts at Curve (not late solvency check)
+    /// Fix ensures swap reverts immediately with "Too little received"
+    function test_ZapBurn_MEV_Reverts_At_Curve_Swap() public {
+        curvePool.setPrice(1e6);
+        curvePool.setMevExtraction(100); // 1% MEV extraction (exceeds 0.5% buffer)
+
+        uint256 bullAmount = 100 * 1e18;
+
+        vm.startPrank(alice);
+        dxyBull.approve(address(zapRouter), bullAmount);
+
+        // With fix: Curve swap reverts with "Too little received"
+        // Before fix: Would pass swap but fail later with SolvencyBreach
+        vm.expectRevert("Too little received");
+        zapRouter.zapBurn(bullAmount, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    /// @notice Small MEV within buffer still succeeds (acceptable)
+    /// The fix protects against MEV exceeding the buffer
+    function test_ZapBurn_SmallMEV_Within_Buffer_Succeeds() public {
+        curvePool.setPrice(1e6);
+        curvePool.setMevExtraction(40); // 0.4% MEV (within 0.5% buffer)
+
+        uint256 bullAmount = 100 * 1e18;
+        uint256 bearBefore = dxyBear.balanceOf(alice);
+
+        vm.startPrank(alice);
+        dxyBull.approve(address(zapRouter), bullAmount);
+        zapRouter.zapBurn(bullAmount, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Small MEV reduces dust but tx still succeeds
+        uint256 bearDust = dxyBear.balanceOf(alice) - bearBefore;
+        assertGt(bearDust, 0, "User should still get some BEAR dust");
+        assertLt(bearDust, 0.5 ether, "But less than full buffer due to MEV");
     }
 
 }

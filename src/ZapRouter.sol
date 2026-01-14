@@ -334,15 +334,11 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
             usdcToSwap = totalUsdc; // Cap at max available (hoping it's enough)
         }
 
-        // Execute Swap
-        CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, usdcToSwap, 0);
+        // Execute Swap with MEV protection: require at least debtBear output
+        CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, usdcToSwap, debtBear);
 
         // 4. Repay Loan
         DXY_BEAR.safeIncreaseAllowance(msg.sender, debtBear);
-
-        // Verify we actually bought enough (Solvency Check)
-        uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
-        if (bearBalance < debtBear) revert ZapRouter__SolvencyBreach();
 
         // 5. Send remaining USDC to User (The Exit)
         uint256 remainingUsdc = USDC.balanceOf(address(this));
@@ -350,7 +346,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         USDC.safeTransfer(user, remainingUsdc);
 
         // 6. Sweep Dust Bear
-        // Because we added a buffer, we will have a tiny bit of Bear left.
+        uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
         if (bearBalance > debtBear) {
             DXY_BEAR.safeTransfer(user, bearBalance - debtBear);
         }
