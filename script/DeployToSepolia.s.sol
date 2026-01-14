@@ -231,6 +231,10 @@ contract DeployToSepolia is Script {
         // Step 11: Deploy Routers
         _deployRouters(deployed);
 
+        // Step 12: Mint USDC to deployer for testing
+        deployed.usdc.mint(deployer, 100_000 * 1e6);
+        console.log("Minted 100,000 USDC to deployer");
+
         vm.stopBroadcast();
 
         // Log deployment
