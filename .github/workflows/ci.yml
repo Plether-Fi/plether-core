@@ -28,10 +28,10 @@ jobs:
       - name: Build
         run: forge build --sizes
 
-      - name: Run tests
-        run: forge test -vvv --no-match-path "test/fork/*"
+      - name: Run fuzz tests
+        run: forge test -vvv --match-test "testFuzz_|invariant_" --no-match-path "test/fork/*"
 
-      - name: Check gas snapshots
+      - name: Run tests and check gas snapshots
         run: forge snapshot --check --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"
 
   coverage:
