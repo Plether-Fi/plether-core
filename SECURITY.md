@@ -221,6 +221,23 @@ LeverageRouter and BullLeverageRouter share a common base contract (`LeverageRou
 | BullLeverageRouter | Morpho (USDC) for open, ERC-3156 (DXY-BEAR) for close | sDXY-BULL |
 | ZapRouter | ERC-3156 (DXY-BEAR) | N/A |
 
+#### MEV Protection
+
+All routers implement multiple layers of MEV protection:
+
+| Protection | Implementation | Purpose |
+|------------|----------------|---------|
+| Max Slippage Cap | `MAX_SLIPPAGE_BPS = 100` (1%) | Prevents users from setting dangerously high slippage |
+| Deadline | `if (block.timestamp > deadline) revert` | Prevents stale transactions from executing |
+| Min Output | `minAmountOut` / `minUsdcOut` parameters | User-specified minimum acceptable output |
+| Curve Enforcement | `min_dy` passed to `exchange()` | On-chain slippage check in Curve swap |
+| Safety Buffer | `SAFETY_BUFFER_BPS = 50` (0.5%) in ZapRouter | Accounts for rounding in flash calculations |
+| Real-time Pricing | `get_dy()` before swaps | Uses current pool state, not stale oracle prices |
+
+**Limitations:**
+- Transactions are visible in the public mempool before inclusion; users can mitigate this by using private mempools (e.g., Flashbots Protect)
+- The 1% cap is a maximum; users can specify lower values for tighter protection, but large positions may still experience significant slippage in dollar terms
+
 ## Emergency Procedures
 
 ### Protocol Pause
@@ -290,6 +307,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-14 | Added MEV Protection section under Router Architecture |
 | 2026-01-13 | BasketOracle: Added 7-day timelock for Curve pool updates; refactored to use OpenZeppelin Ownable |
 | 2026-01-13 | Documented Morpho liquidity risk: burns revert if adapter withdrawal fails due to high market utilization |
 | 2026-01-11 | Reduced harvest caller reward from 1% to 0.1%; added Morpho token rewards documentation |
