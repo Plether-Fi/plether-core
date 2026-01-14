@@ -82,6 +82,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     event FeesProposed(address indexed treasury, address indexed staking, uint256 activationTime);
     event FeesUpdated(address indexed treasury, address indexed staking);
     event EmergencyEjected(uint256 amountRecovered);
+    event AdapterWithdrawn(uint256 requested, uint256 withdrawn);
 
     error Splitter__ZeroAddress();
     error Splitter__InvalidCap();
@@ -98,6 +99,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     error Splitter__InsufficientHarvest();
     error Splitter__AdapterWithdrawFailed();
     error Splitter__Insolvent();
+    error Splitter__NotPaused();
 
     // Structs for Views
     struct SystemStatus {
@@ -372,6 +374,27 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         _pause();
 
         emit EmergencyEjected(recovered);
+    }
+
+    /// @notice Withdraws a specific amount from yield adapter while paused.
+    /// @dev Requires protocol to be paused. Use for gradual liquidity extraction
+    ///      when full ejectLiquidity() fails due to adapter liquidity constraints.
+    /// @param amount Desired USDC amount to withdraw. Capped by adapter's maxWithdraw.
+    function withdrawFromAdapter(
+        uint256 amount
+    ) external nonReentrant onlyOwner {
+        if (!paused()) revert Splitter__NotPaused();
+        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+        if (amount == 0) revert Splitter__ZeroAmount();
+
+        uint256 maxAvailable = yieldAdapter.maxWithdraw(address(this));
+        uint256 toWithdraw = amount > maxAvailable ? maxAvailable : amount;
+
+        if (toWithdraw > 0) {
+            yieldAdapter.withdraw(toWithdraw, address(this), address(this));
+        }
+
+        emit AdapterWithdrawn(amount, toWithdraw);
     }
 
     // ==========================================

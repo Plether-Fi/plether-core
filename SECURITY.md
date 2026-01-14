@@ -21,6 +21,7 @@ This document outlines the security assumptions, trust model, known limitations,
 - **Mitigation**: Router contracts validate authorization before operations; flash loan callbacks validate caller and initiator
 - **Risk (Bugs)**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
 - **Risk (Liquidity)**: If Morpho market utilization is high (all supplied USDC is borrowed), adapter withdrawals revert. Burns exceeding the local buffer will fail until Morpho liquidity returns. The `ejectLiquidity()` emergency function is also affected—it cannot withdraw from an illiquid market. Users may be temporarily unable to redeem even if the protocol is solvent.
+- **Mitigation (Liquidity)**: Use `withdrawFromAdapter(amount)` for gradual liquidity extraction when the protocol is paused. This allows repeated partial withdrawals as Morpho liquidity becomes available, rather than requiring full withdrawal in a single transaction.
 - **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
 
 ### External Library Dependencies
@@ -285,10 +286,23 @@ If yield adapter is compromised:
 1. Pause the Splitter immediately
 2. Propose new adapter via `proposeAdapter(newAdapter)`
 3. Wait 7-day timelock (cannot be bypassed)
-4. Execute migration via `executeAdapterMigration()`
+4. Execute migration via `finalizeAdapter()`
 5. Unpause Splitter
 
 **Note:** During the 7-day period, users can continue to redeem existing tokens.
+
+### Adapter Migration (Tight Liquidity)
+
+If adapter withdrawal fails due to high Morpho utilization:
+1. Pause the Splitter via `pause()`
+2. Call `withdrawFromAdapter(amount)` to extract available liquidity
+3. Repeat step 2 as liquidity frees up (borrowers repay or get liquidated)
+4. Once adapter is fully drained, propose new adapter via `proposeAdapter(newAdapter)`
+5. Wait 7-day timelock
+6. Execute migration via `finalizeAdapter()` (skips redemption if adapter has 0 shares)
+7. Unpause Splitter
+
+**Note:** `withdrawFromAdapter()` requires the protocol to be paused and caps withdrawal to `maxWithdraw()` from the adapter.
 
 ## Security Contact
 
@@ -307,6 +321,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-14 | Added `withdrawFromAdapter()` for gradual liquidity extraction under tight Morpho utilization; documented new emergency procedure |
 | 2026-01-14 | Added MEV Protection section under Router Architecture |
 | 2026-01-13 | BasketOracle: Added 7-day timelock for Curve pool updates; refactored to use OpenZeppelin Ownable |
 | 2026-01-13 | Documented Morpho liquidity risk: burns revert if adapter withdrawal fails due to high market utilization |

@@ -96,6 +96,8 @@ User deposits USDC
 
 The SyntheticSplitter maintains a 10% local buffer of USDC for redemptions, with 90% deployed to yield adapters. This generates yield while ensuring liquidity for normal operations.
 
+If adapter liquidity is constrained (e.g., high Morpho utilization), the owner can pause the protocol and use `withdrawFromAdapter()` for gradual extraction as liquidity becomes available.
+
 ### Leverage
 
 Users can open leveraged positions through the routers:
@@ -112,7 +114,7 @@ Both routers include MEV protection via user-defined slippage caps (max 1%).
 The protocol operates in three states:
 
 1. **ACTIVE** - Normal operations (mint, burn, redeem)
-2. **PAUSED** - Emergency pause (minting blocked, burning allowed so users can exit)
+2. **PAUSED** - Emergency pause (minting blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
 3. **SETTLED** - End-of-life when DXY hits CAP price (only redemptions allowed)
 
 ## Development

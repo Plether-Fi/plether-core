@@ -1724,4 +1724,80 @@ contract SyntheticSplitterTest is Test {
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, 100 * 1e6, "Full refund received thanks to +1 buffer");
     }
 
+    // ==========================================
+    // WITHDRAW FROM ADAPTER (Gradual Emergency Exit)
+    // ==========================================
+
+    function test_WithdrawFromAdapter_RevertsWhenNotPaused() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        vm.expectRevert(SyntheticSplitter.Splitter__NotPaused.selector);
+        splitter.withdrawFromAdapter(50 * 1e6);
+    }
+
+    function test_WithdrawFromAdapter_RevertsZeroAmount() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        splitter.pause();
+
+        vm.expectRevert(SyntheticSplitter.Splitter__ZeroAmount.selector);
+        splitter.withdrawFromAdapter(0);
+    }
+
+    function test_WithdrawFromAdapter_SuccessfulPartialWithdrawal() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        uint256 adapterBalanceBefore = adapter.maxWithdraw(address(splitter));
+        uint256 localBalanceBefore = usdc.balanceOf(address(splitter));
+
+        splitter.pause();
+        splitter.withdrawFromAdapter(50 * 1e6);
+
+        uint256 adapterBalanceAfter = adapter.maxWithdraw(address(splitter));
+        uint256 localBalanceAfter = usdc.balanceOf(address(splitter));
+
+        assertEq(adapterBalanceBefore - adapterBalanceAfter, 50 * 1e6, "Adapter balance decreased");
+        assertEq(localBalanceAfter - localBalanceBefore, 50 * 1e6, "Local balance increased");
+    }
+
+    function test_WithdrawFromAdapter_CapsToMaxAvailable() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        uint256 adapterBalance = adapter.maxWithdraw(address(splitter));
+        splitter.pause();
+
+        splitter.withdrawFromAdapter(adapterBalance + 1000 * 1e6);
+
+        assertEq(adapter.maxWithdraw(address(splitter)), 0, "All available funds withdrawn");
+        assertEq(usdc.balanceOf(address(splitter)), 200 * 1e6, "All USDC now local");
+    }
+
+    function test_WithdrawFromAdapter_CanBeCalledMultipleTimes() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        splitter.pause();
+
+        splitter.withdrawFromAdapter(30 * 1e6);
+        splitter.withdrawFromAdapter(30 * 1e6);
+        splitter.withdrawFromAdapter(30 * 1e6);
+
+        uint256 localBalance = usdc.balanceOf(address(splitter));
+        assertEq(localBalance, 20 * 1e6 + 90 * 1e6, "Three withdrawals accumulated");
+    }
+
 }

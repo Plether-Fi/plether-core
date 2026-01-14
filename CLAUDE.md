@@ -13,6 +13,7 @@ forge test --match-path "test/ZapRouter.t.sol"  # Run tests in specific file
 forge fmt                # Format code
 forge fmt --check        # Check formatting (CI enforced)
 forge coverage           # Generate coverage report
+forge snapshot --no-match-path "test/fork/*" --no-match-test "testFuzz_|invariant_"  # Update gas snapshot
 
 # Fork tests (require MAINNET_RPC_URL in .env)
 (source .env && forge test --match-path test/fork/MainnetForkTest.t.sol --fork-url $MAINNET_RPC_URL -vvv)
@@ -117,3 +118,4 @@ Always keep documentation up to date and consistent when making code changes:
 - **Natspec**: Update function/contract comments when behavior changes
 - **README.md**: Update if architecture, usage, or setup instructions change
 - **SECURITY.md**: Update if security model, trust assumptions, or risk factors change
+- **Function references**: Verify any function names in docs exist in the actual contracts (use `grep -r "function funcName" src/`)
