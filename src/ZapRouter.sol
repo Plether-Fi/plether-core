@@ -314,22 +314,19 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         uint256 debtBear = loanAmount + fee;
 
         // 3. Buy Debt Bear using USDC
-        // FIX: Don't use get_dx (fragile). Estimate using get_dy + Buffer.
-
-        // Step A: Get price for 1 USDC
-        // "How much Bear do I get for 1 USDC?"
         uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
         if (bearFromOneUsdc == 0) revert ZapRouter__InvalidCurvePrice();
 
-        // Step B: Calculate Linear Requirement
-        // (Debt / Rate) = USDC needed
-        // (18 dec * 6 dec) / 18 dec = 6 dec
+        // Linear estimate (first approximation)
         uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;
 
-        // Step C: Apply Safety Buffer
-        // We swap slightly more USDC to handle slippage/fees and guarantee we get enough Bear.
-        // Any excess Bear is swept to user.
-        uint256 usdcToSwap = (usdcLinear * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
+        // Correct for AMM price impact: check actual output at linear estimate
+        uint256 actualBearFromLinear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, usdcLinear);
+        uint256 usdcAdjusted =
+            actualBearFromLinear >= debtBear ? usdcLinear : (usdcLinear * debtBear) / actualBearFromLinear;
+
+        // Apply safety buffer for any remaining slippage
+        uint256 usdcToSwap = (usdcAdjusted * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
         // Sanity Check: Do we have enough USDC?
         uint256 totalUsdc = USDC.balanceOf(address(this));
@@ -401,10 +398,7 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         expectedSwapOut = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, flashAmount);
         totalUSDC = usdcAmount + expectedSwapOut;
 
-        // Minting pairs: 2 USDC -> 1 Pair (assuming CAP=$2)
-        // Formula: (totalUSDC * DecimalConstants.ONE_WAD) / CAP_PRICE
-        // Simplified: (totalUSDC * 1e12) / 2
-        expectedTokensOut = (totalUSDC * 1e12) / 2;
+        expectedTokensOut = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
 
         flashFee = IERC3156FlashLender(address(DXY_BEAR)).flashFee(address(DXY_BEAR), flashAmount);
     }
@@ -444,11 +438,16 @@ contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
         uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
         if (bearFromOneUsdc == 0) return (expectedUsdcFromBurn, 0, 0, flashFee);
 
-        // Linear USDC requirement: (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc
+        // Linear USDC requirement (first approximation)
         uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;
 
-        // Apply safety buffer (matches execution)
-        usdcForBearBuyback = (usdcLinear * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
+        // Correct for AMM price impact: check actual output at linear estimate
+        uint256 actualBearFromLinear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, usdcLinear);
+        uint256 usdcAdjusted =
+            actualBearFromLinear >= debtBear ? usdcLinear : (usdcLinear * debtBear) / actualBearFromLinear;
+
+        // Apply safety buffer
+        usdcForBearBuyback = (usdcAdjusted * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
         // Net USDC out = burn proceeds - buyback cost
         if (expectedUsdcFromBurn > usdcForBearBuyback) {
