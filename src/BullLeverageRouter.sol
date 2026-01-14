@@ -83,6 +83,10 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice Protocol CAP price (8 decimals, oracle format).
     uint256 public immutable CAP;
 
+    /// @notice Buffer for exchange rate drift between previewRedeem and redeem (1%).
+    /// @dev Protects against DoS attacks via yield donation front-running.
+    uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
+
     /// @notice Deploys BullLeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _splitter SyntheticSplitter contract address.
@@ -198,6 +202,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Convert staked shares to underlying BULL amount (for pair matching)
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
 
+        // Add buffer for exchange rate drift (protects against yield donation front-running)
+        uint256 bufferedBullAmount = dxyBullAmount + (dxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
+
         // Calculate extra BEAR needed to sell for debt repayment
         uint256 extraBearForDebt = 0;
         if (debtToRepay > 0) {
@@ -212,8 +219,8 @@ contract BullLeverageRouter is LeverageRouterBase {
             extraBearForDebt = extraBearForDebt + (extraBearForDebt * maxSlippageBps / 10_000);
         }
 
-        // Total BEAR to flash mint: enough for pair redemption + extra for debt
-        uint256 flashAmount = dxyBullAmount + extraBearForDebt;
+        // Total BEAR to flash mint: buffered amount for pair redemption + extra for debt
+        uint256 flashAmount = bufferedBullAmount + extraBearForDebt;
 
         // Encode data for callback
         bytes memory data = abi.encode(
@@ -389,7 +396,13 @@ contract BullLeverageRouter is LeverageRouterBase {
             USDC.safeTransfer(user, usdcToReturn);
         }
 
-        // 8. Emit event for off-chain tracking
+        // 8. Sweep excess BEAR to user (from exchange rate buffer)
+        uint256 finalBearBalance = DXY_BEAR.balanceOf(address(this));
+        if (finalBearBalance > repayAmount) {
+            DXY_BEAR.safeTransfer(user, finalBearBalance - repayAmount);
+        }
+
+        // 9. Emit event for off-chain tracking
         emit LeverageClosed(user, debtToRepay, collateralToWithdraw, usdcToReturn, maxSlippageBps);
 
         // Flash mint repayment happens automatically when callback returns

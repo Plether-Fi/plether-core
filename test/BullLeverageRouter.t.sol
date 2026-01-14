@@ -1424,3 +1424,174 @@ contract MockSplitter is ISyntheticSplitter {
     }
 
 }
+
+/// @notice Mock staked token that simulates exchange rate drift between preview and redeem
+/// previewRedeem returns base rate, redeem uses boosted rate (simulating mid-tx yield donation)
+contract MockStakedTokenWithDrift is ERC20 {
+
+    MockToken public underlying;
+    uint256 public baseRateBps = 10_000; // Rate for previewRedeem
+    uint256 public redeemBoostBps = 0; // Extra bps added only during redeem
+
+    constructor(
+        address _underlying
+    ) ERC20("Staked Token", "sTKN") {
+        underlying = MockToken(_underlying);
+    }
+
+    /// @notice Set the boost that redeem will add on top of baseRate
+    /// This simulates an attacker front-running with yield donation
+    function setRedeemBoost(
+        uint256 _boostBps
+    ) external {
+        redeemBoostBps = _boostBps;
+    }
+
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external returns (uint256 shares) {
+        underlying.transferFrom(msg.sender, address(this), assets);
+        shares = assets; // 1:1 at deposit time
+        _mint(receiver, shares);
+    }
+
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address owner
+    ) external returns (uint256 assets) {
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
+        _burn(owner, shares);
+        // Apply boost: simulates yield donation happening between preview and redeem
+        assets = (shares * (baseRateBps + redeemBoostBps)) / 10_000;
+        // Mint shortfall to simulate yield
+        uint256 balance = underlying.balanceOf(address(this));
+        if (assets > balance) {
+            underlying.mint(address(this), assets - balance);
+        }
+        underlying.transfer(receiver, assets);
+    }
+
+    /// @notice Preview returns base rate (what closeLeverage sees when calculating flashAmount)
+    function previewRedeem(
+        uint256 shares
+    ) external view returns (uint256) {
+        return (shares * baseRateBps) / 10_000;
+    }
+
+}
+
+/// @notice Tests for BEAR/BULL mismatch vulnerability in BullLeverageRouter
+contract BullLeverageRouterExchangeRateDriftTest is Test {
+
+    BullLeverageRouter public router;
+
+    MockToken public usdc;
+    MockFlashToken public dxyBear;
+    MockToken public dxyBull;
+    MockStakedTokenWithDrift public stakedDxyBull;
+    MockMorpho public morpho;
+    MockCurvePool public curvePool;
+    MockSplitter public splitter;
+
+    address alice = address(0xA11ce);
+    address attacker = address(0xBAD);
+    MarketParams params;
+
+    function setUp() public {
+        usdc = new MockToken("USDC", "USDC", 6);
+        dxyBear = new MockFlashToken("DXY-BEAR", "DXY-BEAR");
+        dxyBull = new MockToken("DXY-BULL", "DXY-BULL", 18);
+        stakedDxyBull = new MockStakedTokenWithDrift(address(dxyBull));
+        morpho = new MockMorpho();
+        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
+        splitter = new MockSplitter(address(dxyBear), address(dxyBull), address(usdc));
+
+        morpho.setTokens(address(usdc), address(stakedDxyBull));
+
+        params = MarketParams({
+            loanToken: address(usdc),
+            collateralToken: address(stakedDxyBull),
+            oracle: address(0),
+            irm: address(0),
+            lltv: 900_000_000_000_000_000
+        });
+
+        router = new BullLeverageRouter(
+            address(morpho),
+            address(splitter),
+            address(curvePool),
+            address(usdc),
+            address(dxyBear),
+            address(dxyBull),
+            address(stakedDxyBull),
+            params
+        );
+
+        usdc.mint(alice, 10_000 * 1e6);
+    }
+
+    /// @notice Helper to open a position
+    function _openPosition() internal returns (uint256 supplied, uint256 borrowed) {
+        uint256 principal = 1000 * 1e6;
+        uint256 leverage = 3 * 1e18;
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), principal);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (supplied, borrowed) = morpho.positions(alice);
+    }
+
+    /// @notice FAILING TEST: Exchange rate increase between preview and redeem should not cause revert
+    /// Currently FAILS because flash amount is calculated with old rate, but burn uses new rate
+    function test_CloseLeverage_ExchangeRateIncrease_ShouldSucceed() public {
+        (uint256 supplied, uint256 borrowed) = _openPosition();
+
+        // Set boost: redeem will return 1% more than previewRedeem
+        // This simulates yield donation happening AFTER previewRedeem but BEFORE redeem
+        stakedDxyBull.setRedeemBoost(100); // +1%
+
+        vm.startPrank(alice);
+
+        // This SHOULD succeed but will FAIL due to BEAR/BULL mismatch:
+        // - previewRedeem(supplied) = 1500e18 (base rate)
+        // - flashAmount = 1500e18 + extraBearForDebt
+        // - redeem(supplied) = 1515e18 (with 1% boost)
+        // - SPLITTER.burn(1515e18) needs 1515e18 BEAR
+        // - But we only have 1500e18 BEAR (flashAmount - extraBearForDebt)
+        // - Not enough BEAR → revert
+        router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // If we reach here, the close succeeded
+        (uint256 suppliedAfter,) = morpho.positions(alice);
+        assertEq(suppliedAfter, 0, "Position should be closed");
+    }
+
+    /// @notice FAILING TEST: Attacker front-runs with yield donation to DoS user's close
+    /// Currently FAILS because the donation changes exchange rate mid-transaction
+    function test_CloseLeverage_FrontRunDonation_ShouldNotDoS() public {
+        (uint256 supplied, uint256 borrowed) = _openPosition();
+
+        // Simulate attacker front-running with yield donation
+        // redeem returns 0.5% more than previewRedeem predicted
+        stakedDxyBull.setRedeemBoost(50); // +0.5%
+
+        vm.startPrank(alice);
+
+        // Alice's transaction should succeed despite the rate change
+        // Currently FAILS due to BEAR/BULL mismatch
+        router.closeLeverage(borrowed, supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 suppliedAfter,) = morpho.positions(alice);
+        assertEq(suppliedAfter, 0, "Position should be closed despite donation");
+    }
+
+}
