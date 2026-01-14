@@ -2,6 +2,47 @@
 
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether protocol.
 
+## Upgradeability
+
+All Plether contracts are **non-upgradeable**. Once deployed, the bytecode cannot be changed. This provides strong guarantees:
+
+- **No proxy patterns**: No UUPS, Transparent, or Beacon proxies are used
+- **Immutable logic**: Contract behavior is fixed at deployment
+- **Immutable parameters**: CAP, oracle addresses, and token addresses cannot be changed
+
+The only mutable state is governed by timelocks:
+- Adapter address (7-day timelock)
+- Treasury/staking addresses (7-day timelock)
+- BasketOracle Curve pool (7-day timelock after initial setup)
+
+## Protocol Invariants
+
+These properties must always hold. Violation indicates a critical bug.
+
+### Solvency Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **Collateral Backing** | `totalAssets >= totalLiabilities` where `totalLiabilities = tokenSupply × CAP` |
+| **No Value Leak** | `totalAssets <= totalLiabilities + accumulatedYield + dust` (no funds stuck) |
+| **Fair Pricing** | Users always pay at least the ceiling-rounded USDC cost (no rounding exploits) |
+
+### Token Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **Supply Parity** | `TOKEN_A.totalSupply == TOKEN_B.totalSupply - emergencyRedeemed` |
+| **No Orphaned Tokens** | If `tokenSupply > 0`, then `totalAssets > 0` |
+| **Mint/Burn Symmetry** | `currentSupply == totalMinted - totalBurned - totalEmergencyRedeemed` |
+
+### State Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **Liquidation Irreversibility** | Once `isLiquidated == true`, it can never become `false` |
+| **Router Statelessness** | Routers hold zero tokens after any operation completes |
+| **Self-Reference Prevention** | Treasury and staking addresses are never the Splitter itself |
+
 ## Trust Assumptions
 
 ### External Protocol Dependencies
@@ -77,6 +118,16 @@ This provides users time to exit if they disagree with proposed changes.
 - **Behavior**: `previewMint()` and `previewBurn()` show expected values at current price
 - **Impact**: Actual execution may differ if price changes between preview and execution
 - **Rationale**: This is inherent to any DeFi protocol; users should set appropriate slippage
+
+#### Oracle/Market Price Deviation
+- **Mechanism**: BasketOracle compares the theoretical DXY-BEAR price (derived from Chainlink feeds) against Curve's internal EMA oracle (`price_oracle()`)
+- **Threshold**: Maximum 2% deviation (configurable via `MAX_DEVIATION_BPS` at deployment)
+- **Behavior**: If deviation exceeds threshold, `latestRoundData()` reverts with `BasketOracle__PriceDeviation(theoretical, spot)`
+- **Affected Operations**: Minting, liquidation trigger, and leverage operations (via Morpho oracle). Burns are NOT affected—users can always exit.
+- **Rationale**: Detects oracle manipulation (Chainlink compromise) or market manipulation (Curve pool attack). Also catches stale oracle data if Chainlink stops updating but Curve continues trading.
+- **User Impact**: Minting and leverage operations temporarily halt until prices converge. This is a protective circuit breaker.
+- **Recovery**: Prices typically converge within minutes as arbitrageurs trade the discrepancy. No admin intervention required.
+- **Note**: Uses Curve's `price_oracle()` (time-weighted EMA) rather than `get_dy()` (instantaneous spot) to resist flash loan manipulation
 
 ### Liquidation Mechanics
 
@@ -321,6 +372,8 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-14 | Added Upgradeability section (non-upgradeable contracts) and Protocol Invariants section (solvency, token, state invariants) |
+| 2026-01-14 | Added Oracle/Market Price Deviation section documenting the 2% deviation check between Chainlink and Curve prices |
 | 2026-01-14 | Added `withdrawFromAdapter()` for gradual liquidity extraction under tight Morpho utilization; documented new emergency procedure |
 | 2026-01-14 | Added MEV Protection section under Router Architecture |
 | 2026-01-13 | BasketOracle: Added 7-day timelock for Curve pool updates; refactored to use OpenZeppelin Ownable |
