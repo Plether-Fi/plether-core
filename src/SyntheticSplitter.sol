@@ -550,7 +550,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         emit AdapterProposed(_newAdapter, adapterActivationTime);
     }
 
-    /// @notice Finalize adapter migration after timelock. Migrates all funds.
+    /// @notice Finalize adapter migration after timelock. Migrates all funds atomically.
     function finalizeAdapter() external nonReentrant onlyOwner {
         if (pendingAdapter == address(0)) revert Splitter__InvalidProposal();
         if (block.timestamp < adapterActivationTime) revert Splitter__TimelockActive();
@@ -559,7 +559,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
         IERC4626 oldAdapter = yieldAdapter;
         IERC4626 newAdapter = IERC4626(pendingAdapter);
-        yieldAdapter = IERC4626(address(0));
 
         uint256 movedAmount = 0;
         if (address(oldAdapter) != address(0)) {
