@@ -68,6 +68,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable {
     /// @notice Emitted when Curve pool is updated.
     event CurvePoolUpdated(address indexed oldPool, address indexed newPool);
 
+    /// @notice Thrown when max deviation is zero.
+    error BasketOracle__InvalidDeviation();
+
     /// @notice Creates basket oracle with currency components.
     /// @param _feeds Array of Chainlink feed addresses.
     /// @param _quantities Array of basket weights (1e18 precision).
@@ -82,6 +85,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable {
         address _owner
     ) Ownable(_owner) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
+        if (_maxDeviationBps == 0) revert BasketOracle__InvalidDeviation();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);

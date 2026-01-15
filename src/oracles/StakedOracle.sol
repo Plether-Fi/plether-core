@@ -29,6 +29,9 @@ contract StakedOracle is IOracle {
     /// @notice Thrown when underlying oracle returns zero price.
     error StakedOracle__InvalidPrice();
 
+    /// @notice Thrown when zero address provided to constructor.
+    error StakedOracle__ZeroAddress();
+
     /// @notice Creates staked oracle for a vault.
     /// @param _vault ERC4626 staking vault address.
     /// @param _underlyingOracle Price oracle for the underlying DXY token.
@@ -36,9 +39,10 @@ contract StakedOracle is IOracle {
         address _vault,
         address _underlyingOracle
     ) {
+        if (_vault == address(0)) revert StakedOracle__ZeroAddress();
+        if (_underlyingOracle == address(0)) revert StakedOracle__ZeroAddress();
         VAULT = IERC4626(_vault);
         UNDERLYING_ORACLE = IOracle(_underlyingOracle);
-        // We need decimals to scale the exchange rate correctly
         UNDERLYING_DECIMALS = 10 ** IERC20Metadata(VAULT.asset()).decimals();
     }
 

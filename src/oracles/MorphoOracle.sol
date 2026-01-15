@@ -35,6 +35,12 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice Thrown when source oracle data is stale.
     error MorphoOracle__StalePrice();
 
+    /// @notice Thrown when basket price exceeds protocol CAP (liquidation state).
+    error MorphoOracle__PriceExceedsCap();
+
+    /// @notice Thrown when zero address provided to constructor.
+    error MorphoOracle__ZeroAddress();
+
     /// @notice Creates Morpho-compatible oracle wrapper.
     /// @param _basketOracle BasketOracle address.
     /// @param _cap Protocol CAP (8 decimals, e.g., 2e8 = $2.00).
@@ -44,6 +50,7 @@ contract MorphoOracle is IMorphoOracle {
         uint256 _cap,
         bool _isInverse
     ) {
+        if (_basketOracle == address(0)) revert MorphoOracle__ZeroAddress();
         BASKET_ORACLE = AggregatorV3Interface(_basketOracle);
         CAP = _cap;
         IS_INVERSE = _isInverse;
@@ -62,7 +69,7 @@ contract MorphoOracle is IMorphoOracle {
 
         if (IS_INVERSE) {
             if (basketPrice > CAP) {
-                return 0;
+                revert MorphoOracle__PriceExceedsCap();
             }
             finalPrice = CAP - basketPrice;
             if (finalPrice == 0) {
