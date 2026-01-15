@@ -104,6 +104,29 @@ Critical operations require a 7-day timelock:
 
 This provides users time to exit if they disagree with proposed changes.
 
+#### Governance Cooldown
+After unpausing the protocol, a 7-day cooldown period must elapse before governance operations (adapter migration, fee receiver changes) can be finalized. This prevents rapid pause/unpause cycles that could bypass timelock protections.
+
+The cooldown is enforced by `_checkLiveness()`:
+- Reverts if protocol is paused
+- Reverts if `block.timestamp < lastUnpauseTime + 7 days`
+
+#### Adapter Migration Safety
+
+Adapter migrations include two safety mechanisms to prevent fund loss:
+
+| Mechanism | Implementation | Purpose |
+|-----------|----------------|---------|
+| **Atomic swap** | `yieldAdapter` pointer is never set to null | Prevents view functions from returning incorrect values mid-migration |
+| **Loss check** | `assetsAfter >= assetsBefore * 99.999%` | Reverts if total assets decrease by more than 0.1 bps (0.001%) |
+
+The loss check protects against:
+- Malicious adapters that steal funds on deposit
+- Adapters with excessive entry/exit fees
+- Rounding errors that compound during migration
+
+If migration fails the loss check, it reverts with `Splitter__MigrationLostFunds`. The admin must investigate and propose a different adapter.
+
 ## Known Limitations
 
 ### Oracle Edge Cases
@@ -376,6 +399,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-15 | Added Governance Cooldown and Adapter Migration Safety sections under Trust Assumptions |
 | 2026-01-14 | Added `rescueToken()` to SyntheticSplitter for recovering accidentally sent tokens (excludes USDC, DXY-BEAR, DXY-BULL) |
 | 2026-01-14 | Added Upgradeability section (non-upgradeable contracts) and Protocol Invariants section (solvency, token, state invariants) |
 | 2026-01-14 | Added Oracle/Market Price Deviation section documenting the 2% deviation check between Chainlink and Curve prices |
