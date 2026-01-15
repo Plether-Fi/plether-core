@@ -82,7 +82,7 @@ The protocol owner can:
 - Propose treasury/staking address changes (7-day timelock)
 - Propose BasketOracle Curve pool changes (7-day timelock)
 - Rescue stuck tokens (non-core assets only)
-- Transfer ownership (via Ownable)
+- Transfer ownership (via Ownable2Step two-step pattern)
 
 The owner **cannot**:
 - Freeze user funds permanently (burn always works, even when paused)
@@ -267,6 +267,14 @@ StakedToken (sDXY-BEAR, sDXY-BULL) is an ERC-4626 vault used as Morpho collatera
 - **Risk**: Donation could be used to manipulate share price for Morpho liquidations
 - **Mitigation**: Morpho uses time-weighted prices; instantaneous donations have limited impact
 
+#### Acknowledged Risk: Permissionless donateYield()
+
+`StakedToken.donateYield()` is intentionally permissionless. While this allows anyone to inflate the vault exchange rate, exploitation requires burning capital with no economic return. The protocol accepts this griefing risk because:
+- Attack is not profitable (attacker loses funds)
+- Benefits existing stakers (higher share value)
+- Morpho's time-weighted pricing limits liquidation manipulation
+- Router contracts include exchange rate buffers (1%) to handle drift
+
 ### Curve Pool Configuration
 
 Router contracts assume specific Curve pool structure:
@@ -399,6 +407,8 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-15 | Documented acknowledged risk: permissionless donateYield() griefing vector |
+| 2026-01-15 | Updated ownership model to reflect Ownable2Step pattern |
 | 2026-01-15 | Added Governance Cooldown and Adapter Migration Safety sections under Trust Assumptions |
 | 2026-01-14 | Added `rescueToken()` to SyntheticSplitter for recovering accidentally sent tokens (excludes USDC, DXY-BEAR, DXY-BULL) |
 | 2026-01-14 | Added Upgradeability section (non-upgradeable contracts) and Protocol Invariants section (solvency, token, state invariants) |
