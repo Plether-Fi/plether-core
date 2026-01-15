@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -20,7 +21,7 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 /// @dev Accepts USDC collateral to mint equal amounts of DXY-BEAR + DXY-BULL tokens.
 ///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
 ///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
-contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyGuard {
+contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 

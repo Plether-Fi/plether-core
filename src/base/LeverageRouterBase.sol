@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -14,7 +15,7 @@ import {FlashLoanBase} from "./FlashLoanBase.sol";
 /// @title LeverageRouterBase
 /// @notice Abstract base for leverage routers with shared validation and admin logic.
 /// @dev Common infrastructure for LeverageRouter (DXY-BEAR) and BullLeverageRouter (DXY-BULL).
-abstract contract LeverageRouterBase is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
+abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 

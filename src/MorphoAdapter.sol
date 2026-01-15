@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -22,7 +23,7 @@ interface IUniversalRewardsDistributor {
 /// @title MorphoAdapter
 /// @notice ERC4626-compliant wrapper for Morpho Blue lending.
 /// @dev Interchangeable with other yield adapters. Only accepts deposits from SyntheticSplitter.
-contract MorphoAdapter is ERC4626, Ownable {
+contract MorphoAdapter is ERC4626, Ownable2Step {
 
     using SafeERC20 for IERC20;
 

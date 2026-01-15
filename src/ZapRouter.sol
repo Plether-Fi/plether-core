@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -17,7 +18,7 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @notice Efficient router for acquiring DXY-BULL tokens using flash mints.
 /// @dev Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL.
 ///      For DXY-BEAR, users should swap directly on Curve instead.
-contract ZapRouter is FlashLoanBase, Ownable, Pausable, ReentrancyGuard {
+contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 

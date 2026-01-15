@@ -5,11 +5,12 @@ import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../interfaces/ICurvePool.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title BasketOracle
 /// @notice Aggregates multiple Chainlink feeds into a weighted DXY basket price.
 /// @dev Price = Sum(Price_i * Quantity_i). Includes bound validation against Curve spot.
-contract BasketOracle is AggregatorV3Interface, Ownable {
+contract BasketOracle is AggregatorV3Interface, Ownable2Step {
 
     /// @notice Component feed with its basket weight.
     struct Component {
