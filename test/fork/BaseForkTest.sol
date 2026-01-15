@@ -31,10 +31,10 @@ interface ICurveCryptoFactory {
         uint256 gamma,
         uint256 mid_fee,
         uint256 out_fee,
-        uint256 allowed_extra_profit,
         uint256 fee_gamma,
+        uint256 allowed_extra_profit,
         uint256 adjustment_step,
-        uint256 ma_half_time,
+        uint256 ma_exp_time,
         uint256 initial_price
     ) external returns (address);
 
@@ -81,13 +81,15 @@ abstract contract BaseForkTest is Test {
     // ==========================================
     // CURVE POOL PARAMETERS
     // Single source of truth for all fork tests
+    // Optimized for low-volatility DXY pair
+    // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 40M
     // ==========================================
-    uint256 constant CURVE_A = 2_000_000;
-    uint256 constant CURVE_GAMMA = 50_000_000_000_000;
-    uint256 constant CURVE_MID_FEE = 5_000_000; // 0.05%
-    uint256 constant CURVE_OUT_FEE = 45_000_000; // 0.45%
+    uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
+    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15
+    uint256 constant CURVE_MID_FEE = 2_500_000; // 0.025% (1e10 = 100%)
+    uint256 constant CURVE_OUT_FEE = 30_000_000; // 0.3% (1e10 = 100%)
     uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
-    uint256 constant CURVE_FEE_GAMMA = 230_000_000_000_000;
+    uint256 constant CURVE_FEE_GAMMA = 1_000_000_000_000_000; // 1e15
     uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
     uint256 constant CURVE_MA_HALF_TIME = 600;
 
@@ -187,8 +189,8 @@ abstract contract BaseForkTest is Test {
                 CURVE_GAMMA,
                 CURVE_MID_FEE,
                 CURVE_OUT_FEE,
-                CURVE_ALLOWED_EXTRA_PROFIT,
                 CURVE_FEE_GAMMA,
+                CURVE_ALLOWED_EXTRA_PROFIT,
                 CURVE_ADJUSTMENT_STEP,
                 CURVE_MA_HALF_TIME,
                 bearPrice
