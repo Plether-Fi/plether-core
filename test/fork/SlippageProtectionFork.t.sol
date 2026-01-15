@@ -221,11 +221,9 @@ contract SlippageProtectionForkTest is BaseForkTest {
         leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt = (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares;
+        (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        leverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
@@ -480,7 +478,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         (,, uint256 previewReturn) = bullLeverageRouter.previewCloseLeverage(debt, collateral);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(alice);
-        bullLeverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         uint256 actualReturn = IERC20(USDC).balanceOf(alice) - usdcBefore;
         vm.stopPrank();
 

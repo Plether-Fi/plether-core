@@ -451,14 +451,14 @@ contract LeverageRouterHandler is Test {
         uint256 actorSeed
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
-        uint256 debt = morpho.borrowBalance(currentActor);
 
         // Skip if no position
         if (collateral == 0) return;
 
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
-        try router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours) {
+        // Router queries actual debt from Morpho
+        try router.closeLeverage(collateral, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
@@ -472,26 +472,22 @@ contract LeverageRouterHandler is Test {
 
     function partialClose(
         uint256 actorSeed,
-        uint256 debtRatio,
         uint256 collateralRatio
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
-        uint256 debt = morpho.borrowBalance(currentActor);
 
         // Skip if no position
         if (collateral == 0) return;
 
-        // Bound ratios - ensure collateral ratio >= debt ratio for valid close
-        debtRatio = bound(debtRatio, 0, 100);
-        uint256 minCollateralRatio = debtRatio > 0 ? debtRatio : 10;
-        collateralRatio = bound(collateralRatio, minCollateralRatio, 100);
+        // Bound ratio
+        collateralRatio = bound(collateralRatio, 10, 100);
 
-        uint256 debtToRepay = (debt * debtRatio) / 100;
         uint256 collateralToWithdraw = (collateral * collateralRatio) / 100;
 
         if (collateralToWithdraw == 0) return;
 
-        try router.closeLeverage(debtToRepay, collateralToWithdraw, 100, block.timestamp + 1 hours) {
+        // Router queries actual debt from Morpho
+        try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             if (morpho.collateralBalance(currentActor) == 0) {
                 hasPosition[currentActor] = false;
@@ -898,13 +894,13 @@ contract BullLeverageRouterHandler is Test {
         uint256 actorSeed
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
-        uint256 debt = morpho.borrowBalance(currentActor);
 
         if (collateral == 0) return;
 
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
-        try router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours) {
+        // Router queries actual debt from Morpho
+        try router.closeLeverage(collateral, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
@@ -917,24 +913,21 @@ contract BullLeverageRouterHandler is Test {
 
     function partialClose(
         uint256 actorSeed,
-        uint256 debtRatio,
         uint256 collateralRatio
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
-        uint256 debt = morpho.borrowBalance(currentActor);
 
         if (collateral == 0) return;
 
-        debtRatio = bound(debtRatio, 0, 100);
-        uint256 minCollateralRatio = debtRatio > 0 ? debtRatio : 10;
-        collateralRatio = bound(collateralRatio, minCollateralRatio, 100);
+        // Bound ratio
+        collateralRatio = bound(collateralRatio, 10, 100);
 
-        uint256 debtToRepay = (debt * debtRatio) / 100;
         uint256 collateralToWithdraw = (collateral * collateralRatio) / 100;
 
         if (collateralToWithdraw == 0) return;
 
-        try router.closeLeverage(debtToRepay, collateralToWithdraw, 100, block.timestamp + 1 hours) {
+        // Router queries actual debt from Morpho
+        try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             if (morpho.collateralBalance(currentActor) == 0) {
                 ghost_totalFullyClosed++;

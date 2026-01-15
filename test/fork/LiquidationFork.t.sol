@@ -144,13 +144,9 @@ contract LiquidationForkTest is BaseForkTest {
         vm.warp(block.timestamp + 180 days);
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debtWithInterest =
-            totalBorrowShares > 0 ? (uint256(borrowSharesInitial) * totalBorrowAssets) / totalBorrowShares : 0;
-
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(debtWithInterest, collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try leverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Collateral should be 0");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
@@ -240,12 +236,9 @@ contract LiquidationForkTest is BaseForkTest {
         vm.warp(block.timestamp + 180 days);
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
-
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(debt, collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try leverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Should be fully closed");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
@@ -272,13 +265,9 @@ contract LiquidationForkTest is BaseForkTest {
         vm.warp(block.timestamp + 180 days);
         IMorpho(MORPHO).accrueInterest(bullMarketParams);
 
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt =
-            totalBorrowShares > 0 ? (uint256(borrowSharesInitial) * totalBorrowAssets) / totalBorrowShares : 0;
-
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try bullLeverageRouter.closeLeverage(debt, collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try bullLeverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Position should be closed");
         } catch {}

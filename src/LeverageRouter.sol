@@ -109,14 +109,15 @@ contract LeverageRouter is LeverageRouterBase {
 
     /**
      * @notice Close a Leveraged Position in one transaction.
-     * @param debtToRepay Amount of USDC debt to repay (flash loaned). Can be 0 if no debt.
-     * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
+     * @dev Queries actual debt from Morpho to ensure full repayment even if interest accrued.
+     * @param collateralToWithdraw Amount of sDXY-BEAR shares to withdraw from Morpho.
+     *        NOTE: This is staked token shares, not underlying DXY-BEAR amount.
+     *        Use STAKED_DXY_BEAR.previewRedeem() to convert shares to underlying.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
-     * Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function closeLeverage(
-        uint256 debtToRepay,
         uint256 collateralToWithdraw,
         uint256 maxSlippageBps,
         uint256 deadline
@@ -125,7 +126,10 @@ contract LeverageRouter is LeverageRouterBase {
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
         if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
 
-        // 1. Calculate minimum USDC output based on REAL MARKET PRICE
+        // Query actual debt from Morpho (includes accrued interest)
+        uint256 debtToRepay = _getActualDebt(msg.sender);
+
+        // Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
         uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
         // Use get_dy to find real market expectation
@@ -143,6 +147,35 @@ contract LeverageRouter is LeverageRouterBase {
         }
 
         // Event emitted in _executeClose or _executeCloseNoDebt
+    }
+
+    /// @notice Returns the user's current debt in this market (includes accrued interest).
+    /// @param user The address to query debt for.
+    /// @return debt The actual debt amount in USDC (rounded up).
+    function getActualDebt(
+        address user
+    ) external view returns (uint256 debt) {
+        return _getActualDebt(user);
+    }
+
+    /// @dev Computes actual debt from Morpho position, rounded up to ensure full repayment.
+    function _getActualDebt(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        if (borrowShares == 0) return 0;
+
+        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
+        if (totalBorrowShares == 0) return 0;
+
+        // Round up to ensure full repayment
+        return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+    }
+
+    /// @dev Computes market ID from marketParams.
+    function _marketId() internal view returns (bytes32) {
+        return keccak256(abi.encode(marketParams));
     }
 
     /// @notice Morpho flash loan callback. Routes to open or close handler.

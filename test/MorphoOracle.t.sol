@@ -68,16 +68,16 @@ contract MorphoOracleTest is Test {
     // ==========================================
     // 3. Edge Cases
     // ==========================================
-    function test_BullOracle_ReturnsZero_IfCapBreached() public {
+    function test_BullOracle_RevertsIfCapBreached() public {
         // Market Shock: Basket pumps to $2.10 (Dollar Crash)
         // Cap is $2.00.
         // Value would technically be -$0.10.
-        // Oracle must return 0.
+        // Oracle must revert to signal liquidation state.
 
         basket.updatePrice(210_000_000);
 
-        uint256 price = bullOracle.price();
-        assertEq(price, 0);
+        vm.expectRevert(MorphoOracle.MorphoOracle__PriceExceedsCap.selector);
+        bullOracle.price();
     }
 
     function test_Revert_IfBasketIsBroken() public {

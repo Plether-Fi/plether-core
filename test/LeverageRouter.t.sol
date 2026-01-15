@@ -103,9 +103,9 @@ contract LeverageRouterTest is Test {
         morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice); // Alice holds the debt
 
-        // Now Close
+        // Now Close (router queries actual debt from Morpho)
         morpho.setAuthorization(address(router), true);
-        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertEq(morpho.collateralBalance(alice), 0, "Collateral not cleared");
@@ -136,7 +136,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         uint256 usdcBefore = usdc.balanceOf(alice);
 
-        router.closeLeverage(0, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify: collateral withdrawn, USDC returned to Alice
@@ -159,8 +159,8 @@ contract LeverageRouterTest is Test {
 
         morpho.setAuthorization(address(router), true);
 
-        // Withdraw only 1000 of 3000 collateral
-        router.closeLeverage(0, 1000 * 1e18, 100, block.timestamp + 1 hours);
+        // Withdraw only 1000 of 3000 collateral (no debt to repay)
+        router.closeLeverage(1000 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify: only partial collateral withdrawn
@@ -246,8 +246,8 @@ contract LeverageRouterTest is Test {
         // Record balance before close
         uint256 usdcBefore = usdc.balanceOf(alice);
 
-        // Close the position
-        router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        // Close the position (router queries actual debt from Morpho)
+        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify actual matches preview
@@ -313,7 +313,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp - 1);
+        router.closeLeverage(3000 * 1e18, 100, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -332,7 +332,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
+        router.closeLeverage(3000 * 1e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
 
@@ -370,7 +370,7 @@ contract LeverageRouterTest is Test {
 
         morpho.setAuthorization(address(router), true);
         vm.expectRevert("Too little received");
-        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -495,7 +495,7 @@ contract LeverageRouterTest is Test {
         // Alice tries to close
         vm.startPrank(alice);
         vm.expectRevert();
-        router.closeLeverage(2000 * 1e6, 3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -563,25 +563,16 @@ contract LeverageRouterTest is Test {
         assertApproxEqRel(actualCollateral, expectedCollateral, 0.01e18, "Collateral should match leverage");
     }
 
-    /// @notice Fuzz test: closeLeverage with random debt and collateral ratios
-    /// @dev Tests partial closes with various debt/collateral combinations
-    /// @dev Ensures collateral ratio is sufficient to cover debt (with margin for slippage)
+    /// @notice Fuzz test: closeLeverage with various leverage ratios
+    /// @dev Tests full closes with different leverage amounts
+    /// @dev Note: With new signature, closeLeverage always repays full debt
     function testFuzz_CloseLeverage(
-        uint256 debtRatio,
-        uint256 collateralRatio
+        uint256 principal,
+        uint256 leverage
     ) public {
-        // Bound ratios to 0-100%
-        debtRatio = bound(debtRatio, 0, 100);
-
-        // Setup: Create a position first (3x leverage on $1000)
-        // Position: 3000e18 collateral (worth ~3000e6 USDC), 2000e6 debt
-        // To repay X% of debt, we need at least X% * (2/3) of collateral value
-        // We use collateralRatio >= debtRatio to ensure sufficient collateral with margin
-        uint256 minCollateralRatio = debtRatio > 0 ? debtRatio : 1;
-        collateralRatio = bound(collateralRatio, minCollateralRatio, 100);
-
-        uint256 principal = 1000e6;
-        uint256 leverage = 3e18;
+        // Bound inputs
+        principal = bound(principal, 1000e6, 100_000e6);
+        leverage = bound(leverage, 2e18, 5e18);
 
         usdc.mint(alice, principal);
         usdc.mint(address(morpho), 1_000_000e6);
@@ -593,28 +584,17 @@ contract LeverageRouterTest is Test {
 
         // Get position state
         uint256 totalCollateral = morpho.collateralBalance(alice);
-        uint256 totalDebt = morpho.borrowBalance(alice);
 
-        // Calculate amounts to close based on ratios
-        uint256 debtToRepay = (totalDebt * debtRatio) / 100;
-        uint256 collateralToWithdraw = (totalCollateral * collateralRatio) / 100;
-
-        // Skip if withdrawing too little collateral
-        if (collateralToWithdraw == 0) {
-            vm.stopPrank();
-            return;
-        }
-
-        // Close partial position
-        router.closeLeverage(debtToRepay, collateralToWithdraw, 100, block.timestamp + 1 hours);
+        // Close full position (router queries actual debt from Morpho)
+        router.closeLeverage(totalCollateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify state after close
         uint256 remainingCollateral = morpho.collateralBalance(alice);
         uint256 remainingDebt = morpho.borrowBalance(alice);
 
-        assertEq(remainingCollateral, totalCollateral - collateralToWithdraw, "Collateral should decrease");
-        assertEq(remainingDebt, totalDebt - debtToRepay, "Debt should decrease");
+        assertEq(remainingCollateral, 0, "Collateral should be zero after full close");
+        assertEq(remainingDebt, 0, "Debt should be zero after full close");
     }
 
     /// @notice Fuzz test: Full round trip (open then close) returns reasonable value
@@ -640,11 +620,10 @@ contract LeverageRouterTest is Test {
         // Open position
         router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
-        // Immediately close entire position
+        // Immediately close entire position (router queries actual debt from Morpho)
         uint256 collateral = morpho.collateralBalance(alice);
-        uint256 debt = morpho.borrowBalance(alice);
 
-        router.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdcAfter = usdc.balanceOf(alice);
@@ -975,15 +954,22 @@ contract MockMorpho is IMorpho {
 
     function position(
         bytes32,
-        address
-    ) external pure override returns (uint256, uint128, uint128) {
-        return (0, 0, 0);
+        address user
+    ) external view override returns (uint256, uint128, uint128) {
+        // Return (supplyShares, borrowShares, collateral)
+        // We use borrowBalance as borrowShares for simplicity (1:1 ratio)
+        return (0, uint128(borrowBalance[user]), uint128(collateralBalance[user]));
     }
 
     function market(
         bytes32
-    ) external pure override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
-        return (0, 0, 0, 0, 0, 0);
+    ) external view override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
+        // Return (totalSupplyAssets, totalSupplyShares, totalBorrowAssets, totalBorrowShares, lastUpdate, fee)
+        // For simplicity, use 1:1 ratio for shares:assets
+        uint128 totalBorrow = 0;
+        // Sum all borrows (simplified - in real tests we'd track this properly)
+        // For now just return a large enough value that division works
+        return (0, 0, type(uint128).max, type(uint128).max, 0, 0);
     }
 
     function accrueInterest(
@@ -1150,9 +1136,9 @@ contract LeverageRouterOffsetTest is Test {
         morpho.supplyCollateral(params, shares, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
 
-        // Close leverage
+        // Close leverage (router queries actual debt from Morpho)
         morpho.setAuthorization(address(router), true);
-        router.closeLeverage(2000 * 1e6, shares, 100, block.timestamp + 1 hours);
+        router.closeLeverage(shares, 100, block.timestamp + 1 hours);
 
         vm.stopPrank();
 

@@ -68,12 +68,10 @@ contract LeverageRouterForkTest is BaseForkTest {
         IERC20(USDC).approve(address(leverageRouter), principal);
         leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debtAssets = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
+        (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
-        leverageRouter.closeLeverage(debtAssets, collateral, 100, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         uint256 usdcReturned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
         vm.stopPrank();
 
@@ -94,11 +92,9 @@ contract LeverageRouterForkTest is BaseForkTest {
 
         leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
+        (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        leverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
@@ -174,14 +170,11 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
         bytes32 marketId = _getMarketId(marketParams);
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
+        (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
 
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debtAssets = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
-
-        bullLeverageRouter.closeLeverage(debtAssets, collateral, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdcReturned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
@@ -204,12 +197,9 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
 
         bytes32 marketId = _getMarketId(marketParams);
-        (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
+        (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
-        uint256 debt = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
-
-        bullLeverageRouter.closeLeverage(debt, collateral, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);

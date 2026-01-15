@@ -181,15 +181,15 @@ contract BullLeverageRouter is LeverageRouterBase {
     /**
      * @notice Close a Leveraged DXY-BULL Position in one transaction.
      * @dev Uses a single DXY-BEAR flash mint to unwind positions efficiently.
-     *      If debt exists, extra BEAR is flash minted and sold for USDC to repay.
-     * @param debtToRepay Amount of USDC debt to repay. Can be 0 if no debt.
-     * @param collateralToWithdraw Amount of sDXY-BULL collateral to withdraw.
+     *      Queries actual debt from Morpho to ensure full repayment even if interest accrued.
+     * @param collateralToWithdraw Amount of sDXY-BULL shares to withdraw from Morpho.
+     *        NOTE: This is staked token shares, not underlying DXY-BULL amount.
+     *        Use STAKED_DXY_BULL.previewRedeem() to convert shares to underlying.
      * @param maxSlippageBps Maximum slippage tolerance in basis points.
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
      */
     function closeLeverage(
-        uint256 debtToRepay,
         uint256 collateralToWithdraw,
         uint256 maxSlippageBps,
         uint256 deadline
@@ -198,6 +198,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
         if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
         if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+
+        // Query actual debt from Morpho (includes accrued interest)
+        uint256 debtToRepay = _getActualDebt(msg.sender);
 
         // Convert staked shares to underlying BULL amount (for pair matching)
         uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
@@ -231,6 +234,35 @@ contract BullLeverageRouter is LeverageRouterBase {
         IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
 
         // Event emitted in _executeClose callback
+    }
+
+    /// @notice Returns the user's current debt in this market (includes accrued interest).
+    /// @param user The address to query debt for.
+    /// @return debt The actual debt amount in USDC (rounded up).
+    function getActualDebt(
+        address user
+    ) external view returns (uint256 debt) {
+        return _getActualDebt(user);
+    }
+
+    /// @dev Computes actual debt from Morpho position, rounded up to ensure full repayment.
+    function _getActualDebt(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        if (borrowShares == 0) return 0;
+
+        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
+        if (totalBorrowShares == 0) return 0;
+
+        // Round up to ensure full repayment
+        return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+    }
+
+    /// @dev Computes market ID from marketParams.
+    function _marketId() internal view returns (bytes32) {
+        return keccak256(abi.encode(marketParams));
     }
 
     /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
