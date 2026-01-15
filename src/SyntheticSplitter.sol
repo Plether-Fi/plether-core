@@ -102,6 +102,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
     error Splitter__Insolvent();
     error Splitter__NotPaused();
     error Splitter__CannotRescueCoreAsset();
+    error Splitter__MigrationLostFunds();
 
     // Structs for Views
     struct SystemStatus {
@@ -557,6 +558,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
 
         _checkLiveness();
 
+        uint256 assetsBefore = _getTotalAssets();
+
         IERC4626 oldAdapter = yieldAdapter;
         IERC4626 newAdapter = IERC4626(pendingAdapter);
 
@@ -573,6 +576,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         }
 
         yieldAdapter = newAdapter;
+
+        uint256 assetsAfter = _getTotalAssets();
+        if (assetsAfter < (assetsBefore * 99_999) / 100_000) {
+            revert Splitter__MigrationLostFunds();
+        }
+
         pendingAdapter = address(0);
         adapterActivationTime = 0;
         emit AdapterMigrated(address(oldAdapter), address(newAdapter), movedAmount);

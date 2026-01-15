@@ -50,6 +50,197 @@ contract MockCurvePool {
 
 }
 
+/// @title EvilYieldAdapter - Takes 50% fee on deposit
+contract EvilYieldAdapter is IERC4626 {
+
+    IERC20 public immutable asset_;
+    uint256 public totalAssets_;
+    mapping(address => uint256) public shares;
+    uint256 public totalShares;
+
+    constructor(
+        IERC20 _asset
+    ) {
+        asset_ = _asset;
+    }
+
+    function asset() external view returns (address) {
+        return address(asset_);
+    }
+
+    function totalAssets() external view returns (uint256) {
+        return totalAssets_;
+    }
+
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) external returns (uint256) {
+        asset_.transferFrom(msg.sender, address(this), assets);
+        uint256 stolen = assets / 2;
+        uint256 kept = assets - stolen;
+        totalAssets_ += kept;
+        shares[receiver] += kept;
+        totalShares += kept;
+        return kept;
+    }
+
+    function redeem(
+        uint256 _shares,
+        address receiver,
+        address owner
+    ) external returns (uint256) {
+        require(shares[owner] >= _shares, "Insufficient shares");
+        shares[owner] -= _shares;
+        totalShares -= _shares;
+        uint256 assets = _shares;
+        totalAssets_ -= assets;
+        asset_.transfer(receiver, assets);
+        return assets;
+    }
+
+    function convertToShares(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets;
+    }
+
+    function convertToAssets(
+        uint256 _shares
+    ) external pure returns (uint256) {
+        return _shares;
+    }
+
+    function maxRedeem(
+        address owner
+    ) external view returns (uint256) {
+        return shares[owner];
+    }
+
+    function balanceOf(
+        address account
+    ) external view returns (uint256) {
+        return shares[account];
+    }
+
+    function maxDeposit(
+        address
+    ) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxMint(
+        address
+    ) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function maxWithdraw(
+        address owner
+    ) external view returns (uint256) {
+        return shares[owner];
+    }
+
+    function previewDeposit(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets / 2;
+    }
+
+    function previewMint(
+        uint256 _shares
+    ) external pure returns (uint256) {
+        return _shares * 2;
+    }
+
+    function previewRedeem(
+        uint256 _shares
+    ) external pure returns (uint256) {
+        return _shares;
+    }
+
+    function previewWithdraw(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets;
+    }
+
+    function mint(
+        uint256 _shares,
+        address receiver
+    ) external returns (uint256) {
+        uint256 assets = _shares * 2;
+        asset_.transferFrom(msg.sender, address(this), assets);
+        totalAssets_ += _shares;
+        shares[receiver] += _shares;
+        totalShares += _shares;
+        return assets;
+    }
+
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) external returns (uint256) {
+        require(shares[owner] >= assets, "Insufficient shares");
+        shares[owner] -= assets;
+        totalShares -= assets;
+        totalAssets_ -= assets;
+        asset_.transfer(receiver, assets);
+        return assets;
+    }
+
+    function name() external pure returns (string memory) {
+        return "Evil Vault";
+    }
+
+    function symbol() external pure returns (string memory) {
+        return "EVIL";
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 6;
+    }
+
+    function totalSupply() external view returns (uint256) {
+        return totalShares;
+    }
+
+    function transfer(
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        shares[msg.sender] -= amount;
+        shares[to] += amount;
+        return true;
+    }
+
+    function allowance(
+        address,
+        address
+    ) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
+    function approve(
+        address,
+        uint256
+    ) external pure returns (bool) {
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        shares[from] -= amount;
+        shares[to] += amount;
+        return true;
+    }
+
+}
+
 /// @title Security Attack Vectors - TDD Failing Tests
 /// @notice All tests assert CORRECT behavior and FAIL until fixes are applied
 contract SecurityAttackVectorsTest is Test {
@@ -186,6 +377,45 @@ contract SecurityAttackVectorsTest is Test {
         splitter.burn(500 * 1e18);
 
         vm.stopPrank();
+    }
+
+    // ===========================================
+    // FINDING #6: Migration Sanity Check
+    // ===========================================
+    // Protection: Migration should revert if new adapter loses funds
+    // Test: Evil adapter that takes 50% fee on deposit
+
+    function test_SECURITY_F6_Migration_RevertsOnEvilAdapter() public {
+        vm.warp(1_735_689_600);
+
+        MockUSDC usdc = new MockUSDC();
+        MockOracle oracle = new MockOracle(100_000_000, "Basket");
+        address treasury = address(0x999);
+
+        uint64 nonce = vm.getNonce(address(this));
+        address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
+        MockYieldAdapter goodAdapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), predictedSplitter);
+        SyntheticSplitter splitter =
+            new SyntheticSplitter(address(oracle), address(usdc), address(goodAdapter), CAP, treasury, address(0));
+
+        // Mint tokens to create adapter balance
+        address alice = address(0x1);
+        usdc.mint(alice, 1000 * 1e6);
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 1000 * 1e6);
+        splitter.mint(500 * 1e18);
+        vm.stopPrank();
+
+        // Deploy evil adapter that steals 50% on deposit
+        EvilYieldAdapter evilAdapter = new EvilYieldAdapter(IERC20(address(usdc)));
+
+        // Propose migration to evil adapter
+        splitter.proposeAdapter(address(evilAdapter));
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Migration should revert because 50% loss exceeds 0.1 bps tolerance
+        vm.expectRevert(SyntheticSplitter.Splitter__MigrationLostFunds.selector);
+        splitter.finalizeAdapter();
     }
 
 }
