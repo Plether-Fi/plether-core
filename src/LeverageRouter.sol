@@ -40,6 +40,9 @@ contract LeverageRouter is LeverageRouterBase {
     /// @notice StakedToken vault for DXY-BEAR (used as Morpho collateral).
     IERC4626 public immutable STAKED_DXY_BEAR;
 
+    /// @notice Buffer for exchange rate drift protection (1% = 100 bps).
+    uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
+
     /// @notice Deploys LeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _curvePool Curve USDC/DXY-BEAR pool address.
@@ -132,8 +135,10 @@ contract LeverageRouter is LeverageRouterBase {
         // Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
         uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
+        // Apply exchange rate buffer (conservative estimate for drift protection)
+        uint256 bufferedDxyBearAmount = (dxyBearAmount * (10_000 - EXCHANGE_RATE_BUFFER_BPS)) / 10_000;
         // Use get_dy to find real market expectation
-        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
+        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, bufferedDxyBearAmount);
         uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
 
         if (debtToRepay > 0) {

@@ -418,8 +418,9 @@ contract BullLeverageRouter is LeverageRouterBase {
             uint256 usdcBalance = USDC.balanceOf(address(this));
             if (usdcBalance < maxUsdcToSpend) revert LeverageRouterBase__InsufficientOutput();
 
-            // Swap USDC → BEAR with min_dy = bearToBuy
-            CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, bearToBuy);
+            // Swap USDC → BEAR with slippage-tolerant min_dy
+            uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
+            CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, minBearOut);
         }
 
         // 7. Transfer remaining USDC to user
@@ -505,9 +506,9 @@ contract BullLeverageRouter is LeverageRouterBase {
             }
         }
 
-        // Total BEAR to buy back: dxyBullAmount + extraBearForDebt (flash fee is negligible)
-        // After burn, bearBalance=0, so we need to buy back the full flash amount
-        uint256 totalBearToBuyBack = dxyBullAmount + extraBearForDebt;
+        // Total BEAR to buy back includes exchange rate buffer (mirrors closeLeverage logic)
+        uint256 bufferedBullAmount = dxyBullAmount + (dxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
+        uint256 totalBearToBuyBack = bufferedBullAmount + extraBearForDebt;
 
         // Calculate USDC needed using get_dy for accurate AMM pricing
         usdcForBearBuyback = _estimateUsdcForBearBuyback(totalBearToBuyBack);
