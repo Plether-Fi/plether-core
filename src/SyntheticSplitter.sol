@@ -343,16 +343,14 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
         if (usdcRefund == 0) revert Splitter__ZeroRefund();
 
-        TOKEN_A.burn(msg.sender, amount); // Burn Bear Only
-
-        // Smart Withdrawal Logic for Emergency too
         uint256 localBalance = USDC.balanceOf(address(this));
-
         if (localBalance < usdcRefund) {
             uint256 shortage = usdcRefund - localBalance;
             _withdrawFromAdapter(shortage);
         }
+
         USDC.safeTransfer(msg.sender, usdcRefund);
+        TOKEN_A.burn(msg.sender, amount);
 
         emit EmergencyRedeemed(msg.sender, amount);
     }
