@@ -138,6 +138,7 @@ contract DeployToSepolia is Script {
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
     // Curve Pool Parameters (optimized for low-volatility DXY pair)
+    // Must match test/fork/BaseForkTest.sol for consistent behavior
     // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 4 * 10000 * 1000 = 40M
     uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
     uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15
@@ -146,11 +147,11 @@ contract DeployToSepolia is Script {
     uint256 constant CURVE_FEE_GAMMA = 1_000_000_000_000_000; // 1e15
     uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000; // 2e12
     uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000; // 1.46e14
-    uint256 constant CURVE_MA_EXP_TIME = 866; // ~14 minutes
-    // Initial price is DXY-BEAR value = CAP - DXY
-    // DXY from mock feeds ≈ $0.8654, CAP = $2.00
-    // DXY-BEAR price = $2.00 - $0.8654 = $1.1346
-    uint256 constant CURVE_INITIAL_PRICE = 1_134_563_600_000_000_000; // ~1.135 (USDC per DXY-BEAR)
+    uint256 constant CURVE_MA_HALF_TIME = 600; // 10 minutes (matches fork test)
+
+    // CAP scaled to 18 decimals for Curve price calculations
+    // CAP = 2e8 (8 decimals) -> 2e18 (18 decimals)
+    uint256 constant CAP_SCALED = 2e18;
 
     // ==========================================
     // DEPLOYMENT STATE
@@ -203,25 +204,32 @@ contract DeployToSepolia is Script {
         console.log("DXY-BEAR deployed:", address(deployed.dxyBear));
         console.log("DXY-BULL deployed:", address(deployed.dxyBull));
 
-        // Step 5: Deploy Curve pool with real DXY-BEAR address
-        deployed.curvePool = _deployCurvePool(address(deployed.usdc), address(deployed.dxyBear));
+        // Step 5: Calculate bearPrice from oracle (CAP - DXY)
+        (, int256 answer,,,) = deployed.basketOracle.latestRoundData();
+        uint256 dxyPrice = uint256(answer) * 1e10;
+        uint256 bearPrice = CAP_SCALED - dxyPrice;
+        console.log("DXY price (18 decimals):", dxyPrice);
+        console.log("BEAR price (18 decimals):", bearPrice);
+
+        // Step 6: Deploy Curve pool with real DXY-BEAR address and calculated price
+        deployed.curvePool = _deployCurvePool(address(deployed.usdc), address(deployed.dxyBear), bearPrice);
         console.log("Curve Pool deployed:", deployed.curvePool);
 
-        // Step 6: Configure BasketOracle with Curve pool
+        // Step 7: Configure BasketOracle with Curve pool
         deployed.basketOracle.setCurvePool(deployed.curvePool);
         console.log("BasketOracle configured with Curve pool");
 
-        // Step 7: Seed Curve pool with initial liquidity
-        _seedCurvePool(deployed, deployer);
+        // Step 8: Seed Curve pool with initial liquidity
+        _seedCurvePool(deployed, deployer, bearPrice);
 
-        // Step 8: Deploy Morpho Oracles
+        // Step 9: Deploy Morpho Oracles
         (deployed.morphoOracleBear, deployed.morphoOracleBull) = _deployMorphoOracles(address(deployed.basketOracle));
 
-        // Step 9: Deploy Staked Tokens
+        // Step 10: Deploy Staked Tokens
         (deployed.stakedBear, deployed.stakedBull) =
             _deployStakedTokens(address(deployed.dxyBear), address(deployed.dxyBull));
 
-        // Step 10: Deploy Staked Oracles
+        // Step 11: Deploy Staked Oracles
         (deployed.stakedOracleBear, deployed.stakedOracleBull) = _deployStakedOracles(
             address(deployed.stakedBear),
             address(deployed.stakedBull),
@@ -229,10 +237,10 @@ contract DeployToSepolia is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 11: Deploy Routers
+        // Step 12: Deploy Routers
         _deployRouters(deployed);
 
-        // Step 12: Mint USDC to deployer for testing
+        // Step 13: Mint USDC to deployer for testing
         deployed.usdc.mint(deployer, 100_000 * 1e6);
         console.log("Minted 100,000 USDC to deployer");
 
@@ -268,7 +276,8 @@ contract DeployToSepolia is Script {
 
     function _deployCurvePool(
         address usdc,
-        address dxyBear
+        address dxyBear,
+        uint256 initialPrice
     ) internal returns (address pool) {
         pool = ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
@@ -283,8 +292,8 @@ contract DeployToSepolia is Script {
                 CURVE_FEE_GAMMA,
                 CURVE_ALLOWED_EXTRA_PROFIT,
                 CURVE_ADJUSTMENT_STEP,
-                CURVE_MA_EXP_TIME,
-                CURVE_INITIAL_PRICE
+                CURVE_MA_HALF_TIME,
+                initialPrice
             );
     }
 
@@ -304,29 +313,24 @@ contract DeployToSepolia is Script {
 
     function _seedCurvePool(
         DeployedContracts memory d,
-        address deployer
+        address deployer,
+        uint256 bearPrice
     ) internal {
-        // Seed with balanced liquidity at CURVE_INITIAL_PRICE (USDC per DXY-BEAR)
-        uint256 usdcAmount = 10_000 * 1e6; // 10k USDC
-        uint256 bearAmount = (usdcAmount * 1e30) / CURVE_INITIAL_PRICE; // ~8.8k DXY-BEAR
+        uint256 bearLiquidity = 800_000e18;
+        uint256 usdcAmount = (bearLiquidity * bearPrice) / 1e18 / 1e12;
 
-        // Mint USDC to deployer
         d.usdc.mint(deployer, usdcAmount);
 
-        // Mint DXY-BEAR via Splitter (requires USDC)
-        // Add 1 to account for rounding up in splitter.mint()
-        uint256 mintCost = (bearAmount * CAP) / 1e20 + 1;
+        (uint256 mintCost,,) = d.splitter.previewMint(bearLiquidity);
         d.usdc.mint(deployer, mintCost);
         d.usdc.approve(address(d.splitter), mintCost);
-        d.splitter.mint(bearAmount);
+        d.splitter.mint(bearLiquidity);
 
-        // Approve Curve pool
         d.usdc.approve(d.curvePool, usdcAmount);
-        IERC20(address(d.dxyBear)).approve(d.curvePool, bearAmount);
+        IERC20(address(d.dxyBear)).approve(d.curvePool, bearLiquidity);
 
-        // Add liquidity
-        ICurveTwocryptoPool(d.curvePool).add_liquidity([usdcAmount, bearAmount], 0);
-        console.log("Curve pool seeded with liquidity matching initial price");
+        ICurveTwocryptoPool(d.curvePool).add_liquidity([usdcAmount, bearLiquidity], 0);
+        console.log("Curve pool seeded: %s USDC + %s DXY-BEAR", usdcAmount / 1e6, bearLiquidity / 1e18);
     }
 
     function _deployMorphoOracles(

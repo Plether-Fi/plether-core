@@ -169,6 +169,32 @@ Run a specific fork test file:
 source .env && forge test --match-path test/fork/LeverageRouterFork.t.sol --fork-url $MAINNET_RPC_URL -vvv
 ```
 
+### Local Development (Anvil)
+
+For frontend development and testing without spending real ETH:
+
+```bash
+# 1. Start local Anvil node forking Ethereum mainnet
+anvil --fork-url $MAINNET_RPC_URL --chain-id 31337
+
+# 2. Deploy all contracts (mints 100k USDC to deployer)
+SEPOLIA_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+forge script script/DeployToSepolia.s.sol --tc DeployToSepolia \
+  --rpc-url http://127.0.0.1:8545 \
+  --broadcast
+```
+
+**Anvil Test Accounts** (pre-funded with 10,000 ETH each):
+
+| Account | Address | Private Key |
+|---------|---------|-------------|
+| #0 | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` | `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80` |
+| #1 | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` | `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d` |
+
+**MetaMask Setup:**
+1. Import a test private key (Settings → Import Account)
+2. Add network: RPC `http://127.0.0.1:8545`, Chain ID `31337`
+
 ### Format
 
 ```bash
