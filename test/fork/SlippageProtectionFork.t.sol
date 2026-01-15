@@ -430,7 +430,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         console.log("previewZapMint - Actual tokens:", actualTokensOut);
 
         assertApproxEqRel(
-            actualTokensOut, previewTokensOut, 0.001e18, "BUG: previewZapMint should match actual within 0.1%"
+            actualTokensOut, previewTokensOut, 0.0001e18, "BUG: previewZapMint should match actual within 0.01%"
         );
     }
 
@@ -456,7 +456,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         console.log("previewZapBurn - Actual USDC:", actualUsdcOut);
 
         assertApproxEqRel(
-            actualUsdcOut, previewUsdcOut, 0.001e18, "BUG: previewZapBurn should match actual within 0.1%"
+            actualUsdcOut, previewUsdcOut, 0.0001e18, "BUG: previewZapBurn should match actual within 0.01%"
         );
     }
 
@@ -513,7 +513,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
             console.log("Actual:", actualTokensOut);
             console.log("---");
 
-            assertApproxEqRel(actualTokensOut, previewTokensOut, 0.001e18, "Preview should match actual within 0.1%");
+            assertApproxEqRel(actualTokensOut, previewTokensOut, 0.0001e18, "Preview should match actual within 0.01%");
         }
     }
 

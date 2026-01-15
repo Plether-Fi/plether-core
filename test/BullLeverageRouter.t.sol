@@ -547,17 +547,18 @@ contract BullLeverageRouterTest is Test {
         // With CAP=$2.00: 3000e18 tokens redeem to 6000 USDC (1 token = $2)
         assertEq(expectedUSDC, 6000 * 1e6, "Incorrect expected USDC");
 
-        // At 1:1 rate with 2000 USDC debt:
+        // At 1:1 rate with 2000 USDC debt and 1% exchange rate buffer:
+        // - bufferedBullAmount = 3000 + (3000 * 1%) = 3030e18
         // - extraBearForDebt = 2000e18 BEAR (to sell for debt repayment)
-        // - totalBearToBuyBack = collateral (3000) + extraBearForDebt (2000) = 5000e18
-        // - usdcForBearBuyback = 5000 USDC (at 1:1 rate)
-        assertApproxEqRel(usdcForBearBuyback, 5000 * 1e6, 0.001e18, "Incorrect BEAR buyback cost");
+        // - totalBearToBuyBack = bufferedBullAmount (3030) + extraBearForDebt (2000) = 5030e18
+        // - usdcForBearBuyback = 5030 USDC (at 1:1 rate)
+        assertApproxEqRel(usdcForBearBuyback, 5030 * 1e6, 0.001e18, "Incorrect BEAR buyback cost");
 
         // Net USDC flow:
         // + expectedUSDC (6000) + usdcFromBearSale (2000) = 8000 inflows
-        // - debtToRepay (2000) - usdcForBearBuyback (5000) = 7000 outflows
-        // expectedReturn = 8000 - 7000 = 1000
-        assertApproxEqRel(expectedReturn, 1000 * 1e6, 0.001e18, "Incorrect expected return");
+        // - debtToRepay (2000) - usdcForBearBuyback (5030) = 7030 outflows
+        // expectedReturn = 8000 - 7030 = 970
+        assertApproxEqRel(expectedReturn, 970 * 1e6, 0.001e18, "Incorrect expected return");
     }
 
     function test_PreviewCloseLeverage_MatchesActual() public {
