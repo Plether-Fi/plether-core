@@ -295,15 +295,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable, Pausable, ReentrancyG
         // Success via withdraw
         }
         catch {
-            // Fallback: try redeem with equivalent shares
             uint256 sharesToRedeem = yieldAdapter.convertToShares(amount);
-            // Add 1 to handle rounding (ensure we get at least `amount`)
             if (sharesToRedeem > 0) {
-                sharesToRedeem += 1;
+                uint256 maxShares = yieldAdapter.maxRedeem(address(this));
+                sharesToRedeem = sharesToRedeem + 1 > maxShares ? maxShares : sharesToRedeem + 1;
             }
-            try yieldAdapter.redeem(sharesToRedeem, address(this), address(this)) {
-            // Success via redeem
-            }
+            try yieldAdapter.redeem(sharesToRedeem, address(this), address(this)) {}
             catch {
                 revert Splitter__AdapterWithdrawFailed();
             }

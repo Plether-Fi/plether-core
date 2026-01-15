@@ -186,7 +186,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable {
         if (spotBear18 == 0) revert BasketOracle__InvalidPrice(address(pool));
 
         uint256 diff = theoreticalBear18 > spotBear18 ? theoreticalBear18 - spotBear18 : spotBear18 - theoreticalBear18;
-        uint256 basePrice = theoreticalBear18 < spotBear18 ? theoreticalBear18 : spotBear18;
+        uint256 basePrice = theoreticalBear18 > spotBear18 ? theoreticalBear18 : spotBear18;
         uint256 threshold = (basePrice * MAX_DEVIATION_BPS) / 10_000;
 
         if (diff > threshold) {

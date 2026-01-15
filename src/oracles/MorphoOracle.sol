@@ -26,8 +26,14 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice If true, returns CAP - Price (for DXY-BULL).
     bool public immutable IS_INVERSE;
 
+    /// @notice Maximum age for valid oracle price.
+    uint256 public constant STALENESS_TIMEOUT = 8 hours;
+
     /// @notice Thrown when source oracle returns zero or negative price.
     error MorphoOracle__InvalidPrice();
+
+    /// @notice Thrown when source oracle data is stale.
+    error MorphoOracle__StalePrice();
 
     /// @notice Creates Morpho-compatible oracle wrapper.
     /// @param _basketOracle BasketOracle address.
@@ -46,35 +52,26 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice Returns collateral price scaled to 1e36.
     /// @return Price of 1 DXY token in USDC terms (1e36 scale).
     function price() external view override returns (uint256) {
-        // 1. Get Price from Basket (8 decimals)
-        (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
+        (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
 
-        // Safety: Valid price and not stale (simple check, consumer can add strict staleness)
         if (rawPrice <= 0) revert MorphoOracle__InvalidPrice();
+        if (block.timestamp > updatedAt + STALENESS_TIMEOUT) revert MorphoOracle__StalePrice();
 
         uint256 basketPrice = uint256(rawPrice);
         uint256 finalPrice;
 
-        // 2. Calculate Token Value
         if (IS_INVERSE) {
-            // Logic for DXY-BULL - inverse token
-            // Value = Cap - Basket
-
-            if (basketPrice >= CAP) {
-                // Scenario: Dollar crashed hard, or Basket pumped hard.
-                // The Bull token is effectively worthless (or negative, which implies 0).
-                // We return 0 so the lending market knows the collateral is dead.
+            if (basketPrice > CAP) {
                 return 0;
             }
             finalPrice = CAP - basketPrice;
+            if (finalPrice == 0) {
+                return 1;
+            }
         } else {
-            // Logic for DXY-BEAR - direct token
-            // Value = Basket
             finalPrice = basketPrice;
         }
 
-        // 3. Scale Up to 1e36
-        // Example: Price $1.00 (10^8) * 10^28 = 10^36
         return finalPrice * DecimalConstants.CHAINLINK_TO_MORPHO_SCALE;
     }
 

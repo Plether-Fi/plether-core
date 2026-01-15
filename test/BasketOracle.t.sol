@@ -411,20 +411,22 @@ contract BasketOracleTest is Test {
         basket.latestRoundData();
     }
 
-    function test_DeviationCheck_RevertsAtExactBoundary() public {
-        // theoreticalBear = $0.95, spot = $0.931
-        // diff = 0.019 ether
-        // threshold using min(0.931) = 0.01862 ether -> diff > threshold, REVERT
-        // threshold using max(0.95) = 0.019 ether -> diff == threshold, PASS
-        // This catches basePrice selection mutation
+    function test_DeviationCheck_PassesAtExactBoundary() public {
+        // theoreticalBear = $0.95, spot = $0.931 (2% below)
+        // With MAX-based threshold: basePrice = 0.95, threshold = 0.019
+        // diff = 0.019, diff == threshold -> PASS
         curvePool.setPrice(0.931 ether);
+        basket.latestRoundData();
+    }
+
+    function test_DeviationCheck_RevertsWhenExceedingBoundary() public {
+        // theoreticalBear = $0.95, spot = $0.93 (>2% below)
+        // With MAX-based threshold: basePrice = 0.95, threshold = 0.019
+        // diff = 0.02, diff > threshold -> REVERT
+        curvePool.setPrice(0.93 ether);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                BasketOracle.BasketOracle__PriceDeviation.selector,
-                0.95 ether, // theoreticalBear
-                0.931 ether // spotBear
-            )
+            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, 0.95 ether, 0.93 ether)
         );
         basket.latestRoundData();
     }

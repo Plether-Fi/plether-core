@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
+import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
 import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
@@ -25,6 +26,15 @@ contract LiquidationForkTest is BaseForkTest {
 
     address alice = address(0xA11CE);
     address liquidator = address(0x11001DA70B);
+
+    function _refreshOracleTimestamp() internal {
+        (, int256 price,,,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+        vm.mockCall(
+            CL_EUR,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), price, block.timestamp, block.timestamp, uint80(1))
+        );
+    }
 
     function setUp() public {
         _setupFork();
@@ -105,6 +115,7 @@ contract LiquidationForkTest is BaseForkTest {
         uint256 ltvInitial = _calculateLTV(marketId, alice, bearMarketParams);
 
         vm.warp(block.timestamp + 3 * 365 days);
+        _refreshOracleTimestamp();
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
         uint256 ltvAfter = _calculateLTV(marketId, alice, bearMarketParams);
@@ -161,6 +172,7 @@ contract LiquidationForkTest is BaseForkTest {
         (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
         vm.warp(block.timestamp + 10 * 365 days);
+        _refreshOracleTimestamp();
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
         uint256 ltv = _calculateLTV(marketId, alice, bearMarketParams);
