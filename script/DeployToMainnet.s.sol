@@ -285,7 +285,16 @@ contract DeployToMainnet is Script {
         quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
 
-        return new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP, owner);
+        // Base prices for normalization (8 decimals, January 1, 2026 reference)
+        uint256[] memory basePrices = new uint256[](6);
+        basePrices[0] = 117_500_000; // EUR: $1.1750
+        basePrices[1] = 638_000; // JPY: $0.00638
+        basePrices[2] = 134_480_000; // GBP: $1.3448
+        basePrices[3] = 72_880_000; // CAD: $0.7288
+        basePrices[4] = 10_860_000; // SEK: $0.1086
+        basePrices[5] = 126_100_000; // CHF: $1.2610
+
+        return new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, owner);
     }
 
     function _deployCurvePool(

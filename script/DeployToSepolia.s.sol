@@ -190,10 +190,10 @@ contract DeployToSepolia is Script {
         console.log("MockUSDC deployed:", address(deployed.usdc));
 
         // Step 2: Deploy mock Chainlink feeds
-        (address[] memory feeds, uint256[] memory quantities) = _deployMockFeeds();
+        (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices) = _deployMockFeeds();
 
         // Step 3: Deploy BasketOracle (without Curve pool - will be set later)
-        deployed.basketOracle = new BasketOracle(feeds, quantities, MAX_DEVIATION_BPS, CAP, deployer);
+        deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, deployer);
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates DXY-BEAR/BULL)
@@ -256,7 +256,10 @@ contract DeployToSepolia is Script {
     // INTERNAL HELPERS
     // ==========================================
 
-    function _deployMockFeeds() internal returns (address[] memory feeds, uint256[] memory quantities) {
+    function _deployMockFeeds()
+        internal
+        returns (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices)
+    {
         feeds = new address[](6);
         feeds[0] = address(new MockV3Aggregator(105_000_000)); // ~1.05 USD per EUR
         feeds[1] = address(new MockV3Aggregator(640_000)); // ~0.0064 USD per JPY
@@ -272,6 +275,15 @@ contract DeployToSepolia is Script {
         quantities[3] = 91 * 10 ** 15; // CAD: 9.1%
         quantities[4] = 42 * 10 ** 15; // SEK: 4.2%
         quantities[5] = 36 * 10 ** 15; // CHF: 3.6%
+
+        // Base prices for normalization (8 decimals, January 1, 2026 reference)
+        basePrices = new uint256[](6);
+        basePrices[0] = 117_500_000; // EUR: $1.1750
+        basePrices[1] = 638_000; // JPY: $0.00638
+        basePrices[2] = 134_480_000; // GBP: $1.3448
+        basePrices[3] = 72_880_000; // CAD: $0.7288
+        basePrices[4] = 10_860_000; // SEK: $0.1086
+        basePrices[5] = 126_100_000; // CHF: $1.2610
     }
 
     function _deployCurvePool(
