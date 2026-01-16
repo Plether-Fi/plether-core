@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
-import {StdCheats} from "forge-std/StdCheats.sol";
 
 interface IMintable {
 
@@ -23,10 +22,15 @@ interface IMintable {
  *
  * Usage:
  *   1. Start anvil: anvil --fork-url $MAINNET_RPC_URL
- *   2. Update addresses below to match your deployment
+ *   2. Set environment variables (or add to .env):
+ *      export USDC=0x...
+ *      export STAKED_BEAR=0x...
+ *      export STAKED_BULL=0x...
+ *      export STAKED_ORACLE_BEAR=0x...
+ *      export STAKED_ORACLE_BULL=0x...
  *   3. Run: forge script script/SeedMorphoMarkets.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
  */
-contract SeedMorphoMarkets is Script, StdCheats {
+contract SeedMorphoMarkets is Script {
 
     // ==========================================
     // MORPHO CONSTANTS (same across all chains)
@@ -38,22 +42,12 @@ contract SeedMorphoMarkets is Script, StdCheats {
     uint256 constant LLTV = 0.77e18; // 77%
     uint256 constant SEED_AMOUNT = 1_000_000 * 1e6; // 1M USDC per market
 
-    // ==========================================
-    // YOUR DEPLOYED ADDRESSES (update these)
-    // ==========================================
-
-    address constant USDC = address(0);
-    address constant STAKED_BEAR = address(0); // sDXY-BEAR
-    address constant STAKED_BULL = address(0); // sDXY-BULL
-    address constant STAKED_ORACLE_BEAR = address(0);
-    address constant STAKED_ORACLE_BULL = address(0);
-
     function run() external {
-        require(USDC != address(0), "Set USDC address");
-        require(STAKED_BEAR != address(0), "Set STAKED_BEAR address");
-        require(STAKED_BULL != address(0), "Set STAKED_BULL address");
-        require(STAKED_ORACLE_BEAR != address(0), "Set STAKED_ORACLE_BEAR address");
-        require(STAKED_ORACLE_BULL != address(0), "Set STAKED_ORACLE_BULL address");
+        address usdc = vm.envAddress("USDC");
+        address stakedBear = vm.envAddress("STAKED_BEAR");
+        address stakedBull = vm.envAddress("STAKED_BULL");
+        address stakedOracleBear = vm.envAddress("STAKED_ORACLE_BEAR");
+        address stakedOracleBull = vm.envAddress("STAKED_ORACLE_BULL");
 
         uint256 pk =
             vm.envOr("PRIVATE_KEY", uint256(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80));
@@ -63,14 +57,14 @@ contract SeedMorphoMarkets is Script, StdCheats {
 
         vm.startBroadcast(pk);
 
-        deal(USDC, deployer, SEED_AMOUNT * 2);
+        IMintable(usdc).mint(deployer, SEED_AMOUNT * 2);
 
         MarketParams memory bearParams = MarketParams({
-            loanToken: USDC, collateralToken: STAKED_BEAR, oracle: STAKED_ORACLE_BEAR, irm: MORPHO_IRM, lltv: LLTV
+            loanToken: usdc, collateralToken: stakedBear, oracle: stakedOracleBear, irm: MORPHO_IRM, lltv: LLTV
         });
 
         MarketParams memory bullParams = MarketParams({
-            loanToken: USDC, collateralToken: STAKED_BULL, oracle: STAKED_ORACLE_BULL, irm: MORPHO_IRM, lltv: LLTV
+            loanToken: usdc, collateralToken: stakedBull, oracle: stakedOracleBull, irm: MORPHO_IRM, lltv: LLTV
         });
 
         IMorpho morpho = IMorpho(MORPHO);
@@ -78,7 +72,7 @@ contract SeedMorphoMarkets is Script, StdCheats {
         morpho.createMarket(bearParams);
         morpho.createMarket(bullParams);
 
-        IERC20(USDC).approve(MORPHO, SEED_AMOUNT * 2);
+        IERC20(usdc).approve(MORPHO, SEED_AMOUNT * 2);
         morpho.supply(bearParams, SEED_AMOUNT, 0, deployer, "");
         morpho.supply(bullParams, SEED_AMOUNT, 0, deployer, "");
 
@@ -94,17 +88,17 @@ contract SeedMorphoMarkets is Script, StdCheats {
         console.log("");
         console.log("BEAR Market:");
         console.log("  Market ID:   ", vm.toString(bearMarketId));
-        console.log("  Loan Token:  ", USDC);
-        console.log("  Collateral:  ", STAKED_BEAR);
-        console.log("  Oracle:      ", STAKED_ORACLE_BEAR);
+        console.log("  Loan Token:  ", usdc);
+        console.log("  Collateral:  ", stakedBear);
+        console.log("  Oracle:      ", stakedOracleBear);
         console.log("  LLTV:         77%");
         console.log("  Liquidity:   ", SEED_AMOUNT / 1e6, "USDC");
         console.log("");
         console.log("BULL Market:");
         console.log("  Market ID:   ", vm.toString(bullMarketId));
-        console.log("  Loan Token:  ", USDC);
-        console.log("  Collateral:  ", STAKED_BULL);
-        console.log("  Oracle:      ", STAKED_ORACLE_BULL);
+        console.log("  Loan Token:  ", usdc);
+        console.log("  Collateral:  ", stakedBull);
+        console.log("  Oracle:      ", stakedOracleBull);
         console.log("  LLTV:         77%");
         console.log("  Liquidity:   ", SEED_AMOUNT / 1e6, "USDC");
         console.log("========================================");

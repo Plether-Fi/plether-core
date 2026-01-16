@@ -207,6 +207,17 @@ SEPOLIA_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b
 forge script script/DeployToSepolia.s.sol --tc DeployToSepolia \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
+
+# 3. (Optional) Seed Morpho markets with 1M USDC each for leverage testing
+#    Use addresses from step 2 output
+USDC=<MockUSDC address> \
+STAKED_BEAR=<StakedToken BEAR address> \
+STAKED_BULL=<StakedToken BULL address> \
+STAKED_ORACLE_BEAR=<StakedOracle BEAR address> \
+STAKED_ORACLE_BULL=<StakedOracle BULL address> \
+forge script script/SeedMorphoMarkets.s.sol \
+  --rpc-url http://127.0.0.1:8545 \
+  --broadcast
 ```
 
 **Anvil Test Accounts** (pre-funded with 10,000 ETH each):
