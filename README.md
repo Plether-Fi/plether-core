@@ -47,7 +47,30 @@ User deposits USDC
 | [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
-> **Note:** The BasketOracle uses **arithmetic weighting** (`Price = Σ(Price_i × Quantity_i)`) rather than the geometric weighting used by the official ICE DXY index. This is a deliberate design choice for: (1) gas efficiency and on-chain feasibility, and (2) eliminating rebalancing requirements, which guarantees protocol solvency.
+#### BasketOracle Design
+
+The BasketOracle computes a DXY-like index using **arithmetic weighting** rather than the geometric weighting of the official ICE DXY index:
+
+```
+Price = Σ(Price_i × Quantity_i)
+```
+
+This design choice enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
+
+**Inverse Relationship:** Because the oracle measures the USD value of a foreign currency basket, it moves **inversely** to the real DXY index. When the dollar strengthens, DXY rises but our basket value falls (foreign currencies are worth less in USD terms). This is why DXY-BEAR appreciates when the basket value rises (dollar weakens).
+
+**Fixed Base Weights** (immutable, set at deployment based on January 1, 2026 prices):
+
+| Currency | Base Price (USD) | Weight |
+|----------|------------------|--------|
+| EUR | 1.1750 | 57.6% |
+| JPY | 0.00638 | 13.6% |
+| GBP | 1.3448 | 11.9% |
+| CAD | 0.7288 | 9.1% |
+| SEK | 0.1086 | 4.2% |
+| CHF | 1.2610 | 3.6% |
+
+The base quantities are permanently fixed and cannot be changed after deployment.
 
 ### Routing Layer
 
