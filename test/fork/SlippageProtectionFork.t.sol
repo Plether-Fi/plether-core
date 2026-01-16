@@ -97,6 +97,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 priceBull = capPrice - priceBear;
         uint256 expectedBull = (userAmount * 1e18) / priceBull;
 
+        // Whale dumps BEAR, crashing price and making zapMint uneconomical
         _whaleDumpBear(100_000e18);
 
         uint256 minOut = (expectedBull * 95) / 100;
@@ -141,6 +142,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 grossUsdc = (bullBalance * capPrice) / 1e18;
         uint256 expectedUsdc = (grossUsdc * 90) / 100;
 
+        // Whale pumps BEAR price, making BEAR buyback for redemption too expensive
         _whalePumpBear(500_000e6);
 
         uint256 minUsdcOut = (expectedUsdc * 95) / 100;
@@ -160,7 +162,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
 
-        (, uint256 totalUSDC, uint256 expectedBear,) = leverageRouter.previewOpenLeverage(principal, leverage);
+        (,, uint256 expectedBear,) = leverageRouter.previewOpenLeverage(principal, leverage);
 
         leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
         vm.stopPrank();
@@ -168,8 +170,15 @@ contract SlippageProtectionForkTest is BaseForkTest {
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
         (,, uint128 actualCollateral) = IMorpho(MORPHO).position(marketId, alice);
 
+        // StakedToken uses 1000x share offset for inflation attack protection
+        uint256 actualTokens = actualCollateral / 1000;
+
+        // Slippage sources:
+        // - Curve swap fee (~0.04%) to buy BEAR
+        // - Curve pool price impact (depends on trade size vs liquidity)
+        // Threshold: <1% ensures large trades still get fair execution
         uint256 minAcceptable = (expectedBear * 99) / 100;
-        assertGe(actualCollateral, minAcceptable, "Slippage exceeded 1%");
+        assertGe(actualTokens, minAcceptable, "Slippage exceeded 1%");
     }
 
     function test_LeverageRouter_SucceedsWithReasonableSlippage() public {
@@ -205,8 +214,15 @@ contract SlippageProtectionForkTest is BaseForkTest {
         bytes32 marketId = keccak256(abi.encode(bullMarketParams));
         (,, uint128 actualCollateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        uint256 minAcceptable = (expectedBull * 98) / 100;
-        assertGe(actualCollateral, minAcceptable, "Slippage exceeded tolerance");
+        // StakedToken uses 1000x share offset for inflation attack protection
+        uint256 actualTokens = actualCollateral / 1000;
+
+        // Slippage sources (Bull has more steps than Bear):
+        // - Mint pairs from Splitter (no slippage)
+        // - Curve swap to sell BEAR (~0.04% fee + price impact)
+        // Threshold: <1% ensures fair execution even for larger trades
+        uint256 minAcceptable = (expectedBull * 99) / 100;
+        assertGe(actualTokens, minAcceptable, "Slippage exceeded 1%");
     }
 
     function test_CloseLeverage_SlippageProtectionOnExit() public {
@@ -232,7 +248,13 @@ contract SlippageProtectionForkTest is BaseForkTest {
         (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
         assertEq(collateralAfter, 0, "Collateral should be 0");
         assertEq(borrowSharesAfter, 0, "Debt should be 0");
-        assertLt(totalCost, (principal * 5) / 100, "Round-trip cost too high");
+
+        // Round-trip cost sources:
+        // - Open: Curve swap fee + price impact to buy BEAR
+        // - Close: Curve swap fee + price impact to sell BEAR
+        // - Price impacts partially offset (buy then sell same direction)
+        // Threshold: <1% for normal market conditions
+        assertLt(totalCost, (principal * 1) / 100, "Round-trip cost too high");
     }
 
     function test_ZapMint_RevertsOnExpiredDeadline() public {
@@ -283,7 +305,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
 
     /// @notice Verify round-trip swap (buy then sell) loses only fees, not principal
     function test_CurvePool_RoundTripSwapLosesOnlyFees() public {
-        uint256 swapAmount = 100e6; // 100 USDC - small amount
+        uint256 swapAmount = 100e6;
 
         vm.startPrank(alice);
         uint256 usdcBefore = IERC20(USDC).balanceOf(alice);
@@ -306,101 +328,89 @@ contract SlippageProtectionForkTest is BaseForkTest {
         vm.stopPrank();
 
         uint256 loss = usdcBefore - usdcAfter;
-        uint256 maxAcceptableLoss = (swapAmount * 2) / 100; // 2% max loss for round-trip (fees + slippage)
 
+        // Round-trip loss sources:
+        // - 2x Curve swap fees (~0.04% each)
+        // - Price impact from moving pool state (buy raises price, sell lowers it)
+        // Threshold: <2% ensures pool fees are reasonable
+        uint256 maxAcceptableLoss = (swapAmount * 2) / 100;
         assertLt(loss, maxAcceptableLoss, "Round-trip loss exceeds acceptable fee threshold");
     }
 
     /// @notice Verify small swaps don't create arbitrage (buy BEAR price ≈ sell BEAR price)
     function test_CurvePool_SmallSwapNoBidAskArbitrage() public {
-        uint256 smallAmount = 10e6; // 10 USDC
+        uint256 smallAmount = 10e6;
 
         // Get buy price (USDC -> BEAR)
         uint256 bearForUsdc = ICurvePoolExtended(curvePool).get_dy(0, 1, smallAmount);
-        uint256 buyPrice = (smallAmount * 1e18) / bearForUsdc; // USDC per BEAR
+        uint256 buyPrice = (smallAmount * 1e18) / bearForUsdc;
 
         // Get sell price (BEAR -> USDC) for equivalent amount
         uint256 usdcForBear = ICurvePoolExtended(curvePool).get_dy(1, 0, bearForUsdc);
-        uint256 sellPrice = (usdcForBear * 1e18) / bearForUsdc; // USDC per BEAR
+        uint256 sellPrice = (usdcForBear * 1e18) / bearForUsdc;
 
         // Buy price should be slightly higher than sell price (spread = fees)
         assertGt(buyPrice, sellPrice, "Buy price should be >= sell price");
 
-        // Spread should be less than 1% for small amounts
+        // Spread sources:
+        // - Curve swap fee applied to both directions
+        // - Any pool imbalance
+        // Threshold: <1% spread ensures efficient market for small trades
         uint256 spread = buyPrice - sellPrice;
-        uint256 maxSpread = buyPrice / 100; // 1%
+        uint256 maxSpread = buyPrice / 100;
         assertLt(spread, maxSpread, "Bid-ask spread too wide");
     }
 
     /// @notice Verify no profit from mint-and-sell arbitrage
-    function test_CurvePool_NoMintSellArbitrage() public {
-        uint256 mintAmount = 100e18; // 100 token pairs
+    function test_CurvePool_NoMintSellArbitrage() public view {
+        uint256 mintAmount = 100e18;
 
-        vm.startPrank(alice);
-
-        // Get mint cost
         (uint256 mintCost,,) = splitter.previewMint(mintAmount);
-
-        // Get expected USDC from selling BEAR on Curve
         uint256 bearSellValue = ICurvePoolExtended(curvePool).get_dy(1, 0, mintAmount);
 
-        // Theoretical BULL value (what you'd need to sell BULL for to complete arbitrage)
-        // In a no-arbitrage world: mintCost = bearSellValue + bullValue
-        // So bullValue = mintCost - bearSellValue (if negative, there's arbitrage)
-
-        // For no arbitrage: bearSellValue <= mintCost (you can't profit just by selling BEAR)
-        // Allow 5% tolerance for fees and slippage
+        // No-arbitrage condition: selling BEAR should not exceed mint cost
+        // (you still hold BULL which has positive value)
+        // Threshold: 5% tolerance for fees and market conditions
         uint256 maxBearValue = (mintCost * 105) / 100;
-
         assertLe(bearSellValue, maxBearValue, "BEAR sells for too much - arbitrage exists");
-
-        vm.stopPrank();
     }
 
     /// @notice Verify no profit from buy-and-burn arbitrage
-    function test_CurvePool_NoBuyBurnArbitrage() public {
-        uint256 pairAmount = 100e18; // 100 pairs (18 decimals)
-        uint256 usdcIn = 100e6; // 100 USDC to estimate prices (6 decimals)
+    function test_CurvePool_NoBuyBurnArbitrage() public view {
+        uint256 pairAmount = 100e18;
+        uint256 usdcIn = 100e6;
 
         // Get BEAR per USDC from Curve
         uint256 bearPerUsdc = ICurvePoolExtended(curvePool).get_dy(0, 1, usdcIn);
-        // BEAR price in USDC (6 decimals)
         uint256 bearPriceUsdc6 = (usdcIn * 1e18) / bearPerUsdc;
 
-        // Cost to buy 100 BEAR (in 6 decimal USDC)
+        // Cost to buy BEAR and BULL
         uint256 usdcForBear = (pairAmount * bearPriceUsdc6) / 1e18;
-
-        // BULL price = CAP - BEAR (estimate)
         uint256 bullPriceUsdc6 = (CAP_SCALED / 1e12) - bearPriceUsdc6;
         uint256 usdcForBull = (pairAmount * bullPriceUsdc6) / 1e18;
-
-        // Total cost to acquire pairs
         uint256 totalBuyCost = usdcForBear + usdcForBull;
 
-        // Burn/redeem value
         (uint256 redeemValue,) = splitter.previewBurn(pairAmount);
 
-        // Should NOT be profitable: totalBuyCost >= redeemValue
-        // In ideal market BEAR + BULL = CAP, so costs equal redeem value (break-even)
-        // With real trading fees, buy cost would be higher (loss)
+        // No-arbitrage: buying tokens on market and redeeming should not profit
+        // In efficient market: BEAR + BULL = CAP = redeem value
+        // With fees: buy cost > redeem value (loss)
         assertGe(totalBuyCost, redeemValue, "Buy-and-burn should not be profitable");
     }
 
     /// @notice Verify BEAR + BULL prices approximately sum to CAP (market efficiency)
-    function test_CurvePool_TokenPricesSumToCAP() public {
-        uint256 testAmount = 1e18; // 1 token
+    function test_CurvePool_TokenPricesSumToCAP() public view {
+        uint256 testAmount = 1e18;
 
-        // BEAR price from Curve (USDC per BEAR)
         uint256 usdcPerBear = ICurvePoolExtended(curvePool).get_dy(1, 0, testAmount);
+        uint256 usdcPerBull = CAP_SCALED / 1e12 - usdcPerBear;
 
-        // BULL price = CAP - BEAR (theoretical)
-        uint256 usdcPerBull = CAP_SCALED / 1e12 - usdcPerBear; // Scale to 6 decimals
-
-        // Sum should approximately equal CAP
         uint256 sum = usdcPerBear + usdcPerBull;
         uint256 capIn6Decimals = CAP_SCALED / 1e12;
 
-        // Allow 5% deviation
+        // Market efficiency check: BEAR + BULL should equal CAP
+        // Deviation indicates mispricing or arbitrage opportunity
+        // Threshold: 5% allows for fees and temporary imbalances
         uint256 minSum = (capIn6Decimals * 95) / 100;
         uint256 maxSum = (capIn6Decimals * 105) / 100;
 
@@ -410,10 +420,9 @@ contract SlippageProtectionForkTest is BaseForkTest {
 
     // ==========================================
     // PREVIEW FUNCTION ACCURACY TESTS
-    // These tests should FAIL, demonstrating bugs
     // ==========================================
 
-    /// @notice previewZapMint uses linear interpolation, should match actual within 0.1%
+    /// @notice previewZapMint should match actual execution within tolerance
     function test_PreviewZapMint_ShouldMatchActual() public {
         uint256 usdcAmount = 10_000e6;
 
@@ -426,15 +435,14 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 actualTokensOut = IERC20(bullToken).balanceOf(alice) - bullBefore;
         vm.stopPrank();
 
-        console.log("previewZapMint - Preview tokens:", previewTokensOut);
-        console.log("previewZapMint - Actual tokens:", actualTokensOut);
-
+        // Preview uses Curve's get_dy which matches actual swap output
+        // Threshold: 0.01% accounts for any rounding differences
         assertApproxEqRel(
-            actualTokensOut, previewTokensOut, 0.0001e18, "BUG: previewZapMint should match actual within 0.01%"
+            actualTokensOut, previewTokensOut, 0.0001e18, "previewZapMint should match actual within 0.01%"
         );
     }
 
-    /// @notice previewZapBurn uses linear interpolation for buyback cost
+    /// @notice previewZapBurn should match actual execution within tolerance
     function test_PreviewZapBurn_ShouldMatchActual() public {
         uint256 zapAmount = 10_000e6;
         vm.startPrank(alice);
@@ -452,15 +460,12 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 actualUsdcOut = IERC20(USDC).balanceOf(alice) - usdcBefore;
         vm.stopPrank();
 
-        console.log("previewZapBurn - Preview USDC:", previewUsdcOut);
-        console.log("previewZapBurn - Actual USDC:", actualUsdcOut);
-
-        assertApproxEqRel(
-            actualUsdcOut, previewUsdcOut, 0.0001e18, "BUG: previewZapBurn should match actual within 0.01%"
-        );
+        // Preview uses Curve's get_dy for buyback cost estimation
+        // Threshold: 0.01% accounts for any rounding differences
+        assertApproxEqRel(actualUsdcOut, previewUsdcOut, 0.0001e18, "previewZapBurn should match actual within 0.01%");
     }
 
-    /// @notice previewCloseLeverage uses linear interpolation for buyback cost
+    /// @notice previewCloseLeverage should match actual execution within tolerance
     function test_PreviewCloseLeverage_ShouldMatchActual() public {
         uint256 principal = 10_000e6;
         uint256 leverage = 2e18;
@@ -482,9 +487,8 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 actualReturn = IERC20(USDC).balanceOf(alice) - usdcBefore;
         vm.stopPrank();
 
-        console.log("previewCloseLeverage - Preview return:", previewReturn);
-        console.log("previewCloseLeverage - Actual return:", actualReturn);
-
+        // Preview estimates Curve swap output for BEAR buyback
+        // Threshold: 0.2% accounts for price movement during complex multi-step close
         assertApproxEqRel(actualReturn, previewReturn, 0.002e18, "previewCloseLeverage should match actual within 0.2%");
     }
 
@@ -508,11 +512,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
             uint256 actualTokensOut = IERC20(bullToken).balanceOf(alice) - bullBefore;
             vm.stopPrank();
 
-            console.log("Amount USDC:", usdcAmount / 1e6);
-            console.log("Preview:", previewTokensOut);
-            console.log("Actual:", actualTokensOut);
-            console.log("---");
-
+            // Preview should be accurate regardless of trade size (within pool liquidity)
             assertApproxEqRel(actualTokensOut, previewTokensOut, 0.0001e18, "Preview should match actual within 0.01%");
         }
     }

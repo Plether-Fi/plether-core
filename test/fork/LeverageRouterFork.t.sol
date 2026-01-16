@@ -77,7 +77,12 @@ contract LeverageRouterForkTest is BaseForkTest {
 
         (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
         assertEq(collateralAfter, 0, "Collateral should be cleared");
-        assertGt(usdcReturned, (principal * 97) / 100, "Should return >97% of principal");
+
+        // Cost sources for close:
+        // - Curve swap fee (~0.04%) to sell BEAR for USDC
+        // - Curve pool price impact (~0.05% for this size)
+        // Threshold: <1% allows for larger positions or worse pool conditions
+        assertGt(usdcReturned, (principal * 99) / 100, "Should return >99% of principal");
     }
 
     function test_LeverageRoundTrip_RealCurve_RealMorpho() public {
@@ -100,7 +105,11 @@ contract LeverageRouterForkTest is BaseForkTest {
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
         uint256 totalCost = aliceUsdcStart - aliceUsdcEnd;
 
-        assertLt(totalCost, (principal * 5) / 100, "Round-trip cost should be <5%");
+        // Round-trip cost sources:
+        // - 2x Curve swap fees (~0.04% each = ~0.08% total)
+        // - 2x Curve pool price impact (minimal for BEAR leverage, swaps partially offset)
+        // Threshold: <1% allows for larger positions or worse pool conditions
+        assertLt(totalCost, (principal * 1) / 100, "Round-trip cost should be <1%");
     }
 
     function _getMarketId(
@@ -181,7 +190,13 @@ contract BullLeverageRouterForkTest is BaseForkTest {
 
         (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
         assertEq(collateralAfter, 0, "Collateral should be cleared");
-        assertGt(usdcReturned, (principal * 95) / 100, "Should return >95% of principal");
+
+        // Cost sources for Bull close (higher than Bear due to more swap steps):
+        // - Curve swap fee to buy BEAR for pair redemption (~0.04%)
+        // - Curve pool price impact (~0.5% - buying BEAR raises price)
+        // - Flash mint fee (if any)
+        // Threshold: <2% allows for larger positions or worse pool conditions
+        assertGt(usdcReturned, (principal * 98) / 100, "Should return >98% of principal");
     }
 
     function test_LeverageRoundTrip_RealCurve_RealMorpho() public {
@@ -205,7 +220,12 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
         uint256 totalCost = aliceUsdcStart - aliceUsdcEnd;
 
-        assertLt(totalCost, (principal * 5) / 100, "Round-trip cost should be <5%");
+        // Round-trip cost sources (Bull leverage has more swap steps than Bear):
+        // - Open: Curve swap to sell BEAR (~0.04% fee + price impact)
+        // - Close: Curve swap to buy BEAR (~0.04% fee + price impact)
+        // - Price impacts compound: selling then buying BEAR doesn't fully offset
+        // Threshold: <2% allows for larger positions or worse pool conditions
+        assertLt(totalCost, (principal * 2) / 100, "Round-trip cost should be <2%");
     }
 
     function test_PreviewCloseLeverage_WithOffset() public {

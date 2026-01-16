@@ -126,6 +126,10 @@ contract FullCycleForkTest is BaseForkTest {
             assertEq(IERC20(bearToken).balanceOf(alice), 0, "Alice should have no BEAR tokens");
         }
 
+        // Direct mint/burn has no Curve swaps, so cost comes only from:
+        // - Rounding in share calculations (negligible)
+        // - Any yield adapter fees (none in test setup)
+        // Threshold: <1% to catch any unexpected leakage
         assertGt(usdcReturned, (usdcRequired * 99) / 100, "Should return ~100% of original USDC");
     }
 
@@ -188,6 +192,9 @@ contract FullCycleForkTest is BaseForkTest {
         assertEq(IERC20(bearToken).balanceOf(alice), 0, "Alice BEAR should be 0");
         assertEq(IERC20(bullToken).balanceOf(bob), 0, "Bob BULL should be 0");
         assertEq(IERC20(bearToken).balanceOf(bob), 0, "Bob BEAR should be 0");
+
+        // Direct mint/burn with no Curve interaction - cost is negligible
+        // Threshold: <1% to catch any unexpected leakage
         assertGt(aliceReturned, (aliceUsdc * 99) / 100, "Alice should get ~100% back");
         assertGt(bobReturned, (bobUsdc * 99) / 100, "Bob should get ~100% back");
     }
@@ -267,7 +274,10 @@ contract FullCycleForkTest is BaseForkTest {
             returned = IERC20(USDC).balanceOf(alice) - aliceUsdcBefore;
         }
 
-        assertGt(returned, (usdcRequired * 98) / 100, "Should return >98% of deposit");
+        // Direct mint/burn with yield accrual - harvested yield goes to treasury, not users
+        // User should get back their principal (minus any rounding)
+        // Threshold: <1% to catch any unexpected leakage
+        assertGt(returned, (usdcRequired * 99) / 100, "Should return >99% of deposit");
     }
 
 }

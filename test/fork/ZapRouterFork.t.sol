@@ -71,7 +71,6 @@ contract ZapRouterForkTest is BaseForkTest {
         zapRouter.zapMint(amountIn, 0, 100, block.timestamp + 1 hours);
 
         uint256 bullMinted = IERC20(bullToken).balanceOf(address(this)) - bullBefore;
-        console.log("BULL minted:", bullMinted);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(this));
 
@@ -81,12 +80,12 @@ contract ZapRouterForkTest is BaseForkTest {
         uint256 usdcAfter = IERC20(USDC).balanceOf(address(this));
         uint256 usdcReturned = usdcAfter - usdcBefore;
 
-        console.log("USDC returned:", usdcReturned);
-        console.log("Round-trip cost:", amountIn - usdcReturned);
-
-        // Round-trip costs include: 2x Curve swap fees, flash mint fees, and slippage
-        // Expect ~2-3% loss on round trip, so require >97% return
-        assertGt(usdcReturned, 97e6, "Should return >97% of original USDC");
+        // Round-trip cost sources:
+        // - 2x Curve swap fees (~0.04% each = ~0.08% total)
+        // - 2x Curve pool price impact (~0.2% each for this size)
+        // - Flash mint fee (if any)
+        // Threshold: <1.5% allows for larger trades or worse pool conditions
+        assertGt(usdcReturned, (amountIn * 985) / 1000, "Should return >98.5% of original USDC");
         assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
     }
 
