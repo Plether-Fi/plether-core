@@ -8,7 +8,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import "forge-std/Test.sol";
 
 /// @title Permit Fork Tests
-/// @notice Tests zapBurnWithPermit which uses DXY-BULL's EIP-2612 permit
+/// @notice Tests zapBurnWithPermit which uses plDXY-BULL's EIP-2612 permit
 contract PermitForkTest is BaseForkTest {
 
     ZapRouter zapRouter;

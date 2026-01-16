@@ -44,7 +44,7 @@ contract StakedOracleTest is Test {
 
     function setUp() public {
         // 1. Deploy underlying token (18 decimals)
-        underlyingToken = new MockERC20("DXY-BULL", "BULL");
+        underlyingToken = new MockERC20("plDXY-BULL", "BULL");
 
         // 2. Deploy ERC-4626 vault
         vault = new StakedToken(IERC20(address(underlyingToken)), "Staked BULL", "stBULL");

@@ -49,7 +49,7 @@ contract InvariantMockToken is ERC20 {
 
 }
 
-/// @notice Mock DXY-BEAR with ERC3156 flash mint support
+/// @notice Mock plDXY-BEAR with ERC3156 flash mint support
 contract InvariantMockFlashToken is ERC20, IERC3156FlashLender {
 
     uint8 private _decimals;
@@ -154,7 +154,7 @@ contract InvariantMockStakedToken is ERC20 {
 contract InvariantMockCurvePool is ICurvePool {
 
     address public token0; // USDC
-    address public token1; // dxyBear
+    address public token1; // plDxyBear
     uint256 public bearPrice = 1e6; // 1:1 with USDC
 
     constructor(
@@ -368,8 +368,8 @@ contract LeverageRouterHandler is Test {
     LeverageRouter public router;
     InvariantMockMorpho public morpho;
     InvariantMockToken public usdc;
-    InvariantMockToken public dxyBear;
-    InvariantMockStakedToken public stakedDxyBear;
+    InvariantMockToken public plDxyBear;
+    InvariantMockStakedToken public stakedPlDxyBear;
     InvariantMockCurvePool public curvePool;
     MarketParams public marketParams;
 
@@ -400,16 +400,16 @@ contract LeverageRouterHandler is Test {
         LeverageRouter _router,
         InvariantMockMorpho _morpho,
         InvariantMockToken _usdc,
-        InvariantMockToken _dxyBear,
-        InvariantMockStakedToken _stakedDxyBear,
+        InvariantMockToken _plDxyBear,
+        InvariantMockStakedToken _stakedPlDxyBear,
         InvariantMockCurvePool _curvePool,
         MarketParams memory _marketParams
     ) {
         router = _router;
         morpho = _morpho;
         usdc = _usdc;
-        dxyBear = _dxyBear;
-        stakedDxyBear = _stakedDxyBear;
+        plDxyBear = _plDxyBear;
+        stakedPlDxyBear = _stakedPlDxyBear;
         curvePool = _curvePool;
         marketParams = _marketParams;
 
@@ -520,8 +520,8 @@ contract LeverageRouterInvariantTest is StdInvariant, Test {
     LeverageRouter public router;
     InvariantMockMorpho public morpho;
     InvariantMockToken public usdc;
-    InvariantMockToken public dxyBear;
-    InvariantMockStakedToken public stakedDxyBear;
+    InvariantMockToken public plDxyBear;
+    InvariantMockStakedToken public stakedPlDxyBear;
     InvariantMockCurvePool public curvePool;
     LeverageRouterHandler public handler;
     MarketParams public marketParams;
@@ -529,27 +529,32 @@ contract LeverageRouterInvariantTest is StdInvariant, Test {
     function setUp() public {
         // Deploy mocks
         usdc = new InvariantMockToken("USDC", "USDC", 6);
-        dxyBear = new InvariantMockToken("DXY-BEAR", "BEAR", 18);
-        stakedDxyBear = new InvariantMockStakedToken(address(dxyBear));
-        curvePool = new InvariantMockCurvePool(address(usdc), address(dxyBear));
-        morpho = new InvariantMockMorpho(address(usdc), address(stakedDxyBear));
+        plDxyBear = new InvariantMockToken("plDXY-BEAR", "BEAR", 18);
+        stakedPlDxyBear = new InvariantMockStakedToken(address(plDxyBear));
+        curvePool = new InvariantMockCurvePool(address(usdc), address(plDxyBear));
+        morpho = new InvariantMockMorpho(address(usdc), address(stakedPlDxyBear));
 
         // Fund Morpho for flash loans
         usdc.mint(address(morpho), 100_000_000e6);
 
         marketParams = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBear),
+            collateralToken: address(stakedPlDxyBear),
             oracle: address(0),
             irm: address(0),
             lltv: 0
         });
 
         router = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(stakedDxyBear), marketParams
+            address(morpho),
+            address(curvePool),
+            address(usdc),
+            address(plDxyBear),
+            address(stakedPlDxyBear),
+            marketParams
         );
 
-        handler = new LeverageRouterHandler(router, morpho, usdc, dxyBear, stakedDxyBear, curvePool, marketParams);
+        handler = new LeverageRouterHandler(router, morpho, usdc, plDxyBear, stakedPlDxyBear, curvePool, marketParams);
 
         targetContract(address(handler));
 
@@ -562,8 +567,8 @@ contract LeverageRouterInvariantTest is StdInvariant, Test {
     /// @notice Router should never hold any tokens after operations complete
     function invariant_routerStateless() public view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router holds USDC");
-        assertEq(dxyBear.balanceOf(address(router)), 0, "Router holds DXY-BEAR");
-        assertEq(stakedDxyBear.balanceOf(address(router)), 0, "Router holds sDXY-BEAR");
+        assertEq(plDxyBear.balanceOf(address(router)), 0, "Router holds plDXY-BEAR");
+        assertEq(stakedPlDxyBear.balanceOf(address(router)), 0, "Router holds splDXY-BEAR");
     }
 
     /// @notice Total fully closed positions should be <= total opened positions
@@ -591,18 +596,18 @@ contract LeverageRouterInvariantTest is StdInvariant, Test {
 contract InvariantMockSplitter is ISyntheticSplitter {
 
     InvariantMockToken public usdc;
-    InvariantMockFlashToken public dxyBear;
-    InvariantMockToken public dxyBull;
+    InvariantMockFlashToken public plDxyBear;
+    InvariantMockToken public plDxyBull;
     uint256 public constant CAP_VALUE = 200_000_000; // $2.00 in 8 decimals
 
     constructor(
         address _usdc,
-        address _dxyBear,
-        address _dxyBull
+        address _plDxyBear,
+        address _plDxyBull
     ) {
         usdc = InvariantMockToken(_usdc);
-        dxyBear = InvariantMockFlashToken(_dxyBear);
-        dxyBull = InvariantMockToken(_dxyBull);
+        plDxyBear = InvariantMockFlashToken(_plDxyBear);
+        plDxyBull = InvariantMockToken(_plDxyBull);
     }
 
     function CAP() external pure override returns (uint256) {
@@ -619,15 +624,15 @@ contract InvariantMockSplitter is ISyntheticSplitter {
         // Calculate USDC cost: usdc = tokenAmount * CAP / 1e12
         uint256 usdcCost = (tokenAmount * CAP_VALUE) / 1e12;
         usdc.transferFrom(msg.sender, address(this), usdcCost);
-        dxyBear.mint(msg.sender, tokenAmount);
-        dxyBull.mint(msg.sender, tokenAmount);
+        plDxyBear.mint(msg.sender, tokenAmount);
+        plDxyBull.mint(msg.sender, tokenAmount);
     }
 
     function burn(
         uint256 tokenAmount
     ) external override {
-        dxyBear.transferFrom(msg.sender, address(this), tokenAmount);
-        dxyBull.transferFrom(msg.sender, address(this), tokenAmount);
+        plDxyBear.transferFrom(msg.sender, address(this), tokenAmount);
+        plDxyBull.transferFrom(msg.sender, address(this), tokenAmount);
         // Return USDC: usdc = tokenAmount * CAP / 1e12
         uint256 usdcReturn = (tokenAmount * CAP_VALUE) / 1e12;
         usdc.transfer(msg.sender, usdcReturn);
@@ -637,14 +642,14 @@ contract InvariantMockSplitter is ISyntheticSplitter {
         uint256 amount
     ) external override {
         // Not used in invariant tests, but required by interface
-        dxyBear.transferFrom(msg.sender, address(this), amount);
+        plDxyBear.transferFrom(msg.sender, address(this), amount);
         uint256 usdcReturn = (amount * CAP_VALUE) / 1e12;
         usdc.transfer(msg.sender, usdcReturn);
     }
 
 }
 
-/// @notice Mock Morpho that supports both sDXY-BEAR and sDXY-BULL as collateral
+/// @notice Mock Morpho that supports both splDXY-BEAR and splDXY-BULL as collateral
 contract InvariantMockMorphoBull is IMorpho {
 
     address public usdc;
@@ -810,9 +815,9 @@ contract BullLeverageRouterHandler is Test {
     BullLeverageRouter public router;
     InvariantMockMorphoBull public morpho;
     InvariantMockToken public usdc;
-    InvariantMockFlashToken public dxyBear;
-    InvariantMockToken public dxyBull;
-    InvariantMockStakedToken public stakedDxyBull;
+    InvariantMockFlashToken public plDxyBear;
+    InvariantMockToken public plDxyBull;
+    InvariantMockStakedToken public stakedPlDxyBull;
     InvariantMockCurvePool public curvePool;
     InvariantMockSplitter public splitter;
     MarketParams public marketParams;
@@ -841,9 +846,9 @@ contract BullLeverageRouterHandler is Test {
         BullLeverageRouter _router,
         InvariantMockMorphoBull _morpho,
         InvariantMockToken _usdc,
-        InvariantMockFlashToken _dxyBear,
-        InvariantMockToken _dxyBull,
-        InvariantMockStakedToken _stakedDxyBull,
+        InvariantMockFlashToken _plDxyBear,
+        InvariantMockToken _plDxyBull,
+        InvariantMockStakedToken _stakedPlDxyBull,
         InvariantMockCurvePool _curvePool,
         InvariantMockSplitter _splitter,
         MarketParams memory _marketParams
@@ -851,9 +856,9 @@ contract BullLeverageRouterHandler is Test {
         router = _router;
         morpho = _morpho;
         usdc = _usdc;
-        dxyBear = _dxyBear;
-        dxyBull = _dxyBull;
-        stakedDxyBull = _stakedDxyBull;
+        plDxyBear = _plDxyBear;
+        plDxyBull = _plDxyBull;
+        stakedPlDxyBull = _stakedPlDxyBull;
         curvePool = _curvePool;
         splitter = _splitter;
         marketParams = _marketParams;
@@ -958,9 +963,9 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     BullLeverageRouter public router;
     InvariantMockMorphoBull public morpho;
     InvariantMockToken public usdc;
-    InvariantMockFlashToken public dxyBear;
-    InvariantMockToken public dxyBull;
-    InvariantMockStakedToken public stakedDxyBull;
+    InvariantMockFlashToken public plDxyBear;
+    InvariantMockToken public plDxyBull;
+    InvariantMockStakedToken public stakedPlDxyBull;
     InvariantMockCurvePool public curvePool;
     InvariantMockSplitter public splitter;
     BullLeverageRouterHandler public handler;
@@ -969,12 +974,12 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     function setUp() public {
         // Deploy mocks
         usdc = new InvariantMockToken("USDC", "USDC", 6);
-        dxyBear = new InvariantMockFlashToken("DXY-BEAR", "BEAR", 18);
-        dxyBull = new InvariantMockToken("DXY-BULL", "BULL", 18);
-        stakedDxyBull = new InvariantMockStakedToken(address(dxyBull));
-        curvePool = new InvariantMockCurvePool(address(usdc), address(dxyBear));
-        splitter = new InvariantMockSplitter(address(usdc), address(dxyBear), address(dxyBull));
-        morpho = new InvariantMockMorphoBull(address(usdc), address(0), address(stakedDxyBull));
+        plDxyBear = new InvariantMockFlashToken("plDXY-BEAR", "BEAR", 18);
+        plDxyBull = new InvariantMockToken("plDXY-BULL", "BULL", 18);
+        stakedPlDxyBull = new InvariantMockStakedToken(address(plDxyBull));
+        curvePool = new InvariantMockCurvePool(address(usdc), address(plDxyBear));
+        splitter = new InvariantMockSplitter(address(usdc), address(plDxyBear), address(plDxyBull));
+        morpho = new InvariantMockMorphoBull(address(usdc), address(0), address(stakedPlDxyBull));
 
         // Fund Morpho for flash loans
         usdc.mint(address(morpho), 100_000_000e6);
@@ -985,7 +990,7 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
 
         marketParams = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBull),
+            collateralToken: address(stakedPlDxyBull),
             oracle: address(0),
             irm: address(0),
             lltv: 0
@@ -996,14 +1001,14 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
             address(splitter),
             address(curvePool),
             address(usdc),
-            address(dxyBear),
-            address(dxyBull),
-            address(stakedDxyBull),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedPlDxyBull),
             marketParams
         );
 
         handler = new BullLeverageRouterHandler(
-            router, morpho, usdc, dxyBear, dxyBull, stakedDxyBull, curvePool, splitter, marketParams
+            router, morpho, usdc, plDxyBear, plDxyBull, stakedPlDxyBull, curvePool, splitter, marketParams
         );
 
         targetContract(address(handler));
@@ -1018,9 +1023,9 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     /// @notice Router should never hold any tokens after operations complete
     function invariant_routerStateless() public view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router holds USDC");
-        assertEq(dxyBear.balanceOf(address(router)), 0, "Router holds DXY-BEAR");
-        assertEq(dxyBull.balanceOf(address(router)), 0, "Router holds DXY-BULL");
-        assertEq(stakedDxyBull.balanceOf(address(router)), 0, "Router holds sDXY-BULL");
+        assertEq(plDxyBear.balanceOf(address(router)), 0, "Router holds plDXY-BEAR");
+        assertEq(plDxyBull.balanceOf(address(router)), 0, "Router holds plDXY-BULL");
+        assertEq(stakedPlDxyBull.balanceOf(address(router)), 0, "Router holds splDXY-BULL");
     }
 
     /// @notice Total fully closed positions should be <= total opened positions

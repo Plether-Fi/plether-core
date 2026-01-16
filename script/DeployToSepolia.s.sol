@@ -137,7 +137,7 @@ contract DeployToSepolia is Script {
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
-    // Curve Pool Parameters (optimized for low-volatility DXY pair)
+    // Curve Pool Parameters (optimized for low-volatility plDXY pair)
     // Must match test/fork/BaseForkTest.sol for consistent behavior
     // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 4 * 10000 * 1000 = 40M
     uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
@@ -163,8 +163,8 @@ contract DeployToSepolia is Script {
         BasketOracle basketOracle;
         MockYieldAdapter adapter;
         SyntheticSplitter splitter;
-        SyntheticToken dxyBear;
-        SyntheticToken dxyBull;
+        SyntheticToken plDxyBear;
+        SyntheticToken plDxyBull;
         MorphoOracle morphoOracleBear;
         MorphoOracle morphoOracleBull;
         StakedToken stakedBear;
@@ -196,23 +196,23 @@ contract DeployToSepolia is Script {
         deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, deployer);
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
-        // Step 4: Deploy Adapter + Splitter (creates DXY-BEAR/BULL)
+        // Step 4: Deploy Adapter + Splitter (creates plDXY-BEAR/BULL)
         (deployed.adapter, deployed.splitter) =
             _deploySplitterWithAdapter(address(deployed.basketOracle), address(deployed.usdc), deployer);
-        deployed.dxyBear = deployed.splitter.TOKEN_A();
-        deployed.dxyBull = deployed.splitter.TOKEN_B();
-        console.log("DXY-BEAR deployed:", address(deployed.dxyBear));
-        console.log("DXY-BULL deployed:", address(deployed.dxyBull));
+        deployed.plDxyBear = deployed.splitter.TOKEN_A();
+        deployed.plDxyBull = deployed.splitter.TOKEN_B();
+        console.log("plDXY-BEAR deployed:", address(deployed.plDxyBear));
+        console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 
-        // Step 5: Calculate bearPrice from oracle (CAP - DXY)
+        // Step 5: Calculate bearPrice from oracle (CAP - plDXY)
         (, int256 answer,,,) = deployed.basketOracle.latestRoundData();
-        uint256 dxyPrice = uint256(answer) * 1e10;
-        uint256 bearPrice = CAP_SCALED - dxyPrice;
-        console.log("DXY price (18 decimals):", dxyPrice);
+        uint256 plDxyPrice = uint256(answer) * 1e10;
+        uint256 bearPrice = CAP_SCALED - plDxyPrice;
+        console.log("plDXY price (18 decimals):", plDxyPrice);
         console.log("BEAR price (18 decimals):", bearPrice);
 
-        // Step 6: Deploy Curve pool with real DXY-BEAR address and calculated price
-        deployed.curvePool = _deployCurvePool(address(deployed.usdc), address(deployed.dxyBear), bearPrice);
+        // Step 6: Deploy Curve pool with real plDXY-BEAR address and calculated price
+        deployed.curvePool = _deployCurvePool(address(deployed.usdc), address(deployed.plDxyBear), bearPrice);
         console.log("Curve Pool deployed:", deployed.curvePool);
 
         // Step 7: Configure BasketOracle with Curve pool
@@ -227,7 +227,7 @@ contract DeployToSepolia is Script {
 
         // Step 10: Deploy Staked Tokens
         (deployed.stakedBear, deployed.stakedBull) =
-            _deployStakedTokens(address(deployed.dxyBear), address(deployed.dxyBull));
+            _deployStakedTokens(address(deployed.plDxyBear), address(deployed.plDxyBull));
 
         // Step 11: Deploy Staked Oracles
         (deployed.stakedOracleBear, deployed.stakedOracleBull) = _deployStakedOracles(
@@ -288,14 +288,14 @@ contract DeployToSepolia is Script {
 
     function _deployCurvePool(
         address usdc,
-        address dxyBear,
+        address plDxyBear,
         uint256 initialPrice
     ) internal returns (address pool) {
         pool = ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
-                "Curve.fi USDC/DXY-BEAR",
-                "crvUSDCDXYBEAR",
-                [usdc, dxyBear],
+                "Curve.fi USDC/plDXY-BEAR",
+                "crvUSDCplDXYBEAR",
+                [usdc, plDxyBear],
                 0, // implementation_id (use default)
                 CURVE_A,
                 CURVE_GAMMA,
@@ -339,10 +339,10 @@ contract DeployToSepolia is Script {
         d.splitter.mint(bearLiquidity);
 
         d.usdc.approve(d.curvePool, usdcAmount);
-        IERC20(address(d.dxyBear)).approve(d.curvePool, bearLiquidity);
+        IERC20(address(d.plDxyBear)).approve(d.curvePool, bearLiquidity);
 
         ICurveTwocryptoPool(d.curvePool).add_liquidity([usdcAmount, bearLiquidity], 0);
-        console.log("Curve pool seeded: %s USDC + %s DXY-BEAR", usdcAmount / 1e6, bearLiquidity / 1e18);
+        console.log("Curve pool seeded: %s USDC + %s plDXY-BEAR", usdcAmount / 1e6, bearLiquidity / 1e18);
     }
 
     function _deployMorphoOracles(
@@ -356,8 +356,8 @@ contract DeployToSepolia is Script {
         address bearToken,
         address bullToken
     ) internal returns (StakedToken stakedBear, StakedToken stakedBull) {
-        stakedBear = new StakedToken(IERC20(bearToken), "Staked DXY-BEAR", "sDXY-BEAR");
-        stakedBull = new StakedToken(IERC20(bullToken), "Staked DXY-BULL", "sDXY-BULL");
+        stakedBear = new StakedToken(IERC20(bearToken), "Staked plDXY-BEAR", "splDXY-BEAR");
+        stakedBull = new StakedToken(IERC20(bullToken), "Staked plDXY-BULL", "splDXY-BULL");
     }
 
     function _deployStakedOracles(
@@ -376,8 +376,9 @@ contract DeployToSepolia is Script {
         MarketParams memory bearMarketParams;
         MarketParams memory bullMarketParams;
         // Deploy ZapRouter
-        d.zapRouter =
-            new ZapRouter(address(d.splitter), address(d.dxyBear), address(d.dxyBull), address(d.usdc), d.curvePool);
+        d.zapRouter = new ZapRouter(
+            address(d.splitter), address(d.plDxyBear), address(d.plDxyBull), address(d.usdc), d.curvePool
+        );
         console.log("ZapRouter:", address(d.zapRouter));
 
         // Deploy LeverageRouter (BEAR)
@@ -390,7 +391,7 @@ contract DeployToSepolia is Script {
         });
 
         d.leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.dxyBear), address(d.stakedBear), bearMarketParams
+            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.plDxyBear), address(d.stakedBear), bearMarketParams
         );
         console.log("LeverageRouter:", address(d.leverageRouter));
 
@@ -408,8 +409,8 @@ contract DeployToSepolia is Script {
             address(d.splitter),
             d.curvePool,
             address(d.usdc),
-            address(d.dxyBear),
-            address(d.dxyBull),
+            address(d.plDxyBear),
+            address(d.plDxyBull),
             address(d.stakedBull),
             bullMarketParams
         );
@@ -422,11 +423,11 @@ contract DeployToSepolia is Script {
     ) internal {
         IMorpho morpho = IMorpho(MORPHO_BLUE);
 
-        // Create BEAR market (sDXY-BEAR as collateral, USDC as loan token)
+        // Create BEAR market (splDXY-BEAR as collateral, USDC as loan token)
         morpho.createMarket(bearMarketParams);
         console.log("Morpho BEAR market created");
 
-        // Create BULL market (sDXY-BULL as collateral, USDC as loan token)
+        // Create BULL market (splDXY-BULL as collateral, USDC as loan token)
         morpho.createMarket(bullMarketParams);
         console.log("Morpho BULL market created");
     }
@@ -468,8 +469,8 @@ contract DeployToSepolia is Script {
         console.log("  BasketOracle:        ", address(d.basketOracle));
         console.log("  MockAdapter:         ", address(d.adapter));
         console.log("  SyntheticSplitter:   ", address(d.splitter));
-        console.log("  DXY-BEAR:            ", address(d.dxyBear));
-        console.log("  DXY-BULL:            ", address(d.dxyBull));
+        console.log("  plDXY-BEAR:            ", address(d.plDxyBear));
+        console.log("  plDXY-BULL:            ", address(d.plDxyBull));
         console.log("");
         console.log("Morpho Oracles:");
         console.log("  MorphoOracle (BEAR): ", address(d.morphoOracleBear));

@@ -5,14 +5,14 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.33-363636?logo=solidity)](https://docs.soliditylang.org/)
 
-Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse exposure to the US Dollar Index (DXY). Users deposit USDC to mint paired tokens that track USD strength, enabling speculation and hedging on dollar movements.
+Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse and direct exposure to the US Dollar Index (USDX). Users deposit USDC to mint paired tokens that track USD strength, enabling speculation and hedging on dollar movements.
 
 ## How It Works
 
 The protocol creates two synthetic tokens from USDC collateral:
 
-- **DXY-BEAR** - Appreciates when USD weakens (DXY falls)
-- **DXY-BULL** - Appreciates when USD strengthens (DXY rises)
+- **plDXY-BEAR** - Appreciates when USD weakens (USDX falls)
+- **plDXY-BULL** - Appreciates when USD strengthens (USDX rises)
 
 These tokens are always minted and burned in pairs, maintaining a zero-sum relationship. When you deposit 100 USDC, you receive equal amounts of both tokens. The combined value of a BEAR + BULL pair always equals the original USDC deposit.
 
@@ -24,9 +24,9 @@ User deposits USDC
 │ SyntheticSplitter │
 └───────────────────┘
         │
-        ├──► DXY-BEAR (gains when USD weakens)
+        ├──► plDXY-BEAR (gains when USD weakens)
         │
-        └──► DXY-BULL (gains when USD strengthens)
+        └──► plDXY-BULL (gains when USD strengthens)
 ```
 
 ## Architecture
@@ -36,30 +36,30 @@ User deposits USDC
 | Contract | Description |
 |----------|-------------|
 | [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs, manages yield deployment |
-| [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for DXY-BEAR and DXY-BULL |
+| [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
 | [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper enabling yield accrual on deposited tokens |
 
 ### Oracle Layer
 
 | Contract | Description |
 |----------|-------------|
-| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes DXY as weighted basket of 6 Chainlink feeds, with bound validation against Curve EMA price |
+| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 Chainlink feeds, with bound validation against Curve EMA price |
 | [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
 #### BasketOracle Design
 
-The BasketOracle computes a DXY-like index using **normalized arithmetic weighting** rather than the geometric weighting of the official ICE DXY index:
+The BasketOracle computes a USDX-like index using **normalized arithmetic weighting** rather than the geometric weighting of the official ICE USDX index:
 
 ```
 Price = Σ(Weight_i × Price_i / BasePrice_i)
 ```
 
-Each currency's contribution is normalized by its base price, ensuring the intended DXY weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (~$0.007) would be nearly ignored compared to EUR (~$1.08), causing severe weight distortion.
+Each currency's contribution is normalized by its base price, ensuring the intended USDX weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (~$0.007) would be nearly ignored compared to EUR (~$1.08), causing severe weight distortion.
 
 This design enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
 
-**Inverse Relationship:** Because the oracle measures the USD value of a foreign currency basket, it moves **inversely** to the real DXY index. When the dollar strengthens, DXY rises but our basket value falls (foreign currencies are worth less in USD terms). This is why DXY-BEAR appreciates when the basket value rises (dollar weakens).
+**Inverse Relationship:** Because the oracle measures the USD value of a foreign currency basket, it moves **inversely** to the real USDX index. When the dollar strengthens, USDX rises but our basket value falls (foreign currencies are worth less in USD terms). This is why plDXY-BEAR appreciates when the basket value rises (dollar weakens).
 
 **Fixed Base Prices and Weights** (immutable, set at deployment based on January 1, 2026 prices):
 
@@ -78,9 +78,9 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 | Contract | Description |
 |----------|-------------|
-| [`ZapRouter`](src/ZapRouter.sol) | Single-sided DXY-BULL minting and burning using flash mints |
-| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged DXY-BEAR positions via Morpho Blue flash loans (fee-free) |
-| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged DXY-BULL positions via Morpho + DXY-BEAR flash mints |
+| [`ZapRouter`](src/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints |
+| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans (fee-free) |
+| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints |
 
 ### Yield Adapters (ERC-4626)
 
@@ -112,7 +112,7 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 ```
 
 - **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD
-- **Curve Finance** - AMM pools for USDC/DXY-BEAR swaps
+- **Curve Finance** - AMM pools for USDC/plDXY-BEAR swaps
 - **Morpho Blue** - Lending markets for leveraged positions, yield generation on idle USDC reserves, and fee-free flash loans
 
 ## Protocol Mechanics
@@ -127,8 +127,8 @@ If adapter liquidity is constrained (e.g., high Morpho utilization), the owner c
 
 Users can open leveraged positions through the routers:
 
-1. **LeverageRouter** (Bear): Morpho flash loan USDC → Swap to DXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
-2. **BullLeverageRouter** (Bull): Morpho flash loan USDC → Mint pairs → Sell DXY-BEAR → Stake DXY-BULL → Deposit to Morpho → Borrow to repay
+1. **LeverageRouter** (Bear): Morpho flash loan USDC → Swap to plDXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
+2. **BullLeverageRouter** (Bull): Morpho flash loan USDC → Mint pairs → Sell plDXY-BEAR → Stake plDXY-BULL → Deposit to Morpho → Borrow to repay
 
 Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
 
@@ -140,7 +140,7 @@ The protocol operates in three states:
 
 1. **ACTIVE** - Normal operations (mint, burn, redeem)
 2. **PAUSED** - Emergency pause (minting blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
-3. **SETTLED** - End-of-life when DXY hits CAP price (only redemptions allowed)
+3. **SETTLED** - End-of-life when plDXY hits CAP price (only redemptions allowed)
 
 ## Development
 
@@ -187,7 +187,7 @@ source .env && forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC
 | `LeverageRouterFork.t.sol` | Bear and Bull leverage via real Morpho |
 | `SlippageProtectionFork.t.sol` | MEV protection and slippage scenarios |
 | `LiquidationFork.t.sol` | Interest accrual and liquidation mechanics |
-| `BasketOracleFork.t.sol` | Full 6-feed DXY basket oracle validation |
+| `BasketOracleFork.t.sol` | Full 6-feed plDXY basket oracle validation |
 
 Run a specific fork test file:
 ```bash

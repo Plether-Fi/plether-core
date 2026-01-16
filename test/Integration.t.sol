@@ -28,8 +28,8 @@ contract IntegrationTest is Test {
 
     // Tokens
     MockUSDC public usdc;
-    SyntheticToken public dxyBear;
-    SyntheticToken public dxyBull;
+    SyntheticToken public plDxyBear;
+    SyntheticToken public plDxyBull;
 
     // Mocks (only for external dependencies)
     MockOracle public oracle;
@@ -69,16 +69,16 @@ contract IntegrationTest is Test {
         vm.stopPrank();
 
         // Get the real synthetic tokens created by splitter
-        dxyBear = splitter.TOKEN_A();
-        dxyBull = splitter.TOKEN_B();
+        plDxyBear = splitter.TOKEN_A();
+        plDxyBull = splitter.TOKEN_B();
 
         // Deploy Curve pool mock (external dependency)
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
         curvePool.setPrice(1e6); // 1 BEAR = 1 USDC (parity)
 
         // Deploy ZapRouter with REAL splitter
         zapRouter =
-            new ZapRouter(address(splitter), address(dxyBear), address(dxyBull), address(usdc), address(curvePool));
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
 
         // Fund test accounts
         usdc.mint(alice, 10_000_000e6);
@@ -95,14 +95,14 @@ contract IntegrationTest is Test {
         vm.startPrank(poolSeeder);
         usdc.approve(address(splitter), type(uint256).max);
         splitter.mint(1_000_000 ether); // Mint 1M BEAR+BULL pairs
-        dxyBear.transfer(address(curvePool), 1_000_000 ether); // Seed pool with BEAR
+        plDxyBear.transfer(address(curvePool), 1_000_000 ether); // Seed pool with BEAR
         vm.stopPrank();
 
         // Labels
         vm.label(address(splitter), "Splitter");
         vm.label(address(zapRouter), "ZapRouter");
-        vm.label(address(dxyBear), "DXY-BEAR");
-        vm.label(address(dxyBull), "DXY-BULL");
+        vm.label(address(plDxyBear), "plDXY-BEAR");
+        vm.label(address(plDxyBull), "plDXY-BULL");
         vm.label(alice, "Alice");
         vm.label(bob, "Bob");
         vm.label(carol, "Carol");
@@ -124,8 +124,8 @@ contract IntegrationTest is Test {
         uint256 usdcAfter = usdc.balanceOf(alice);
 
         // Verify mint
-        assertEq(dxyBear.balanceOf(alice), mintAmount, "Should have BEAR");
-        assertEq(dxyBull.balanceOf(alice), mintAmount, "Should have BULL");
+        assertEq(plDxyBear.balanceOf(alice), mintAmount, "Should have BEAR");
+        assertEq(plDxyBull.balanceOf(alice), mintAmount, "Should have BULL");
         uint256 usdcSpent = usdcBefore - usdcAfter;
         assertGt(usdcSpent, 0, "Should have spent USDC");
 
@@ -133,8 +133,8 @@ contract IntegrationTest is Test {
         uint256 burnAmount = 500 ether;
         splitter.burn(burnAmount);
 
-        assertEq(dxyBear.balanceOf(alice), mintAmount - burnAmount, "Should have remaining BEAR");
-        assertEq(dxyBull.balanceOf(alice), mintAmount - burnAmount, "Should have remaining BULL");
+        assertEq(plDxyBear.balanceOf(alice), mintAmount - burnAmount, "Should have remaining BEAR");
+        assertEq(plDxyBull.balanceOf(alice), mintAmount - burnAmount, "Should have remaining BULL");
         assertGt(usdc.balanceOf(alice), usdcAfter, "Should have received USDC back");
         vm.stopPrank();
     }
@@ -147,18 +147,18 @@ contract IntegrationTest is Test {
         uint256 usdcInput = 100e6;
         zapRouter.zapMint(usdcInput, 0, 100, block.timestamp + 1 hours);
 
-        uint256 bullReceived = dxyBull.balanceOf(alice);
+        uint256 bullReceived = plDxyBull.balanceOf(alice);
         assertGt(bullReceived, 0, "Should have received BULL");
         // Note: ZapRouter may sweep small dust amounts of BEAR to user
         // The key point is that BULL is the primary output
-        assertLt(dxyBear.balanceOf(alice), 1 ether, "Should have minimal BEAR (only dust)");
+        assertLt(plDxyBear.balanceOf(alice), 1 ether, "Should have minimal BEAR (only dust)");
 
         // 2. Alice uses ZapRouter to sell BULL back
-        dxyBull.approve(address(zapRouter), bullReceived);
+        plDxyBull.approve(address(zapRouter), bullReceived);
         uint256 usdcBefore = usdc.balanceOf(alice);
         zapRouter.zapBurn(bullReceived, 0, block.timestamp + 1 hours);
 
-        assertEq(dxyBull.balanceOf(alice), 0, "Should have burned all BULL");
+        assertEq(plDxyBull.balanceOf(alice), 0, "Should have burned all BULL");
         assertGt(usdc.balanceOf(alice), usdcBefore, "Should have received USDC");
         vm.stopPrank();
     }
@@ -174,7 +174,7 @@ contract IntegrationTest is Test {
         uint256 carolMint = 500 ether;
 
         // Record initial supply (from pool seeding in setUp)
-        uint256 initialSupply = dxyBear.totalSupply();
+        uint256 initialSupply = plDxyBear.totalSupply();
 
         vm.prank(alice);
         usdc.approve(address(splitter), type(uint256).max);
@@ -192,14 +192,14 @@ contract IntegrationTest is Test {
         splitter.mint(carolMint);
 
         // Verify individual balances
-        assertEq(dxyBear.balanceOf(alice), aliceMint);
-        assertEq(dxyBear.balanceOf(bob), bobMint);
-        assertEq(dxyBear.balanceOf(carol), carolMint);
+        assertEq(plDxyBear.balanceOf(alice), aliceMint);
+        assertEq(plDxyBear.balanceOf(bob), bobMint);
+        assertEq(plDxyBear.balanceOf(carol), carolMint);
 
         // Verify total supply increased by the expected amount
         uint256 expectedNewTokens = aliceMint + bobMint + carolMint;
-        assertEq(dxyBear.totalSupply(), initialSupply + expectedNewTokens);
-        assertEq(dxyBull.totalSupply(), initialSupply + expectedNewTokens);
+        assertEq(plDxyBear.totalSupply(), initialSupply + expectedNewTokens);
+        assertEq(plDxyBull.totalSupply(), initialSupply + expectedNewTokens);
 
         // Verify solvency
         _verifySolvency();
@@ -237,9 +237,9 @@ contract IntegrationTest is Test {
         splitter.burn(burnAmount);
 
         // Verify each user has remaining tokens
-        assertEq(dxyBear.balanceOf(alice), mintAmount - burnAmount);
-        assertEq(dxyBear.balanceOf(bob), mintAmount - burnAmount);
-        assertEq(dxyBear.balanceOf(carol), mintAmount - burnAmount);
+        assertEq(plDxyBear.balanceOf(alice), mintAmount - burnAmount);
+        assertEq(plDxyBear.balanceOf(bob), mintAmount - burnAmount);
+        assertEq(plDxyBear.balanceOf(carol), mintAmount - burnAmount);
 
         // Verify solvency
         _verifySolvency();
@@ -277,9 +277,9 @@ contract IntegrationTest is Test {
         splitter.burn(1000 ether);
 
         // Final state verification
-        assertEq(dxyBear.balanceOf(alice), 1100 ether); // 1000 - 200 + 300
-        assertEq(dxyBear.balanceOf(bob), 0 ether); // 500 - 500
-        assertEq(dxyBear.balanceOf(carol), 1000 ether); // 2000 - 1000
+        assertEq(plDxyBear.balanceOf(alice), 1100 ether); // 1000 - 200 + 300
+        assertEq(plDxyBear.balanceOf(bob), 0 ether); // 500 - 500
+        assertEq(plDxyBear.balanceOf(carol), 1000 ether); // 2000 - 1000
 
         _verifySolvency();
     }
@@ -300,12 +300,12 @@ contract IntegrationTest is Test {
         assertLt(usdcAfter, usdcBefore, "Should have spent USDC");
 
         // Should have BULL tokens
-        assertGt(dxyBull.balanceOf(alice), 0, "Should have BULL");
+        assertGt(plDxyBull.balanceOf(alice), 0, "Should have BULL");
 
         // ZapRouter should not hold any tokens
         assertEq(usdc.balanceOf(address(zapRouter)), 0, "ZapRouter should not hold USDC");
-        assertEq(dxyBear.balanceOf(address(zapRouter)), 0, "ZapRouter should not hold BEAR");
-        assertEq(dxyBull.balanceOf(address(zapRouter)), 0, "ZapRouter should not hold BULL");
+        assertEq(plDxyBear.balanceOf(address(zapRouter)), 0, "ZapRouter should not hold BEAR");
+        assertEq(plDxyBull.balanceOf(address(zapRouter)), 0, "ZapRouter should not hold BULL");
 
         vm.stopPrank();
     }
@@ -329,12 +329,12 @@ contract IntegrationTest is Test {
         zapRouter.zapMint(50e6, 0, 100, block.timestamp + 1 hours);
 
         // All should have BULL
-        assertGt(dxyBull.balanceOf(alice), 0, "Alice should have BULL");
-        assertGt(dxyBull.balanceOf(bob), 0, "Bob should have BULL");
-        assertGt(dxyBull.balanceOf(carol), 0, "Carol should have BULL");
+        assertGt(plDxyBull.balanceOf(alice), 0, "Alice should have BULL");
+        assertGt(plDxyBull.balanceOf(bob), 0, "Bob should have BULL");
+        assertGt(plDxyBull.balanceOf(carol), 0, "Carol should have BULL");
 
         // Bob invested more, should have more BULL
-        assertGt(dxyBull.balanceOf(bob), dxyBull.balanceOf(alice), "Bob should have more BULL than Alice");
+        assertGt(plDxyBull.balanceOf(bob), plDxyBull.balanceOf(alice), "Bob should have more BULL than Alice");
 
         _verifySolvency();
     }
@@ -438,7 +438,7 @@ contract IntegrationTest is Test {
     // ==========================================
 
     function _verifySolvency() internal view {
-        uint256 totalSupply = dxyBear.totalSupply();
+        uint256 totalSupply = plDxyBear.totalSupply();
         uint256 liabilities = (totalSupply * CAP) / splitter.USDC_MULTIPLIER();
 
         uint256 localBuffer = usdc.balanceOf(address(splitter));
@@ -522,7 +522,7 @@ contract MockOracle is AggregatorV3Interface {
 contract MockCurvePool {
 
     address public token0; // USDC
-    address public token1; // DXY-BEAR
+    address public token1; // plDXY-BEAR
     uint256 public bearPrice = 1e6; // 1 BEAR = 1 USDC (in 6 decimals)
 
     constructor(

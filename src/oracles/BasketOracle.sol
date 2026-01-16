@@ -8,7 +8,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title BasketOracle
-/// @notice Aggregates multiple Chainlink feeds into a normalized weighted DXY basket price.
+/// @notice Aggregates multiple Chainlink feeds into a normalized weighted plDXY basket price.
 /// @dev Price = Sum(Weight_i * Price_i / BasePrice_i). Normalization preserves intended currency weights.
 contract BasketOracle is AggregatorV3Interface, Ownable2Step {
 
@@ -26,7 +26,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     uint8 public constant DECIMALS = 8;
 
     /// @notice Oracle description string.
-    string public constant DESCRIPTION = "DXY Fixed Basket (Bounded)";
+    string public constant DESCRIPTION = "plDXY Fixed Basket (Bounded)";
 
     /// @notice Curve pool for deviation validation.
     ICurvePool public curvePool;
@@ -108,7 +108,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     }
 
     /// @notice Sets the Curve pool for deviation validation (initial setup only).
-    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
     function setCurvePool(
         address _curvePool
     ) external onlyOwner {

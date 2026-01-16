@@ -17,8 +17,8 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title SyntheticSplitter
-/// @notice Core protocol contract for minting/burning synthetic DXY tokens.
-/// @dev Accepts USDC collateral to mint equal amounts of DXY-BEAR + DXY-BULL tokens.
+/// @notice Core protocol contract for minting/burning synthetic plplDXY tokens.
+/// @dev Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL tokens.
 ///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
 ///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
 contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, ReentrancyGuard {
@@ -117,11 +117,11 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         uint256 adapterAssets; // USDC value held in yield adapter
     }
 
-    /// @notice Deploys the SyntheticSplitter and creates DXY-BEAR and DXY-BULL tokens.
-    /// @param _oracle Chainlink-compatible price feed for DXY basket.
+    /// @notice Deploys the SyntheticSplitter and creates plDXY-BEAR and plDXY-BULL tokens.
+    /// @param _oracle Chainlink-compatible price feed for plDXY basket.
     /// @param _usdc USDC token address (6 decimals).
     /// @param _yieldAdapter ERC4626-compliant yield adapter for USDC deposits.
-    /// @param _cap Maximum DXY price (8 decimals). Triggers liquidation when breached.
+    /// @param _cap Maximum plDXY price (8 decimals). Triggers liquidation when breached.
     /// @param _treasury Treasury address for fee distribution.
     /// @param _sequencerUptimeFeed L2 sequencer uptime feed (address(0) for L1/testnets).
     constructor(
@@ -145,8 +145,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         treasury = _treasury;
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        TOKEN_A = new SyntheticToken("Bear DXY", "plDXY-BEAR", address(this));
-        TOKEN_B = new SyntheticToken("Bull DXY", "plDXY-BULL", address(this));
+        TOKEN_A = new SyntheticToken("plDXY-BEAR", "plplDXY-BEAR", address(this));
+        TOKEN_B = new SyntheticToken("plDXY-BULL", "plplDXY-BULL", address(this));
 
         // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
@@ -182,7 +182,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         depositToAdapter = usdcRequired - keptInBuffer;
     }
 
-    /// @notice Mint DXY-BEAR and DXY-BULL tokens by depositing USDC collateral.
+    /// @notice Mint plDXY-BEAR and plDXY-BULL tokens by depositing USDC collateral.
     /// @param amount The amount of token pairs to mint (18 decimals).
     function mint(
         uint256 amount
@@ -252,7 +252,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
     }
 
-    /// @notice Burn DXY-BEAR and DXY-BULL tokens to redeem USDC collateral.
+    /// @notice Burn plDXY-BEAR and plDXY-BULL tokens to redeem USDC collateral.
     /// @param amount The amount of token pairs to burn (18 decimals).
     function burn(
         uint256 amount
@@ -325,8 +325,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     }
 
     /// @notice Emergency redemption when protocol is liquidated (price >= CAP).
-    /// @dev Only burns DXY-BEAR tokens at CAP price. DXY-BULL becomes worthless.
-    /// @param amount The amount of DXY-BEAR tokens to redeem (18 decimals).
+    /// @dev Only burns plDXY-BEAR tokens at CAP price. plDXY-BULL becomes worthless.
+    /// @param amount The amount of plDXY-BEAR tokens to redeem (18 decimals).
     function emergencyRedeem(
         uint256 amount
     ) external nonReentrant {

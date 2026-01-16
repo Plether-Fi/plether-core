@@ -30,8 +30,8 @@ contract VerifyDeployment is Script {
 
     address constant BASKET_ORACLE = address(0); // TODO: Set after deployment
     address constant SPLITTER = address(0); // TODO: Set after deployment
-    address constant DXY_BEAR = address(0); // TODO: Set after deployment
-    address constant DXY_BULL = address(0); // TODO: Set after deployment
+    address constant PLDXY_BEAR = address(0); // TODO: Set after deployment
+    address constant PLDXY_BULL = address(0); // TODO: Set after deployment
     address constant MORPHO_ORACLE_BEAR = address(0); // TODO: Set after deployment
     address constant MORPHO_ORACLE_BULL = address(0); // TODO: Set after deployment
     address constant STAKED_BEAR = address(0); // TODO: Set after deployment
@@ -48,8 +48,8 @@ contract VerifyDeployment is Script {
 
     // Expected values
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
-    uint256 constant MIN_EXPECTED_PRICE = 90_000_000; // $0.90 minimum expected DXY price
-    uint256 constant MAX_EXPECTED_PRICE = 140_000_000; // $1.40 maximum expected DXY price
+    uint256 constant MIN_EXPECTED_PRICE = 90_000_000; // $0.90 minimum expected plDXY price
+    uint256 constant MAX_EXPECTED_PRICE = 140_000_000; // $1.40 maximum expected plDXY price
 
     // Test amounts
     uint256 constant MINT_TEST_AMOUNT = 100 ether; // 100 tokens
@@ -128,8 +128,8 @@ contract VerifyDeployment is Script {
     function _checkAddressesSet() internal pure {
         require(BASKET_ORACLE != address(0), "BasketOracle not set");
         require(SPLITTER != address(0), "Splitter not set");
-        require(DXY_BEAR != address(0), "DXY-BEAR not set");
-        require(DXY_BULL != address(0), "DXY-BULL not set");
+        require(PLDXY_BEAR != address(0), "plDXY-BEAR not set");
+        require(PLDXY_BULL != address(0), "plDXY-BULL not set");
         require(MORPHO_ORACLE_BEAR != address(0), "MorphoOracle BEAR not set");
         require(MORPHO_ORACLE_BULL != address(0), "MorphoOracle BULL not set");
         require(STAKED_BEAR != address(0), "StakedBear not set");
@@ -145,8 +145,8 @@ contract VerifyDeployment is Script {
         console2.log("[OK] Splitter CAP correct:", CAP);
 
         // Check tokens are correctly set
-        require(address(splitter.TOKEN_A()) == DXY_BEAR, "TOKEN_A mismatch");
-        require(address(splitter.TOKEN_B()) == DXY_BULL, "TOKEN_B mismatch");
+        require(address(splitter.TOKEN_A()) == PLDXY_BEAR, "TOKEN_A mismatch");
+        require(address(splitter.TOKEN_B()) == PLDXY_BULL, "TOKEN_B mismatch");
         console2.log("[OK] Splitter tokens correctly configured");
 
         // Check Splitter is active (not paused and not liquidated)
@@ -155,8 +155,8 @@ contract VerifyDeployment is Script {
         console2.log("[OK] Splitter is in ACTIVE state");
 
         // Check token SPLITTER references
-        require(SyntheticToken(DXY_BEAR).SPLITTER() == SPLITTER, "BEAR SPLITTER wrong");
-        require(SyntheticToken(DXY_BULL).SPLITTER() == SPLITTER, "BULL SPLITTER wrong");
+        require(SyntheticToken(PLDXY_BEAR).SPLITTER() == SPLITTER, "BEAR SPLITTER wrong");
+        require(SyntheticToken(PLDXY_BULL).SPLITTER() == SPLITTER, "BULL SPLITTER wrong");
         console2.log("[OK] Token SPLITTER references correct");
     }
 
@@ -199,8 +199,8 @@ contract VerifyDeployment is Script {
 
     function _verifyTokenRelationships() internal view {
         // Verify token names/symbols
-        SyntheticToken bear = SyntheticToken(DXY_BEAR);
-        SyntheticToken bull = SyntheticToken(DXY_BULL);
+        SyntheticToken bear = SyntheticToken(PLDXY_BEAR);
+        SyntheticToken bull = SyntheticToken(PLDXY_BULL);
 
         require(bytes(bear.name()).length > 0, "BEAR name empty");
         require(bytes(bull.name()).length > 0, "BULL name empty");
@@ -218,8 +218,8 @@ contract VerifyDeployment is Script {
         StakedToken stakedBull = StakedToken(STAKED_BULL);
 
         // Check underlying assets
-        require(stakedBear.asset() == DXY_BEAR, "StakedBear asset mismatch");
-        require(stakedBull.asset() == DXY_BULL, "StakedBull asset mismatch");
+        require(stakedBear.asset() == PLDXY_BEAR, "StakedBear asset mismatch");
+        require(stakedBull.asset() == PLDXY_BULL, "StakedBull asset mismatch");
         console2.log("[OK] Staked token assets correctly configured");
 
         // Check names
@@ -246,8 +246,8 @@ contract VerifyDeployment is Script {
 
         // Check ZapRouter addresses
         require(address(zapRouter.SPLITTER()) == SPLITTER, "ZapRouter SPLITTER wrong");
-        require(address(zapRouter.DXY_BEAR()) == DXY_BEAR, "ZapRouter DXY_BEAR wrong");
-        require(address(zapRouter.DXY_BULL()) == DXY_BULL, "ZapRouter DXY_BULL wrong");
+        require(address(zapRouter.PLDXY_BEAR()) == PLDXY_BEAR, "ZapRouter PLDXY_BEAR wrong");
+        require(address(zapRouter.PLDXY_BULL()) == PLDXY_BULL, "ZapRouter PLDXY_BULL wrong");
         console2.log("[OK] ZapRouter addresses correctly configured");
 
         if (LEVERAGE_ROUTER != address(0)) {
@@ -277,13 +277,13 @@ contract VerifyDeployment is Script {
 
         // Approve and mint
         usdc.approve(SPLITTER, previewUsdc);
-        uint256 bearBefore = IERC20(DXY_BEAR).balanceOf(sender);
-        uint256 bullBefore = IERC20(DXY_BULL).balanceOf(sender);
+        uint256 bearBefore = IERC20(PLDXY_BEAR).balanceOf(sender);
+        uint256 bullBefore = IERC20(PLDXY_BULL).balanceOf(sender);
 
         splitter.mint(MINT_TEST_AMOUNT);
 
-        uint256 bearAfter = IERC20(DXY_BEAR).balanceOf(sender);
-        uint256 bullAfter = IERC20(DXY_BULL).balanceOf(sender);
+        uint256 bearAfter = IERC20(PLDXY_BEAR).balanceOf(sender);
+        uint256 bullAfter = IERC20(PLDXY_BULL).balanceOf(sender);
 
         require(bearAfter == bearBefore + MINT_TEST_AMOUNT, "BEAR balance mismatch");
         require(bullAfter == bullBefore + MINT_TEST_AMOUNT, "BULL balance mismatch");
@@ -291,8 +291,8 @@ contract VerifyDeployment is Script {
         console2.log("[OK] Mint successful - received BEAR and BULL tokens");
 
         // Test burn
-        IERC20(DXY_BEAR).approve(SPLITTER, MINT_TEST_AMOUNT);
-        IERC20(DXY_BULL).approve(SPLITTER, MINT_TEST_AMOUNT);
+        IERC20(PLDXY_BEAR).approve(SPLITTER, MINT_TEST_AMOUNT);
+        IERC20(PLDXY_BULL).approve(SPLITTER, MINT_TEST_AMOUNT);
 
         uint256 usdcBefore = usdc.balanceOf(sender);
         splitter.burn(MINT_TEST_AMOUNT);

@@ -81,7 +81,7 @@ abstract contract BaseForkTest is Test {
     // ==========================================
     // CURVE POOL PARAMETERS
     // Single source of truth for all fork tests
-    // Optimized for low-volatility DXY pair
+    // Optimized for low-volatility plDXY pair
     // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 40M
     // ==========================================
     uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
@@ -113,7 +113,7 @@ abstract contract BaseForkTest is Test {
     address public bearToken;
 
     uint256 public realOraclePrice;
-    uint256 public bearPrice; // CAP - DXY, the fair value of DXY-BEAR
+    uint256 public bearPrice; // CAP - plDXY, the fair value of plDXY-BEAR
 
     // ==========================================
     // SETUP HELPERS
@@ -151,7 +151,7 @@ abstract contract BaseForkTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        // Mock Pool for Oracle Init (using DXY-BEAR price = CAP - DXY)
+        // Mock Pool for Oracle Init (using plDXY-BEAR price = CAP - plDXY)
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
         basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, 2e8, address(this));
         basketOracle.setCurvePool(tempCurvePool);
@@ -189,8 +189,8 @@ abstract contract BaseForkTest is Test {
 
         curvePool = ICurveCryptoFactory(CURVE_CRYPTO_FACTORY)
             .deploy_pool(
-                "USDC/Bear Pool",
-                "USDC-BEAR",
+                "USDC/plDXY-BEAR Pool",
+                "USDC-plDXY-BEAR",
                 coins,
                 0,
                 CURVE_A,
@@ -206,7 +206,7 @@ abstract contract BaseForkTest is Test {
 
         require(curvePool != address(0), "Pool Deployment Failed");
 
-        // Add Liquidity at bearPrice (USDC per DXY-BEAR)
+        // Add Liquidity at bearPrice (USDC per plDXY-BEAR)
         IERC20(USDC).approve(curvePool, type(uint256).max);
         IERC20(bearToken).approve(curvePool, type(uint256).max);
 

@@ -33,8 +33,8 @@ contract SlippageReportTest is BaseForkTest {
     }
 
     function test_SlippageReport_SellBear() public view {
-        console.log("=== SLIPPAGE REPORT: Sell DXY-BEAR for USDC ===");
-        console.log("Pool liquidity: 800,000 DXY-BEAR");
+        console.log("=== SLIPPAGE REPORT: Sell plDXY-BEAR for USDC ===");
+        console.log("Pool liquidity: 800,000 plDXY-BEAR");
         console.log("Curve params: A=%s, gamma=%s", CURVE_A, CURVE_GAMMA);
         console.log("");
         console.log("| Trade Size | BEAR Amount | Expected USDC | Actual USDC | Slippage |");
@@ -64,7 +64,7 @@ contract SlippageReportTest is BaseForkTest {
     }
 
     function test_SlippageReport_BuyBear() public view {
-        console.log("=== SLIPPAGE REPORT: Buy DXY-BEAR with USDC ===");
+        console.log("=== SLIPPAGE REPORT: Buy plDXY-BEAR with USDC ===");
         console.log("Pool liquidity: ~660,000 USDC equivalent");
         console.log("Curve params: A=%s, gamma=%s", CURVE_A, CURVE_GAMMA);
         console.log("");
@@ -98,7 +98,7 @@ contract SlippageReportTest is BaseForkTest {
 
     function test_SlippageReport_RoundTrip() public {
         console.log("=== SLIPPAGE REPORT: Round-trip (Sell BEAR -> Buy BEAR) ===");
-        console.log("Pool liquidity: 800,000 DXY-BEAR");
+        console.log("Pool liquidity: 800,000 plDXY-BEAR");
         console.log("Curve params: A=%s, gamma=%s", CURVE_A, CURVE_GAMMA);
         console.log("");
         console.log("| Trade Size | BEAR In | USDC Mid | BEAR Out | Round-trip Loss |");

@@ -15,15 +15,15 @@ contract SyntheticTokenTest is Test {
     event Transfer(address indexed from, address indexed to, uint256 value);
 
     function setUp() public {
-        token = new SyntheticToken("Mock DXY", "mDXY", splitter);
+        token = new SyntheticToken("Mock plDXY", "mplDXY", splitter);
     }
 
     // ==========================================
     // 1. Initialization Tests
     // ==========================================
     function test_InitialState() public {
-        assertEq(token.name(), "Mock DXY");
-        assertEq(token.symbol(), "mDXY");
+        assertEq(token.name(), "Mock plDXY");
+        assertEq(token.symbol(), "mplDXY");
         assertEq(token.SPLITTER(), splitter);
     }
 

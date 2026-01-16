@@ -53,7 +53,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Risk**: If Chainlink is compromised or all 6 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed
 
 #### Curve Finance
-- **Assumption**: Curve pool for USDC/DXY-BEAR operates correctly and provides fair exchange rates
+- **Assumption**: Curve pool for USDC/plDXY-BEAR operates correctly and provides fair exchange rates
 - **Mitigation**: `price_oracle()` deviation check (2% max) prevents price manipulation attacks
 - **Risk**: Curve pool manipulation could affect ZapRouter and LeverageRouter swap outcomes; user-provided slippage protects against this
 
@@ -143,7 +143,7 @@ If migration fails the loss check, it reverts with `Splitter__MigrationLostFunds
 - **Rationale**: This is inherent to any DeFi protocol; users should set appropriate slippage
 
 #### Oracle/Market Price Deviation
-- **Mechanism**: BasketOracle compares the theoretical DXY-BEAR price (derived from Chainlink feeds) against Curve's internal EMA oracle (`price_oracle()`)
+- **Mechanism**: BasketOracle compares the theoretical plDXY-BEAR price (derived from Chainlink feeds) against Curve's internal EMA oracle (`price_oracle()`)
 - **Threshold**: Maximum 2% deviation (configurable via `MAX_DEVIATION_BPS` at deployment)
 - **Behavior**: If deviation exceeds threshold, `latestRoundData()` reverts with `BasketOracle__PriceDeviation(theoretical, spot)`
 - **Affected Operations**: Minting, liquidation trigger, and leverage operations (via Morpho oracle). Burns are NOT affected—users can always exit.
@@ -162,7 +162,7 @@ If migration fails the loss check, it reverts with `Splitter__MigrationLostFunds
 #### No Partial Liquidation
 - **Behavior**: When price >= CAP, the entire protocol enters SETTLED state
 - **Impact**: All positions are affected equally
-- **Rationale**: The CAP represents the theoretical maximum DXY value; exceeding it means the inverse token has zero value
+- **Rationale**: The CAP represents the theoretical maximum plDXY value; exceeding it means the inverse token has zero value
 
 ### Minimum/Maximum Amounts
 
@@ -195,7 +195,7 @@ The protocol has zero fees for user operations. The only fee is a performance fe
 |-----------|-----|-------|
 | Mint | 0% | No fee to mint BEAR+BULL pairs |
 | Burn | 0% | No fee to redeem USDC |
-| Flash Mint (DXY-BEAR/BULL) | 0% | ERC-3156 compliant, zero fee |
+| Flash Mint (plDXY-BEAR/BULL) | 0% | ERC-3156 compliant, zero fee |
 | Flash Loan (Morpho) | 0% | Morpho Blue provides fee-free flash loans |
 | Curve Swaps | ~0.04% | Paid to Curve LPs, not Plether |
 
@@ -230,13 +230,13 @@ Morpho may distribute token rewards (e.g., MORPHO) to suppliers via their Univer
 
 ### Flash Mint Capability
 
-SyntheticToken (DXY-BEAR and DXY-BULL) supports ERC-3156 flash mints:
+SyntheticToken (plDXY-BEAR and plDXY-BULL) supports ERC-3156 flash mints:
 
 - **Fee**: Zero (no flash mint fee)
 - **Max Amount**: Unlimited (tokens are minted on demand)
 - **Use Cases**:
-  - ZapRouter: Flash mints DXY-BEAR for atomic BULL acquisition
-  - BullLeverageRouter: Flash mints DXY-BEAR for closing leveraged positions (single flash loan pattern)
+  - ZapRouter: Flash mints plDXY-BEAR for atomic BULL acquisition
+  - BullLeverageRouter: Flash mints plDXY-BEAR for closing leveraged positions (single flash loan pattern)
 - **Risk**: Flash-minted tokens could be used in complex attack vectors (e.g., oracle manipulation, governance attacks)
 - **Mitigation**: Tokens must be returned in same transaction; protocol operations validate prices independently
 
@@ -247,9 +247,9 @@ Critical decimal conversions throughout the protocol:
 | Asset/Oracle | Decimals | Notes |
 |--------------|----------|-------|
 | USDC | 6 | Collateral token |
-| DXY-BEAR / DXY-BULL | 18 | Synthetic tokens |
+| plDXY-BEAR / plDXY-BULL | 18 | Synthetic tokens |
 | Chainlink Price Feeds | 8 | EUR/USD, JPY/USD, etc. |
-| BasketOracle Output | 8 | Aggregated DXY price |
+| BasketOracle Output | 8 | Aggregated plDXY price |
 | Morpho Oracle | 36 | Internal Morpho scaling |
 | StakedToken Offset | 3 | 1000x inflation attack protection |
 
@@ -259,7 +259,7 @@ Conversion formula in Splitter:
 
 ### StakedToken Security
 
-StakedToken (sDXY-BEAR, sDXY-BULL) is an ERC-4626 vault used as Morpho collateral:
+StakedToken (splDXY-BEAR, splDXY-BULL) is an ERC-4626 vault used as Morpho collateral:
 
 - **Inflation Attack Protection**: Uses `_decimalsOffset() = 3` (1000x multiplier)
 - **Permissionless Yield Injection**: `donateYield()` allows anyone to add yield
@@ -282,7 +282,7 @@ Router contracts assume specific Curve pool structure:
 | Index | Asset | Constant |
 |-------|-------|----------|
 | 0 | USDC | `USDC_INDEX` |
-| 1 | DXY-BEAR | `DXY_BEAR_INDEX` |
+| 1 | plDXY-BEAR | `PLDXY_BEAR_INDEX` |
 
 - **Risk**: If Curve pool is deployed with different indices, all router swaps fail
 - **Mitigation**: Indices are verified during deployment; pool address is immutable
@@ -300,9 +300,9 @@ LeverageRouter and BullLeverageRouter share a common base contract (`LeverageRou
 
 | Router | Flash Loan Source | Collateral Token |
 |--------|-------------------|------------------|
-| LeverageRouter | Morpho (USDC) | sDXY-BEAR |
-| BullLeverageRouter | Morpho (USDC) for open, ERC-3156 (DXY-BEAR) for close | sDXY-BULL |
-| ZapRouter | ERC-3156 (DXY-BEAR) | N/A |
+| LeverageRouter | Morpho (USDC) | splDXY-BEAR |
+| BullLeverageRouter | Morpho (USDC) for open, ERC-3156 (plDXY-BEAR) for close | splDXY-BULL |
+| ZapRouter | ERC-3156 (plDXY-BEAR) | N/A |
 
 #### MEV Protection
 
@@ -343,7 +343,7 @@ All routers implement multiple layers of MEV protection:
 ### Liquidation Trigger
 
 **Trigger condition:**
-- Oracle price >= CAP ($2.00 for DXY)
+- Oracle price >= CAP ($2.00 for plDXY)
 
 **How to trigger:**
 - Anyone can call `triggerLiquidation()` when oracle reports price >= CAP
@@ -360,10 +360,10 @@ All routers implement multiple layers of MEV protection:
 If tokens are accidentally sent to contracts:
 1. Identify the stuck token
 2. Call `rescueToken(token, recipient)` on the relevant contract
-3. Note: Cannot rescue core assets (USDC, DXY-BEAR, DXY-BULL)
+3. Note: Cannot rescue core assets (USDC, plDXY-BEAR, plDXY-BULL)
 
 Contracts supporting `rescueToken`:
-- **SyntheticSplitter**: Rescues any token except USDC, DXY-BEAR, DXY-BULL
+- **SyntheticSplitter**: Rescues any token except USDC, plDXY-BEAR, plDXY-BULL
 - **MorphoAdapter**: Rescues any token except USDC (the underlying asset)
 
 ### Adapter Migration (Emergency)
@@ -410,7 +410,7 @@ contact@plether.com
 | 2026-01-15 | Documented acknowledged risk: permissionless donateYield() griefing vector |
 | 2026-01-15 | Updated ownership model to reflect Ownable2Step pattern |
 | 2026-01-15 | Added Governance Cooldown and Adapter Migration Safety sections under Trust Assumptions |
-| 2026-01-14 | Added `rescueToken()` to SyntheticSplitter for recovering accidentally sent tokens (excludes USDC, DXY-BEAR, DXY-BULL) |
+| 2026-01-14 | Added `rescueToken()` to SyntheticSplitter for recovering accidentally sent tokens (excludes USDC, plDXY-BEAR, plDXY-BULL) |
 | 2026-01-14 | Added Upgradeability section (non-upgradeable contracts) and Protocol Invariants section (solvency, token, state invariants) |
 | 2026-01-14 | Added Oracle/Market Price Deviation section documenting the 2% deviation check between Chainlink and Curve prices |
 | 2026-01-14 | Added `withdrawFromAdapter()` for gradual liquidity extraction under tight Morpho utilization; documented new emergency procedure |

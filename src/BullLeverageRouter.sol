@@ -11,9 +11,9 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title BullLeverageRouter
-/// @notice Leverage router for DXY-BULL positions via Morpho Blue.
-/// @dev Uses Morpho flash loans + Splitter minting to acquire DXY-BULL, then deposits as Morpho collateral.
-///      Close operation uses a single DXY-BEAR flash mint for simplicity and gas efficiency.
+/// @notice Leverage router for plDXY-BULL positions via Morpho Blue.
+/// @dev Uses Morpho flash loans + Splitter minting to acquire plDXY-BULL, then deposits as Morpho collateral.
+///      Close operation uses a single plDXY-BEAR flash mint for simplicity and gas efficiency.
 ///      Uses Morpho's fee-free flash loans for capital efficiency.
 ///
 /// @dev STATE MACHINE - OPEN LEVERAGE:
@@ -23,10 +23,10 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │   2. Flash loan additional USDC from Morpho (fee-free)                  │
 ///      │      └──► onMorphoFlashLoan(OP_OPEN)                                    │
 ///      │            └──► _executeOpen()                                          │
-///      │                  1. Mint DXY-BEAR + DXY-BULL pairs via Splitter         │
-///      │                  2. Sell DXY-BEAR on Curve → USDC                       │
-///      │                  3. Stake DXY-BULL → sDXY-BULL                          │
-///      │                  4. Deposit sDXY-BULL to Morpho (user's collateral)     │
+///      │                  1. Mint plDXY-BEAR + plDXY-BULL pairs via Splitter         │
+///      │                  2. Sell plDXY-BEAR on Curve → USDC                       │
+///      │                  3. Stake plDXY-BULL → splDXY-BULL                          │
+///      │                  4. Deposit splDXY-BULL to Morpho (user's collateral)     │
 ///      │                  5. Borrow USDC from Morpho to cover flash repayment    │
 ///      │                  6. Emit LeverageOpened event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
@@ -34,15 +34,15 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @dev STATE MACHINE - CLOSE LEVERAGE (Single Flash Mint):
 ///      ┌─────────────────────────────────────────────────────────────────────────┐
 ///      │ closeLeverage(debtToRepay, collateralToWithdraw)                        │
-///      │   1. Flash mint DXY-BEAR (collateral + extra for debt repayment)        │
+///      │   1. Flash mint plDXY-BEAR (collateral + extra for debt repayment)        │
 ///      │      └──► onFlashLoan(OP_CLOSE)                                         │
 ///      │            └──► _executeClose()                                         │
-///      │                  1. Sell extra DXY-BEAR on Curve → USDC                 │
+///      │                  1. Sell extra plDXY-BEAR on Curve → USDC                 │
 ///      │                  2. Repay user's Morpho debt with USDC from sale        │
-///      │                  3. Withdraw user's sDXY-BULL from Morpho               │
-///      │                  4. Unstake sDXY-BULL → DXY-BULL                        │
-///      │                  5. Redeem DXY-BEAR + DXY-BULL → USDC                   │
-///      │                  6. Buy DXY-BEAR on Curve to repay flash mint           │
+///      │                  3. Withdraw user's splDXY-BULL from Morpho               │
+///      │                  4. Unstake splDXY-BULL → plDXY-BULL                        │
+///      │                  5. Redeem plDXY-BEAR + plDXY-BULL → USDC                   │
+///      │                  6. Buy plDXY-BEAR on Curve to repay flash mint           │
 ///      │                  7. Transfer remaining USDC to user                     │
 ///      │                  8. Emit LeverageClosed event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
@@ -51,18 +51,18 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     using SafeERC20 for IERC20;
 
-    /// @notice Emitted when a leveraged DXY-BULL position is opened.
+    /// @notice Emitted when a leveraged plDXY-BULL position is opened.
     event LeverageOpened(
         address indexed user,
         uint256 principal,
         uint256 leverage,
         uint256 loanAmount,
-        uint256 dxyBullReceived,
+        uint256 plDxyBullReceived,
         uint256 debtIncurred,
         uint256 maxSlippageBps
     );
 
-    /// @notice Emitted when a leveraged DXY-BULL position is closed.
+    /// @notice Emitted when a leveraged plDXY-BULL position is closed.
     event LeverageClosed(
         address indexed user,
         uint256 debtRepaid,
@@ -74,11 +74,11 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice SyntheticSplitter for minting/burning token pairs.
     ISyntheticSplitter public immutable SPLITTER;
 
-    /// @notice DXY-BULL token (collateral for bull positions).
-    IERC20 public immutable DXY_BULL;
+    /// @notice plDXY-BULL token (collateral for bull positions).
+    IERC20 public immutable PLDXY_BULL;
 
-    /// @notice StakedToken vault for DXY-BULL (used as Morpho collateral).
-    IERC4626 public immutable STAKED_DXY_BULL;
+    /// @notice StakedToken vault for plDXY-BULL (used as Morpho collateral).
+    IERC4626 public immutable STAKED_PLDXY_BULL;
 
     /// @notice Protocol CAP price (8 decimals, oracle format).
     uint256 public immutable CAP;
@@ -90,29 +90,29 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice Deploys BullLeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _splitter SyntheticSplitter contract address.
-    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
     /// @param _usdc USDC token address.
-    /// @param _dxyBear DXY-BEAR token address.
-    /// @param _dxyBull DXY-BULL token address.
-    /// @param _stakedDxyBull sDXY-BULL staking vault address.
-    /// @param _marketParams Morpho market parameters for sDXY-BULL/USDC.
+    /// @param _plDxyBear plDXY-BEAR token address.
+    /// @param _plDxyBull plDXY-BULL token address.
+    /// @param _stakedPlDxyBull splDXY-BULL staking vault address.
+    /// @param _marketParams Morpho market parameters for splDXY-BULL/USDC.
     constructor(
         address _morpho,
         address _splitter,
         address _curvePool,
         address _usdc,
-        address _dxyBear,
-        address _dxyBull,
-        address _stakedDxyBull,
+        address _plDxyBear,
+        address _plDxyBull,
+        address _stakedPlDxyBull,
         MarketParams memory _marketParams
-    ) LeverageRouterBase(_morpho, _curvePool, _usdc, _dxyBear) {
+    ) LeverageRouterBase(_morpho, _curvePool, _usdc, _plDxyBear) {
         if (_splitter == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_dxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_stakedDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_plDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_stakedPlDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
 
         SPLITTER = ISyntheticSplitter(_splitter);
-        DXY_BULL = IERC20(_dxyBull);
-        STAKED_DXY_BULL = IERC4626(_stakedDxyBull);
+        PLDXY_BULL = IERC20(_plDxyBull);
+        STAKED_PLDXY_BULL = IERC4626(_stakedPlDxyBull);
         marketParams = _marketParams;
 
         // Cache CAP from Splitter (8 decimals)
@@ -121,27 +121,27 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Approvals (One-time)
         // 1. Allow Splitter to take USDC (for minting pairs)
         USDC.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 2. Allow Curve pool to take DXY-BEAR (for selling during open)
-        DXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
+        // 2. Allow Curve pool to take plDXY-BEAR (for selling during open)
+        PLDXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
         // 3. Allow Curve pool to take USDC (for buying BEAR during close)
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 4. Allow StakedToken to take DXY-BULL (for staking)
-        DXY_BULL.safeIncreaseAllowance(_stakedDxyBull, type(uint256).max);
-        // 5. Allow Morpho to take sDXY-BULL (for supplying collateral)
-        IERC20(_stakedDxyBull).safeIncreaseAllowance(_morpho, type(uint256).max);
+        // 4. Allow StakedToken to take plDXY-BULL (for staking)
+        PLDXY_BULL.safeIncreaseAllowance(_stakedPlDxyBull, type(uint256).max);
+        // 5. Allow Morpho to take splDXY-BULL (for supplying collateral)
+        IERC20(_stakedPlDxyBull).safeIncreaseAllowance(_morpho, type(uint256).max);
         // 6. Allow Morpho to take USDC (for repaying debt and flash loan)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
-        // 7. Allow Splitter to take DXY-BEAR (for redeeming pairs during close)
-        DXY_BEAR.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 8. Allow Splitter to take DXY-BULL (for redeeming pairs during close)
-        DXY_BULL.safeIncreaseAllowance(_splitter, type(uint256).max);
-        // 9. Allow DXY-BEAR to take back tokens (Flash Mint Repayment)
-        DXY_BEAR.safeIncreaseAllowance(_dxyBear, type(uint256).max);
+        // 7. Allow Splitter to take plDXY-BEAR (for redeeming pairs during close)
+        PLDXY_BEAR.safeIncreaseAllowance(_splitter, type(uint256).max);
+        // 8. Allow Splitter to take plDXY-BULL (for redeeming pairs during close)
+        PLDXY_BULL.safeIncreaseAllowance(_splitter, type(uint256).max);
+        // 9. Allow plDXY-BEAR to take back tokens (Flash Mint Repayment)
+        PLDXY_BEAR.safeIncreaseAllowance(_plDxyBear, type(uint256).max);
     }
 
     /**
-     * @notice Open a Leveraged DXY-BULL Position in one transaction.
-     * @dev Mints pairs via Splitter, sells DXY-BEAR on Curve, deposits DXY-BULL to Morpho.
+     * @notice Open a Leveraged plDXY-BULL Position in one transaction.
+     * @dev Mints pairs via Splitter, sells plDXY-BEAR on Curve, deposits plDXY-BULL to Morpho.
      * @param principal Amount of USDC user sends.
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
@@ -169,8 +169,8 @@ contract BullLeverageRouter is LeverageRouterBase {
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
         uint256 totalUSDC = principal + loanAmount;
-        uint256 dxyBearAmount = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
-        uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
+        uint256 plDxyBearAmount = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearAmount);
         uint256 minSwapOut = (expectedUsdcFromSale * (10_000 - maxSlippageBps)) / 10_000;
 
         bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minSwapOut);
@@ -179,12 +179,12 @@ contract BullLeverageRouter is LeverageRouterBase {
     }
 
     /**
-     * @notice Close a Leveraged DXY-BULL Position in one transaction.
-     * @dev Uses a single DXY-BEAR flash mint to unwind positions efficiently.
+     * @notice Close a Leveraged plDXY-BULL Position in one transaction.
+     * @dev Uses a single plDXY-BEAR flash mint to unwind positions efficiently.
      *      Queries actual debt from Morpho to ensure full repayment even if interest accrued.
-     * @param collateralToWithdraw Amount of sDXY-BULL shares to withdraw from Morpho.
-     *        NOTE: This is staked token shares, not underlying DXY-BULL amount.
-     *        Use STAKED_DXY_BULL.previewRedeem() to convert shares to underlying.
+     * @param collateralToWithdraw Amount of splDXY-BULL shares to withdraw from Morpho.
+     *        NOTE: This is staked token shares, not underlying plDXY-BULL amount.
+     *        Use STAKED_PLDXY_BULL.previewRedeem() to convert shares to underlying.
      * @param maxSlippageBps Maximum slippage tolerance in basis points.
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
@@ -203,16 +203,16 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 debtToRepay = _getActualDebt(msg.sender);
 
         // Convert staked shares to underlying BULL amount (for pair matching)
-        uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
+        uint256 plDxyBullAmount = STAKED_PLDXY_BULL.previewRedeem(collateralToWithdraw);
 
         // Add buffer for exchange rate drift (protects against yield donation front-running)
-        uint256 bufferedBullAmount = dxyBullAmount + (dxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
+        uint256 bufferedBullAmount = plDxyBullAmount + (plDxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
 
         // Calculate extra BEAR needed to sell for debt repayment
         uint256 extraBearForDebt = 0;
         if (debtToRepay > 0) {
             // Query: how much USDC do we get for 1 BEAR (DecimalConstants.ONE_WAD)?
-            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
+            uint256 usdcPerBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
             if (usdcPerBear == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate BEAR needed to sell for debtToRepay USDC
@@ -231,7 +231,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         );
 
         // Single flash mint handles entire close operation
-        IERC3156FlashLender(address(DXY_BEAR)).flashLoan(this, address(DXY_BEAR), flashAmount, data);
+        IERC3156FlashLender(address(PLDXY_BEAR)).flashLoan(this, address(PLDXY_BEAR), flashAmount, data);
 
         // Event emitted in _executeClose callback
     }
@@ -287,9 +287,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Constructor grants max approval, so no additional approval needed.
     }
 
-    /// @notice ERC-3156 flash loan callback for DXY-BEAR flash mints (OP_CLOSE only).
+    /// @notice ERC-3156 flash loan callback for plDXY-BEAR flash mints (OP_CLOSE only).
     /// @param initiator Address that initiated the flash loan (must be this contract).
-    /// @param amount Amount of DXY-BEAR borrowed.
+    /// @param amount Amount of plDXY-BEAR borrowed.
     /// @param fee Flash loan fee (always 0 for SyntheticToken).
     /// @param data Encoded close operation parameters.
     /// @return CALLBACK_SUCCESS on successful execution.
@@ -300,7 +300,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 fee,
         bytes calldata data
     ) external override returns (bytes32) {
-        _validateFlashLoan(msg.sender, address(DXY_BEAR), initiator);
+        _validateFlashLoan(msg.sender, address(PLDXY_BEAR), initiator);
 
         uint8 operation = abi.decode(data, (uint8));
 
@@ -327,20 +327,20 @@ contract BullLeverageRouter is LeverageRouterBase {
         // 1. Total USDC = Principal + Flash Loan
         uint256 totalUSDC = principal + loanAmount;
 
-        // 2. Mint pairs via Splitter (USDC -> DXY-BEAR + DXY-BULL)
+        // 2. Mint pairs via Splitter (USDC -> plDXY-BEAR + plDXY-BULL)
         // Splitter.mint expects token amount (18 decimals), not USDC (6 decimals)
         // tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
         SPLITTER.mint((totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP);
 
-        // 3. Sell ALL DXY-BEAR for USDC via Curve
-        uint256 dxyBearBalance = DXY_BEAR.balanceOf(address(this));
-        uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearBalance, minSwapOut);
+        // 3. Sell ALL plDXY-BEAR for USDC via Curve
+        uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
+        uint256 usdcFromSale = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
 
-        // 4. Stake DXY-BULL to get sDXY-BULL
-        uint256 dxyBullReceived = DXY_BULL.balanceOf(address(this));
-        uint256 stakedShares = STAKED_DXY_BULL.deposit(dxyBullReceived, address(this));
+        // 4. Stake plDXY-BULL to get splDXY-BULL
+        uint256 plDxyBullReceived = PLDXY_BULL.balanceOf(address(this));
+        uint256 stakedShares = STAKED_PLDXY_BULL.deposit(plDxyBullReceived, address(this));
 
-        // 5. Deposit sDXY-BULL collateral to Morpho on behalf of the USER
+        // 5. Deposit splDXY-BULL collateral to Morpho on behalf of the USER
         MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
         // 6. Borrow USDC from Morpho to repay flash loan (no fee with Morpho)
@@ -351,11 +351,11 @@ contract BullLeverageRouter is LeverageRouterBase {
         }
 
         // 7. Emit event for off-chain tracking
-        emit LeverageOpened(user, principal, leverage, loanAmount, dxyBullReceived, debtIncurred, maxSlippageBps);
+        emit LeverageOpened(user, principal, leverage, loanAmount, plDxyBullReceived, debtIncurred, maxSlippageBps);
     }
 
-    /// @dev Executes close leverage operation within DXY-BEAR flash mint callback.
-    /// @param flashAmount Amount of DXY-BEAR flash minted.
+    /// @dev Executes close leverage operation within plDXY-BEAR flash mint callback.
+    /// @param flashAmount Amount of plDXY-BEAR flash minted.
     /// @param flashFee Flash mint fee (always 0).
     /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps).
     function _executeClose(
@@ -377,7 +377,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         if (debtToRepay > 0 && extraBearForDebt > 0) {
             // Sell extraBearForDebt BEAR → USDC (with slippage protection)
             uint256 minUsdcFromSale = (debtToRepay * (10_000 - maxSlippageBps)) / 10_000;
-            uint256 usdcFromSale = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt, minUsdcFromSale);
+            uint256 usdcFromSale = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt, minUsdcFromSale);
             if (usdcFromSale < debtToRepay) revert LeverageRouterBase__InsufficientOutput();
         }
 
@@ -386,28 +386,28 @@ contract BullLeverageRouter is LeverageRouterBase {
             MORPHO.repay(marketParams, debtToRepay, 0, user, "");
         }
 
-        // 3. Withdraw user's sDXY-BULL collateral from Morpho
+        // 3. Withdraw user's splDXY-BULL collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
 
-        // 4. Unstake sDXY-BULL to get DXY-BULL
-        uint256 dxyBullReceived = STAKED_DXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
+        // 4. Unstake splDXY-BULL to get plDXY-BULL
+        uint256 plDxyBullReceived = STAKED_PLDXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
 
-        // 5. Redeem pairs via Splitter (DXY-BEAR + DXY-BULL → USDC)
-        // We have exactly dxyBullReceived BULL, and (flashAmount - extraBearForDebt) BEAR remaining
-        SPLITTER.burn(dxyBullReceived);
+        // 5. Redeem pairs via Splitter (plDXY-BEAR + plDXY-BULL → USDC)
+        // We have exactly plDxyBullReceived BULL, and (flashAmount - extraBearForDebt) BEAR remaining
+        SPLITTER.burn(plDxyBullReceived);
 
         // 6. Buy back ALL flash-minted BEAR to repay flash mint
         uint256 repayAmount = flashAmount + flashFee;
 
         // Current BEAR balance (from minting pairs)
-        uint256 bearBalance = DXY_BEAR.balanceOf(address(this));
+        uint256 bearBalance = PLDXY_BEAR.balanceOf(address(this));
 
         // Need to buy: repayAmount - bearBalance
         if (repayAmount > bearBalance) {
             uint256 bearToBuy = repayAmount - bearBalance;
 
             // Estimate USDC needed using Curve price discovery
-            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
+            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
             if (bearPerUsdc == 0) revert LeverageRouterBase__InvalidCurvePrice();
 
             // Calculate USDC needed with slippage buffer
@@ -420,7 +420,7 @@ contract BullLeverageRouter is LeverageRouterBase {
 
             // Swap USDC → BEAR with slippage-tolerant min_dy
             uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
-            CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, maxUsdcToSpend, minBearOut);
+            CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, maxUsdcToSpend, minBearOut);
         }
 
         // 7. Transfer remaining USDC to user
@@ -430,16 +430,16 @@ contract BullLeverageRouter is LeverageRouterBase {
         }
 
         // 8. Sweep excess BEAR to user (from exchange rate buffer)
-        uint256 finalBearBalance = DXY_BEAR.balanceOf(address(this));
+        uint256 finalBearBalance = PLDXY_BEAR.balanceOf(address(this));
         if (finalBearBalance > repayAmount) {
-            DXY_BEAR.safeTransfer(user, finalBearBalance - repayAmount);
+            PLDXY_BEAR.safeTransfer(user, finalBearBalance - repayAmount);
         }
 
         // 9. Emit event for off-chain tracking
         emit LeverageClosed(user, debtToRepay, collateralToWithdraw, usdcToReturn, maxSlippageBps);
 
         // Flash mint repayment happens automatically when callback returns
-        // DXY-BEAR token will burn repayAmount from this contract
+        // plDXY-BEAR token will burn repayAmount from this contract
     }
 
     // ==========================================
@@ -447,28 +447,28 @@ contract BullLeverageRouter is LeverageRouterBase {
     // ==========================================
 
     /**
-     * @notice Preview the result of opening a leveraged DXY-BULL position.
+     * @notice Preview the result of opening a leveraged plDXY-BULL position.
      * @param principal Amount of USDC user will send.
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @return loanAmount Amount of USDC to flash loan.
      * @return totalUSDC Total USDC for minting pairs (principal + loan).
-     * @return expectedDxyBull Expected DXY-BULL tokens received.
-     * @return expectedDebt Expected Morpho debt (flash repayment - USDC from DXY-BEAR sale).
+     * @return expectedPlDxyBull Expected plDXY-BULL tokens received.
+     * @return expectedDebt Expected Morpho debt (flash repayment - USDC from plDXY-BEAR sale).
      */
     function previewOpenLeverage(
         uint256 principal,
         uint256 leverage
-    ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt) {
+    ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBull, uint256 expectedDebt) {
         if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
 
         loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;
         // Splitter mints at CAP price: tokens = usdc * DecimalConstants.USDC_TO_TOKEN_SCALE / CAP
-        expectedDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        expectedPlDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
 
-        // Use Curve to estimate USDC from selling DXY-BEAR
-        uint256 dxyBearAmount = expectedDxyBull;
-        uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
+        // Use Curve to estimate USDC from selling plDXY-BEAR
+        uint256 plDxyBearAmount = expectedPlDxyBull;
+        uint256 expectedUsdcFromSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearAmount);
 
         // No flash fee with Morpho
         // Debt = what we need to borrow from Morpho after using sale proceeds
@@ -476,11 +476,11 @@ contract BullLeverageRouter is LeverageRouterBase {
     }
 
     /**
-     * @notice Preview the result of closing a leveraged DXY-BULL position.
+     * @notice Preview the result of closing a leveraged plDXY-BULL position.
      * @param debtToRepay Amount of USDC debt to repay.
-     * @param collateralToWithdraw Amount of DXY-BULL collateral to withdraw.
+     * @param collateralToWithdraw Amount of plDXY-BULL collateral to withdraw.
      * @return expectedUSDC Expected USDC from redeeming pairs.
-     * @return usdcForBearBuyback Expected USDC needed to buy back DXY-BEAR.
+     * @return usdcForBearBuyback Expected USDC needed to buy back plDXY-BEAR.
      * @return expectedReturn Expected USDC returned to user after all repayments.
      */
     function previewCloseLeverage(
@@ -488,26 +488,26 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 collateralToWithdraw
     ) external view returns (uint256 expectedUSDC, uint256 usdcForBearBuyback, uint256 expectedReturn) {
         // Convert staked shares to underlying BULL amount
-        uint256 dxyBullAmount = STAKED_DXY_BULL.previewRedeem(collateralToWithdraw);
+        uint256 plDxyBullAmount = STAKED_PLDXY_BULL.previewRedeem(collateralToWithdraw);
 
         // Redeeming pairs at CAP: usdc = tokens * CAP / DecimalConstants.USDC_TO_TOKEN_SCALE
-        expectedUSDC = (dxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        expectedUSDC = (plDxyBullAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
 
         // Calculate extra BEAR needed to sell for debt repayment (mirrors closeLeverage logic)
         uint256 extraBearForDebt = 0;
         uint256 usdcFromBearSale = 0;
         if (debtToRepay > 0) {
-            uint256 usdcPerBear = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
+            uint256 usdcPerBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
             if (usdcPerBear > 0) {
                 // Calculate BEAR needed without slippage buffer (conservative estimate)
                 extraBearForDebt = (debtToRepay * DecimalConstants.ONE_WAD) / usdcPerBear;
                 // Estimate actual USDC from selling this BEAR
-                usdcFromBearSale = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
+                usdcFromBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
             }
         }
 
         // Total BEAR to buy back includes exchange rate buffer (mirrors closeLeverage logic)
-        uint256 bufferedBullAmount = dxyBullAmount + (dxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
+        uint256 bufferedBullAmount = plDxyBullAmount + (plDxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
         uint256 totalBearToBuyBack = bufferedBullAmount + extraBearForDebt;
 
         // Calculate USDC needed using get_dy for accurate AMM pricing
@@ -525,14 +525,14 @@ contract BullLeverageRouter is LeverageRouterBase {
     }
 
     /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.
-    /// @param bearAmount Target DXY-BEAR amount to acquire.
+    /// @param bearAmount Target plDXY-BEAR amount to acquire.
     /// @return Estimated USDC needed (with slippage margin).
     function _estimateUsdcForBearBuyback(
         uint256 bearAmount
     ) private view returns (uint256) {
         if (bearAmount == 0) return 0;
 
-        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
+        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
         if (bearPerUsdc == 0) {
             return (bearAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         }
@@ -542,16 +542,16 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 high = low + (low / 5); // Start with 20% buffer
 
         // Ensure high is sufficient
-        uint256 bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, high);
+        uint256 bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
         while (bearAtHigh < bearAmount && high < type(uint128).max) {
             high = high * 2;
-            bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, high);
+            bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
         }
 
         // Binary search to find minimum USDC
         for (uint256 i = 0; i < 20; i++) {
             uint256 mid = (low + high) / 2;
-            uint256 bearOut = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, mid);
+            uint256 bearOut = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, mid);
             if (bearOut >= bearAmount) {
                 high = mid;
             } else {

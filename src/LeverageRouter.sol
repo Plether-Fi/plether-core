@@ -9,26 +9,26 @@ import {MarketParams} from "./interfaces/IMorpho.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title LeverageRouter
-/// @notice Leverage router for DXY-BEAR positions via Morpho Blue.
-/// @dev Flash loans USDC from Morpho → swaps to DXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
+/// @notice Leverage router for plDXY-BEAR positions via Morpho Blue.
+/// @dev Flash loans USDC from Morpho → swaps to plDXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
 ///      Requires user to authorize this contract in Morpho before use.
 ///      Uses Morpho's fee-free flash loans for capital efficiency.
 contract LeverageRouter is LeverageRouterBase {
 
     using SafeERC20 for IERC20;
 
-    /// @notice Emitted when a leveraged DXY-BEAR position is opened.
+    /// @notice Emitted when a leveraged plDXY-BEAR position is opened.
     event LeverageOpened(
         address indexed user,
         uint256 principal,
         uint256 leverage,
         uint256 loanAmount,
-        uint256 dxyBearReceived,
+        uint256 plDxyBearReceived,
         uint256 debtIncurred,
         uint256 maxSlippageBps
     );
 
-    /// @notice Emitted when a leveraged DXY-BEAR position is closed.
+    /// @notice Emitted when a leveraged plDXY-BEAR position is closed.
     event LeverageClosed(
         address indexed user,
         uint256 debtRepaid,
@@ -37,40 +37,40 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
-    /// @notice StakedToken vault for DXY-BEAR (used as Morpho collateral).
-    IERC4626 public immutable STAKED_DXY_BEAR;
+    /// @notice StakedToken vault for plDXY-BEAR (used as Morpho collateral).
+    IERC4626 public immutable STAKED_PLDXY_BEAR;
 
     /// @notice Buffer for exchange rate drift protection (1% = 100 bps).
     uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
 
     /// @notice Deploys LeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
-    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
     /// @param _usdc USDC token address.
-    /// @param _dxyBear DXY-BEAR token address.
-    /// @param _stakedDxyBear sDXY-BEAR staking vault address.
-    /// @param _marketParams Morpho market parameters for sDXY-BEAR/USDC.
+    /// @param _plDxyBear plDXY-BEAR token address.
+    /// @param _stakedPlDxyBear splDXY-BEAR staking vault address.
+    /// @param _marketParams Morpho market parameters for splDXY-BEAR/USDC.
     constructor(
         address _morpho,
         address _curvePool,
         address _usdc,
-        address _dxyBear,
-        address _stakedDxyBear,
+        address _plDxyBear,
+        address _stakedPlDxyBear,
         MarketParams memory _marketParams
-    ) LeverageRouterBase(_morpho, _curvePool, _usdc, _dxyBear) {
-        if (_stakedDxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
-        STAKED_DXY_BEAR = IERC4626(_stakedDxyBear);
+    ) LeverageRouterBase(_morpho, _curvePool, _usdc, _plDxyBear) {
+        if (_stakedPlDxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
+        STAKED_PLDXY_BEAR = IERC4626(_stakedPlDxyBear);
         marketParams = _marketParams;
 
         // Approvals (One-time)
         // 1. Allow Curve pool to take USDC (for opening)
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 2. Allow Curve pool to take DXY-BEAR (for closing)
-        DXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        // 3. Allow StakedToken to take DXY-BEAR (for staking)
-        DXY_BEAR.safeIncreaseAllowance(_stakedDxyBear, type(uint256).max);
-        // 4. Allow Morpho to take sDXY-BEAR (for supplying collateral)
-        IERC20(_stakedDxyBear).safeIncreaseAllowance(_morpho, type(uint256).max);
+        // 2. Allow Curve pool to take plDXY-BEAR (for closing)
+        PLDXY_BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
+        // 3. Allow StakedToken to take plDXY-BEAR (for staking)
+        PLDXY_BEAR.safeIncreaseAllowance(_stakedPlDxyBear, type(uint256).max);
+        // 4. Allow Morpho to take splDXY-BEAR (for supplying collateral)
+        IERC20(_stakedPlDxyBear).safeIncreaseAllowance(_morpho, type(uint256).max);
         // 5. Allow Morpho to take USDC (for repaying debt and flash loan)
         USDC.safeIncreaseAllowance(_morpho, type(uint256).max);
     }
@@ -101,11 +101,11 @@ contract LeverageRouter is LeverageRouterBase {
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
         uint256 totalUSDC = principal + loanAmount;
-        uint256 expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
+        uint256 expectedPlDxyBear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, totalUSDC);
 
-        uint256 minDxyBear = (expectedDxyBear * (10_000 - maxSlippageBps)) / 10_000;
+        uint256 minPlDxyBear = (expectedPlDxyBear * (10_000 - maxSlippageBps)) / 10_000;
 
-        bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minDxyBear);
+        bytes memory data = abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, maxSlippageBps, minPlDxyBear);
 
         MORPHO.flashLoan(address(USDC), loanAmount, data);
     }
@@ -113,9 +113,9 @@ contract LeverageRouter is LeverageRouterBase {
     /**
      * @notice Close a Leveraged Position in one transaction.
      * @dev Queries actual debt from Morpho to ensure full repayment even if interest accrued.
-     * @param collateralToWithdraw Amount of sDXY-BEAR shares to withdraw from Morpho.
-     *        NOTE: This is staked token shares, not underlying DXY-BEAR amount.
-     *        Use STAKED_DXY_BEAR.previewRedeem() to convert shares to underlying.
+     * @param collateralToWithdraw Amount of splDXY-BEAR shares to withdraw from Morpho.
+     *        NOTE: This is staked token shares, not underlying plDXY-BEAR amount.
+     *        Use STAKED_PLDXY_BEAR.previewRedeem() to convert shares to underlying.
      * @param maxSlippageBps Maximum slippage tolerance in basis points (e.g., 50 = 0.5%).
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
@@ -134,11 +134,11 @@ contract LeverageRouter is LeverageRouterBase {
 
         // Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
-        uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
+        uint256 plDxyBearAmount = STAKED_PLDXY_BEAR.previewRedeem(collateralToWithdraw);
         // Apply exchange rate buffer (conservative estimate for drift protection)
-        uint256 bufferedDxyBearAmount = (dxyBearAmount * (10_000 - EXCHANGE_RATE_BUFFER_BPS)) / 10_000;
+        uint256 bufferedDxyBearAmount = (plDxyBearAmount * (10_000 - EXCHANGE_RATE_BUFFER_BPS)) / 10_000;
         // Use get_dy to find real market expectation
-        uint256 expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, bufferedDxyBearAmount);
+        uint256 expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, bufferedDxyBearAmount);
         uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
 
         if (debtToRepay > 0) {
@@ -220,24 +220,24 @@ contract LeverageRouter is LeverageRouterBase {
 
     /// @dev Executes open leverage operation within Morpho flash loan callback.
     /// @param loanAmount Amount of USDC borrowed from Morpho.
-    /// @param data Encoded parameters (op, user, deadline, principal, leverage, maxSlippageBps, minDxyBear).
+    /// @param data Encoded parameters (op, user, deadline, principal, leverage, maxSlippageBps, minPlDxyBear).
     function _executeOpen(
         uint256 loanAmount,
         bytes calldata data
     ) private {
-        // Decode open-specific data: (op, user, deadline, principal, leverage, maxSlippageBps, minDxyBear)
-        (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minDxyBear) =
+        // Decode open-specific data: (op, user, deadline, principal, leverage, maxSlippageBps, minPlDxyBear)
+        (, address user,, uint256 principal, uint256 leverage, uint256 maxSlippageBps, uint256 minPlDxyBear) =
             abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         uint256 totalUSDC = principal + loanAmount;
 
-        // 1. Swap ALL USDC -> DXY-BEAR via Curve
-        uint256 dxyBearReceived = CURVE_POOL.exchange(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC, minDxyBear);
+        // 1. Swap ALL USDC -> plDXY-BEAR via Curve
+        uint256 plDxyBearReceived = CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, totalUSDC, minPlDxyBear);
 
-        // 2. Stake DXY-BEAR to get sDXY-BEAR
-        uint256 stakedShares = STAKED_DXY_BEAR.deposit(dxyBearReceived, address(this));
+        // 2. Stake plDXY-BEAR to get splDXY-BEAR
+        uint256 stakedShares = STAKED_PLDXY_BEAR.deposit(plDxyBearReceived, address(this));
 
-        // 3. Supply sDXY-BEAR collateral to Morpho on behalf of the USER
+        // 3. Supply splDXY-BEAR collateral to Morpho on behalf of the USER
         MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
 
         // 4. Borrow USDC from Morpho to repay flash loan (no fee with Morpho)
@@ -245,7 +245,7 @@ contract LeverageRouter is LeverageRouterBase {
         MORPHO.borrow(marketParams, debtIncurred, 0, user, address(this));
 
         // 5. Emit event for off-chain tracking and MEV analysis
-        emit LeverageOpened(user, principal, leverage, loanAmount, dxyBearReceived, debtIncurred, maxSlippageBps);
+        emit LeverageOpened(user, principal, leverage, loanAmount, plDxyBearReceived, debtIncurred, maxSlippageBps);
     }
 
     /// @dev Executes close leverage operation within Morpho flash loan callback.
@@ -264,14 +264,14 @@ contract LeverageRouter is LeverageRouterBase {
             MORPHO.repay(marketParams, loanAmount, 0, user, "");
         }
 
-        // 2. Withdraw user's sDXY-BEAR collateral from Morpho
+        // 2. Withdraw user's splDXY-BEAR collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
 
-        // 3. Unstake sDXY-BEAR to get DXY-BEAR
-        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
+        // 3. Unstake splDXY-BEAR to get plDXY-BEAR
+        uint256 plDxyBearReceived = STAKED_PLDXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
 
-        // 4. Swap DXY-BEAR -> USDC via Curve
-        uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
+        // 4. Swap plDXY-BEAR -> USDC via Curve
+        uint256 usdcReceived = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearReceived, minUsdcOut);
 
         // 5. Flash loan repayment handled by caller (no fee with Morpho)
         if (usdcReceived < loanAmount) revert LeverageRouterBase__InsufficientOutput();
@@ -288,7 +288,7 @@ contract LeverageRouter is LeverageRouterBase {
 
     /// @dev Closes position without flash loan when user has no Morpho debt.
     /// @param user Position owner receiving USDC.
-    /// @param collateralToWithdraw Amount of sDXY-BEAR shares to withdraw.
+    /// @param collateralToWithdraw Amount of splDXY-BEAR shares to withdraw.
     /// @param maxSlippageBps Maximum slippage for Curve swap.
     /// @param minUsdcOut Minimum USDC to receive after swap.
     function _executeCloseNoDebt(
@@ -297,14 +297,14 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 minUsdcOut
     ) private {
-        // 1. Withdraw user's sDXY-BEAR collateral from Morpho
+        // 1. Withdraw user's splDXY-BEAR collateral from Morpho
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
 
-        // 2. Unstake sDXY-BEAR to get DXY-BEAR
-        uint256 dxyBearReceived = STAKED_DXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
+        // 2. Unstake splDXY-BEAR to get plDXY-BEAR
+        uint256 plDxyBearReceived = STAKED_PLDXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
 
-        // 3. Swap DXY-BEAR -> USDC via Curve
-        uint256 usdcReceived = CURVE_POOL.exchange(DXY_BEAR_INDEX, USDC_INDEX, dxyBearReceived, minUsdcOut);
+        // 3. Swap plDXY-BEAR -> USDC via Curve
+        uint256 usdcReceived = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearReceived, minUsdcOut);
 
         // 4. Send all USDC to user (no flash loan to repay)
         if (usdcReceived > 0) {
@@ -325,20 +325,20 @@ contract LeverageRouter is LeverageRouterBase {
      * @param leverage Multiplier (e.g. 3x = 3e18).
      * @return loanAmount Amount of USDC to flash loan.
      * @return totalUSDC Total USDC to swap (principal + loan).
-     * @return expectedDxyBear Expected DXY-BEAR (based on current curve price).
+     * @return expectedPlDxyBear Expected plDXY-BEAR (based on current curve price).
      * @return expectedDebt Expected debt incurred (equals loan amount, no flash fee with Morpho).
      */
     function previewOpenLeverage(
         uint256 principal,
         uint256 leverage
-    ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) {
+    ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBear, uint256 expectedDebt) {
         if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
 
         loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;
 
         // Use get_dy for accurate preview
-        expectedDxyBear = CURVE_POOL.get_dy(USDC_INDEX, DXY_BEAR_INDEX, totalUSDC);
+        expectedPlDxyBear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, totalUSDC);
 
         // No flash fee with Morpho
         expectedDebt = loanAmount;
@@ -347,7 +347,7 @@ contract LeverageRouter is LeverageRouterBase {
     /**
      * @notice Preview the result of closing a leveraged position.
      * @param debtToRepay Amount of USDC debt to repay.
-     * @param collateralToWithdraw Amount of DXY-BEAR collateral to withdraw.
+     * @param collateralToWithdraw Amount of plDXY-BEAR collateral to withdraw.
      * @return expectedUSDC Expected USDC from swap (based on current curve price).
      * @return flashFee Flash loan fee (always 0 with Morpho).
      * @return expectedReturn Expected USDC returned to user after repaying flash loan.
@@ -357,9 +357,9 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 collateralToWithdraw
     ) external view returns (uint256 expectedUSDC, uint256 flashFee, uint256 expectedReturn) {
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
-        uint256 dxyBearAmount = STAKED_DXY_BEAR.previewRedeem(collateralToWithdraw);
+        uint256 plDxyBearAmount = STAKED_PLDXY_BEAR.previewRedeem(collateralToWithdraw);
         // Use get_dy for accurate preview
-        expectedUSDC = CURVE_POOL.get_dy(DXY_BEAR_INDEX, USDC_INDEX, dxyBearAmount);
+        expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearAmount);
 
         // No flash fee with Morpho
         flashFee = 0;

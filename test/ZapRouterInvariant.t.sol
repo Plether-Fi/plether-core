@@ -108,7 +108,7 @@ contract InvMockFlashToken is ERC20, IERC3156FlashLender {
 contract InvMockCurvePool is ICurvePool {
 
     address public token0; // USDC
-    address public token1; // dxyBear
+    address public token1; // plDxyBear
     uint256 public bearPrice = 1e6; // 1 BEAR = 1 USDC
 
     constructor(
@@ -220,8 +220,8 @@ contract ZapRouterHandler is Test {
 
     ZapRouter public router;
     InvMockToken public usdc;
-    InvMockFlashToken public dxyBear;
-    InvMockFlashToken public dxyBull;
+    InvMockFlashToken public plDxyBear;
+    InvMockFlashToken public plDxyBull;
     InvMockCurvePool public curvePool;
     InvMockSplitter public splitter;
 
@@ -249,15 +249,15 @@ contract ZapRouterHandler is Test {
     constructor(
         ZapRouter _router,
         InvMockToken _usdc,
-        InvMockFlashToken _dxyBear,
-        InvMockFlashToken _dxyBull,
+        InvMockFlashToken _plDxyBear,
+        InvMockFlashToken _plDxyBull,
         InvMockCurvePool _curvePool,
         InvMockSplitter _splitter
     ) {
         router = _router;
         usdc = _usdc;
-        dxyBear = _dxyBear;
-        dxyBull = _dxyBull;
+        plDxyBear = _plDxyBear;
+        plDxyBull = _plDxyBull;
         curvePool = _curvePool;
         splitter = _splitter;
 
@@ -270,7 +270,7 @@ contract ZapRouterHandler is Test {
             vm.prank(actor);
             usdc.approve(address(router), type(uint256).max);
             vm.prank(actor);
-            dxyBull.approve(address(router), type(uint256).max);
+            plDxyBull.approve(address(router), type(uint256).max);
         }
     }
 
@@ -284,12 +284,12 @@ contract ZapRouterHandler is Test {
         // Skip if actor doesn't have enough
         if (usdc.balanceOf(currentActor) < usdcAmount) return;
 
-        uint256 bullBefore = dxyBull.balanceOf(currentActor);
+        uint256 bullBefore = plDxyBull.balanceOf(currentActor);
 
         try router.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours) {
             ghost_totalZapMints++;
             ghost_totalUsdcDeposited += usdcAmount;
-            uint256 bullReceived = dxyBull.balanceOf(currentActor) - bullBefore;
+            uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
         } catch {
             // Expected failures are OK
@@ -300,7 +300,7 @@ contract ZapRouterHandler is Test {
         uint256 actorSeed,
         uint256 bullAmount
     ) external useActor(actorSeed) {
-        uint256 bullBalance = dxyBull.balanceOf(currentActor);
+        uint256 bullBalance = plDxyBull.balanceOf(currentActor);
 
         // Skip if no BULL to burn
         if (bullBalance == 0) return;
@@ -329,14 +329,14 @@ contract ZapRouterHandler is Test {
 
         if (usdc.balanceOf(currentActor) < usdcAmount) return;
 
-        uint256 bullBefore = dxyBull.balanceOf(currentActor);
+        uint256 bullBefore = plDxyBull.balanceOf(currentActor);
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
         // Mint
         try router.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours) {
             ghost_totalZapMints++;
             ghost_totalUsdcDeposited += usdcAmount;
-            uint256 bullReceived = dxyBull.balanceOf(currentActor) - bullBefore;
+            uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
 
             // Immediately burn
@@ -376,8 +376,8 @@ contract ZapRouterInvariantTest is StdInvariant, Test {
 
     ZapRouter public router;
     InvMockToken public usdc;
-    InvMockFlashToken public dxyBear;
-    InvMockFlashToken public dxyBull;
+    InvMockFlashToken public plDxyBear;
+    InvMockFlashToken public plDxyBull;
     InvMockCurvePool public curvePool;
     InvMockSplitter public splitter;
     ZapRouterHandler public handler;
@@ -385,16 +385,17 @@ contract ZapRouterInvariantTest is StdInvariant, Test {
     function setUp() public {
         // Deploy mocks
         usdc = new InvMockToken("USDC", "USDC", 6);
-        dxyBear = new InvMockFlashToken("DXY-BEAR", "BEAR", 18);
-        dxyBull = new InvMockFlashToken("DXY-BULL", "BULL", 18);
-        curvePool = new InvMockCurvePool(address(usdc), address(dxyBear));
-        splitter = new InvMockSplitter(address(dxyBear), address(dxyBull), address(usdc));
+        plDxyBear = new InvMockFlashToken("plDXY-BEAR", "BEAR", 18);
+        plDxyBull = new InvMockFlashToken("plDXY-BULL", "BULL", 18);
+        curvePool = new InvMockCurvePool(address(usdc), address(plDxyBear));
+        splitter = new InvMockSplitter(address(plDxyBear), address(plDxyBull), address(usdc));
 
         // Deploy router
-        router = new ZapRouter(address(splitter), address(dxyBear), address(dxyBull), address(usdc), address(curvePool));
+        router =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
 
         // Create handler
-        handler = new ZapRouterHandler(router, usdc, dxyBear, dxyBull, curvePool, splitter);
+        handler = new ZapRouterHandler(router, usdc, plDxyBear, plDxyBull, curvePool, splitter);
 
         targetContract(address(handler));
 
@@ -408,8 +409,8 @@ contract ZapRouterInvariantTest is StdInvariant, Test {
     /// @notice Router should never hold any tokens after operations complete
     function invariant_routerStateless() public view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router holds USDC");
-        assertEq(dxyBear.balanceOf(address(router)), 0, "Router holds DXY-BEAR");
-        assertEq(dxyBull.balanceOf(address(router)), 0, "Router holds DXY-BULL");
+        assertEq(plDxyBear.balanceOf(address(router)), 0, "Router holds plDXY-BEAR");
+        assertEq(plDxyBull.balanceOf(address(router)), 0, "Router holds plDXY-BULL");
     }
 
     /// @notice Total BULL burned should be <= total BULL minted

@@ -30,8 +30,8 @@ contract ReentrancyTest is Test {
 
     // Tokens
     MockUSDC public usdc;
-    MockFlashToken public dxyBear;
-    MockFlashToken public dxyBull;
+    MockFlashToken public plDxyBear;
+    MockFlashToken public plDxyBull;
 
     // Mocks
     MockOracle public oracle;
@@ -52,15 +52,15 @@ contract ReentrancyTest is Test {
 
         // Deploy tokens
         usdc = new MockUSDC();
-        dxyBear = new MockFlashToken("DXY-BEAR", "plDXY-BEAR");
-        dxyBull = new MockFlashToken("DXY-BULL", "plDXY-BULL");
+        plDxyBear = new MockFlashToken("plDXY-BEAR", "plplDXY-BEAR");
+        plDxyBull = new MockFlashToken("plDXY-BULL", "plplDXY-BULL");
 
         // Deploy oracles
         oracle = new MockOracle(100_000_000, block.timestamp, block.timestamp);
         sequencer = new MockOracle(0, block.timestamp - 2 hours, block.timestamp);
 
         // Deploy Curve pool mock
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
         curvePool.setPrice(1e6); // 1 BEAR = 1 USDC
 
         // Calculate future splitter address
@@ -77,10 +77,11 @@ contract ReentrancyTest is Test {
         vm.stopPrank();
 
         // Deploy ZapRouter with mock splitter for flash loan tests
-        MockSplitter mockSplitter = new MockSplitter(address(dxyBear), address(dxyBull));
+        MockSplitter mockSplitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
         mockSplitter.setUsdc(address(usdc));
-        zapRouter =
-            new ZapRouter(address(mockSplitter), address(dxyBear), address(dxyBull), address(usdc), address(curvePool));
+        zapRouter = new ZapRouter(
+            address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool)
+        );
 
         // Deploy attacker
         attacker = new ReentrantFlashBorrower();
@@ -158,14 +159,14 @@ contract ReentrancyTest is Test {
         attacker.setTarget(address(zapRouter));
         attacker.setReentryFunction(ReentrantFlashBorrower.ReentryType.ZAP_MINT);
 
-        uint256 bullBefore = dxyBull.balanceOf(address(attacker));
+        uint256 bullBefore = plDxyBull.balanceOf(address(attacker));
 
         // Attempt zapMint - nonReentrant should block any callback reentrancy
         vm.prank(address(attacker));
         zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
 
         // Verify attacker received BULL (meaning normal execution completed)
-        uint256 bullAfter = dxyBull.balanceOf(address(attacker));
+        uint256 bullAfter = plDxyBull.balanceOf(address(attacker));
         assertGt(bullAfter, bullBefore, "Attacker should receive BULL from normal execution");
 
         // Verify no double-minting occurred (reentrancy was blocked)
@@ -175,10 +176,10 @@ contract ReentrancyTest is Test {
 
     function test_ZapRouter_ZapBurn_ReentrancyBlocked() public {
         // Fund attacker with BULL tokens
-        dxyBull.mint(address(attacker), 100 ether);
+        plDxyBull.mint(address(attacker), 100 ether);
 
         vm.prank(address(attacker));
-        dxyBull.approve(address(zapRouter), type(uint256).max);
+        plDxyBull.approve(address(zapRouter), type(uint256).max);
 
         // Configure attacker
         attacker.setTarget(address(zapRouter));
@@ -189,7 +190,7 @@ contract ReentrancyTest is Test {
         zapRouter.zapBurn(100 ether, 0, block.timestamp + 1 hours);
 
         // Verify tokens were burned
-        assertEq(dxyBull.balanceOf(address(attacker)), 0, "Should burn all BULL");
+        assertEq(plDxyBull.balanceOf(address(attacker)), 0, "Should burn all BULL");
     }
 
     // ==========================================
@@ -200,14 +201,14 @@ contract ReentrancyTest is Test {
         // Try calling onFlashLoan directly from a random address
         vm.prank(alice);
         vm.expectRevert();
-        zapRouter.onFlashLoan(address(zapRouter), address(dxyBear), 100, 0, "");
+        zapRouter.onFlashLoan(address(zapRouter), address(plDxyBear), 100, 0, "");
     }
 
     function test_ZapRouter_OnFlashLoan_RejectsWrongInitiator() public {
         // Try calling from the correct lender but wrong initiator
-        vm.prank(address(dxyBear));
+        vm.prank(address(plDxyBear));
         vm.expectRevert();
-        zapRouter.onFlashLoan(alice, address(dxyBear), 100, 0, "");
+        zapRouter.onFlashLoan(alice, address(plDxyBear), 100, 0, "");
     }
 
     // ==========================================
@@ -219,13 +220,13 @@ contract ReentrancyTest is Test {
         // reenter during exchange()
 
         // Deploy malicious curve pool
-        MaliciousCurvePool maliciousPool = new MaliciousCurvePool(address(usdc), address(dxyBear), address(zapRouter));
+        MaliciousCurvePool maliciousPool = new MaliciousCurvePool(address(usdc), address(plDxyBear), address(zapRouter));
 
         // Create new ZapRouter with malicious pool
-        MockSplitter mockSplitter = new MockSplitter(address(dxyBear), address(dxyBull));
+        MockSplitter mockSplitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
         mockSplitter.setUsdc(address(usdc));
         ZapRouter maliciousRouter = new ZapRouter(
-            address(mockSplitter), address(dxyBear), address(dxyBull), address(usdc), address(maliciousPool)
+            address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(maliciousPool)
         );
 
         // Fund attacker
@@ -275,7 +276,7 @@ contract ReentrancyTest is Test {
         vm.stopPrank();
 
         // Verify execution
-        assertGt(dxyBull.balanceOf(alice), 0, "Should have received BULL");
+        assertGt(plDxyBull.balanceOf(alice), 0, "Should have received BULL");
     }
 
 }

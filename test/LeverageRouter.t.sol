@@ -15,8 +15,8 @@ contract LeverageRouterTest is Test {
 
     // Mocks
     MockToken public usdc;
-    MockToken public dxyBear;
-    MockStakedToken public stakedDxyBear;
+    MockToken public plDxyBear;
+    MockStakedToken public stakedPlDxyBear;
     MockCurvePool public curvePool;
     MockMorpho public morpho;
 
@@ -27,22 +27,22 @@ contract LeverageRouterTest is Test {
 
     function setUp() public {
         usdc = new MockToken("USDC", "USDC");
-        dxyBear = new MockToken("DXY-BEAR", "BEAR");
-        stakedDxyBear = new MockStakedToken(address(dxyBear));
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        stakedPlDxyBear = new MockStakedToken(address(plDxyBear));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        morpho = new MockMorpho(address(usdc), address(stakedPlDxyBear));
 
         // FIX: Assign to state variable
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBear),
+            collateralToken: address(stakedPlDxyBear),
             oracle: address(0),
             irm: address(0),
             lltv: 0
         });
 
         router = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(stakedDxyBear), params
+            address(morpho), address(curvePool), address(usdc), address(plDxyBear), address(stakedPlDxyBear), params
         );
 
         usdc.mint(alice, 1000 * 1e6);
@@ -90,16 +90,16 @@ contract LeverageRouterTest is Test {
     }
 
     function test_CloseLeverage_Success() public {
-        // Setup existing position: 3000 sDXY-BEAR Collateral, 2000 USDC Debt
+        // Setup existing position: 3000 splDXY-BEAR Collateral, 2000 USDC Debt
         usdc.mint(address(morpho), 2000 * 1e6); // Fund morpho for borrowing
 
         vm.startPrank(alice);
         // Manually create position in mock: mint BEAR -> stake to sBEAR -> supply to Morpho
-        dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
-        stakedDxyBear.deposit(3000 * 1e18, alice); // Alice gets 3000 sDXY-BEAR
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice); // Alice gets 3000 splDXY-BEAR
 
-        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
         morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice); // Alice holds the debt
 
@@ -120,11 +120,11 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
 
         // Mint BEAR -> stake to sBEAR -> supply to Morpho as collateral
-        dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
-        stakedDxyBear.deposit(3000 * 1e18, alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
 
-        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
         morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         // NOTE: No borrow() call - Alice has collateral but zero debt
 
@@ -150,11 +150,11 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
 
         // Setup: 3000 sBEAR collateral, 0 debt
-        dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
-        stakedDxyBear.deposit(3000 * 1e18, alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
 
-        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
         morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
 
         morpho.setAuthorization(address(router), true);
@@ -179,12 +179,12 @@ contract LeverageRouterTest is Test {
     }
 
     function test_PreviewOpenLeverage_Success() public view {
-        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) =
+        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBear, uint256 expectedDebt) =
             router.previewOpenLeverage(1000 * 1e6, 3e18);
 
         assertEq(loanAmount, 2000 * 1e6, "Loan amount mismatch");
         assertEq(totalUSDC, 3000 * 1e6, "Total USDC mismatch");
-        assertGt(expectedDxyBear, 0, "Expected DXY-BEAR should be > 0");
+        assertGt(expectedPlDxyBear, 0, "Expected plDXY-BEAR should be > 0");
         assertEq(expectedDebt, 2000 * 1e6, "Expected debt mismatch (no fee)");
     }
 
@@ -193,7 +193,7 @@ contract LeverageRouterTest is Test {
         uint256 leverage = 3e18;
 
         // Get preview
-        (, uint256 totalUSDC, uint256 expectedDxyBear, uint256 expectedDebt) =
+        (, uint256 totalUSDC, uint256 expectedPlDxyBear, uint256 expectedDebt) =
             router.previewOpenLeverage(principal, leverage);
 
         // Execute actual operation
@@ -207,9 +207,9 @@ contract LeverageRouterTest is Test {
         uint256 actualCollateral = morpho.collateralBalance(alice);
         uint256 actualDebt = morpho.borrowBalance(alice);
 
-        // Collateral is in staked tokens (18 decimals), preview gives DXY-BEAR amount
+        // Collateral is in staked tokens (18 decimals), preview gives plDXY-BEAR amount
         // Allow 1% tolerance due to curve slippage/rounding
-        assertApproxEqRel(actualCollateral, expectedDxyBear, 0.01e18, "Collateral should match preview");
+        assertApproxEqRel(actualCollateral, expectedPlDxyBear, 0.01e18, "Collateral should match preview");
         assertEq(actualDebt, expectedDebt, "Debt should match preview");
     }
 
@@ -358,10 +358,10 @@ contract LeverageRouterTest is Test {
         usdc.mint(address(morpho), 2000 * 1e6);
 
         vm.startPrank(alice);
-        dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
-        stakedDxyBear.deposit(3000 * 1e18, alice);
-        stakedDxyBear.approve(address(morpho), 3000 * 1e18);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
         morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
 
@@ -761,7 +761,7 @@ contract MockStakedToken is ERC20 {
 contract MockCurvePool is ICurvePool {
 
     address public token0; // USDC
-    address public token1; // dxyBear
+    address public token1; // plDxyBear
     uint256 public bearPrice = 1e6;
     uint256 public slippageBps = 0; // Simulated slippage in basis points
 
@@ -826,7 +826,7 @@ contract MockCurvePool is ICurvePool {
 contract MockMorpho is IMorpho {
 
     address public usdc;
-    address public stakedToken; // sDXY-BEAR
+    address public stakedToken; // splDXY-BEAR
     mapping(address => uint256) public collateralBalance;
     mapping(address => uint256) public borrowBalance;
     mapping(address => mapping(address => bool)) public _isAuthorized;
@@ -1045,8 +1045,8 @@ contract LeverageRouterOffsetTest is Test {
     LeverageRouter public router;
 
     MockToken public usdc;
-    MockToken public dxyBear;
-    MockStakedTokenWithOffset public stakedDxyBear;
+    MockToken public plDxyBear;
+    MockStakedTokenWithOffset public stakedPlDxyBear;
     MockCurvePool public curvePool;
     MockMorpho public morpho;
 
@@ -1055,21 +1055,21 @@ contract LeverageRouterOffsetTest is Test {
 
     function setUp() public {
         usdc = new MockToken("USDC", "USDC");
-        dxyBear = new MockToken("DXY-BEAR", "BEAR");
-        stakedDxyBear = new MockStakedTokenWithOffset(address(dxyBear)); // Uses offset mock!
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        morpho = new MockMorpho(address(usdc), address(stakedDxyBear));
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        stakedPlDxyBear = new MockStakedTokenWithOffset(address(plDxyBear)); // Uses offset mock!
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        morpho = new MockMorpho(address(usdc), address(stakedPlDxyBear));
 
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBear),
+            collateralToken: address(stakedPlDxyBear),
             oracle: address(0),
             irm: address(0),
             lltv: 0
         });
 
         router = new LeverageRouter(
-            address(morpho), address(curvePool), address(usdc), address(dxyBear), address(stakedDxyBear), params
+            address(morpho), address(curvePool), address(usdc), address(plDxyBear), address(stakedPlDxyBear), params
         );
 
         usdc.mint(alice, 1000 * 1e6);
@@ -1124,15 +1124,15 @@ contract LeverageRouterOffsetTest is Test {
         vm.startPrank(alice);
 
         // Mint BEAR, stake to get shares (with 1000x offset)
-        dxyBear.mint(alice, 3000 * 1e18);
-        dxyBear.approve(address(stakedDxyBear), 3000 * 1e18);
-        uint256 shares = stakedDxyBear.deposit(3000 * 1e18, alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        uint256 shares = stakedPlDxyBear.deposit(3000 * 1e18, alice);
 
         // Verify offset: 3000 BEAR -> 3,000,000 shares (3e21 in wei)
         assertEq(shares, 3000 * 1e18 * 1000, "Shares should be 1000x BEAR amount");
 
         // Supply to Morpho and borrow
-        stakedDxyBear.approve(address(morpho), shares);
+        stakedPlDxyBear.approve(address(morpho), shares);
         morpho.supplyCollateral(params, shares, alice, "");
         morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
 
@@ -1153,7 +1153,7 @@ contract LeverageRouterOffsetTest is Test {
         uint256 shares = 1e24; // 1 million in 18 decimals... wait, 1e24 / 1e18 = 1e6 tokens
 
         // previewRedeem should divide by 1000
-        uint256 assets = stakedDxyBear.previewRedeem(shares);
+        uint256 assets = stakedPlDxyBear.previewRedeem(shares);
         assertEq(assets, shares / 1000, "previewRedeem should divide shares by 1000");
         assertEq(assets, 1e21, "1e24 shares = 1e21 BEAR (1000 BEAR tokens)");
     }

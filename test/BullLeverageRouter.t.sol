@@ -18,9 +18,9 @@ contract BullLeverageRouterTest is Test {
 
     // Mocks
     MockToken public usdc;
-    MockFlashToken public dxyBear;
-    MockToken public dxyBull;
-    MockStakedToken public stakedDxyBull;
+    MockFlashToken public plDxyBear;
+    MockToken public plDxyBull;
+    MockStakedToken public stakedPlDxyBull;
     MockMorpho public morpho;
     MockCurvePool public curvePool;
     MockSplitter public splitter;
@@ -30,19 +30,19 @@ contract BullLeverageRouterTest is Test {
 
     function setUp() public {
         usdc = new MockToken("USDC", "USDC", 6);
-        dxyBear = new MockFlashToken("DXY-BEAR", "DXY-BEAR");
-        dxyBull = new MockToken("DXY-BULL", "DXY-BULL", 18);
-        stakedDxyBull = new MockStakedToken(address(dxyBull));
+        plDxyBear = new MockFlashToken("plDXY-BEAR", "plDXY-BEAR");
+        plDxyBull = new MockToken("plDXY-BULL", "plDXY-BULL", 18);
+        stakedPlDxyBull = new MockStakedToken(address(plDxyBull));
         morpho = new MockMorpho();
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        splitter = new MockSplitter(address(dxyBear), address(dxyBull), address(usdc));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        splitter = new MockSplitter(address(plDxyBear), address(plDxyBull), address(usdc));
 
         // Configure MockMorpho with token addresses (collateral is now staked token)
-        morpho.setTokens(address(usdc), address(stakedDxyBull));
+        morpho.setTokens(address(usdc), address(stakedPlDxyBull));
 
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBull),
+            collateralToken: address(stakedPlDxyBull),
             oracle: address(0),
             irm: address(0),
             lltv: 900_000_000_000_000_000 // 90%
@@ -53,9 +53,9 @@ contract BullLeverageRouterTest is Test {
             address(splitter),
             address(curvePool),
             address(usdc),
-            address(dxyBear),
-            address(dxyBull),
-            address(stakedDxyBull),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedPlDxyBull),
             params
         );
 
@@ -81,8 +81,8 @@ contract BullLeverageRouterTest is Test {
 
         // Verify: 3x on $1000 = $3000 total USDC
         // With CAP=$2: $3000 USDC mints 1500e18 of each token
-        // Sell 1500e18 DXY-BEAR for 1500 USDC (at 1:1 rate)
-        // Deposit 1500e18 DXY-BULL as collateral
+        // Sell 1500e18 plDXY-BEAR for 1500 USDC (at 1:1 rate)
+        // Deposit 1500e18 plDXY-BULL as collateral
         // Flash loan repayment = $2000, sale gives $1500
         // Morpho debt = max(0, 2000 - 1500) = 500
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
@@ -96,7 +96,7 @@ contract BullLeverageRouterTest is Test {
         uint256 maxSlippageBps = 50;
         uint256 expectedLoanAmount = 2000 * 1e6;
         // With CAP=$2: $3000 USDC mints 1500e18 tokens
-        uint256 expectedDxyBull = 1500 * 1e18;
+        uint256 expectedPlDxyBull = 1500 * 1e18;
         // With 1:1 rates: usdcFromSale = 1500 (selling 1500e18 BEAR), flashRepayment = 2000
         // debtToIncur = max(0, 2000 - 1500) = 500
         uint256 expectedDebt = 500 * 1e6;
@@ -107,7 +107,7 @@ contract BullLeverageRouterTest is Test {
 
         vm.expectEmit(true, false, false, true);
         emit BullLeverageRouter.LeverageOpened(
-            alice, principal, leverage, expectedLoanAmount, expectedDxyBull, expectedDebt, maxSlippageBps
+            alice, principal, leverage, expectedLoanAmount, expectedPlDxyBull, expectedDebt, maxSlippageBps
         );
 
         router.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
@@ -306,7 +306,7 @@ contract BullLeverageRouterTest is Test {
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
-        // 2. Scenario: DXY-BEAR price rises to $1.10 relative to USDC
+        // 2. Scenario: plDXY-BEAR price rises to $1.10 relative to USDC
         // This means 1 USDC buys LESS Bear (~0.909).
         // Router must spend MORE USDC to buy back the required amount of BEAR.
         curvePool.setRate(100, 110); // 100 output for 110 input -> Output < Input
@@ -324,9 +324,9 @@ contract BullLeverageRouterTest is Test {
         assertEq(usdc.balanceOf(address(router)), 0, "Router holding USDC");
 
         // 6. Note: Due to slippage buffer logic in _executeCloseRedeem,
-        // the router will likely hold some DXY-BEAR dust.
+        // the router will likely hold some plDXY-BEAR dust.
         // We assert >= 0 just to acknowledge this behavior.
-        assertGe(dxyBear.balanceOf(address(router)), 0, "Router may hold BEAR dust");
+        assertGe(plDxyBear.balanceOf(address(router)), 0, "Router may hold BEAR dust");
     }
 
     function test_CloseLeverage_RevertsWhenRedemptionOutputInsufficient() public {
@@ -361,12 +361,12 @@ contract BullLeverageRouterTest is Test {
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         // With CAP=$2 pricing:
-        // After open: supplied = 1500e18 DXY-BULL, borrowed = 500e6 USDC
+        // After open: supplied = 1500e18 plDXY-BULL, borrowed = 500e6 USDC
         // Close flow (single flash mint):
         // 1. Flash mint: 2005e18 BEAR (1500 for pairs + 505 for debt with 1% buffer)
         // 2. Sell 505e18 BEAR → 505 USDC
         // 3. Repay 500 USDC Morpho debt
-        // 4. Withdraw 1500e18 sDXY-BULL → 1500e18 DXY-BULL
+        // 4. Withdraw 1500e18 splDXY-BULL → 1500e18 plDXY-BULL
         // 5. Redeem 1500e18 pairs: 3000 USDC
         // 6. Buy 2005e18 BEAR on Curve: ~2025 USDC (with 1% buffer on estimate)
         // 7. Leftover returned to user
@@ -451,7 +451,7 @@ contract BullLeverageRouterTest is Test {
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         // Expected: totalUSDC = principal * leverage / 1e18
-        // With CAP=$2: DXY-BULL received = (totalUSDC * 1e12) / 2
+        // With CAP=$2: plDXY-BULL received = (totalUSDC * 1e12) / 2
         uint256 totalUSDC = principal * leverageMultiplier / 1e18;
         uint256 expectedSupplied = (totalUSDC * 1e12) / 2;
 
@@ -462,7 +462,7 @@ contract BullLeverageRouterTest is Test {
         uint256 usdcFromSale = expectedSupplied / 1e12; // Mock curve gives 1:1 rate with decimal conversion
         uint256 expectedBorrowed = loanAmount > usdcFromSale ? loanAmount - usdcFromSale : 0;
 
-        assertEq(supplied, expectedSupplied, "Supplied DXY-BULL mismatch");
+        assertEq(supplied, expectedSupplied, "Supplied plDXY-BULL mismatch");
         assertEq(borrowed, expectedBorrowed, "Borrowed USDC mismatch");
     }
 
@@ -503,13 +503,13 @@ contract BullLeverageRouterTest is Test {
         uint256 principal = 1000 * 1e6;
         uint256 leverage = 3e18;
 
-        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedDxyBull, uint256 expectedDebt) =
+        (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBull, uint256 expectedDebt) =
             router.previewOpenLeverage(principal, leverage);
 
         assertEq(loanAmount, 2000 * 1e6, "Incorrect loan amount");
         assertEq(totalUSDC, 3000 * 1e6, "Incorrect total USDC");
         // With CAP=$2.00: $3000 USDC mints 1500e18 tokens (1 USDC = 0.5 pairs)
-        assertEq(expectedDxyBull, 1500 * 1e18, "Incorrect expected DXY-BULL");
+        assertEq(expectedPlDxyBull, 1500 * 1e18, "Incorrect expected plDXY-BULL");
         // With 1:1 rates: flashRepayment=2000, usdcFromSale=1500 (selling 1500e18 BEAR at $1 each)
         // expectedDebt = max(0, 2000 - 1500) = 500
         assertEq(expectedDebt, 500 * 1e6, "Incorrect expected debt");
@@ -520,7 +520,7 @@ contract BullLeverageRouterTest is Test {
         uint256 leverage = 3e18;
 
         // Get preview
-        (,, uint256 expectedDxyBull, uint256 expectedDebt) = router.previewOpenLeverage(principal, leverage);
+        (,, uint256 expectedPlDxyBull, uint256 expectedDebt) = router.previewOpenLeverage(principal, leverage);
 
         // Execute actual operation
         vm.startPrank(alice);
@@ -533,7 +533,7 @@ contract BullLeverageRouterTest is Test {
         (uint256 actualCollateral, uint256 actualDebt) = morpho.positions(alice);
 
         // Allow 1% tolerance due to curve slippage/rounding
-        assertApproxEqRel(actualCollateral, expectedDxyBull, 0.01e18, "Collateral should match preview");
+        assertApproxEqRel(actualCollateral, expectedPlDxyBull, 0.01e18, "Collateral should match preview");
         assertApproxEqRel(actualDebt, expectedDebt, 0.01e18, "Debt should match preview");
     }
 
@@ -600,22 +600,22 @@ contract BullLeverageRouterTest is Test {
     // ==========================================
 
     function test_OnFlashLoan_UntrustedLender_Reverts() public {
-        // Call from alice (not dxyBear) with OP_CLOSE_REDEEM (3) to test lender validation
+        // Call from alice (not plDxyBear) with OP_CLOSE_REDEEM (3) to test lender validation
         vm.startPrank(alice);
 
         vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         router.onFlashLoan(
-            address(router), address(dxyBear), 100, 0, abi.encode(uint8(3), alice, block.timestamp + 1, 0, 0)
+            address(router), address(plDxyBear), 100, 0, abi.encode(uint8(3), alice, block.timestamp + 1, 0, 0)
         );
         vm.stopPrank();
     }
 
     function test_OnFlashLoan_UntrustedInitiator_Reverts() public {
-        // For ERC-3156 callback, the lender is dxyBear (used for close leverage)
-        vm.startPrank(address(dxyBear));
+        // For ERC-3156 callback, the lender is plDxyBear (used for close leverage)
+        vm.startPrank(address(plDxyBear));
 
         vm.expectRevert(FlashLoanBase.FlashLoan__InvalidInitiator.selector);
-        router.onFlashLoan(alice, address(dxyBear), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
+        router.onFlashLoan(alice, address(plDxyBear), 100, 0, abi.encode(uint8(1), alice, block.timestamp + 1, 0, 0));
         vm.stopPrank();
     }
 
@@ -1074,7 +1074,7 @@ contract MockFlashToken is ERC20, IERC3156FlashLender {
 contract MockCurvePool is ICurvePool {
 
     address public token0; // USDC (index 0)
-    address public token1; // DXY-BEAR (index 1)
+    address public token1; // plDXY-BEAR (index 1)
 
     // Scale factor for output. Default 1:1.
     // dy = dx * rateNum / rateDenom (with decimals adjusted)
@@ -1119,10 +1119,10 @@ contract MockCurvePool is ICurvePool {
         uint8 tokenOutDecimals = MockToken(tokenOut).decimals();
 
         if (tokenInDecimals < tokenOutDecimals) {
-            // USDC (6) -> DXY-BEAR (18) : * 1e12
+            // USDC (6) -> plDXY-BEAR (18) : * 1e12
             dy = dx * 1e12;
         } else {
-            // DXY-BEAR (18) -> USDC (6) : / 1e12
+            // plDXY-BEAR (18) -> USDC (6) : / 1e12
             dy = dx / 1e12;
         }
 
@@ -1152,10 +1152,10 @@ contract MockCurvePool is ICurvePool {
         uint8 tokenOutDecimals = MockToken(tokenOut).decimals();
 
         if (tokenInDecimals < tokenOutDecimals) {
-            // USDC (6) -> DXY-BEAR (18) : * 1e12
+            // USDC (6) -> plDXY-BEAR (18) : * 1e12
             dy = dx * 1e12;
         } else {
-            // DXY-BEAR (18) -> USDC (6) : / 1e12
+            // plDXY-BEAR (18) -> USDC (6) : / 1e12
             dy = dx / 1e12;
         }
 
@@ -1340,20 +1340,20 @@ contract MockMorpho is IMorpho {
 
 contract MockSplitter is ISyntheticSplitter {
 
-    address public dxyBear;
-    address public dxyBull;
+    address public plDxyBear;
+    address public plDxyBull;
     address public usdc;
     Status private _status = Status.ACTIVE;
     uint256 public redemptionRate = 100; // Percentage of payout (100 = 100%)
     uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
 
     constructor(
-        address _dxyBear,
-        address _dxyBull,
+        address _plDxyBear,
+        address _plDxyBull,
         address _usdc
     ) {
-        dxyBear = _dxyBear;
-        dxyBull = _dxyBull;
+        plDxyBear = _plDxyBear;
+        plDxyBull = _plDxyBull;
         usdc = _usdc;
     }
 
@@ -1376,8 +1376,8 @@ contract MockSplitter is ISyntheticSplitter {
         // Calculate USDC to pull: usdc = tokens * CAP / 1e20 = tokens * 2e8 / 1e20 = tokens * 2 / 1e12
         uint256 usdcNeeded = (amount * 2) / 1e12;
         MockToken(usdc).burn(msg.sender, usdcNeeded);
-        MockFlashToken(dxyBear).mint(msg.sender, amount);
-        MockToken(dxyBull).mint(msg.sender, amount);
+        MockFlashToken(plDxyBear).mint(msg.sender, amount);
+        MockToken(plDxyBull).mint(msg.sender, amount);
     }
 
     function burn(
@@ -1387,8 +1387,8 @@ contract MockSplitter is ISyntheticSplitter {
         // amount is in token units (18 decimals), USDC is 6 decimals
         // CAP = $2.00, so 1 pair redeems to $2.00 USDC
         // usdc = tokens * CAP / 1e20 = tokens * 2e8 / 1e20 = tokens * 2 / 1e12
-        MockFlashToken(dxyBear).burn(msg.sender, amount);
-        MockToken(dxyBull).burn(msg.sender, amount);
+        MockFlashToken(plDxyBear).burn(msg.sender, amount);
+        MockToken(plDxyBull).burn(msg.sender, amount);
         uint256 usdcAmount = (amount * 2) / 1e12;
 
         // Apply solvency haircut if set
@@ -1472,9 +1472,9 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
     BullLeverageRouter public router;
 
     MockToken public usdc;
-    MockFlashToken public dxyBear;
-    MockToken public dxyBull;
-    MockStakedTokenWithDrift public stakedDxyBull;
+    MockFlashToken public plDxyBear;
+    MockToken public plDxyBull;
+    MockStakedTokenWithDrift public stakedPlDxyBull;
     MockMorpho public morpho;
     MockCurvePool public curvePool;
     MockSplitter public splitter;
@@ -1485,18 +1485,18 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
 
     function setUp() public {
         usdc = new MockToken("USDC", "USDC", 6);
-        dxyBear = new MockFlashToken("DXY-BEAR", "DXY-BEAR");
-        dxyBull = new MockToken("DXY-BULL", "DXY-BULL", 18);
-        stakedDxyBull = new MockStakedTokenWithDrift(address(dxyBull));
+        plDxyBear = new MockFlashToken("plDXY-BEAR", "plDXY-BEAR");
+        plDxyBull = new MockToken("plDXY-BULL", "plDXY-BULL", 18);
+        stakedPlDxyBull = new MockStakedTokenWithDrift(address(plDxyBull));
         morpho = new MockMorpho();
-        curvePool = new MockCurvePool(address(usdc), address(dxyBear));
-        splitter = new MockSplitter(address(dxyBear), address(dxyBull), address(usdc));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        splitter = new MockSplitter(address(plDxyBear), address(plDxyBull), address(usdc));
 
-        morpho.setTokens(address(usdc), address(stakedDxyBull));
+        morpho.setTokens(address(usdc), address(stakedPlDxyBull));
 
         params = MarketParams({
             loanToken: address(usdc),
-            collateralToken: address(stakedDxyBull),
+            collateralToken: address(stakedPlDxyBull),
             oracle: address(0),
             irm: address(0),
             lltv: 900_000_000_000_000_000
@@ -1507,9 +1507,9 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
             address(splitter),
             address(curvePool),
             address(usdc),
-            address(dxyBear),
-            address(dxyBull),
-            address(stakedDxyBull),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedPlDxyBull),
             params
         );
 
@@ -1537,7 +1537,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
 
         // Set boost: redeem will return 1% more than previewRedeem
         // This simulates yield donation happening AFTER previewRedeem but BEFORE redeem
-        stakedDxyBull.setRedeemBoost(100); // +1%
+        stakedPlDxyBull.setRedeemBoost(100); // +1%
 
         vm.startPrank(alice);
 
@@ -1563,7 +1563,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
 
         // Simulate attacker front-running with yield donation
         // redeem returns 0.5% more than previewRedeem predicted
-        stakedDxyBull.setRedeemBoost(50); // +0.5%
+        stakedPlDxyBull.setRedeemBoost(50); // +0.5%
 
         vm.startPrank(alice);
 

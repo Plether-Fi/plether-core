@@ -7,7 +7,7 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 
 /// @title SyntheticToken
 /// @notice ERC20 token with flash mint and permit capability, controlled by SyntheticSplitter.
-/// @dev Used for DXY-BEAR and DXY-BULL tokens. Only the Splitter can mint/burn.
+/// @dev Used for plDXY-BEAR and plDXY-BULL tokens. Only the Splitter can mint/burn.
 ///      Inherits ERC20FlashMint for fee-free flash loans used by routers.
 contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
 
@@ -29,8 +29,8 @@ contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
     }
 
     /// @notice Creates a new SyntheticToken.
-    /// @param _name Token name (e.g., "Bear DXY").
-    /// @param _symbol Token symbol (e.g., "plDXY-BEAR").
+    /// @param _name Token name (e.g., "plDXY-BEAR").
+    /// @param _symbol Token symbol (e.g., "plplDXY-BEAR").
     /// @param _splitter Address of the SyntheticSplitter contract.
     constructor(
         string memory _name,

@@ -14,7 +14,7 @@ interface IMorphoOracle {
 
 /// @title MorphoOracle
 /// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
-/// @dev Supports both DXY-BEAR (direct) and DXY-BULL (inverse) pricing.
+/// @dev Supports both plDXY-BEAR (direct) and plDXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {
 
     /// @notice Source price feed (BasketOracle).
@@ -23,7 +23,7 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice Protocol CAP price (8 decimals).
     uint256 public immutable CAP;
 
-    /// @notice If true, returns CAP - Price (for DXY-BULL).
+    /// @notice If true, returns CAP - Price (for plDXY-BULL).
     bool public immutable IS_INVERSE;
 
     /// @notice Maximum age for valid oracle price.
@@ -44,7 +44,7 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice Creates Morpho-compatible oracle wrapper.
     /// @param _basketOracle BasketOracle address.
     /// @param _cap Protocol CAP (8 decimals, e.g., 2e8 = $2.00).
-    /// @param _isInverse True for DXY-BULL (CAP - Price), false for DXY-BEAR.
+    /// @param _isInverse True for plDXY-BULL (CAP - Price), false for plDXY-BEAR.
     constructor(
         address _basketOracle,
         uint256 _cap,
@@ -57,7 +57,7 @@ contract MorphoOracle is IMorphoOracle {
     }
 
     /// @notice Returns collateral price scaled to 1e36.
-    /// @return Price of 1 DXY token in USDC terms (1e36 scale).
+    /// @return Price of 1 plDXY token in USDC terms (1e36 scale).
     function price() external view override returns (uint256) {
         (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
 

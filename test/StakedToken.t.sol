@@ -9,7 +9,7 @@ import {Test} from "forge-std/Test.sol";
 
 contract MockUnderlying is ERC20, ERC20Permit {
 
-    constructor() ERC20("DXY-BEAR", "BEAR") ERC20Permit("DXY-BEAR") {}
+    constructor() ERC20("plDXY-BEAR", "BEAR") ERC20Permit("plDXY-BEAR") {}
 
     function mint(
         address to,
@@ -31,7 +31,7 @@ contract StakedTokenTest is Test {
 
     function setUp() public {
         underlying = new MockUnderlying();
-        stakedToken = new StakedToken(IERC20(address(underlying)), "Staked DXY-BEAR", "sDXY-BEAR");
+        stakedToken = new StakedToken(IERC20(address(underlying)), "Staked plDXY-BEAR", "splDXY-BEAR");
 
         underlying.mint(alice, 1000 ether);
         underlying.mint(bob, 1000 ether);

@@ -88,8 +88,8 @@ SyntheticSplitter splitter = new SyntheticSplitter(
 
 **Verification:**
 - [ ] `address(splitter) == predictedSplitter`
-- [ ] `TOKEN_A()` returns DXY-BEAR address
-- [ ] `TOKEN_B()` returns DXY-BULL address
+- [ ] `TOKEN_A()` returns plDXY-BEAR address
+- [ ] `TOKEN_B()` returns plDXY-BULL address
 - [ ] `CAP()` returns correct value
 - [ ] `paused()` returns false
 - [ ] `isLiquidated()` returns false
@@ -106,8 +106,8 @@ MorphoOracle morphoOracleBull = new MorphoOracle(basketOracle, CAP, true);
 
 ### Step 5: Deploy Staked Tokens
 ```solidity
-StakedToken stakedBear = new StakedToken(DXY_BEAR, "Staked DXY-BEAR", "sDXY-BEAR");
-StakedToken stakedBull = new StakedToken(DXY_BULL, "Staked DXY-BULL", "sDXY-BULL");
+StakedToken stakedBear = new StakedToken(PLDXY_BEAR, "Staked plDXY-BEAR", "splDXY-BEAR");
+StakedToken stakedBull = new StakedToken(PLDXY_BULL, "Staked plDXY-BULL", "splDXY-BULL");
 ```
 
 **Verification:**
@@ -125,7 +125,7 @@ StakedOracle stakedOracleBull = new StakedOracle(stakedBull, morphoOracleBull);
 
 ### Step 7: Deploy ZapRouter
 ```solidity
-ZapRouter zapRouter = new ZapRouter(splitter, DXY_BEAR, DXY_BULL, USDC, curvePool);
+ZapRouter zapRouter = new ZapRouter(splitter, PLDXY_BEAR, PLDXY_BULL, USDC, curvePool);
 ```
 
 **Verification:**
@@ -138,7 +138,7 @@ LeverageRouter leverageRouter = new LeverageRouter(
     MORPHO_BLUE,
     curvePool,
     USDC,
-    DXY_BEAR,
+    PLDXY_BEAR,
     stakedBear,
     AAVE_POOL,
     bearMarketParams
@@ -155,8 +155,8 @@ BullLeverageRouter bullLeverageRouter = new BullLeverageRouter(
     splitter,
     curvePool,
     USDC,
-    DXY_BEAR,
-    DXY_BULL,
+    PLDXY_BEAR,
+    PLDXY_BULL,
     stakedBull,
     AAVE_POOL,
     bullMarketParams
@@ -227,13 +227,13 @@ cast send <CONTRACT> "transferOwnership(address)" <MULTISIG> --private-key $PRIV
 
 ### Create Morpho Markets (if needed)
 Markets must exist on Morpho Blue for:
-1. USDC/sDXY-BEAR (for LeverageRouter)
-2. USDC/sDXY-BULL (for BullLeverageRouter)
+1. USDC/splDXY-BEAR (for LeverageRouter)
+2. USDC/splDXY-BULL (for BullLeverageRouter)
 
 ### Seed Curve Pool
 Initial liquidity required for:
 - USDC (one side)
-- DXY-BEAR (other side)
+- plDXY-BEAR (other side)
 
 ## Rollback Procedure
 
@@ -268,8 +268,8 @@ Update this section after deployment:
 | BasketOracle | `0x...` | [ ] |
 | MorphoAdapter | `0x...` | [ ] |
 | SyntheticSplitter | `0x...` | [ ] |
-| DXY-BEAR | `0x...` | [ ] |
-| DXY-BULL | `0x...` | [ ] |
+| plDXY-BEAR | `0x...` | [ ] |
+| plDXY-BULL | `0x...` | [ ] |
 | MorphoOracle (BEAR) | `0x...` | [ ] |
 | MorphoOracle (BULL) | `0x...` | [ ] |
 | StakedToken (BEAR) | `0x...` | [ ] |

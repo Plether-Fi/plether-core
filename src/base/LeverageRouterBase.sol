@@ -14,7 +14,7 @@ import {FlashLoanBase} from "./FlashLoanBase.sol";
 
 /// @title LeverageRouterBase
 /// @notice Abstract base for leverage routers with shared validation and admin logic.
-/// @dev Common infrastructure for LeverageRouter (DXY-BEAR) and BullLeverageRouter (DXY-BULL).
+/// @dev Common infrastructure for LeverageRouter (plDXY-BEAR) and BullLeverageRouter (plDXY-BULL).
 abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
@@ -22,11 +22,11 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     /// @notice Maximum slippage in basis points (1% = 100 bps).
     uint256 public constant MAX_SLIPPAGE_BPS = 100;
 
-    /// @notice USDC index in Curve USDC/DXY-BEAR pool.
+    /// @notice USDC index in Curve USDC/plDXY-BEAR pool.
     uint256 public constant USDC_INDEX = 0;
 
-    /// @notice DXY-BEAR index in Curve USDC/DXY-BEAR pool.
-    uint256 public constant DXY_BEAR_INDEX = 1;
+    /// @notice plDXY-BEAR index in Curve USDC/plDXY-BEAR pool.
+    uint256 public constant PLDXY_BEAR_INDEX = 1;
 
     /// @dev Operation type: open leverage position.
     uint8 internal constant OP_OPEN = 1;
@@ -37,14 +37,14 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     /// @notice Morpho Blue lending protocol.
     IMorpho public immutable MORPHO;
 
-    /// @notice Curve pool for USDC/DXY-BEAR swaps.
+    /// @notice Curve pool for USDC/plDXY-BEAR swaps.
     ICurvePool public immutable CURVE_POOL;
 
     /// @notice USDC stablecoin.
     IERC20 public immutable USDC;
 
-    /// @notice DXY-BEAR token.
-    IERC20 public immutable DXY_BEAR;
+    /// @notice plDXY-BEAR token.
+    IERC20 public immutable PLDXY_BEAR;
 
     /// @notice Morpho market configuration.
     MarketParams public marketParams;
@@ -81,24 +81,24 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
 
     /// @notice Initializes base router with core dependencies.
     /// @param _morpho Morpho Blue protocol address.
-    /// @param _curvePool Curve USDC/DXY-BEAR pool address.
+    /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
     /// @param _usdc USDC token address.
-    /// @param _dxyBear DXY-BEAR token address.
+    /// @param _plDxyBear plDXY-BEAR token address.
     constructor(
         address _morpho,
         address _curvePool,
         address _usdc,
-        address _dxyBear
+        address _plDxyBear
     ) Ownable(msg.sender) {
         if (_morpho == address(0)) revert LeverageRouterBase__ZeroAddress();
         if (_curvePool == address(0)) revert LeverageRouterBase__ZeroAddress();
         if (_usdc == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_dxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_plDxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
 
         MORPHO = IMorpho(_morpho);
         CURVE_POOL = ICurvePool(_curvePool);
         USDC = IERC20(_usdc);
-        DXY_BEAR = IERC20(_dxyBear);
+        PLDXY_BEAR = IERC20(_plDxyBear);
     }
 
     // ==========================================

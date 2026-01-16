@@ -14,13 +14,13 @@ interface IOracle {
 
 /// @title StakedOracle
 /// @notice Prices ERC4626 vault shares by combining underlying price with exchange rate.
-/// @dev Price = UnderlyingPrice * ExchangeRate. Used for sDXY-BEAR/sDXY-BULL in Morpho.
+/// @dev Price = UnderlyingPrice * ExchangeRate. Used for splDXY-BEAR/splDXY-BULL in Morpho.
 contract StakedOracle is IOracle {
 
-    /// @notice The staking vault (sDXY-BEAR or sDXY-BULL).
+    /// @notice The staking vault (splDXY-BEAR or splDXY-BULL).
     IERC4626 public immutable VAULT;
 
-    /// @notice Oracle for the underlying DXY token.
+    /// @notice Oracle for the underlying plDXY token.
     IOracle public immutable UNDERLYING_ORACLE;
 
     /// @notice Decimal multiplier for the underlying asset.
@@ -34,7 +34,7 @@ contract StakedOracle is IOracle {
 
     /// @notice Creates staked oracle for a vault.
     /// @param _vault ERC4626 staking vault address.
-    /// @param _underlyingOracle Price oracle for the underlying DXY token.
+    /// @param _underlyingOracle Price oracle for the underlying plDXY token.
     constructor(
         address _vault,
         address _underlyingOracle

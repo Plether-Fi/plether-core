@@ -88,7 +88,7 @@ contract MockCurvePoolForOracleBasket {
 }
 
 /// @title Full Basket Oracle Fork Tests
-/// @notice Tests BasketOracle with real 6-feed DXY basket (5 real + 1 mock for SEK)
+/// @notice Tests BasketOracle with real 6-feed plDXY basket (5 real + 1 mock for SEK)
 contract BasketOracleForkTest is Test {
 
     address constant CL_EUR_USD = 0xb49f677943BC038e9857d61E7d053CaA2C1734C1;
@@ -159,7 +159,7 @@ contract BasketOracleForkTest is Test {
 
         calculatedBasketPrice = _calculateBasketPrice();
 
-        // Mock Curve pool returns DXY-BEAR price = CAP - DXY
+        // Mock Curve pool returns plDXY-BEAR price = CAP - plDXY
         uint256 bearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
         address tempCurvePool = address(new MockCurvePoolForOracleBasket(bearPrice));
 
@@ -271,7 +271,7 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        // DXY-BEAR price = CAP - DXY (use original basket price for comparison)
+        // plDXY-BEAR price = CAP - plDXY (use original basket price for comparison)
         uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
@@ -309,7 +309,7 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        // DXY-BEAR price = CAP - DXY (use original basket price for comparison)
+        // plDXY-BEAR price = CAP - plDXY (use original basket price for comparison)
         uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
@@ -347,7 +347,7 @@ contract BasketOracleForkTest is Test {
     }
 
     function test_FullBasket_DeviationCheckWithRealPool() public {
-        // Curve initial price is DXY-BEAR = CAP - DXY
+        // Curve initial price is plDXY-BEAR = CAP - plDXY
         uint256 initialBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
         curvePool = _deployCurvePool(initialBearPrice);
 
@@ -406,7 +406,7 @@ contract BasketOracleForkTest is Test {
         pool = ICurveCryptoFactory(CURVE_CRYPTO_FACTORY)
             .deploy_pool(
                 "USDC/BEAR Full Basket",
-                "USDC-BEAR-FB",
+                "USDC-plDXY-BEAR-FB",
                 coins,
                 0,
                 CURVE_A,

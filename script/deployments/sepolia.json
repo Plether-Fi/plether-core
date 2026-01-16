@@ -15,8 +15,8 @@
   "core": {
     "MockYieldAdapter": "0xb0f4041bed9517a2b200debc65b302c3767a7929",
     "SyntheticSplitter": "0x92933cec354a5f75202675d58e0ed718b017b147",
-    "DXY_BEAR": "0xd343b25a402fb3ed2cf26221c67ba0a8dfa3866c",
-    "DXY_BULL": "0x174b809e4baf272a477ce16b2a04a540eeacc5e1"
+    "PLDXY_BEAR": "0xd343b25a402fb3ed2cf26221c67ba0a8dfa3866c",
+    "PLDXY_BULL": "0x174b809e4baf272a477ce16b2a04a540eeacc5e1"
   },
   "staking": {
     "StakedBear": "0xd110ac5274f3c7a7c5d7bf65a9ed5a5f5f59a893",

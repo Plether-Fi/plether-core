@@ -29,7 +29,7 @@ interface ISyntheticSplitter {
     // ==========================================
 
     /**
-     * @notice Deposits collateral to mint equal amounts of DXY-BEAR and DXY-BULL tokens.
+     * @notice Deposits collateral to mint equal amounts of plDXY-BEAR and plDXY-BULL tokens.
      * @dev Requires approval on USDC. Amount is in 18-decimal token units.
      * @param amount The amount of token pairs to mint.
      */
@@ -38,7 +38,7 @@ interface ISyntheticSplitter {
     ) external;
 
     /**
-     * @notice Burns equal amounts of DXY-BEAR and DXY-BULL tokens to retrieve collateral.
+     * @notice Burns equal amounts of plDXY-BEAR and plDXY-BULL tokens to retrieve collateral.
      * @dev Works when not liquidated. May be restricted when paused and insolvent.
      * @param amount The amount of token pairs to burn.
      */
@@ -47,9 +47,9 @@ interface ISyntheticSplitter {
     ) external;
 
     /**
-     * @notice Emergency exit after liquidation. Burns DXY-BEAR for its full CAP value.
+     * @notice Emergency exit after liquidation. Burns plDXY-BEAR for its full CAP value.
      * @dev Only works when protocol is liquidated (price >= CAP).
-     * @param amount The amount of DXY-BEAR tokens to burn.
+     * @param amount The amount of plDXY-BEAR tokens to burn.
      */
     function emergencyRedeem(
         uint256 amount

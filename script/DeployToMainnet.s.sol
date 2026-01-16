@@ -52,7 +52,7 @@ interface ICurveTwocryptoPool {
  * @dev Deploys all 12 contracts in correct dependency order:
  *      1. BasketOracle
  *      2. MorphoAdapter (with predicted Splitter address)
- *      3. SyntheticSplitter (creates DXY-BEAR and DXY-BULL)
+ *      3. SyntheticSplitter (creates plDXY-BEAR and plDXY-BULL)
  *      4. MorphoOracle (BEAR variant)
  *      5. MorphoOracle (BULL variant)
  *      6. StakedToken (BEAR)
@@ -116,8 +116,8 @@ contract DeployToMainnet is Script {
         BasketOracle basketOracle;
         MorphoAdapter morphoAdapter;
         SyntheticSplitter splitter;
-        SyntheticToken dxyBear;
-        SyntheticToken dxyBull;
+        SyntheticToken plDxyBear;
+        SyntheticToken plDxyBull;
         address curvePool;
         MorphoOracle morphoOracleBear;
         MorphoOracle morphoOracleBull;
@@ -154,15 +154,15 @@ contract DeployToMainnet is Script {
             _deploySplitterWithAdapter(address(deployed.basketOracle), treasury, deployer);
 
         // Get token addresses from Splitter
-        deployed.dxyBear = deployed.splitter.TOKEN_A();
-        deployed.dxyBull = deployed.splitter.TOKEN_B();
-        console.log("DXY-BEAR deployed:", address(deployed.dxyBear));
-        console.log("DXY-BULL deployed:", address(deployed.dxyBull));
+        deployed.plDxyBear = deployed.splitter.TOKEN_A();
+        deployed.plDxyBull = deployed.splitter.TOKEN_B();
+        console.log("plDXY-BEAR deployed:", address(deployed.plDxyBear));
+        console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 
         // ==========================================
         // STEP 3: Deploy Curve pool via factory
         // ==========================================
-        deployed.curvePool = _deployCurvePool(address(deployed.dxyBear));
+        deployed.curvePool = _deployCurvePool(address(deployed.plDxyBear));
         console.log("Curve Pool deployed:", deployed.curvePool);
 
         // ==========================================
@@ -189,8 +189,8 @@ contract DeployToMainnet is Script {
         // ==========================================
         // STEP 6: Deploy Staked Tokens
         // ==========================================
-        deployed.stakedBear = new StakedToken(IERC20(address(deployed.dxyBear)), "Staked DXY-BEAR", "sDXY-BEAR");
-        deployed.stakedBull = new StakedToken(IERC20(address(deployed.dxyBull)), "Staked DXY-BULL", "sDXY-BULL");
+        deployed.stakedBear = new StakedToken(IERC20(address(deployed.plDxyBear)), "Staked plDXY-BEAR", "splDXY-BEAR");
+        deployed.stakedBull = new StakedToken(IERC20(address(deployed.plDxyBull)), "Staked plDXY-BULL", "splDXY-BULL");
 
         // ==========================================
         // STEP 7: Deploy Staked Oracles
@@ -202,7 +202,11 @@ contract DeployToMainnet is Script {
         // STEP 8: Deploy ZapRouter
         // ==========================================
         deployed.zapRouter = new ZapRouter(
-            address(deployed.splitter), address(deployed.dxyBear), address(deployed.dxyBull), USDC, deployed.curvePool
+            address(deployed.splitter),
+            address(deployed.plDxyBear),
+            address(deployed.plDxyBull),
+            USDC,
+            deployed.curvePool
         );
 
         // ==========================================
@@ -220,7 +224,7 @@ contract DeployToMainnet is Script {
             MORPHO_BLUE,
             deployed.curvePool,
             USDC,
-            address(deployed.dxyBear),
+            address(deployed.plDxyBear),
             address(deployed.stakedBear),
             bearMarketParams
         );
@@ -241,8 +245,8 @@ contract DeployToMainnet is Script {
             address(deployed.splitter),
             deployed.curvePool,
             USDC,
-            address(deployed.dxyBear),
-            address(deployed.dxyBull),
+            address(deployed.plDxyBear),
+            address(deployed.plDxyBull),
             address(deployed.stakedBull),
             bullMarketParams
         );
@@ -298,13 +302,13 @@ contract DeployToMainnet is Script {
     }
 
     function _deployCurvePool(
-        address dxyBear
+        address plDxyBear
     ) internal returns (address) {
         return ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
-                "Curve.fi USDC/DXY-BEAR",
-                "crvUSDCDXYBEAR",
-                [USDC, dxyBear],
+                "Curve.fi USDC/plDXY-BEAR",
+                "crvUSDCplDXYBEAR",
+                [USDC, plDxyBear],
                 0,
                 CURVE_A,
                 CURVE_GAMMA,
@@ -357,8 +361,8 @@ contract DeployToMainnet is Script {
         console.log("  BasketOracle:        ", address(d.basketOracle));
         console.log("  MorphoAdapter:       ", address(d.morphoAdapter));
         console.log("  SyntheticSplitter:   ", address(d.splitter));
-        console.log("  DXY-BEAR:            ", address(d.dxyBear));
-        console.log("  DXY-BULL:            ", address(d.dxyBull));
+        console.log("  plDXY-BEAR:            ", address(d.plDxyBear));
+        console.log("  plDXY-BULL:            ", address(d.plDxyBull));
         console.log("  Curve Pool:          ", d.curvePool);
         console.log("");
         console.log("Morpho Oracles:");
@@ -385,17 +389,17 @@ contract DeployToMainnet is Script {
         console.log("Verifying deployment...");
 
         // Check Splitter state
-        require(address(d.splitter.TOKEN_A()) == address(d.dxyBear), "BEAR token mismatch");
-        require(address(d.splitter.TOKEN_B()) == address(d.dxyBull), "BULL token mismatch");
+        require(address(d.splitter.TOKEN_A()) == address(d.plDxyBear), "BEAR token mismatch");
+        require(address(d.splitter.TOKEN_B()) == address(d.plDxyBull), "BULL token mismatch");
         require(d.splitter.CAP() == CAP, "CAP mismatch");
 
         // Check token ownership
-        require(d.dxyBear.SPLITTER() == address(d.splitter), "BEAR SPLITTER wrong");
-        require(d.dxyBull.SPLITTER() == address(d.splitter), "BULL SPLITTER wrong");
+        require(d.plDxyBear.SPLITTER() == address(d.splitter), "BEAR SPLITTER wrong");
+        require(d.plDxyBull.SPLITTER() == address(d.splitter), "BULL SPLITTER wrong");
 
         // Check staked tokens
-        require(address(d.stakedBear.asset()) == address(d.dxyBear), "StakedBear asset wrong");
-        require(address(d.stakedBull.asset()) == address(d.dxyBull), "StakedBull asset wrong");
+        require(address(d.stakedBear.asset()) == address(d.plDxyBear), "StakedBear asset wrong");
+        require(address(d.stakedBull.asset()) == address(d.plDxyBull), "StakedBull asset wrong");
 
         // Check router CAPs match
         require(d.zapRouter.CAP() == CAP, "ZapRouter CAP wrong");

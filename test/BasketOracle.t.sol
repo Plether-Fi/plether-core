@@ -52,7 +52,7 @@ contract BasketOracleTest is Test {
 
         // With normalized formula and 50/50 weights at base prices:
         // Index = 0.5 * (1.10/1.10) + 0.5 * (0.01/0.01) = 0.5 + 0.5 = 1.0
-        // DXY-BEAR = CAP - Index = $2.00 - $1.00 = $1.00
+        // plDXY-BEAR = CAP - Index = $2.00 - $1.00 = $1.00
         curvePool = new MockCurvePool(1.0 ether);
 
         address[] memory feeds = new address[](2);
@@ -94,9 +94,9 @@ contract BasketOracleTest is Test {
         // = 0.5 * (55_000_000 / 110_000_000) + 0.5 * (1_000_000 / 1_000_000)
         // = 0.5 * 0.5 + 0.5 * 1.0
         // = 0.25 + 0.50 = 0.75
-        // DXY-BEAR = CAP - Index = $2.00 - $0.75 = $1.25
+        // plDXY-BEAR = CAP - Index = $2.00 - $0.75 = $1.25
 
-        // Update Curve price to match DXY-BEAR (within 2% threshold)
+        // Update Curve price to match plDXY-BEAR (within 2% threshold)
         curvePool.setPrice(1.25 ether);
 
         (, int256 answer,,,) = basket.latestRoundData();

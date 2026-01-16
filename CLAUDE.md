@@ -31,54 +31,54 @@ forge snapshot --no-match-path "test/fork/*" --no-match-test "testFuzz_|invarian
 
 ## Architecture Overview
 
-Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse (bull/bear) exposure to the US Dollar Index (DXY).
+Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse and direct (bear/bull) exposure to the US Dollar Index (USDX).
 
 ### Core Contracts
 
 **SyntheticSplitter** - Central protocol contract
-- Accepts USDC collateral to mint equal amounts of DXY-BEAR + DXY-BULL
+- Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL
 - Maintains 10% liquidity buffer locally, 90% deployed to yield adapters
 - Three lifecycle states: ACTIVE → PAUSED → SETTLED
 - Liquidates when oracle price >= CAP (protocol end-of-life)
 
 **SyntheticToken** - ERC20 + ERC20FlashMint tokens
-- DXY-BEAR: appreciates when USD weakens / DXY falls
-- DXY-BULL: appreciates when USD strengthens / DXY rises
+- plDXY-BEAR: appreciates when USD weakens / USDX falls
+- plDXY-BULL: appreciates when USD strengthens / USDX rises
 - Only SyntheticSplitter can mint/burn
 
 ### Staking Layer
 
-**StakedToken** - Staked versions of DXY-BEAR and DXY-BULL (sDXY-BEAR, sDXY-BULL)
-- Users stake DXY tokens to receive staked tokens 1:1
+**StakedToken** - Staked versions of plDXY-BEAR and plDXY-BULL (splDXY-BEAR, splDXY-BULL)
+- Users stake plDXY tokens to receive staked tokens 1:1
 - Staked tokens are used as collateral in Morpho lending pools
 - Required for leverage positions (routers stake on behalf of users)
 - May accrue staking rewards (protocol-specific incentives)
 
 ### Routing Layer
 
-**ZapRouter** - Efficient DXY-BULL acquisition using flash mints
-- Flash mints DXY-BEAR → swaps to USDC via Curve → mints pairs → keeps DXY-BULL
+**ZapRouter** - Efficient plDXY-BULL acquisition using flash mints
+- Flash mints plDXY-BEAR → swaps to USDC via Curve → mints pairs → keeps plDXY-BULL
 - 1% max slippage cap for MEV protection
 
-**LeverageRouter** - Leveraged DXY-BEAR positions via Morpho Blue
-- Flash loans USDC → swaps to DXY-BEAR → stakes to sDXY-BEAR → deposits as Morpho collateral
-- Morpho market uses sDXY-BEAR as collateral token
+**LeverageRouter** - Leveraged plDXY-BEAR positions via Morpho Blue
+- Flash loans USDC → swaps to plDXY-BEAR → stakes to splDXY-BEAR → deposits as Morpho collateral
+- Morpho market uses splDXY-BEAR as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
-**BullLeverageRouter** - Leveraged DXY-BULL positions via Morpho Blue
-- Open: Flash loan USDC → mint pairs via Splitter → sell DXY-BEAR on Curve → stake DXY-BULL → deposit sDXY-BULL to Morpho
-- Close: Single DXY-BEAR flash mint for entire operation
-- Close flow: Flash mint BEAR (collateral + extra for debt) → sell extra BEAR for USDC → repay debt → withdraw sDXY-BULL → unstake → redeem pairs → buy back BEAR
-- Morpho market uses sDXY-BULL as collateral token
+**BullLeverageRouter** - Leveraged plDXY-BULL positions via Morpho Blue
+- Open: Flash loan USDC → mint pairs via Splitter → sell plDXY-BEAR on Curve → stake plDXY-BULL → deposit splDXY-BULL to Morpho
+- Close: Single plDXY-BEAR flash mint for entire operation
+- Close flow: Flash mint BEAR (collateral + extra for debt) → sell extra BEAR for USDC → repay debt → withdraw splDXY-BULL → unstake → redeem pairs → buy back BEAR
+- Morpho market uses splDXY-BULL as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
 ### Oracle Layer
 
-**BasketOracle** - Computes DXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF)
+**BasketOracle** - Computes plDXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF)
 
 **MorphoOracle** - Adapts BasketOracle to Morpho's 1e36 scale format
 
-**StakedOracle**: Wrapper that calculates `Price(Asset) * ExchangeRate` to price sDXY collateral for Morpho
+**StakedOracle**: Wrapper that calculates `Price(Asset) * ExchangeRate` to price splDXY collateral for Morpho
 
 ### Yield Adapters (ERC4626)
 
@@ -105,8 +105,8 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ## External Integrations
 
 - **Chainlink**: AggregatorV3Interface for price feeds
-- **Curve**: ICurvePool for USDC/DXY-BEAR swaps (indices: USDC=0, DXY-BEAR=1)
-- **Morpho Blue**: IMorpho for lending with staked tokens (sDXY-BEAR, sDXY-BULL) as collateral, and yield via MorphoAdapter
+- **Curve**: ICurvePool for USDC/plDXY-BEAR swaps (indices: USDC=0, plDXY-BEAR=1)
+- **Morpho Blue**: IMorpho for lending with staked tokens (splDXY-BEAR, splDXY-BULL) as collateral, and yield via MorphoAdapter
 
 ## Git Workflow
 

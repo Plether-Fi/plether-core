@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 /// @title ICurvePool
 /// @notice Interface for Curve StableSwap pools.
-/// @dev Used for USDC/DXY-BEAR swaps. Indices: USDC=0, DXY-BEAR=1.
+/// @dev Used for USDC/plDXY-BEAR swaps. Indices: USDC=0, plDXY-BEAR=1.
 interface ICurvePool {
 
     /// @notice Calculates expected output for a swap.

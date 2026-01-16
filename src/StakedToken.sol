@@ -7,7 +7,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title StakedToken
-/// @notice ERC4626 vault for staking DXY-BEAR or DXY-BULL tokens.
+/// @notice ERC4626 vault for staking plDXY-BEAR or plDXY-BULL tokens.
 /// @dev Used as Morpho collateral. Exchange rate increases via yield donations.
 ///      Implements 1000x virtual share offset to prevent inflation attacks.
 contract StakedToken is ERC4626 {
@@ -15,9 +15,9 @@ contract StakedToken is ERC4626 {
     using SafeERC20 for IERC20;
 
     /// @notice Creates a new staking vault for a synthetic token.
-    /// @param _asset The underlying DXY token to stake (DXY-BEAR or DXY-BULL).
-    /// @param _name Vault share name (e.g., "Staked Bear DXY").
-    /// @param _symbol Vault share symbol (e.g., "sDXY-BEAR").
+    /// @param _asset The underlying plDXY token to stake (plDXY-BEAR or plDXY-BULL).
+    /// @param _name Vault share name (e.g., "Staked plDXY-BEAR").
+    /// @param _symbol Vault share symbol (e.g., "splDXY-BEAR").
     constructor(
         IERC20 _asset,
         string memory _name,
