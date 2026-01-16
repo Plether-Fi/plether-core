@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
+import {StdCheats} from "forge-std/StdCheats.sol";
 
 interface IMintable {
 
@@ -25,7 +26,7 @@ interface IMintable {
  *   2. Update addresses below to match your deployment
  *   3. Run: forge script script/SeedMorphoMarkets.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
  */
-contract SeedMorphoMarkets is Script {
+contract SeedMorphoMarkets is Script, StdCheats {
 
     // ==========================================
     // MORPHO CONSTANTS (same across all chains)
