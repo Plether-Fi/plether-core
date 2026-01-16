@@ -49,28 +49,30 @@ User deposits USDC
 
 #### BasketOracle Design
 
-The BasketOracle computes a DXY-like index using **arithmetic weighting** rather than the geometric weighting of the official ICE DXY index:
+The BasketOracle computes a DXY-like index using **normalized arithmetic weighting** rather than the geometric weighting of the official ICE DXY index:
 
 ```
-Price = Σ(Price_i × Quantity_i)
+Price = Σ(Weight_i × Price_i / BasePrice_i)
 ```
 
-This design choice enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
+Each currency's contribution is normalized by its base price, ensuring the intended DXY weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (~$0.007) would be nearly ignored compared to EUR (~$1.08), causing severe weight distortion.
+
+This design enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
 
 **Inverse Relationship:** Because the oracle measures the USD value of a foreign currency basket, it moves **inversely** to the real DXY index. When the dollar strengthens, DXY rises but our basket value falls (foreign currencies are worth less in USD terms). This is why DXY-BEAR appreciates when the basket value rises (dollar weakens).
 
-**Fixed Base Weights** (immutable, set at deployment based on January 1, 2026 prices):
+**Fixed Base Prices and Weights** (immutable, set at deployment based on January 1, 2026 prices):
 
-| Currency | Base Price (USD) | Weight |
-|----------|------------------|--------|
-| EUR | 1.1750 | 57.6% |
-| JPY | 0.00638 | 13.6% |
-| GBP | 1.3448 | 11.9% |
-| CAD | 0.7288 | 9.1% |
-| SEK | 0.1086 | 4.2% |
-| CHF | 1.2610 | 3.6% |
+| Currency | Weight | Base Price (USD) |
+|----------|--------|------------------|
+| EUR | 57.6% | 1.1750 |
+| JPY | 13.6% | 0.00638 |
+| GBP | 11.9% | 1.3448 |
+| CAD | 9.1% | 0.7288 |
+| SEK | 4.2% | 0.1086 |
+| CHF | 3.6% | 1.2610 |
 
-The base quantities are permanently fixed and cannot be changed after deployment.
+Both weights and base prices are permanently fixed and cannot be changed after deployment.
 
 ### Routing Layer
 
