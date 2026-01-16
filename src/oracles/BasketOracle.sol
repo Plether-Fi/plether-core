@@ -8,14 +8,15 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title BasketOracle
-/// @notice Aggregates multiple Chainlink feeds into a weighted DXY basket price.
-/// @dev Price = Sum(Price_i * Quantity_i). Includes bound validation against Curve spot.
+/// @notice Aggregates multiple Chainlink feeds into a normalized weighted DXY basket price.
+/// @dev Price = Sum(Weight_i * Price_i / BasePrice_i). Normalization preserves intended currency weights.
 contract BasketOracle is AggregatorV3Interface, Ownable2Step {
 
-    /// @notice Component feed with its basket weight.
+    /// @notice Component feed with its basket weight and base price for normalization.
     struct Component {
         AggregatorV3Interface feed;
         uint256 quantity;
+        uint256 basePrice;
     }
 
     /// @notice Array of currency components (EUR, JPY, GBP, CAD, SEK, CHF).
@@ -72,27 +73,34 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @notice Thrown when max deviation is zero.
     error BasketOracle__InvalidDeviation();
 
+    /// @notice Thrown when a base price is zero.
+    error BasketOracle__InvalidBasePrice();
+
     /// @notice Creates basket oracle with currency components.
     /// @param _feeds Array of Chainlink feed addresses.
     /// @param _quantities Array of basket weights (1e18 precision).
+    /// @param _basePrices Array of base prices for normalization (8 decimals).
     /// @param _maxDeviationBps Maximum deviation from Curve (e.g., 200 = 2%).
     /// @param _cap Protocol CAP price (8 decimals).
     /// @param _owner Admin address for Curve pool management.
     constructor(
         address[] memory _feeds,
         uint256[] memory _quantities,
+        uint256[] memory _basePrices,
         uint256 _maxDeviationBps,
         uint256 _cap,
         address _owner
     ) Ownable(_owner) {
         if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
+        if (_feeds.length != _basePrices.length) revert BasketOracle__LengthMismatch();
         if (_maxDeviationBps == 0) revert BasketOracle__InvalidDeviation();
 
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
             if (feed.decimals() != DECIMALS) revert BasketOracle__InvalidPrice(address(feed));
+            if (_basePrices[i] == 0) revert BasketOracle__InvalidBasePrice();
 
-            components.push(Component({feed: feed, quantity: _quantities[i]}));
+            components.push(Component({feed: feed, quantity: _quantities[i], basePrice: _basePrices[i]}));
         }
 
         MAX_DEVIATION_BPS = _maxDeviationBps;
@@ -150,8 +158,10 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             // Safety: Price must be positive
             if (price <= 0) revert BasketOracle__InvalidPrice(address(components[i].feed));
 
-            // Math: Price (8 dec) * Quantity (18 dec) / ONE_WAD = 8 decimals
-            int256 value = (price * int256(components[i].quantity)) / int256(DecimalConstants.ONE_WAD);
+            // Normalized: Weight (18 dec) * Price (8 dec) / (BasePrice (8 dec) * 1e10) = 8 decimals
+            // This preserves intended currency weights regardless of absolute FX rate scales
+            int256 value = (price * int256(components[i].quantity))
+                / int256(components[i].basePrice * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
             totalPrice += value;
 
             // The basket is only as fresh as its oldest component

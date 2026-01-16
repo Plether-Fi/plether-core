@@ -295,20 +295,27 @@ contract SecurityAttackVectorsTest is Test {
         feeds[0] = address(feedEUR);
         feeds[1] = address(feedJPY);
 
+        // 50% EUR, 50% JPY weights
         uint256[] memory quantities = new uint256[](2);
         quantities[0] = 0.5 ether;
-        quantities[1] = 50 ether;
+        quantities[1] = 0.5 ether;
 
-        // theoreticalBear = 0.95 ether
-        BasketOracle basket = new BasketOracle(feeds, quantities, 200, 2e8, address(this));
+        // Base prices for normalization
+        uint256[] memory basePrices = new uint256[](2);
+        basePrices[0] = 110_000_000; // EUR base
+        basePrices[1] = 1_000_000; // JPY base
 
-        // 2% above: 0.95 * 1.02 = 0.969 ether - this PASSES with current code
-        MockCurvePool curvePool = new MockCurvePool(0.969 ether);
+        // Normalized index = 0.5 * (110/110) + 0.5 * (1/1) = 1.0
+        // theoreticalBear = CAP - Index = 2.0 - 1.0 = 1.0 ether
+        BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+
+        // 2% above: 1.0 * 1.02 = 1.02 ether - this PASSES with current code
+        MockCurvePool curvePool = new MockCurvePool(1.02 ether);
         basket.setCurvePool(address(curvePool));
         basket.latestRoundData(); // passes
 
-        // 2% below: 0.95 * 0.98 = 0.931 ether
-        curvePool.setPrice(0.931 ether);
+        // 2% below: 1.0 * 0.98 = 0.98 ether
+        curvePool.setPrice(0.98 ether);
 
         // EXPECTED: Should also pass (symmetric 2% tolerance)
         // CURRENT BUG: Reverts because MIN-based threshold is smaller

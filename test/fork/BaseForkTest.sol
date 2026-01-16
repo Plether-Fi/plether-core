@@ -97,6 +97,9 @@ abstract contract BaseForkTest is Test {
     // CAP = 2e8 (8 decimals) -> 2e18 (18 decimals)
     uint256 constant CAP_SCALED = 2e18;
 
+    // Base price for EUR normalization (8 decimals)
+    uint256 constant BASE_EUR = 108_000_000;
+
     // ==========================================
     // PROTOCOL STATE
     // ==========================================
@@ -128,7 +131,10 @@ abstract contract BaseForkTest is Test {
     /// @notice Fetch real oracle price and warp to valid timestamp
     function _fetchPriceAndWarp() internal {
         (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
-        realOraclePrice = uint256(price) * 1e10;
+        // Normalized formula: (price * quantity) / (basePrice * 1e10)
+        // With quantity=1e18: result in 8 decimals = price / basePrice (normalized)
+        uint256 normalizedPrice8 = (uint256(price) * 1e18) / (BASE_EUR * 1e10);
+        realOraclePrice = normalizedPrice8 * 1e10;
         bearPrice = CAP_SCALED - realOraclePrice;
         vm.warp(updatedAt + 1 hours);
     }
@@ -142,10 +148,12 @@ abstract contract BaseForkTest is Test {
         feeds[0] = CL_EUR;
         uint256[] memory qtys = new uint256[](1);
         qtys[0] = 1e18;
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = BASE_EUR;
 
         // Mock Pool for Oracle Init (using DXY-BEAR price = CAP - DXY)
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
-        basketOracle = new BasketOracle(feeds, qtys, 200, 2e8, address(this));
+        basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, 2e8, address(this));
         basketOracle.setCurvePool(tempCurvePool);
 
         // Create a Morpho yield market for the adapter (USDC lending market)
