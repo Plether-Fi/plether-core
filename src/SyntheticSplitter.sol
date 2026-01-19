@@ -132,11 +132,21 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         address _treasury,
         address _sequencerUptimeFeed
     ) Ownable(msg.sender) {
-        if (_oracle == address(0)) revert Splitter__ZeroAddress();
-        if (_usdc == address(0)) revert Splitter__ZeroAddress();
-        if (_yieldAdapter == address(0)) revert Splitter__ZeroAddress();
-        if (_cap == 0) revert Splitter__InvalidCap();
-        if (_treasury == address(0)) revert Splitter__ZeroAddress();
+        if (_oracle == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
+        if (_usdc == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
+        if (_yieldAdapter == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
+        if (_cap == 0) {
+            revert Splitter__InvalidCap();
+        }
+        if (_treasury == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
 
         ORACLE = AggregatorV3Interface(_oracle);
         USDC = IERC20(_usdc);
@@ -148,7 +158,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         TOKEN_A = new SyntheticToken("Plether Dollar Index Bear", "plDXY-BEAR", address(this));
         TOKEN_B = new SyntheticToken("Plether Dollar Index Bull", "plDXY-BULL", address(this));
 
-        // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
         USDC_MULTIPLIER = 10 ** (18 + 8 - decimals);
     }
@@ -167,12 +176,18 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function previewMint(
         uint256 mintAmount
     ) external view returns (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer) {
-        if (mintAmount == 0) return (0, 0, 0);
-        if (isLiquidated) revert Splitter__LiquidationActive();
+        if (mintAmount == 0) {
+            return (0, 0, 0);
+        }
+        if (isLiquidated) {
+            revert Splitter__LiquidationActive();
+        }
 
         // Check Oracle Price to fail fast if over CAP
         uint256 price = _getOraclePrice();
-        if (price >= CAP) revert Splitter__LiquidationActive();
+        if (price >= CAP) {
+            revert Splitter__LiquidationActive();
+        }
 
         // Calculate USDC required (round UP to favor protocol)
         usdcRequired = Math.mulDiv(mintAmount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
@@ -187,9 +202,15 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function mint(
         uint256 amount
     ) external nonReentrant whenNotPaused {
-        if (amount == 0) revert Splitter__ZeroAmount();
-        if (isLiquidated) revert Splitter__LiquidationActive();
-        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+        if (amount == 0) {
+            revert Splitter__ZeroAmount();
+        }
+        if (isLiquidated) {
+            revert Splitter__LiquidationActive();
+        }
+        if (address(yieldAdapter) == address(0)) {
+            revert Splitter__AdapterNotSet();
+        }
 
         uint256 price = _getOraclePrice();
         if (price >= CAP) {
@@ -197,7 +218,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
 
         uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
-        if (usdcNeeded == 0) revert Splitter__ZeroAmount();
+        if (usdcNeeded == 0) {
+            revert Splitter__ZeroAmount();
+        }
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcNeeded);
 
@@ -228,14 +251,18 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function previewBurn(
         uint256 burnAmount
     ) external view returns (uint256 usdcRefund, uint256 withdrawnFromAdapter) {
-        if (burnAmount == 0) return (0, 0);
+        if (burnAmount == 0) {
+            return (0, 0);
+        }
 
         // 1. Solvency Check (Simulates the paused logic)
         _requireSolventIfPaused();
 
         // 2. Calculate Refund
         usdcRefund = (burnAmount * CAP) / USDC_MULTIPLIER;
-        if (usdcRefund == 0) revert Splitter__ZeroRefund();
+        if (usdcRefund == 0) {
+            revert Splitter__ZeroRefund();
+        }
 
         // 3. Calculate Liquidity Source
         uint256 localBalance = USDC.balanceOf(address(this));
@@ -246,7 +273,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             // Optional: Check if adapter actually has this liquidity
             // logical constraint to warn frontend if withdrawal will fail
             uint256 maxWithdraw = yieldAdapter.maxWithdraw(address(this));
-            if (maxWithdraw < withdrawnFromAdapter) revert Splitter__AdapterInsufficientLiquidity();
+            if (maxWithdraw < withdrawnFromAdapter) {
+                revert Splitter__AdapterInsufficientLiquidity();
+            }
         } else {
             withdrawnFromAdapter = 0;
         }
@@ -257,13 +286,17 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function burn(
         uint256 amount
     ) external nonReentrant {
-        if (amount == 0) revert Splitter__ZeroAmount();
+        if (amount == 0) {
+            revert Splitter__ZeroAmount();
+        }
 
         // If paused, enforce 100% solvency to prevent race to exit
         _requireSolventIfPaused();
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
-        if (usdcRefund == 0) revert Splitter__ZeroRefund();
+        if (usdcRefund == 0) {
+            revert Splitter__ZeroRefund();
+        }
 
         // 1. Check Local Buffer First
         uint256 localBalance = USDC.balanceOf(address(this));
@@ -271,7 +304,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (localBalance < usdcRefund) {
             uint256 shortage = usdcRefund - localBalance;
             // Check adapter just in case (though solvency check handles this usually)
-            if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+            if (address(yieldAdapter) == address(0)) {
+                revert Splitter__AdapterNotSet();
+            }
 
             // Try withdraw first, fall back to redeem if it fails
             _withdrawFromAdapter(shortage);
@@ -317,8 +352,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     /// @dev Permissionless. Prevents system revival if price drops after breach.
     function triggerLiquidation() external nonReentrant {
         uint256 price = _getOraclePrice();
-        if (price < CAP) revert Splitter__NotLiquidated();
-        if (isLiquidated) revert Splitter__LiquidationActive();
+        if (price < CAP) {
+            revert Splitter__NotLiquidated();
+        }
+        if (isLiquidated) {
+            revert Splitter__LiquidationActive();
+        }
 
         isLiquidated = true;
         emit LiquidationTriggered(price);
@@ -339,10 +378,14 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
                 revert Splitter__NotLiquidated();
             }
         }
-        if (amount == 0) revert Splitter__ZeroAmount();
+        if (amount == 0) {
+            revert Splitter__ZeroAmount();
+        }
 
         uint256 usdcRefund = (amount * CAP) / USDC_MULTIPLIER;
-        if (usdcRefund == 0) revert Splitter__ZeroRefund();
+        if (usdcRefund == 0) {
+            revert Splitter__ZeroRefund();
+        }
 
         uint256 localBalance = USDC.balanceOf(address(this));
         if (localBalance < usdcRefund) {
@@ -359,7 +402,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     /// @notice Emergency exit: withdraws all funds from yield adapter.
     /// @dev Bypasses timelock. Auto-pauses protocol. Use if adapter is compromised.
     function ejectLiquidity() external onlyOwner {
-        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+        if (address(yieldAdapter) == address(0)) {
+            revert Splitter__AdapterNotSet();
+        }
 
         uint256 shares = yieldAdapter.balanceOf(address(this));
         uint256 recovered = 0;
@@ -382,9 +427,15 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function withdrawFromAdapter(
         uint256 amount
     ) external nonReentrant onlyOwner {
-        if (!paused()) revert Splitter__NotPaused();
-        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
-        if (amount == 0) revert Splitter__ZeroAmount();
+        if (!paused()) {
+            revert Splitter__NotPaused();
+        }
+        if (address(yieldAdapter) == address(0)) {
+            revert Splitter__AdapterNotSet();
+        }
+        if (amount == 0) {
+            revert Splitter__ZeroAmount();
+        }
 
         uint256 maxAvailable = yieldAdapter.maxWithdraw(address(this));
         uint256 toWithdraw = amount > maxAvailable ? maxAvailable : amount;
@@ -417,7 +468,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             uint256 stakingShare
         )
     {
-        if (address(yieldAdapter) == address(0)) return (false, 0, 0, 0, 0);
+        if (address(yieldAdapter) == address(0)) {
+            return (false, 0, 0, 0, 0);
+        }
 
         // 1. Calculate Total Holdings
         uint256 myShares = yieldAdapter.balanceOf(address(this));
@@ -454,7 +507,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     /// @notice Permissionless yield harvesting from the adapter.
     /// @dev Distributes surplus: 0.1% to caller, 20% to treasury, 79.9% to staking.
     function harvestYield() external nonReentrant whenNotPaused {
-        if (address(yieldAdapter) == address(0)) revert Splitter__AdapterNotSet();
+        if (address(yieldAdapter) == address(0)) {
+            revert Splitter__AdapterNotSet();
+        }
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
         uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
@@ -463,7 +518,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
         uint256 requiredBacking = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
 
-        if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) revert Splitter__NoSurplus();
+        if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) {
+            revert Splitter__NoSurplus();
+        }
 
         uint256 surplus = totalHoldings - requiredBacking;
 
@@ -478,7 +535,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         uint256 harvested = USDC.balanceOf(address(this)) - balanceBefore;
 
         // Safety check: Ensure we got at least 90% of expected (adjust threshold as needed)
-        if (harvested < (expectedPull * 90) / 100) revert Splitter__InsufficientHarvest();
+        if (harvested < (expectedPull * 90) / 100) {
+            revert Splitter__InsufficientHarvest();
+        }
 
         // Distribute based on actual harvested
         uint256 callerCut = (harvested * HARVEST_REWARD_BPS) / 10_000;
@@ -489,8 +548,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         emit YieldHarvested(harvested, treasuryShare, stakingShare);
 
         // Transfers (CEI: All calcs done before interactions)
-        if (callerCut > 0) USDC.safeTransfer(msg.sender, callerCut);
-        if (treasury != address(0)) USDC.safeTransfer(treasury, treasuryShare);
+        if (callerCut > 0) {
+            USDC.safeTransfer(msg.sender, callerCut);
+        }
+        if (treasury != address(0)) {
+            USDC.safeTransfer(treasury, treasuryShare);
+        }
         if (staking != address(0)) {
             USDC.safeTransfer(staking, stakingShare);
         } else {
@@ -504,7 +567,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
     /// @dev Enforces 7-day cooldown after unpause for governance actions.
     function _checkLiveness() internal view {
-        if (paused()) revert Splitter__GovernanceLocked();
+        if (paused()) {
+            revert Splitter__GovernanceLocked();
+        }
         // Using TIMELOCK_DELAY (7 days) as the Cooldown
         if (block.timestamp < lastUnpauseTime + TIMELOCK_DELAY) {
             revert Splitter__GovernanceLocked();
@@ -518,7 +583,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         address _treasury,
         address _staking
     ) external onlyOwner {
-        if (_treasury == address(0)) revert Splitter__ZeroAddress();
+        if (_treasury == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
         pendingFees = FeeConfig(_treasury, _staking);
         feesActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit FeesProposed(_treasury, _staking, feesActivationTime);
@@ -526,8 +593,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
     /// @notice Finalize pending fee receiver change after timelock expires.
     function finalizeFeeReceivers() external onlyOwner {
-        if (feesActivationTime == 0) revert Splitter__InvalidProposal();
-        if (block.timestamp < feesActivationTime) revert Splitter__TimelockActive();
+        if (feesActivationTime == 0) {
+            revert Splitter__InvalidProposal();
+        }
+        if (block.timestamp < feesActivationTime) {
+            revert Splitter__TimelockActive();
+        }
 
         _checkLiveness();
 
@@ -544,7 +615,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function proposeAdapter(
         address _newAdapter
     ) external onlyOwner {
-        if (_newAdapter == address(0)) revert Splitter__ZeroAddress();
+        if (_newAdapter == address(0)) {
+            revert Splitter__ZeroAddress();
+        }
         pendingAdapter = _newAdapter;
         adapterActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit AdapterProposed(_newAdapter, adapterActivationTime);
@@ -552,8 +625,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
     /// @notice Finalize adapter migration after timelock. Migrates all funds atomically.
     function finalizeAdapter() external nonReentrant onlyOwner {
-        if (pendingAdapter == address(0)) revert Splitter__InvalidProposal();
-        if (block.timestamp < adapterActivationTime) revert Splitter__TimelockActive();
+        if (pendingAdapter == address(0)) {
+            revert Splitter__InvalidProposal();
+        }
+        if (block.timestamp < adapterActivationTime) {
+            revert Splitter__TimelockActive();
+        }
 
         _checkLiveness();
 
@@ -625,8 +702,12 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
      * @return The current Status enum value (ACTIVE, PAUSED, or SETTLED).
      */
     function currentStatus() external view override returns (Status) {
-        if (isLiquidated) return Status.SETTLED;
-        if (paused()) return Status.PAUSED;
+        if (isLiquidated) {
+            return Status.SETTLED;
+        }
+        if (paused()) {
+            return Status.PAUSED;
+        }
         return Status.ACTIVE;
     }
 
@@ -686,7 +767,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (paused()) {
             uint256 totalAssets = _getTotalAssets();
             uint256 totalLiabilities = _getTotalLiabilities();
-            if (totalAssets < totalLiabilities) revert Splitter__Insolvent();
+            if (totalAssets < totalLiabilities) {
+                revert Splitter__Insolvent();
+            }
         }
     }
 

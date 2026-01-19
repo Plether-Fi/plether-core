@@ -91,14 +91,24 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         uint256 _cap,
         address _owner
     ) Ownable(_owner) {
-        if (_feeds.length != _quantities.length) revert BasketOracle__LengthMismatch();
-        if (_feeds.length != _basePrices.length) revert BasketOracle__LengthMismatch();
-        if (_maxDeviationBps == 0) revert BasketOracle__InvalidDeviation();
+        if (_feeds.length != _quantities.length) {
+            revert BasketOracle__LengthMismatch();
+        }
+        if (_feeds.length != _basePrices.length) {
+            revert BasketOracle__LengthMismatch();
+        }
+        if (_maxDeviationBps == 0) {
+            revert BasketOracle__InvalidDeviation();
+        }
 
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
-            if (feed.decimals() != DECIMALS) revert BasketOracle__InvalidPrice(address(feed));
-            if (_basePrices[i] == 0) revert BasketOracle__InvalidBasePrice();
+            if (feed.decimals() != DECIMALS) {
+                revert BasketOracle__InvalidPrice(address(feed));
+            }
+            if (_basePrices[i] == 0) {
+                revert BasketOracle__InvalidBasePrice();
+            }
 
             components.push(Component({feed: feed, quantity: _quantities[i], basePrice: _basePrices[i]}));
         }
@@ -112,7 +122,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     function setCurvePool(
         address _curvePool
     ) external onlyOwner {
-        if (address(curvePool) != address(0)) revert BasketOracle__AlreadySet();
+        if (address(curvePool) != address(0)) {
+            revert BasketOracle__AlreadySet();
+        }
         curvePool = ICurvePool(_curvePool);
         emit CurvePoolUpdated(address(0), _curvePool);
     }
@@ -122,7 +134,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     function proposeCurvePool(
         address _newPool
     ) external onlyOwner {
-        if (address(curvePool) == address(0)) revert BasketOracle__InvalidProposal();
+        if (address(curvePool) == address(0)) {
+            revert BasketOracle__InvalidProposal();
+        }
         // slither-disable-next-line missing-zero-check
         pendingCurvePool = _newPool;
         curvePoolActivationTime = block.timestamp + TIMELOCK_DELAY;
@@ -131,8 +145,12 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
 
     /// @notice Finalizes the Curve pool update after timelock expires.
     function finalizeCurvePool() external onlyOwner {
-        if (pendingCurvePool == address(0)) revert BasketOracle__InvalidProposal();
-        if (block.timestamp < curvePoolActivationTime) revert BasketOracle__TimelockActive();
+        if (pendingCurvePool == address(0)) {
+            revert BasketOracle__InvalidProposal();
+        }
+        if (block.timestamp < curvePoolActivationTime) {
+            revert BasketOracle__TimelockActive();
+        }
 
         address oldPool = address(curvePool);
         curvePool = ICurvePool(pendingCurvePool);
@@ -156,7 +174,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             (, int256 price,, uint256 updatedAt,) = components[i].feed.latestRoundData();
 
             // Safety: Price must be positive
-            if (price <= 0) revert BasketOracle__InvalidPrice(address(components[i].feed));
+            if (price <= 0) {
+                revert BasketOracle__InvalidPrice(address(components[i].feed));
+            }
 
             // Normalized: Weight (18 dec) * Price (8 dec) / (BasePrice (8 dec) * 1e10) = 8 decimals
             // This preserves intended currency weights regardless of absolute FX rate scales
@@ -191,14 +211,18 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         uint256 theoreticalDxy8Dec
     ) internal view {
         ICurvePool pool = curvePool;
-        if (address(pool) == address(0)) return;
+        if (address(pool) == address(0)) {
+            return;
+        }
 
         uint256 cap18 = CAP * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
         uint256 dxy18 = theoreticalDxy8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
         uint256 theoreticalBear18 = cap18 - dxy18;
 
         uint256 spotBear18 = pool.price_oracle();
-        if (spotBear18 == 0) revert BasketOracle__InvalidPrice(address(pool));
+        if (spotBear18 == 0) {
+            revert BasketOracle__InvalidPrice(address(pool));
+        }
 
         uint256 diff = theoreticalBear18 > spotBear18 ? theoreticalBear18 - spotBear18 : spotBear18 - theoreticalBear18;
         uint256 basePrice = theoreticalBear18 > spotBear18 ? theoreticalBear18 : spotBear18;

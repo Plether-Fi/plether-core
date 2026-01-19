@@ -39,8 +39,12 @@ contract StakedOracle is IOracle {
         address _vault,
         address _underlyingOracle
     ) {
-        if (_vault == address(0)) revert StakedOracle__ZeroAddress();
-        if (_underlyingOracle == address(0)) revert StakedOracle__ZeroAddress();
+        if (_vault == address(0)) {
+            revert StakedOracle__ZeroAddress();
+        }
+        if (_underlyingOracle == address(0)) {
+            revert StakedOracle__ZeroAddress();
+        }
         VAULT = IERC4626(_vault);
         UNDERLYING_ORACLE = IOracle(_underlyingOracle);
         UNDERLYING_DECIMALS = 10 ** IERC20Metadata(VAULT.asset()).decimals();
@@ -50,7 +54,9 @@ contract StakedOracle is IOracle {
     /// @return Price scaled to 1e36 (underlying price * exchange rate).
     function price() external view override returns (uint256) {
         uint256 rawPrice = UNDERLYING_ORACLE.price();
-        if (rawPrice == 0) revert StakedOracle__InvalidPrice();
+        if (rawPrice == 0) {
+            revert StakedOracle__InvalidPrice();
+        }
 
         uint256 oneShare = 10 ** IERC20Metadata(address(VAULT)).decimals();
         uint256 assetsPerShare = VAULT.convertToAssets(oneShare);

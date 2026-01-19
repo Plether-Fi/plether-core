@@ -23,7 +23,9 @@ library OracleLib {
         uint256 gracePeriod
     ) internal view {
         // Skip check if no feed address is provided
-        if (address(sequencerFeed) == address(0)) return;
+        if (address(sequencerFeed) == address(0)) {
+            return;
+        }
 
         (, int256 answer, uint256 startedAt,,) = sequencerFeed.latestRoundData();
 
@@ -71,7 +73,9 @@ library OracleLib {
         checkStaleness(updatedAt, timeout);
 
         // Revert on invalid prices - broken oracle should halt operations
-        if (rawPrice <= 0) revert OracleLib__InvalidPrice();
+        if (rawPrice <= 0) {
+            revert OracleLib__InvalidPrice();
+        }
 
         return uint256(rawPrice);
     }

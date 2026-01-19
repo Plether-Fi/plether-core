@@ -906,8 +906,12 @@ contract MockCurvePool is ICurvePool {
         uint256 j,
         uint256 dx
     ) external view override returns (uint256) {
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 
@@ -917,8 +921,12 @@ contract MockCurvePool is ICurvePool {
         uint256 dy
     ) external view returns (uint256) {
         // Inverse of get_dy (not in ICurvePool interface but useful for testing)
-        if (i == 1 && j == 0) return (dy * 1e18) / bearPrice;
-        if (i == 0 && j == 1) return (dy * bearPrice) / 1e18;
+        if (i == 1 && j == 0) {
+            return (dy * 1e18) / bearPrice;
+        }
+        if (i == 0 && j == 1) {
+            return (dy * bearPrice) / 1e18;
+        }
         return 0;
     }
 
@@ -1048,8 +1056,12 @@ contract MockCurvePoolWithMEV is ICurvePool {
         uint256 dx
     ) external view override returns (uint256) {
         // Returns "expected" output - what user sees before sandwich
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 

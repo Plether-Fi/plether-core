@@ -280,7 +280,9 @@ contract LiquidationForkTest is BaseForkTest {
         MarketParams memory params
     ) internal view returns (uint256 ltv) {
         (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, user);
-        if (collateral == 0) return 0;
+        if (collateral == 0) {
+            return 0;
+        }
 
         (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = IMorpho(MORPHO).market(marketId);
         uint256 debtAssets = totalBorrowShares > 0 ? (uint256(borrowShares) * totalBorrowAssets) / totalBorrowShares : 0;
@@ -288,7 +290,9 @@ contract LiquidationForkTest is BaseForkTest {
         uint256 oraclePrice = MorphoOracle(params.oracle).price();
         uint256 collateralValue = (uint256(collateral) * oraclePrice) / 1e36;
 
-        if (collateralValue == 0) return type(uint256).max;
+        if (collateralValue == 0) {
+            return type(uint256).max;
+        }
         ltv = (debtAssets * 10_000) / collateralValue;
     }
 

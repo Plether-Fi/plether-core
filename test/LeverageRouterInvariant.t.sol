@@ -176,8 +176,12 @@ contract InvariantMockCurvePool is ICurvePool {
         uint256 j,
         uint256 dx
     ) external view override returns (uint256) {
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 
@@ -436,7 +440,9 @@ contract LeverageRouterHandler is Test {
         leverage = bound(leverage, 2e18, 5e18); // 2x to 5x
 
         // Skip if actor doesn't have enough
-        if (usdc.balanceOf(currentActor) < principal) return;
+        if (usdc.balanceOf(currentActor) < principal) {
+            return;
+        }
 
         try router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours) {
             ghost_totalOpened++;
@@ -453,7 +459,9 @@ contract LeverageRouterHandler is Test {
         uint256 collateral = morpho.collateralBalance(currentActor);
 
         // Skip if no position
-        if (collateral == 0) return;
+        if (collateral == 0) {
+            return;
+        }
 
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
@@ -477,14 +485,18 @@ contract LeverageRouterHandler is Test {
         uint256 collateral = morpho.collateralBalance(currentActor);
 
         // Skip if no position
-        if (collateral == 0) return;
+        if (collateral == 0) {
+            return;
+        }
 
         // Bound ratio
         collateralRatio = bound(collateralRatio, 10, 100);
 
         uint256 collateralToWithdraw = (collateral * collateralRatio) / 100;
 
-        if (collateralToWithdraw == 0) return;
+        if (collateralToWithdraw == 0) {
+            return;
+        }
 
         // Router queries actual debt from Morpho
         try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
@@ -885,7 +897,9 @@ contract BullLeverageRouterHandler is Test {
         principal = bound(principal, 1000e6, 100_000e6); // $1k to $100k
         leverage = bound(leverage, 2e18, 4e18); // 2x to 4x (tighter for Bull)
 
-        if (usdc.balanceOf(currentActor) < principal) return;
+        if (usdc.balanceOf(currentActor) < principal) {
+            return;
+        }
 
         try router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours) {
             ghost_totalOpened++;
@@ -900,7 +914,9 @@ contract BullLeverageRouterHandler is Test {
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
 
-        if (collateral == 0) return;
+        if (collateral == 0) {
+            return;
+        }
 
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
@@ -922,14 +938,18 @@ contract BullLeverageRouterHandler is Test {
     ) external useActor(actorSeed) {
         uint256 collateral = morpho.collateralBalance(currentActor);
 
-        if (collateral == 0) return;
+        if (collateral == 0) {
+            return;
+        }
 
         // Bound ratio
         collateralRatio = bound(collateralRatio, 10, 100);
 
         uint256 collateralToWithdraw = (collateral * collateralRatio) / 100;
 
-        if (collateralToWithdraw == 0) return;
+        if (collateralToWithdraw == 0) {
+            return;
+        }
 
         // Router queries actual debt from Morpho
         try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {

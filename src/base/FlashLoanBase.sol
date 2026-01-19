@@ -30,8 +30,12 @@ abstract contract FlashLoanBase is IERC3156FlashBorrower, IMorphoFlashLoanCallba
         address expectedLender,
         address initiator
     ) internal view {
-        if (lender != expectedLender) revert FlashLoan__InvalidLender();
-        if (initiator != address(this)) revert FlashLoan__InvalidInitiator();
+        if (lender != expectedLender) {
+            revert FlashLoan__InvalidLender();
+        }
+        if (initiator != address(this)) {
+            revert FlashLoan__InvalidInitiator();
+        }
     }
 
     /// @dev Validates that msg.sender is the expected lender.
@@ -41,7 +45,9 @@ abstract contract FlashLoanBase is IERC3156FlashBorrower, IMorphoFlashLoanCallba
         address lender,
         address expectedLender
     ) internal pure {
-        if (lender != expectedLender) revert FlashLoan__InvalidLender();
+        if (lender != expectedLender) {
+            revert FlashLoan__InvalidLender();
+        }
     }
 
 }

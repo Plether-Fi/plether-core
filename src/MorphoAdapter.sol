@@ -70,9 +70,15 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         address _owner,
         address _splitter
     ) ERC4626(_asset) ERC20("Morpho Yield Wrapper", "myUSDC") Ownable(_owner) {
-        if (_splitter == address(0)) revert MorphoAdapter__InvalidAddress();
-        if (_morpho == address(0)) revert MorphoAdapter__InvalidAddress();
-        if (_marketParams.loanToken != address(_asset)) revert MorphoAdapter__InvalidMarket();
+        if (_splitter == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
+        if (_morpho == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
+        if (_marketParams.loanToken != address(_asset)) {
+            revert MorphoAdapter__InvalidMarket();
+        }
 
         MORPHO = IMorpho(_morpho);
         marketParams = _marketParams;
@@ -91,7 +97,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     /// @return Total assets including accrued interest.
     function totalAssets() public view override returns (uint256) {
         (uint256 supplyShares,,) = MORPHO.position(MARKET_ID, address(this));
-        if (supplyShares == 0) return 0;
+        if (supplyShares == 0) {
+            return 0;
+        }
         return _convertMorphoSharesToAssets(supplyShares);
     }
 
@@ -106,7 +114,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         uint256 assets,
         uint256 shares
     ) internal override {
-        if (caller != SPLITTER) revert MorphoAdapter__OnlySplitter();
+        if (caller != SPLITTER) {
+            revert MorphoAdapter__OnlySplitter();
+        }
 
         // 1. OpenZeppelin's logic already pulled assets from 'caller' to 'this'
         super._deposit(caller, receiver, assets, shares);
@@ -156,7 +166,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     ) internal view returns (uint256) {
         (uint128 totalSupplyAssets, uint128 totalSupplyShares,,,,) = MORPHO.market(MARKET_ID);
 
-        if (totalSupplyShares == 0) return shares;
+        if (totalSupplyShares == 0) {
+            return shares;
+        }
         return (shares * uint256(totalSupplyAssets)) / uint256(totalSupplyShares);
     }
 
@@ -171,7 +183,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         address token,
         address to
     ) external onlyOwner {
-        if (token == asset()) revert MorphoAdapter__CannotRescueUnderlying();
+        if (token == asset()) {
+            revert MorphoAdapter__CannotRescueUnderlying();
+        }
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
     }
 
@@ -184,7 +198,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     function setUrd(
         address _urd
     ) external onlyOwner {
-        if (_urd == address(0)) revert MorphoAdapter__InvalidAddress();
+        if (_urd == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
         address oldUrd = urd;
         urd = _urd;
         emit UrdUpdated(oldUrd, _urd);
@@ -202,8 +218,12 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         bytes32[] calldata proof,
         address to
     ) external onlyOwner returns (uint256 claimed) {
-        if (urd == address(0)) revert MorphoAdapter__InvalidAddress();
-        if (to == address(0)) revert MorphoAdapter__InvalidAddress();
+        if (urd == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
+        if (to == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
 
         // Claim from URD (claims to this contract)
         claimed = IUniversalRewardsDistributor(urd).claim(address(this), reward, claimable, proof);
@@ -224,7 +244,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         uint256 claimable,
         bytes32[] calldata proof
     ) external onlyOwner returns (uint256 claimed) {
-        if (urd == address(0)) revert MorphoAdapter__InvalidAddress();
+        if (urd == address(0)) {
+            revert MorphoAdapter__InvalidAddress();
+        }
 
         claimed = IUniversalRewardsDistributor(urd).claim(address(this), reward, claimable, proof);
     }

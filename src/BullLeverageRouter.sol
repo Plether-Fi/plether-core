@@ -106,9 +106,15 @@ contract BullLeverageRouter is LeverageRouterBase {
         address _stakedPlDxyBull,
         MarketParams memory _marketParams
     ) LeverageRouterBase(_morpho, _curvePool, _usdc, _plDxyBear) {
-        if (_splitter == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_plDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_stakedPlDxyBull == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_splitter == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
+        if (_plDxyBull == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
+        if (_stakedPlDxyBull == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
 
         SPLITTER = ISyntheticSplitter(_splitter);
         PLDXY_BULL = IERC20(_plDxyBull);
@@ -154,17 +160,29 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
-        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
-        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
-        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+        if (principal == 0) {
+            revert LeverageRouterBase__ZeroPrincipal();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (leverage <= DecimalConstants.ONE_WAD) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
         if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) {
             revert LeverageRouterBase__SplitterNotActive();
         }
 
         uint256 loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
-        if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
+        if (loanAmount == 0) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
 
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
@@ -194,10 +212,18 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        if (collateralToWithdraw == 0) revert LeverageRouterBase__ZeroCollateral();
-        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
-        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+        if (collateralToWithdraw == 0) {
+            revert LeverageRouterBase__ZeroCollateral();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
 
         // Query actual debt from Morpho (includes accrued interest)
         uint256 debtToRepay = _getActualDebt(msg.sender);
@@ -213,7 +239,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         if (debtToRepay > 0) {
             // Query: how much USDC do we get for 1 BEAR (DecimalConstants.ONE_WAD)?
             uint256 usdcPerBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
-            if (usdcPerBear == 0) revert LeverageRouterBase__InvalidCurvePrice();
+            if (usdcPerBear == 0) {
+                revert LeverageRouterBase__InvalidCurvePrice();
+            }
 
             // Calculate BEAR needed to sell for debtToRepay USDC
             // Formula: (debt * DecimalConstants.ONE_WAD) / usdcPerBear, with slippage buffer
@@ -251,10 +279,14 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) internal view returns (uint256) {
         bytes32 marketId = _marketId();
         (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        if (borrowShares == 0) return 0;
+        if (borrowShares == 0) {
+            return 0;
+        }
 
         (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
-        if (totalBorrowShares == 0) return 0;
+        if (totalBorrowShares == 0) {
+            return 0;
+        }
 
         // Round up to ensure full repayment
         return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
@@ -378,7 +410,9 @@ contract BullLeverageRouter is LeverageRouterBase {
             // Sell extraBearForDebt BEAR → USDC (with slippage protection)
             uint256 minUsdcFromSale = (debtToRepay * (10_000 - maxSlippageBps)) / 10_000;
             uint256 usdcFromSale = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt, minUsdcFromSale);
-            if (usdcFromSale < debtToRepay) revert LeverageRouterBase__InsufficientOutput();
+            if (usdcFromSale < debtToRepay) {
+                revert LeverageRouterBase__InsufficientOutput();
+            }
         }
 
         // 2. Repay user's debt on Morpho (if any)
@@ -408,7 +442,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
             // Estimate USDC needed using Curve price discovery
             uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-            if (bearPerUsdc == 0) revert LeverageRouterBase__InvalidCurvePrice();
+            if (bearPerUsdc == 0) {
+                revert LeverageRouterBase__InvalidCurvePrice();
+            }
 
             // Calculate USDC needed with slippage buffer
             uint256 estimatedUsdcNeeded = (bearToBuy * DecimalConstants.ONE_USDC) / bearPerUsdc;
@@ -416,7 +452,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
             // Verify we have enough USDC
             uint256 usdcBalance = USDC.balanceOf(address(this));
-            if (usdcBalance < maxUsdcToSpend) revert LeverageRouterBase__InsufficientOutput();
+            if (usdcBalance < maxUsdcToSpend) {
+                revert LeverageRouterBase__InsufficientOutput();
+            }
 
             // Swap USDC → BEAR with slippage-tolerant min_dy
             uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
@@ -459,7 +497,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage
     ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBull, uint256 expectedDebt) {
-        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
 
         loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;
@@ -530,7 +570,9 @@ contract BullLeverageRouter is LeverageRouterBase {
     function _estimateUsdcForBearBuyback(
         uint256 bearAmount
     ) private view returns (uint256) {
-        if (bearAmount == 0) return 0;
+        if (bearAmount == 0) {
+            return 0;
+        }
 
         uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
         if (bearPerUsdc == 0) {

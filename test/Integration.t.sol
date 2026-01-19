@@ -545,9 +545,13 @@ contract MockCurvePool {
         uint256 dx
     ) external view returns (uint256) {
         // i=1 (BEAR), j=0 (USDC): sell BEAR for USDC
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
         // i=0 (USDC), j=1 (BEAR): buy BEAR with USDC
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 

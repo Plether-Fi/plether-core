@@ -23,6 +23,6 @@ int_types = "long"
 multiline_func_header = "params_first"
 quote_style = "double"
 number_underscore = "thousands"
-single_line_statement_blocks = "preserve"
+single_line_statement_blocks = "multi"
 sort_imports = true
 contract_new_lines = true

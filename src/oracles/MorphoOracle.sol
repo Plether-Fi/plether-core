@@ -50,7 +50,9 @@ contract MorphoOracle is IMorphoOracle {
         uint256 _cap,
         bool _isInverse
     ) {
-        if (_basketOracle == address(0)) revert MorphoOracle__ZeroAddress();
+        if (_basketOracle == address(0)) {
+            revert MorphoOracle__ZeroAddress();
+        }
         BASKET_ORACLE = AggregatorV3Interface(_basketOracle);
         CAP = _cap;
         IS_INVERSE = _isInverse;
@@ -61,8 +63,12 @@ contract MorphoOracle is IMorphoOracle {
     function price() external view override returns (uint256) {
         (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
 
-        if (rawPrice <= 0) revert MorphoOracle__InvalidPrice();
-        if (block.timestamp > updatedAt + STALENESS_TIMEOUT) revert MorphoOracle__StalePrice();
+        if (rawPrice <= 0) {
+            revert MorphoOracle__InvalidPrice();
+        }
+        if (block.timestamp > updatedAt + STALENESS_TIMEOUT) {
+            revert MorphoOracle__StalePrice();
+        }
 
         uint256 basketPrice = uint256(rawPrice);
         uint256 finalPrice;

@@ -92,11 +92,21 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         address _usdc,
         address _curvePool
     ) Ownable(msg.sender) {
-        if (_splitter == address(0)) revert ZapRouter__ZeroAddress();
-        if (_plDxyBear == address(0)) revert ZapRouter__ZeroAddress();
-        if (_plDxyBull == address(0)) revert ZapRouter__ZeroAddress();
-        if (_usdc == address(0)) revert ZapRouter__ZeroAddress();
-        if (_curvePool == address(0)) revert ZapRouter__ZeroAddress();
+        if (_splitter == address(0)) {
+            revert ZapRouter__ZeroAddress();
+        }
+        if (_plDxyBear == address(0)) {
+            revert ZapRouter__ZeroAddress();
+        }
+        if (_plDxyBull == address(0)) {
+            revert ZapRouter__ZeroAddress();
+        }
+        if (_usdc == address(0)) {
+            revert ZapRouter__ZeroAddress();
+        }
+        if (_curvePool == address(0)) {
+            revert ZapRouter__ZeroAddress();
+        }
 
         SPLITTER = ISyntheticSplitter(_splitter);
         PLDXY_BEAR = IERC20(_plDxyBear);
@@ -130,13 +140,23 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        if (usdcAmount == 0) revert ZapRouter__ZeroAmount();
-        if (block.timestamp > deadline) revert ZapRouter__Expired();
-        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert ZapRouter__SlippageExceedsMax();
-        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) revert ZapRouter__SplitterNotActive();
+        if (usdcAmount == 0) {
+            revert ZapRouter__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert ZapRouter__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert ZapRouter__SlippageExceedsMax();
+        }
+        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) {
+            revert ZapRouter__SplitterNotActive();
+        }
 
         uint256 priceBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
-        if (priceBear >= CAP_PRICE) revert ZapRouter__BearPriceAboveCap();
+        if (priceBear >= CAP_PRICE) {
+            revert ZapRouter__BearPriceAboveCap();
+        }
 
         uint256 priceBull = CAP_PRICE - priceBear;
         uint256 theoreticalFlash = (usdcAmount * DecimalConstants.ONE_WAD) / priceBull;
@@ -193,8 +213,12 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 minUsdcOut,
         uint256 deadline
     ) internal {
-        if (bullAmount == 0) revert ZapRouter__ZeroAmount();
-        if (block.timestamp > deadline) revert ZapRouter__Expired();
+        if (bullAmount == 0) {
+            revert ZapRouter__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert ZapRouter__Expired();
+        }
 
         PLDXY_BULL.safeTransferFrom(msg.sender, address(this), bullAmount);
 
@@ -277,7 +301,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         // 3. Sweep Dust
         // Check if we successfully minted enough to repay (Safety Check)
         uint256 currentBalance = PLDXY_BEAR.balanceOf(address(this));
-        if (currentBalance < repayAmount) revert ZapRouter__SolvencyBreach();
+        if (currentBalance < repayAmount) {
+            revert ZapRouter__SolvencyBreach();
+        }
 
         if (currentBalance > repayAmount) {
             uint256 surplus = currentBalance - repayAmount;
@@ -286,7 +312,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
         // 4. Transfer plDXY-BULL to user and emit event
         uint256 tokensOut = PLDXY_BULL.balanceOf(address(this));
-        if (tokensOut < minAmountOut) revert ZapRouter__InsufficientOutput();
+        if (tokensOut < minAmountOut) {
+            revert ZapRouter__InsufficientOutput();
+        }
         PLDXY_BULL.safeTransfer(user, tokensOut);
 
         emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc);
@@ -316,7 +344,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
         // 3. Buy Debt Bear using USDC
         uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-        if (bearFromOneUsdc == 0) revert ZapRouter__InvalidCurvePrice();
+        if (bearFromOneUsdc == 0) {
+            revert ZapRouter__InvalidCurvePrice();
+        }
 
         // Linear estimate (first approximation)
         uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;
@@ -343,7 +373,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
         // 5. Send remaining USDC to User (The Exit)
         uint256 remainingUsdc = USDC.balanceOf(address(this));
-        if (remainingUsdc < minUsdcOut) revert ZapRouter__InsufficientOutput();
+        if (remainingUsdc < minUsdcOut) {
+            revert ZapRouter__InsufficientOutput();
+        }
         USDC.safeTransfer(user, remainingUsdc);
 
         // 6. Sweep Dust Bear
@@ -383,7 +415,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         )
     {
         uint256 priceBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
-        if (priceBear >= CAP_PRICE) return (0, 0, 0, 0, 0);
+        if (priceBear >= CAP_PRICE) {
+            return (0, 0, 0, 0, 0);
+        }
 
         // Calculate Bull Price
         uint256 priceBull = CAP_PRICE - priceBear;
@@ -415,7 +449,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         view
         returns (uint256 expectedUsdcFromBurn, uint256 usdcForBearBuyback, uint256 expectedUsdcOut, uint256 flashFee)
     {
-        if (bullAmount == 0) return (0, 0, 0, 0);
+        if (bullAmount == 0) {
+            return (0, 0, 0, 0);
+        }
 
         // Flash borrow amount equals bull amount (1:1 for pair burning)
         uint256 flashAmount = bullAmount;
@@ -433,7 +469,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
         // Get price: how much BEAR do we get for 1 USDC?
         uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-        if (bearFromOneUsdc == 0) return (expectedUsdcFromBurn, 0, 0, flashFee);
+        if (bearFromOneUsdc == 0) {
+            return (expectedUsdcFromBurn, 0, 0, flashFee);
+        }
 
         // Linear USDC requirement (first approximation)
         uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;

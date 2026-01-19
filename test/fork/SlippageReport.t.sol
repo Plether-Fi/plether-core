@@ -169,16 +169,36 @@ contract SlippageReportTest is BaseForkTest {
     function _formatPct(
         uint256 bps
     ) internal pure returns (string memory) {
-        if (bps == 10) return "0.1%  ";
-        if (bps == 100) return "1%    ";
-        if (bps == 200) return "2%    ";
-        if (bps == 300) return "3%    ";
-        if (bps == 500) return "5%    ";
-        if (bps == 1000) return "10%   ";
-        if (bps == 1500) return "15%   ";
-        if (bps == 2000) return "20%   ";
-        if (bps == 3300) return "33%   ";
-        if (bps == 4000) return "40%   ";
+        if (bps == 10) {
+            return "0.1%  ";
+        }
+        if (bps == 100) {
+            return "1%    ";
+        }
+        if (bps == 200) {
+            return "2%    ";
+        }
+        if (bps == 300) {
+            return "3%    ";
+        }
+        if (bps == 500) {
+            return "5%    ";
+        }
+        if (bps == 1000) {
+            return "10%   ";
+        }
+        if (bps == 1500) {
+            return "15%   ";
+        }
+        if (bps == 2000) {
+            return "20%   ";
+        }
+        if (bps == 3300) {
+            return "33%   ";
+        }
+        if (bps == 4000) {
+            return "40%   ";
+        }
         return "?%    ";
     }
 
@@ -186,8 +206,12 @@ contract SlippageReportTest is BaseForkTest {
         uint256 amount
     ) internal pure returns (string memory) {
         uint256 whole = amount / 1e18;
-        if (whole >= 1_000_000) return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
-        if (whole >= 1000) return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        if (whole >= 1_000_000) {
+            return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        }
+        if (whole >= 1000) {
+            return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        }
         return _uint2str(whole);
     }
 
@@ -195,15 +219,21 @@ contract SlippageReportTest is BaseForkTest {
         uint256 amount
     ) internal pure returns (string memory) {
         uint256 whole = amount / 1e6;
-        if (whole >= 1_000_000) return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
-        if (whole >= 1000) return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        if (whole >= 1_000_000) {
+            return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        }
+        if (whole >= 1000) {
+            return string(abi.encodePacked(_uint2str(whole / 1000), "k"));
+        }
         return _uint2str(whole);
     }
 
     function _uint2str(
         uint256 _i
     ) internal pure returns (string memory) {
-        if (_i == 0) return "0";
+        if (_i == 0) {
+            return "0";
+        }
         uint256 j = _i;
         uint256 len;
         while (j != 0) {

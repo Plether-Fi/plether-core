@@ -130,8 +130,12 @@ contract InvMockCurvePool is ICurvePool {
         uint256 j,
         uint256 dx
     ) external view override returns (uint256) {
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 
@@ -282,7 +286,9 @@ contract ZapRouterHandler is Test {
         usdcAmount = bound(usdcAmount, 10e6, 100_000e6); // $10 to $100k
 
         // Skip if actor doesn't have enough
-        if (usdc.balanceOf(currentActor) < usdcAmount) return;
+        if (usdc.balanceOf(currentActor) < usdcAmount) {
+            return;
+        }
 
         uint256 bullBefore = plDxyBull.balanceOf(currentActor);
 
@@ -303,7 +309,9 @@ contract ZapRouterHandler is Test {
         uint256 bullBalance = plDxyBull.balanceOf(currentActor);
 
         // Skip if no BULL to burn
-        if (bullBalance == 0) return;
+        if (bullBalance == 0) {
+            return;
+        }
 
         // Bound to available balance
         bullAmount = bound(bullAmount, 1e18, bullBalance);
@@ -327,7 +335,9 @@ contract ZapRouterHandler is Test {
         // Bound inputs
         usdcAmount = bound(usdcAmount, 100e6, 10_000e6); // $100 to $10k
 
-        if (usdc.balanceOf(currentActor) < usdcAmount) return;
+        if (usdc.balanceOf(currentActor) < usdcAmount) {
+            return;
+        }
 
         uint256 bullBefore = plDxyBull.balanceOf(currentActor);
         uint256 usdcBefore = usdc.balanceOf(currentActor);

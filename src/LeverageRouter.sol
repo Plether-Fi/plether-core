@@ -58,7 +58,9 @@ contract LeverageRouter is LeverageRouterBase {
         address _stakedPlDxyBear,
         MarketParams memory _marketParams
     ) LeverageRouterBase(_morpho, _curvePool, _usdc, _plDxyBear) {
-        if (_stakedPlDxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_stakedPlDxyBear == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
         STAKED_PLDXY_BEAR = IERC4626(_stakedPlDxyBear);
         marketParams = _marketParams;
 
@@ -89,14 +91,26 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        if (principal == 0) revert LeverageRouterBase__ZeroPrincipal();
-        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
-        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
-        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+        if (principal == 0) {
+            revert LeverageRouterBase__ZeroPrincipal();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (leverage <= DecimalConstants.ONE_WAD) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
 
         uint256 loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
-        if (loanAmount == 0) revert LeverageRouterBase__LeverageTooLow();
+        if (loanAmount == 0) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
 
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
@@ -125,9 +139,15 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        if (block.timestamp > deadline) revert LeverageRouterBase__Expired();
-        if (maxSlippageBps > MAX_SLIPPAGE_BPS) revert LeverageRouterBase__SlippageExceedsMax();
-        if (!MORPHO.isAuthorized(msg.sender, address(this))) revert LeverageRouterBase__NotAuthorized();
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
 
         // Query actual debt from Morpho (includes accrued interest)
         uint256 debtToRepay = _getActualDebt(msg.sender);
@@ -169,10 +189,14 @@ contract LeverageRouter is LeverageRouterBase {
     ) internal view returns (uint256) {
         bytes32 marketId = _marketId();
         (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        if (borrowShares == 0) return 0;
+        if (borrowShares == 0) {
+            return 0;
+        }
 
         (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
-        if (totalBorrowShares == 0) return 0;
+        if (totalBorrowShares == 0) {
+            return 0;
+        }
 
         // Round up to ensure full repayment
         return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
@@ -274,7 +298,9 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 usdcReceived = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearReceived, minUsdcOut);
 
         // 5. Flash loan repayment handled by caller (no fee with Morpho)
-        if (usdcReceived < loanAmount) revert LeverageRouterBase__InsufficientOutput();
+        if (usdcReceived < loanAmount) {
+            revert LeverageRouterBase__InsufficientOutput();
+        }
 
         // 6. Send remaining USDC to user
         uint256 usdcToReturn = usdcReceived - loanAmount;
@@ -332,7 +358,9 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage
     ) external view returns (uint256 loanAmount, uint256 totalUSDC, uint256 expectedPlDxyBear, uint256 expectedDebt) {
-        if (leverage <= DecimalConstants.ONE_WAD) revert LeverageRouterBase__LeverageTooLow();
+        if (leverage <= DecimalConstants.ONE_WAD) {
+            revert LeverageRouterBase__LeverageTooLow();
+        }
 
         loanAmount = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
         totalUSDC = principal + loanAmount;

@@ -74,10 +74,14 @@ contract SplitterHandler is Test {
         bytes memory reason,
         bytes4[] memory allowed
     ) internal pure {
-        if (reason.length < 4) revert("Unknown error (no selector)");
+        if (reason.length < 4) {
+            revert("Unknown error (no selector)");
+        }
         bytes4 selector = bytes4(reason);
         for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) return;
+            if (selector == allowed[i]) {
+                return;
+            }
         }
         // Not an expected error - propagate it
         assembly {
@@ -133,10 +137,14 @@ contract SplitterHandler is Test {
         (uint256 usdcFair,,) = splitter.previewMint(amount);
 
         // Skip if actor doesn't have enough USDC
-        if (usdc.balanceOf(currentActor) < usdcFair) return;
+        if (usdc.balanceOf(currentActor) < usdcFair) {
+            return;
+        }
 
         // Skip if liquidated or paused (known to revert)
-        if (splitter.isLiquidated() || splitter.paused()) return;
+        if (splitter.isLiquidated() || splitter.paused()) {
+            return;
+        }
 
         // Track actual USDC balance change to know what contract really charged
         uint256 balanceBefore = usdc.balanceOf(currentActor);
@@ -162,11 +170,15 @@ contract SplitterHandler is Test {
         uint256 amount
     ) external useActor(actorSeed) {
         uint256 balance = splitter.TOKEN_A().balanceOf(currentActor);
-        if (balance == 0) return;
+        if (balance == 0) {
+            return;
+        }
 
         // Also need TOKEN_B balance for burn (burns both)
         uint256 balanceB = splitter.TOKEN_B().balanceOf(currentActor);
-        if (balanceB == 0) return;
+        if (balanceB == 0) {
+            return;
+        }
 
         // Bound to minimum of both balances
         uint256 maxBurn = balance < balanceB ? balance : balanceB;
@@ -190,9 +202,13 @@ contract SplitterHandler is Test {
                 bytes4 selector = bytes4(reason);
                 // String error selector: Error(string) = 0x08c379a0
                 // Expected for "Paused & Insolvent" solvency check
-                if (selector == bytes4(0x08c379a0)) return;
+                if (selector == bytes4(0x08c379a0)) {
+                    return;
+                }
                 // ERR_ZERO_AMOUNT shouldn't happen (we bound > 0) but allow it
-                if (selector == ERR_ZERO_AMOUNT) return;
+                if (selector == ERR_ZERO_AMOUNT) {
+                    return;
+                }
                 // Any other error is unexpected - propagate it
                 assembly {
                     revert(add(reason, 32), mload(reason))
@@ -207,7 +223,9 @@ contract SplitterHandler is Test {
         uint256 actorSeed
     ) external useActor(actorSeed) {
         // Skip if paused (will revert with Pausable error)
-        if (splitter.paused()) return;
+        if (splitter.paused()) {
+            return;
+        }
 
         try splitter.harvestYield() {
             harvestCalls++;
@@ -224,15 +242,21 @@ contract SplitterHandler is Test {
     ) external {
         // Only simulate yield if splitter has shares in adapter
         uint256 splitterShares = adapter.balanceOf(address(splitter));
-        if (splitterShares == 0) return;
+        if (splitterShares == 0) {
+            return;
+        }
 
         // Bound yield to reasonable range (max 10% of current adapter assets)
         uint256 currentAssets = adapter.convertToAssets(splitterShares);
         uint256 maxYield = currentAssets / 10;
-        if (maxYield == 0) return;
+        if (maxYield == 0) {
+            return;
+        }
 
         yieldAmount = bound(yieldAmount, 0, maxYield);
-        if (yieldAmount == 0) return;
+        if (yieldAmount == 0) {
+            return;
+        }
 
         // Advance blocks to allow CAPO growth (10% yield max needs ~1000 blocks)
         vm.roll(block.number + 1100);
@@ -277,11 +301,15 @@ contract SplitterHandler is Test {
         uint256 amount
     ) external useActor(actorSeed) {
         // Only works if liquidated
-        if (!splitter.isLiquidated()) return;
+        if (!splitter.isLiquidated()) {
+            return;
+        }
 
         // Bound to actor's Bear token balance
         uint256 bearBalance = splitter.TOKEN_A().balanceOf(currentActor);
-        if (bearBalance == 0) return;
+        if (bearBalance == 0) {
+            return;
+        }
 
         amount = bound(amount, 1, bearBalance);
 
@@ -383,7 +411,9 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
 
     /// @notice When not liquidated, total assets must be >= total liabilities (lower bound)
     function invariant_solvencyLowerBound() public view {
-        if (splitter.isLiquidated()) return; // Skip if liquidated
+        if (splitter.isLiquidated()) {
+            return; // Skip if liquidated
+        }
 
         uint256 totalAssets = handler.getTotalAssets();
         uint256 totalLiabilities = handler.getTotalLiabilities();

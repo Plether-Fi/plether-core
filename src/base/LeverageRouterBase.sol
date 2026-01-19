@@ -90,10 +90,18 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
         address _usdc,
         address _plDxyBear
     ) Ownable(msg.sender) {
-        if (_morpho == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_curvePool == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_usdc == address(0)) revert LeverageRouterBase__ZeroAddress();
-        if (_plDxyBear == address(0)) revert LeverageRouterBase__ZeroAddress();
+        if (_morpho == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
+        if (_curvePool == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
+        if (_usdc == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
+        if (_plDxyBear == address(0)) {
+            revert LeverageRouterBase__ZeroAddress();
+        }
 
         MORPHO = IMorpho(_morpho);
         CURVE_POOL = ICurvePool(_curvePool);

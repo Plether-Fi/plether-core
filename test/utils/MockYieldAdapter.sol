@@ -39,7 +39,9 @@ contract MockYieldAdapter is ERC4626, Ownable {
         uint256 assets,
         uint256 shares
     ) internal override {
-        if (caller != SPLITTER) revert MockYieldAdapter__OnlySplitter();
+        if (caller != SPLITTER) {
+            revert MockYieldAdapter__OnlySplitter();
+        }
         super._deposit(caller, receiver, assets, shares);
         // No external call needed – assets already transferred to this via ERC4626 logic
     }
@@ -61,7 +63,9 @@ contract MockYieldAdapter is ERC4626, Ownable {
         address token,
         address to
     ) external onlyOwner {
-        if (token == address(asset())) revert("Cannot rescue underlying");
+        if (token == address(asset())) {
+            revert("Cannot rescue underlying");
+        }
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
     }
 

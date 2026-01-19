@@ -793,8 +793,12 @@ contract MockCurvePool is ICurvePool {
         uint256 dx
     ) external view override returns (uint256) {
         // get_dy returns the "quoted" price without slippage
-        if (i == 1 && j == 0) return (dx * bearPrice) / 1e18;
-        if (i == 0 && j == 1) return (dx * 1e18) / bearPrice;
+        if (i == 1 && j == 0) {
+            return (dx * bearPrice) / 1e18;
+        }
+        if (i == 0 && j == 1) {
+            return (dx * 1e18) / bearPrice;
+        }
         return 0;
     }
 

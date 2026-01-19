@@ -126,7 +126,9 @@ contract SyntheticSplitterFuzzTest is Test {
         // Amount just below the next USDC (maximizes rounding benefit)
         uint256 exploitAmount = exactAmount + (usdcMultiplier / CAP) - 1;
 
-        if (exploitAmount == 0) return;
+        if (exploitAmount == 0) {
+            return;
+        }
 
         // Get expected cost from preview function
         (uint256 expectedPrice,,) = splitter.previewMint(exploitAmount);

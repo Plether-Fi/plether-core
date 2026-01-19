@@ -19,7 +19,9 @@ contract ZapRouterForkTest is BaseForkTest {
 
     function setUp() public {
         _setupFork();
-        if (block.chainid != 1) revert("Wrong Chain! Must be Mainnet.");
+        if (block.chainid != 1) {
+            revert("Wrong Chain! Must be Mainnet.");
+        }
 
         deal(USDC, address(this), 2_000_000e6);
 

@@ -211,7 +211,9 @@ contract MockAdapter is IERC4626, ERC20 {
         address owner
     ) external override returns (uint256) {
         uint256 shares = convertToShares(assets);
-        if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
         _burn(owner, shares);
         assetToken.transfer(receiver, assets);
         return shares;
@@ -222,7 +224,9 @@ contract MockAdapter is IERC4626, ERC20 {
         address receiver,
         address owner
     ) external override returns (uint256) {
-        if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
+        if (msg.sender != owner) {
+            _spendAllowance(owner, msg.sender, shares);
+        }
         uint256 assets = convertToAssets(shares);
         _burn(owner, shares);
         assetToken.transfer(receiver, assets);

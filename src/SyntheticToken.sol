@@ -37,7 +37,9 @@ contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
         string memory _symbol,
         address _splitter
     ) ERC20(_name, _symbol) ERC20Permit(_name) {
-        if (_splitter == address(0)) revert SyntheticToken__ZeroAddress();
+        if (_splitter == address(0)) {
+            revert SyntheticToken__ZeroAddress();
+        }
         SPLITTER = _splitter;
     }
 

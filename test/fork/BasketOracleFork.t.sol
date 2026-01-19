@@ -434,7 +434,9 @@ contract BasketOracleForkTest is Test {
     }
 
     function _deployProtocolWithBasket() internal {
-        if (address(splitter) != address(0)) return;
+        if (address(splitter) != address(0)) {
+            return;
+        }
 
         address yieldOracle = address(new MockMorphoOracleForYieldBasket());
         MarketParams memory yieldParams = MarketParams({
