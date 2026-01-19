@@ -551,9 +551,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (callerCut > 0) {
             USDC.safeTransfer(msg.sender, callerCut);
         }
-        if (treasury != address(0)) {
-            USDC.safeTransfer(treasury, treasuryShare);
-        }
+        USDC.safeTransfer(treasury, treasuryShare);
         if (staking != address(0)) {
             USDC.safeTransfer(staking, stakingShare);
         } else {
