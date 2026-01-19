@@ -29,8 +29,8 @@ contract SyntheticToken is ERC20, ERC20Permit, ERC20FlashMint {
     }
 
     /// @notice Creates a new SyntheticToken.
-    /// @param _name Token name (e.g., "plDXY-BEAR").
-    /// @param _symbol Token symbol (e.g., "plplDXY-BEAR").
+    /// @param _name Token name (e.g., "Plether Dollar Index Bear").
+    /// @param _symbol Token symbol (e.g., "plDXY-BEAR").
     /// @param _splitter Address of the SyntheticSplitter contract.
     constructor(
         string memory _name,

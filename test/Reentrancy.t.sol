@@ -52,8 +52,8 @@ contract ReentrancyTest is Test {
 
         // Deploy tokens
         usdc = new MockUSDC();
-        plDxyBear = new MockFlashToken("plDXY-BEAR", "plplDXY-BEAR");
-        plDxyBull = new MockFlashToken("plDXY-BULL", "plplDXY-BULL");
+        plDxyBear = new MockFlashToken("plDXY-BEAR", "plDXY-BEAR");
+        plDxyBull = new MockFlashToken("plDXY-BULL", "plDXY-BULL");
 
         // Deploy oracles
         oracle = new MockOracle(100_000_000, block.timestamp, block.timestamp);

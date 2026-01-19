@@ -17,7 +17,7 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title SyntheticSplitter
-/// @notice Core protocol contract for minting/burning synthetic plplDXY tokens.
+/// @notice Core protocol contract for minting/burning synthetic plDXY tokens.
 /// @dev Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL tokens.
 ///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
 ///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
@@ -145,8 +145,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         treasury = _treasury;
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        TOKEN_A = new SyntheticToken("plDXY-BEAR", "plplDXY-BEAR", address(this));
-        TOKEN_B = new SyntheticToken("plDXY-BULL", "plplDXY-BULL", address(this));
+        TOKEN_A = new SyntheticToken("Plether Dollar Index Bear", "plDXY-BEAR", address(this));
+        TOKEN_B = new SyntheticToken("Plether Dollar Index Bull", "plDXY-BULL", address(this));
 
         // OPTIMIZATION: Calculate scaler ONCE
         uint256 decimals = ERC20(_usdc).decimals();
