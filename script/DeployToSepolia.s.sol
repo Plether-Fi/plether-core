@@ -237,8 +237,8 @@ contract DeployToSepolia is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 12: Deploy Routers
-        _deployRouters(deployed);
+        // Step 12: Deploy Routers and create Morpho markets
+        _deployRoutersAndMarkets(deployed, deployer);
 
         // Step 13: Mint USDC to deployer for testing
         deployed.usdc.mint(deployer, 100_000 * 1e6);
@@ -370,19 +370,12 @@ contract DeployToSepolia is Script {
         oracleBull = new StakedOracle(stakedBull, morphoOracleBull);
     }
 
-    function _deployRouters(
-        DeployedContracts memory d
+    function _deployRoutersAndMarkets(
+        DeployedContracts memory d,
+        address deployer
     ) internal {
-        MarketParams memory bearMarketParams;
-        MarketParams memory bullMarketParams;
-        // Deploy ZapRouter
-        d.zapRouter = new ZapRouter(
-            address(d.splitter), address(d.plDxyBear), address(d.plDxyBull), address(d.usdc), d.curvePool
-        );
-        console.log("ZapRouter:", address(d.zapRouter));
-
-        // Deploy LeverageRouter (BEAR)
-        bearMarketParams = MarketParams({
+        // Build market params
+        MarketParams memory bearMarketParams = MarketParams({
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBear),
             oracle: address(d.stakedOracleBear),
@@ -390,13 +383,7 @@ contract DeployToSepolia is Script {
             lltv: LLTV
         });
 
-        d.leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.plDxyBear), address(d.stakedBear), bearMarketParams
-        );
-        console.log("LeverageRouter:", address(d.leverageRouter));
-
-        // Deploy BullLeverageRouter
-        bullMarketParams = MarketParams({
+        MarketParams memory bullMarketParams = MarketParams({
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBull),
             oracle: address(d.stakedOracleBull),
@@ -404,6 +391,23 @@ contract DeployToSepolia is Script {
             lltv: LLTV
         });
 
+        // Create and seed Morpho markets
+        _createMorphoMarkets(bearMarketParams, bullMarketParams);
+        _seedMorphoMarkets(d, deployer, bearMarketParams, bullMarketParams);
+
+        // Deploy ZapRouter
+        d.zapRouter = new ZapRouter(
+            address(d.splitter), address(d.plDxyBear), address(d.plDxyBull), address(d.usdc), d.curvePool
+        );
+        console.log("ZapRouter:", address(d.zapRouter));
+
+        // Deploy LeverageRouter (BEAR)
+        d.leverageRouter = new LeverageRouter(
+            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.plDxyBear), address(d.stakedBear), bearMarketParams
+        );
+        console.log("LeverageRouter:", address(d.leverageRouter));
+
+        // Deploy BullLeverageRouter
         d.bullLeverageRouter = new BullLeverageRouter(
             MORPHO_BLUE,
             address(d.splitter),
