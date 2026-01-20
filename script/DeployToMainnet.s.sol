@@ -93,8 +93,8 @@ contract DeployToMainnet is Script {
 
     // Protocol Parameters
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
-    uint256 constant LLTV_BEAR = 0.77e18; // 77% LLTV for BEAR market
-    uint256 constant LLTV_BULL = 0.77e18; // 77% LLTV for BULL market
+    uint256 constant LLTV_BEAR = 0.9e18; // 90% LLTV for BEAR market (allows up to 10x leverage)
+    uint256 constant LLTV_BULL = 0.9e18; // 90% LLTV for BULL market (allows up to 10x leverage)
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation for basket oracle
 
     // Curve Pool Parameters (optimized for low slippage)
