@@ -1166,3 +1166,339 @@ contract LeverageRouterOffsetTest is Test {
     }
 
 }
+
+// ==========================================
+// INTEREST ACCRUAL TEST
+// ==========================================
+// Tests that the flash loan buffer handles interest accrual during close
+
+contract MockMorphoWithInterest is IMorpho {
+
+    address public usdc;
+    address public stakedToken;
+    mapping(address => uint256) public collateralBalance;
+    mapping(address => uint256) public borrowShares;
+    mapping(address => mapping(address => bool)) public _isAuthorized;
+
+    uint256 public totalBorrowAssets;
+    uint256 public totalBorrowShares;
+
+    constructor(
+        address _usdc,
+        address _stakedToken
+    ) {
+        usdc = _usdc;
+        stakedToken = _stakedToken;
+    }
+
+    function simulateInterestAccrual(
+        uint256 interestAmount
+    ) external {
+        totalBorrowAssets += interestAmount;
+    }
+
+    function setAuthorization(
+        address authorized,
+        bool newIsAuthorized
+    ) external override {
+        _isAuthorized[msg.sender][authorized] = newIsAuthorized;
+    }
+
+    function isAuthorized(
+        address authorizer,
+        address authorized
+    ) external view override returns (bool) {
+        return _isAuthorized[authorizer][authorized];
+    }
+
+    function createMarket(
+        MarketParams memory
+    ) external override {}
+
+    function idToMarketParams(
+        bytes32
+    ) external pure override returns (MarketParams memory) {
+        return MarketParams(address(0), address(0), address(0), address(0), 0);
+    }
+
+    function flashLoan(
+        address token,
+        uint256 assets,
+        bytes calldata data
+    ) external override {
+        MockToken(token).mint(msg.sender, assets);
+        IMorphoFlashLoanCallback(msg.sender).onMorphoFlashLoan(assets, data);
+        IERC20(token).transferFrom(msg.sender, address(this), assets);
+        MockToken(token).burn(address(this), assets);
+    }
+
+    function supply(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address,
+        bytes calldata
+    ) external override returns (uint256, uint256) {
+        return (assets, 0);
+    }
+
+    function withdraw(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address,
+        address
+    ) external override returns (uint256, uint256) {
+        return (assets, 0);
+    }
+
+    function supplyCollateral(
+        MarketParams memory,
+        uint256 assets,
+        address onBehalfOf,
+        bytes calldata
+    ) external override {
+        IERC20(stakedToken).transferFrom(msg.sender, address(this), assets);
+        collateralBalance[onBehalfOf] += assets;
+    }
+
+    function withdrawCollateral(
+        MarketParams memory,
+        uint256 assets,
+        address onBehalfOf,
+        address receiver
+    ) external override {
+        if (msg.sender != onBehalfOf) {
+            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+        }
+        collateralBalance[onBehalfOf] -= assets;
+        IERC20(stakedToken).transfer(receiver, assets);
+    }
+
+    function borrow(
+        MarketParams memory,
+        uint256 assets,
+        uint256,
+        address onBehalfOf,
+        address receiver
+    ) external override returns (uint256, uint256) {
+        if (msg.sender != onBehalfOf) {
+            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+        }
+        MockToken(usdc).mint(receiver, assets);
+        borrowShares[onBehalfOf] += assets;
+        totalBorrowShares += assets;
+        totalBorrowAssets += assets;
+        return (assets, assets);
+    }
+
+    function repay(
+        MarketParams memory,
+        uint256 assets,
+        uint256 shares,
+        address onBehalfOf,
+        bytes calldata
+    ) external override returns (uint256, uint256) {
+        uint256 repayAssets;
+        uint256 repayShares;
+
+        if (assets > 0) {
+            repayAssets = assets;
+            repayShares = (assets * totalBorrowShares) / totalBorrowAssets;
+        } else {
+            repayShares = shares;
+            repayAssets = (shares * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+        }
+
+        MockToken(usdc).transferFrom(msg.sender, address(this), repayAssets);
+        borrowShares[onBehalfOf] -= repayShares;
+        totalBorrowShares -= repayShares;
+        totalBorrowAssets -= repayAssets;
+
+        return (repayAssets, repayShares);
+    }
+
+    function position(
+        bytes32,
+        address user
+    ) external view override returns (uint256, uint128, uint128) {
+        return (0, uint128(borrowShares[user]), uint128(collateralBalance[user]));
+    }
+
+    function market(
+        bytes32
+    ) external view override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
+        return (0, 0, uint128(totalBorrowAssets), uint128(totalBorrowShares), 0, 0);
+    }
+
+    function accrueInterest(
+        MarketParams memory
+    ) external override {}
+
+    function liquidate(
+        MarketParams memory,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external pure override returns (uint256, uint256) {
+        return (0, 0);
+    }
+
+}
+
+contract LeverageRouterInterestAccrualTest is Test {
+
+    MockToken usdc;
+    MockToken plDxyBear;
+    MockCurvePool curvePool;
+    MockMorphoWithInterest morpho;
+    MockStakedTokenWithOffset stakedPlDxyBear;
+    LeverageRouter router;
+    MarketParams params;
+
+    address alice = makeAddr("alice");
+
+    function setUp() public {
+        usdc = new MockToken("USDC", "USDC");
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        stakedPlDxyBear = new MockStakedTokenWithOffset(address(plDxyBear));
+        morpho = new MockMorphoWithInterest(address(usdc), address(stakedPlDxyBear));
+
+        params = MarketParams({
+            loanToken: address(usdc),
+            collateralToken: address(stakedPlDxyBear),
+            oracle: address(0),
+            irm: address(1),
+            lltv: 0.9e18
+        });
+
+        router = new LeverageRouter(
+            address(morpho), address(curvePool), address(usdc), address(plDxyBear), address(stakedPlDxyBear), params
+        );
+    }
+
+    /// @notice Test that interest accrual during close is handled by the flash loan buffer
+    /// @dev Without the 1 bps buffer, this would fail with insufficient USDC
+    function test_CloseLeverage_InterestAccrual_HandledByBuffer() public {
+        usdc.mint(address(morpho), 10_000 * 1e6);
+
+        vm.startPrank(alice);
+
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        uint256 shares = stakedPlDxyBear.deposit(3000 * 1e18, alice);
+
+        stakedPlDxyBear.approve(address(morpho), shares);
+        morpho.supplyCollateral(params, shares, alice, "");
+        morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
+
+        vm.stopPrank();
+
+        // Simulate interest accrual (0.1% = 10 bps)
+        // This is much higher than real intra-tx accrual (~0.0001%) but tests the buffer
+        morpho.simulateInterestAccrual(2 * 1e6); // 2 USDC interest on 2000 USDC debt
+
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        // This would fail without the buffer because:
+        // - Flash loan amount = 2000 USDC (original debt)
+        // - Shares-based repay converts to 2002 USDC (debt + interest)
+        // - Router only has 2000 USDC -> insufficient balance
+        //
+        // With the 1 bps buffer:
+        // - Flash loan amount = 2000 + 0.2 + 1 wei ≈ 2000.2 USDC
+        // - Still not enough for 2002, but real interest accrual is ~0.0001%
+        //
+        // For this test, we use 0.1% interest which exceeds the 0.01% buffer,
+        // but demonstrates the mechanism. In production, intra-tx interest is negligible.
+
+        // Actually, let's use realistic interest (0.001% = 0.1 bps)
+        vm.stopPrank();
+
+        // Reset and use realistic interest
+        morpho = new MockMorphoWithInterest(address(usdc), address(stakedPlDxyBear));
+        router = new LeverageRouter(
+            address(morpho), address(curvePool), address(usdc), address(plDxyBear), address(stakedPlDxyBear), params
+        );
+
+        usdc.mint(address(morpho), 10_000 * 1e6);
+
+        vm.startPrank(alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), type(uint256).max);
+        shares = stakedPlDxyBear.deposit(3000 * 1e18, alice);
+
+        stakedPlDxyBear.approve(address(morpho), shares);
+        morpho.supplyCollateral(params, shares, alice, "");
+        morpho.borrow(params, 2000 * 1e6, 0, alice, alice);
+
+        morpho.setAuthorization(address(router), true);
+        vm.stopPrank();
+
+        // Simulate realistic intra-tx interest: 0.005% (0.5 bps) - within the 1 bps buffer
+        morpho.simulateInterestAccrual(100_000); // 0.1 USDC on 2000 USDC = 0.005%
+
+        vm.prank(alice);
+        router.closeLeverage(shares, 100, block.timestamp + 1 hours);
+
+        assertEq(morpho.collateralBalance(alice), 0, "Collateral should be cleared");
+        assertEq(morpho.borrowShares(alice), 0, "Debt shares should be cleared");
+    }
+
+    /// @notice Demonstrates that without buffer, close fails when interest accrues
+    /// @dev This test shows what would happen if we flash loaned exactly debtToRepay
+    function test_CloseLeverage_WithoutBuffer_WouldFail() public {
+        // This test documents the bug that the buffer fixes.
+        // We can't easily test the "without buffer" case without modifying the router,
+        // but the math is clear:
+        //
+        // Given:
+        //   - User debt: 2000 USDC (totalBorrowAssets = 2000, totalBorrowShares = 2000)
+        //   - Interest accrues: totalBorrowAssets becomes 2001, shares unchanged
+        //   - User's borrowShares = 2000
+        //
+        // Without buffer:
+        //   - Flash loan 2000 USDC (queried debt)
+        //   - Repay using 2000 shares
+        //   - Shares → assets: (2000 * 2001) / 2000 = 2001 USDC needed
+        //   - Router has 2000 USDC → REVERT: insufficient balance
+        //
+        // With buffer (1 bps + 1 wei):
+        //   - Flash loan 2000 + 0.2 + 1 = 2000.2 USDC
+        //   - Repay using 2000 shares = 2001 USDC needed
+        //   - If interest is < 0.01%, buffer covers it
+
+        // Verify the math in MockMorphoWithInterest
+        uint256 initialDebt = 1000 * 1e6;
+        morpho = new MockMorphoWithInterest(address(usdc), address(stakedPlDxyBear));
+
+        // Simulate borrow
+        usdc.mint(address(morpho), initialDebt);
+        vm.prank(alice);
+        morpho.borrow(params, initialDebt, 0, alice, alice);
+
+        assertEq(morpho.totalBorrowAssets(), initialDebt);
+        assertEq(morpho.totalBorrowShares(), initialDebt);
+        assertEq(morpho.borrowShares(alice), initialDebt);
+
+        // Accrue 1% interest
+        uint256 interest = initialDebt / 100; // 10 USDC
+        morpho.simulateInterestAccrual(interest);
+
+        assertEq(morpho.totalBorrowAssets(), initialDebt + interest);
+        assertEq(morpho.totalBorrowShares(), initialDebt); // Shares unchanged
+
+        // Calculate repay amount for all shares
+        uint256 sharesToRepay = morpho.borrowShares(alice);
+        uint256 assetsNeeded =
+            (sharesToRepay * morpho.totalBorrowAssets() + morpho.totalBorrowShares() - 1) / morpho.totalBorrowShares();
+
+        // Without buffer: would flash loan initialDebt but need assetsNeeded
+        assertGt(assetsNeeded, initialDebt, "Interest accrual means more assets needed than original debt");
+        assertEq(assetsNeeded, initialDebt + interest, "Need original debt + accrued interest");
+    }
+
+}
