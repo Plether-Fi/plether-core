@@ -1279,16 +1279,19 @@ contract MockMorpho is IMorpho {
     function repay(
         MarketParams memory,
         uint256 assets,
-        uint256,
+        uint256 shares,
         address onBehalfOf,
         bytes calldata
     ) external override returns (uint256, uint256) {
         if (msg.sender != onBehalfOf) {
             require(_isAuthorized[onBehalfOf][msg.sender], "Morpho: Not authorized");
         }
-        positions[onBehalfOf].borrowed -= assets;
-        MockToken(usdc).burn(msg.sender, assets);
-        return (assets, 0);
+        // Support both assets-based and shares-based repayment
+        // In this mock, borrowed == borrowShares (1:1 ratio)
+        uint256 repayAmount = assets > 0 ? assets : shares;
+        positions[onBehalfOf].borrowed -= repayAmount;
+        MockToken(usdc).burn(msg.sender, repayAmount);
+        return (repayAmount, shares > 0 ? shares : repayAmount);
     }
 
     function position(
@@ -1574,6 +1577,37 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
 
         (uint256 suppliedAfter,) = morpho.positions(alice);
         assertEq(suppliedAfter, 0, "Position should be closed despite donation");
+    }
+
+    /// @notice FAILING TEST: Exchange rate drift exceeding buffer causes arithmetic underflow
+    /// The 1% buffer (EXCHANGE_RATE_BUFFER_BPS = 100) is insufficient when drift exceeds 1%
+    /// This causes SPLITTER.burn() to attempt burning more BEAR than the router holds
+    function test_CloseLeverage_ExchangeRateDriftExceedsBuffer_Reverts() public {
+        (uint256 supplied,) = _openPosition();
+
+        // Set boost to 2% - this EXCEEDS the 1% buffer
+        // previewRedeem returns X, but actual redeem returns X * 1.02
+        // Router only flash mints enough BEAR for X * 1.01 (the buffer)
+        stakedPlDxyBull.setRedeemBoost(200); // +2% drift
+
+        vm.startPrank(alice);
+
+        // This will revert with arithmetic underflow:
+        // - previewRedeem(supplied) = 1500e18
+        // - bufferedBullAmount = 1500e18 * 1.01 = 1515e18
+        // - flashAmount includes 1515e18 BEAR for pair redemption
+        // - But actual redeem returns 1500e18 * 1.02 = 1530e18 BULL
+        // - SPLITTER.burn(1530e18) tries to burn 1530e18 BEAR
+        // - Router only has 1515e18 BEAR → underflow in Splitter
+        // Router has 1515e18 BEAR but needs 1530e18 for burn
+        // ERC20InsufficientBalance(router, balance=1515e18, needed=1530e18)
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "ERC20InsufficientBalance(address,uint256,uint256)", address(router), 1515e18, 1530e18
+            )
+        );
+        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
     }
 
 }

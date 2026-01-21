@@ -318,13 +318,14 @@ contract InvariantMockMorpho is IMorpho {
     function repay(
         MarketParams memory,
         uint256 assets,
-        uint256,
+        uint256 shares,
         address onBehalfOf,
         bytes calldata
     ) external override returns (uint256, uint256) {
-        InvariantMockToken(usdc).transferFrom(msg.sender, address(this), assets);
-        borrowBalance[onBehalfOf] -= assets;
-        return (assets, 0);
+        uint256 repayAmount = assets > 0 ? assets : shares;
+        InvariantMockToken(usdc).transferFrom(msg.sender, address(this), repayAmount);
+        borrowBalance[onBehalfOf] -= repayAmount;
+        return (repayAmount, shares > 0 ? shares : repayAmount);
     }
 
     function position(
@@ -778,13 +779,14 @@ contract InvariantMockMorphoBull is IMorpho {
     function repay(
         MarketParams memory,
         uint256 assets,
-        uint256,
+        uint256 shares,
         address onBehalfOf,
         bytes calldata
     ) external override returns (uint256, uint256) {
-        InvariantMockToken(usdc).transferFrom(msg.sender, address(this), assets);
-        borrowBalance[onBehalfOf] -= assets;
-        return (assets, 0);
+        uint256 repayAmount = assets > 0 ? assets : shares;
+        InvariantMockToken(usdc).transferFrom(msg.sender, address(this), repayAmount);
+        borrowBalance[onBehalfOf] -= repayAmount;
+        return (repayAmount, shares > 0 ? shares : repayAmount);
     }
 
     function position(

@@ -149,8 +149,11 @@ contract LeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__NotAuthorized();
         }
 
-        // Query actual debt from Morpho (includes accrued interest)
+        // Query actual debt and borrow shares from Morpho
+        // We need debtToRepay for flash loan amount, and borrowShares for Morpho repayment
+        // Using shares-based repayment avoids Morpho edge case when repaying exact totalBorrowAssets
         uint256 debtToRepay = _getActualDebt(msg.sender);
+        uint256 borrowShares = _getBorrowShares(msg.sender);
 
         // Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
@@ -162,9 +165,10 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
 
         if (debtToRepay > 0) {
-            // Standard path: flash loan USDC to repay debt
-            bytes memory data =
-                abi.encode(OP_CLOSE, msg.sender, deadline, collateralToWithdraw, maxSlippageBps, minUsdcOut);
+            // Standard path: flash loan USDC to repay debt (includes borrowShares for shares-based repayment)
+            bytes memory data = abi.encode(
+                OP_CLOSE, msg.sender, deadline, collateralToWithdraw, borrowShares, maxSlippageBps, minUsdcOut
+            );
             MORPHO.flashLoan(address(USDC), debtToRepay, data);
         } else {
             // No debt to repay: directly unwind position without flash loan
@@ -200,6 +204,16 @@ contract LeverageRouter is LeverageRouterBase {
 
         // Round up to ensure full repayment
         return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+    }
+
+    /// @dev Returns user's borrow shares from Morpho position.
+    /// @dev Used for shares-based repayment to avoid Morpho edge case when repaying exact debt.
+    function _getBorrowShares(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        return uint256(borrowShares);
     }
 
     /// @dev Computes market ID from marketParams.
@@ -274,18 +288,26 @@ contract LeverageRouter is LeverageRouterBase {
 
     /// @dev Executes close leverage operation within Morpho flash loan callback.
     /// @param loanAmount Amount of USDC borrowed from Morpho to repay debt.
-    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, maxSlippageBps, minUsdcOut).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, borrowShares, maxSlippageBps, minUsdcOut).
     function _executeClose(
         uint256 loanAmount,
         bytes calldata data
     ) private {
-        // Decode close-specific data: (op, user, deadline, collateralToWithdraw, maxSlippageBps, minUsdcOut)
-        (, address user,, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 minUsdcOut) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256));
+        // Decode close-specific data: (op, user, deadline, collateralToWithdraw, borrowShares, maxSlippageBps, minUsdcOut)
+        (
+            ,
+            address user,,
+            uint256 collateralToWithdraw,
+            uint256 borrowShares,
+            uint256 maxSlippageBps,
+            uint256 minUsdcOut
+        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
-        // 1. Repay user's debt on Morpho (skip if no debt)
-        if (loanAmount > 0) {
-            MORPHO.repay(marketParams, loanAmount, 0, user, "");
+        // 1. Repay user's debt on Morpho using shares (not assets)
+        // Using shares-based repayment avoids Morpho edge case that panics when
+        // repaying exactly totalBorrowAssets (full market debt)
+        if (borrowShares > 0) {
+            MORPHO.repay(marketParams, 0, borrowShares, user, "");
         }
 
         // 2. Withdraw user's splDXY-BEAR collateral from Morpho

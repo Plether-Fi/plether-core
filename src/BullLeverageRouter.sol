@@ -225,8 +225,11 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__NotAuthorized();
         }
 
-        // Query actual debt from Morpho (includes accrued interest)
+        // Query actual debt and borrow shares from Morpho
+        // We need debtToRepay for calculating BEAR to sell, and borrowShares for Morpho repayment
+        // Using shares-based repayment avoids Morpho edge case when repaying exact totalBorrowAssets
         uint256 debtToRepay = _getActualDebt(msg.sender);
+        uint256 borrowShares = _getBorrowShares(msg.sender);
 
         // Convert staked shares to underlying BULL amount (for pair matching)
         uint256 plDxyBullAmount = STAKED_PLDXY_BULL.previewRedeem(collateralToWithdraw);
@@ -253,9 +256,16 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Total BEAR to flash mint: buffered amount for pair redemption + extra for debt
         uint256 flashAmount = bufferedBullAmount + extraBearForDebt;
 
-        // Encode data for callback
+        // Encode data for callback (includes borrowShares for shares-based Morpho repayment)
         bytes memory data = abi.encode(
-            OP_CLOSE, msg.sender, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps
+            OP_CLOSE,
+            msg.sender,
+            deadline,
+            collateralToWithdraw,
+            debtToRepay,
+            borrowShares,
+            extraBearForDebt,
+            maxSlippageBps
         );
 
         // Single flash mint handles entire close operation
@@ -290,6 +300,16 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // Round up to ensure full repayment
         return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+    }
+
+    /// @dev Returns user's borrow shares from Morpho position.
+    /// @dev Used for shares-based repayment to avoid Morpho edge case when repaying exact debt.
+    function _getBorrowShares(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        return uint256(borrowShares);
     }
 
     /// @dev Computes market ID from marketParams.
@@ -389,21 +409,22 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @dev Executes close leverage operation within plDXY-BEAR flash mint callback.
     /// @param flashAmount Amount of plDXY-BEAR flash minted.
     /// @param flashFee Flash mint fee (always 0).
-    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, borrowShares, extraBearForDebt, maxSlippageBps).
     function _executeClose(
         uint256 flashAmount,
         uint256 flashFee,
         bytes calldata data
     ) private {
-        // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, extraBearForDebt, maxSlippageBps)
+        // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, borrowShares, extraBearForDebt, maxSlippageBps)
         (
             ,
             address user,,
             uint256 collateralToWithdraw,
             uint256 debtToRepay,
+            uint256 borrowShares,
             uint256 extraBearForDebt,
             uint256 maxSlippageBps
-        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
+        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256, uint256));
 
         // 1. If debt exists, sell extra BEAR for USDC to repay it
         if (debtToRepay > 0 && extraBearForDebt > 0) {
@@ -415,9 +436,11 @@ contract BullLeverageRouter is LeverageRouterBase {
             }
         }
 
-        // 2. Repay user's debt on Morpho (if any)
-        if (debtToRepay > 0) {
-            MORPHO.repay(marketParams, debtToRepay, 0, user, "");
+        // 2. Repay user's debt on Morpho using shares (not assets)
+        // Using shares-based repayment avoids Morpho edge case that panics when
+        // repaying exactly totalBorrowAssets (full market debt)
+        if (borrowShares > 0) {
+            MORPHO.repay(marketParams, 0, borrowShares, user, "");
         }
 
         // 3. Withdraw user's splDXY-BULL collateral from Morpho

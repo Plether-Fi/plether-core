@@ -947,13 +947,16 @@ contract MockMorpho is IMorpho {
     function repay(
         MarketParams memory,
         uint256 assets,
-        uint256,
+        uint256 shares,
         address onBehalfOf,
         bytes calldata
     ) external override returns (uint256, uint256) {
-        MockToken(usdc).transferFrom(msg.sender, address(this), assets);
-        borrowBalance[onBehalfOf] -= assets;
-        return (assets, 0);
+        // Support both assets-based and shares-based repayment
+        // In this mock, borrowBalance == borrowShares (1:1 ratio)
+        uint256 repayAmount = assets > 0 ? assets : shares;
+        MockToken(usdc).transferFrom(msg.sender, address(this), repayAmount);
+        borrowBalance[onBehalfOf] -= repayAmount;
+        return (repayAmount, shares > 0 ? shares : repayAmount);
     }
 
     function position(
