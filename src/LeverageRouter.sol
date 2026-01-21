@@ -169,7 +169,10 @@ contract LeverageRouter is LeverageRouterBase {
             bytes memory data = abi.encode(
                 OP_CLOSE, msg.sender, deadline, collateralToWithdraw, borrowShares, maxSlippageBps, minUsdcOut
             );
-            MORPHO.flashLoan(address(USDC), debtToRepay, data);
+            // Add 1 bps buffer to cover interest accrual between debt query and repay execution
+            // The shares-based repay may convert to slightly more assets due to interest
+            uint256 flashLoanAmount = debtToRepay + (debtToRepay / 10_000) + 1;
+            MORPHO.flashLoan(address(USDC), flashLoanAmount, data);
         } else {
             // No debt to repay: directly unwind position without flash loan
             _executeCloseNoDebt(msg.sender, collateralToWithdraw, maxSlippageBps, minUsdcOut);
