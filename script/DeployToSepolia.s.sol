@@ -133,7 +133,7 @@ contract DeployToSepolia is Script {
 
     // Protocol Parameters
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
-    uint256 constant LLTV = 0.9e18; // 90% LLTV (allows up to 10x leverage)
+    uint256 constant LLTV = 0.915e18; // 91.5% LLTV (allows up to ~11.7x leverage)
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
