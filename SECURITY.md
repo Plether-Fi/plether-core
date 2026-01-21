@@ -65,6 +65,15 @@ These properties must always hold. Violation indicates a critical bug.
 - **Mitigation (Liquidity)**: Use `withdrawFromAdapter(amount)` for gradual liquidity extraction when the protocol is paused. This allows repeated partial withdrawals as Morpho liquidity becomes available, rather than requiring full withdrawal in a single transaction.
 - **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
 
+#### USDC (Circle)
+- **Assumption**: USDC maintains its $1 peg and operates as a standard ERC-20 token
+- **Risk (Depeg)**: If USDC depegs significantly, the protocol's collateral value diverges from its nominal value. Users holding plDXY tokens would receive fewer real dollars than expected on redemption.
+- **Risk (Blacklisting)**: Circle can blacklist addresses, freezing their USDC balances. If the SyntheticSplitter, MorphoAdapter, or Morpho market contracts are blacklisted, the protocol cannot process redemptions or yield withdrawals.
+- **Risk (Upgradeability)**: USDC is an upgradeable proxy contract. Circle could modify transfer logic, add fees, or change behavior in ways that break protocol assumptions.
+- **Risk (Regulatory)**: Circle operates under US regulatory oversight. Regulatory action could affect USDC availability or require compliance changes that impact the protocol.
+- **Mitigation**: None. These are fundamental risks of using USDC as collateral. Users should understand that the protocol inherits all USDC counterparty risks.
+- **Note**: The protocol does not implement USDC depeg detection. If USDC depegs, the protocol continues operating at nominal values.
+
 ### External Library Dependencies
 
 #### OpenZeppelin Contracts
@@ -407,6 +416,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-21 | Added USDC (Circle) risks: depeg, blacklisting, upgradeability, and regulatory risks |
 | 2026-01-15 | Documented acknowledged risk: permissionless donateYield() griefing vector |
 | 2026-01-15 | Updated ownership model to reflect Ownable2Step pattern |
 | 2026-01-15 | Added Governance Cooldown and Adapter Migration Safety sections under Trust Assumptions |
