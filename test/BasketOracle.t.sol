@@ -45,15 +45,15 @@ contract BasketOracleTest is Test {
 
     function setUp() public {
         // 1. Deploy Shared Mocks
-        // EUR = $1.10 (8 decimals)
-        feedEUR = new MockOracle(110_000_000, "EUR/USD");
+        // EUR = $1.21 (10% above base of $1.10) - intentionally ≠ base to catch formula bugs
+        feedEUR = new MockOracle(121_000_000, "EUR/USD");
         // JPY = $0.01 (8 decimals)
         feedJPY = new MockOracle(1_000_000, "JPY/USD");
 
-        // With normalized formula and 50/50 weights at base prices:
-        // basket = 0.5 * (1.10/1.10) + 0.5 * (0.01/0.01) = 0.5 + 0.5 = 1.0
-        // BEAR = basket = $1.00 (BEAR tracks basket directly)
-        curvePool = new MockCurvePool(1.0 ether);
+        // With normalized formula and 50/50 weights:
+        // basket = 0.5 * (1.21/1.10) + 0.5 * (0.01/0.01) = 0.5 * 1.1 + 0.5 = 1.05
+        // BEAR = basket = $1.05 (BEAR tracks basket directly)
+        curvePool = new MockCurvePool(1.05 ether);
 
         address[] memory feeds = new address[](2);
         feeds[0] = address(feedEUR);
@@ -76,14 +76,14 @@ contract BasketOracleTest is Test {
 
     function test_Math_CalculatesCorrectSum() public {
         // Normalized formula: Sum(weight_i * price_i / basePrice_i)
-        // = 0.5 * (110_000_000 / 110_000_000) + 0.5 * (1_000_000 / 1_000_000)
-        // = 0.5 * 1.0 + 0.5 * 1.0
-        // = 1.0
+        // = 0.5 * (121_000_000 / 110_000_000) + 0.5 * (1_000_000 / 1_000_000)
+        // = 0.5 * 1.1 + 0.5 * 1.0
+        // = 1.05
 
         (, int256 answer,,,) = basket.latestRoundData();
 
-        // $1.00 in 8 decimals = 100,000,000
-        assertEq(answer, 100_000_000);
+        // $1.05 in 8 decimals = 105,000,000
+        assertEq(answer, 105_000_000);
     }
 
     function test_Math_UpdatesDynamically() public {
@@ -212,33 +212,33 @@ contract BasketOracleTest is Test {
 
         BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
         // Don't set curvePool - deviation check should be skipped
-        // Normalized: 1.0 * (110_000_000 / 110_000_000) = 1.0 = 100_000_000
+        // Normalized: 1.0 * (121_000_000 / 110_000_000) = 1.1 = 110_000_000
         (, int256 answer,,,) = newBasket.latestRoundData();
-        assertEq(answer, 100_000_000);
+        assertEq(answer, 110_000_000);
     }
 
     function test_Revert_PriceDeviationExceedsThreshold() public {
-        // Index = 1.0, CAP = $2.00, so theoreticalBear = $1.00
-        // Set Curve price 5% higher (1.05 vs 1.0 = 5% deviation, exceeds 2% threshold)
-        curvePool.setPrice(1.05 ether);
+        // basket = $1.05, BEAR = $1.05
+        // Set Curve price 5% higher (1.1025 vs 1.05 = 5% deviation, exceeds 2% threshold)
+        curvePool.setPrice(1.1025 ether);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 BasketOracle.BasketOracle__PriceDeviation.selector,
-                1.0 ether, // theoreticalBear (CAP - Index scaled to 18 dec)
-                1.05 ether // spotBear
+                1.05 ether, // theoreticalBear
+                1.1025 ether // spotBear
             )
         );
         basket.latestRoundData();
     }
 
     function test_Success_PriceDeviationWithinThreshold() public {
-        // Index = 1.0, CAP = $2.00, so theoreticalBear = $1.00
-        // Set Curve price 1% higher (1.01 vs 1.0 = 1% deviation, within 2% threshold)
-        curvePool.setPrice(1.01 ether);
+        // basket = $1.05, BEAR = $1.05
+        // Set Curve price 1% higher (1.0605 vs 1.05 = 1% deviation, within 2% threshold)
+        curvePool.setPrice(1.0605 ether);
 
         (, int256 answer,,,) = basket.latestRoundData();
-        assertEq(answer, 100_000_000);
+        assertEq(answer, 105_000_000);
     }
 
     function test_Revert_ZeroSpotPrice() public {
@@ -400,75 +400,75 @@ contract BasketOracleTest is Test {
     // ==========================================
 
     function test_DeviationCheck_WhenTheoreticalGreaterThanSpot() public {
-        // Index = 1.0, CAP = $2.00, theoreticalBear = $1.00 (1.0 ether)
+        // basket = $1.05, BEAR = $1.05
         // Set spot BELOW theoretical to exercise the first branch of the ternary
         // (theoreticalBear18 > spotBear18 ? theoreticalBear18 - spotBear18 : ...)
-        curvePool.setPrice(0.99 ether); // spot < theoretical, within 2% threshold
+        curvePool.setPrice(1.04 ether); // spot < theoretical, within 2% threshold
 
         (, int256 answer,,,) = basket.latestRoundData();
-        assertEq(answer, 100_000_000);
+        assertEq(answer, 105_000_000);
     }
 
     function test_DeviationCheck_RevertsWhenTheoreticalGreaterThanSpotExceedsThreshold() public {
-        // theoreticalBear = $1.00, set spot 5% lower to exceed 2% threshold
-        curvePool.setPrice(0.94 ether);
+        // basket = $1.05, BEAR = $1.05, set spot 5% lower to exceed 2% threshold
+        curvePool.setPrice(0.9975 ether);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 BasketOracle.BasketOracle__PriceDeviation.selector,
-                1.0 ether, // theoreticalBear
-                0.94 ether // spotBear
+                1.05 ether, // theoreticalBear
+                0.9975 ether // spotBear
             )
         );
         basket.latestRoundData();
     }
 
     function test_DeviationCheck_RevertsWhenSpotIsDoubleTheoretical() public {
-        // theoreticalBear = $1.00, set spot to 2x theoretical
-        // This catches modulo mutation: 2.0 % 1.0 = 0 (wrong) vs 2.0 - 1.0 = 1.0 (correct)
-        curvePool.setPrice(2.0 ether);
+        // basket = $1.05, BEAR = $1.05, set spot to 2x theoretical
+        // This catches modulo mutation: 2.1 % 1.05 = 0 (wrong) vs 2.1 - 1.05 = 1.05 (correct)
+        curvePool.setPrice(2.1 ether);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 BasketOracle.BasketOracle__PriceDeviation.selector,
-                1.0 ether, // theoreticalBear
-                2.0 ether // spotBear
+                1.05 ether, // theoreticalBear
+                2.1 ether // spotBear
             )
         );
         basket.latestRoundData();
     }
 
     function test_DeviationCheck_RevertsWhenSpotIsHalfTheoretical() public {
-        // theoreticalBear = $1.00, set spot to half theoretical
-        // This catches modulo mutation in first branch: 1.0 % 0.5 = 0 (wrong) vs 1.0 - 0.5 = 0.5 (correct)
-        curvePool.setPrice(0.5 ether);
+        // basket = $1.05, BEAR = $1.05, set spot to half theoretical
+        // This catches modulo mutation in first branch
+        curvePool.setPrice(0.525 ether);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 BasketOracle.BasketOracle__PriceDeviation.selector,
-                1.0 ether, // theoreticalBear
-                0.5 ether // spotBear
+                1.05 ether, // theoreticalBear
+                0.525 ether // spotBear
             )
         );
         basket.latestRoundData();
     }
 
     function test_DeviationCheck_PassesAtExactBoundary() public {
-        // theoreticalBear = $1.00, spot = $0.98 (2% below)
-        // With MAX-based threshold: basePrice = 1.0, threshold = 0.02
-        // diff = 0.02, diff == threshold -> PASS
-        curvePool.setPrice(0.98 ether);
+        // basket = $1.05, BEAR = $1.05, spot = $1.029 (2% below)
+        // With MAX-based threshold: basePrice = 1.05, threshold = 0.021
+        // diff = 0.021, diff == threshold -> PASS
+        curvePool.setPrice(1.029 ether);
         basket.latestRoundData();
     }
 
     function test_DeviationCheck_RevertsWhenExceedingBoundary() public {
-        // theoreticalBear = $1.00, spot = $0.97 (>2% below)
-        // With MAX-based threshold: basePrice = 1.0, threshold = 0.02
-        // diff = 0.03, diff > threshold -> REVERT
-        curvePool.setPrice(0.97 ether);
+        // basket = $1.05, BEAR = $1.05, spot = $1.018 (>2% below)
+        // With MAX-based threshold: basePrice = 1.05, threshold = 0.021
+        // diff = 0.032, diff > threshold -> REVERT
+        curvePool.setPrice(1.018 ether);
 
         vm.expectRevert(
-            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, 1.0 ether, 0.97 ether)
+            abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, 1.05 ether, 1.018 ether)
         );
         basket.latestRoundData();
     }
