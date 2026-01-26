@@ -51,8 +51,8 @@ contract BasketOracleTest is Test {
         feedJPY = new MockOracle(1_000_000, "JPY/USD");
 
         // With normalized formula and 50/50 weights at base prices:
-        // Index = 0.5 * (1.10/1.10) + 0.5 * (0.01/0.01) = 0.5 + 0.5 = 1.0
-        // plDXY-BEAR = CAP - Index = $2.00 - $1.00 = $1.00
+        // basket = 0.5 * (1.10/1.10) + 0.5 * (0.01/0.01) = 0.5 + 0.5 = 1.0
+        // BEAR = basket = $1.00 (BEAR tracks basket directly)
         curvePool = new MockCurvePool(1.0 ether);
 
         address[] memory feeds = new address[](2);
@@ -94,10 +94,10 @@ contract BasketOracleTest is Test {
         // = 0.5 * (55_000_000 / 110_000_000) + 0.5 * (1_000_000 / 1_000_000)
         // = 0.5 * 0.5 + 0.5 * 1.0
         // = 0.25 + 0.50 = 0.75
-        // plDXY-BEAR = CAP - Index = $2.00 - $0.75 = $1.25
+        // BEAR = basket = $0.75 (BEAR tracks basket directly)
 
-        // Update Curve price to match plDXY-BEAR (within 2% threshold)
-        curvePool.setPrice(1.25 ether);
+        // Update Curve price to match BEAR (within 2% threshold)
+        curvePool.setPrice(0.75 ether);
 
         (, int256 answer,,,) = basket.latestRoundData();
         assertEq(answer, 75_000_000);
@@ -471,6 +471,26 @@ contract BasketOracleTest is Test {
             abi.encodeWithSelector(BasketOracle.BasketOracle__PriceDeviation.selector, 1.0 ether, 0.97 ether)
         );
         basket.latestRoundData();
+    }
+
+    function test_DeviationCheck_BearTracksBasketDirectly() public {
+        // BEAR = basket (direct correlation), NOT CAP - basket
+        // When USD weakens, foreign currencies become more expensive -> basket UP -> BEAR UP
+        //
+        // Setup: EUR rises 10% from $1.10 to $1.21 (USD weakened)
+        feedEUR.updatePrice(121_000_000); // $1.21
+
+        // New basket = 0.5 * (1.21/1.10) + 0.5 * (0.01/0.01) = 0.5 * 1.1 + 0.5 = 1.05
+        // Correct: BEAR = basket = $1.05
+        // Buggy:   BEAR = CAP - basket = $2.00 - $1.05 = $0.95
+
+        // Set Curve to show correct BEAR price ($1.05)
+        curvePool.setPrice(1.05 ether);
+
+        // This should NOT revert - Curve correctly tracks basket
+        // But buggy code calculates theoretical as $0.95, sees 10% deviation, and reverts
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertEq(answer, 105_000_000, "Basket should be $1.05");
     }
 
 }
