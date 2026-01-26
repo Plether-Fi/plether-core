@@ -113,7 +113,7 @@ abstract contract BaseForkTest is Test {
     address public bearToken;
 
     uint256 public realOraclePrice;
-    uint256 public bearPrice; // CAP - plDXY, the fair value of plDXY-BEAR
+    uint256 public bearPrice; // basket price (BEAR tracks basket directly)
 
     // ==========================================
     // SETUP HELPERS
@@ -152,7 +152,7 @@ abstract contract BaseForkTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        // Mock Pool for Oracle Init (using plDXY-BEAR price = CAP - plDXY)
+        // Mock Pool for Oracle Init (BEAR price = basket)
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
         basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, 2e8, address(this));
         basketOracle.setCurvePool(tempCurvePool);
