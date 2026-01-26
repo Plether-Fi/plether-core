@@ -88,6 +88,12 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 |----------|-------------|
 | [`MorphoAdapter`](src/MorphoAdapter.sol) | ERC-4626 wrapper for Morpho Blue yield generation |
 
+### Staking & Rewards
+
+| Contract | Description |
+|----------|-------------|
+| [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
+
 ## Ecosystem Integrations
 
 ```
@@ -133,6 +139,16 @@ Users can open leveraged positions through the routers:
 Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
 
 Both routers include MEV protection via user-defined slippage caps (max 1%).
+
+### Reward Distribution
+
+The RewardDistributor receives yield from SyntheticSplitter and allocates it to StakedToken vaults based on the price discrepancy between the oracle and Curve EMA:
+
+- **≥2% discrepancy**: 100% to underperforming token stakers
+- **<2% discrepancy**: Quadratic interpolation from 50/50 toward 100/0
+- **0% discrepancy**: 50/50 split
+
+This mechanism incentivizes arbitrageurs to correct price deviations by rewarding stakers of the underpriced token. A 0.1% caller reward incentivizes permissionless distribution.
 
 ### Lifecycle States
 
