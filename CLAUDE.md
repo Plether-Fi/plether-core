@@ -105,7 +105,9 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - `MorphoAdapter.t.sol` - Adapter tests for Morpho Blue integration
 - Mock contracts in `test/` files (MockToken, MockFlashLender, MockMorpho, MockSplitter, etc.)
 
-**Test Guidelines**: Only write tests for application-specific logic. Do not add tests that verify library behavior (OpenZeppelin ERC20/ERC4626/Ownable/Pausable, Chainlink AggregatorV3Interface, etc.) - those are already tested by their maintainers.
+**Test Guidelines**:
+- Only write tests for application-specific logic. Do not add tests that verify library behavior (OpenZeppelin ERC20/ERC4626/Ownable/Pausable, Chainlink AggregatorV3Interface, etc.) - those are already tested by their maintainers.
+- **Oracle tests must use basket ≠ $1.00** (e.g., $0.80, $1.20). At $1.00, the formulas `BEAR = basket` and `BEAR = CAP - basket` give identical results, hiding bugs.
 
 ## External Integrations
 
