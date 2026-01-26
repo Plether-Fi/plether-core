@@ -186,8 +186,17 @@ contract RewardDistributorTest is Test {
         distributor.distributeRewards();
     }
 
-    function test_DistributeRewards_RevertsIfSplitterNotActive() public {
+    function test_DistributeRewards_RevertsIfSplitterPaused() public {
         splitter.setStatus(ISyntheticSplitter.Status.PAUSED);
+        usdc.mint(address(distributor), 100e6);
+
+        vm.prank(alice);
+        vm.expectRevert(IRewardDistributor.RewardDistributor__SplitterNotActive.selector);
+        distributor.distributeRewards();
+    }
+
+    function test_DistributeRewards_RevertsIfSplitterSettled() public {
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         usdc.mint(address(distributor), 100e6);
 
         vm.prank(alice);
@@ -209,7 +218,7 @@ contract RewardDistributorTest is Test {
         assertGt(bearPct, 5000, "BEAR should be underperforming");
     }
 
-    function test_Constructor_RevertsOnZeroAddress() public {
+    function test_Constructor_RevertsOnZeroAddress_Splitter() public {
         vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
         new RewardDistributor(
             address(0),
@@ -221,6 +230,126 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_Usdc() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(0),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_PlDxyBear() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(0),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_PlDxyBull() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(0),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_StakedBear() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(0),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_StakedBull() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(0),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_CurvePool() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(0),
+            address(zapRouter),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_ZapRouter() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(0),
+            address(oracle)
+        );
+    }
+
+    function test_Constructor_RevertsOnZeroAddress_Oracle() public {
+        vm.expectRevert(IRewardDistributor.RewardDistributor__ZeroAddress.selector);
+        new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(0)
         );
     }
 
@@ -276,6 +405,286 @@ contract RewardDistributorTest is Test {
 
         assertGe(stakedBearAfter, stakedBearBefore, "BEAR balance should not decrease");
         assertGe(stakedBullAfter, stakedBullBefore, "BULL balance should not decrease");
+    }
+
+    function test_DistributeRewards_NonDollarOracle_BearUnderperforming() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.76e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertGt(bearPct, 5000, "BEAR should get majority when underperforming");
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+
+        assertGt(bearDonated, bullDonated, "BEAR should receive more rewards");
+    }
+
+    function test_DistributeRewards_NonDollarOracle_BullUnderperforming() public {
+        oracle.setPrice(1.2e8);
+        curvePool.setPrice(1.26e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertGt(bullPct, 5000, "BULL should get majority when underperforming");
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+
+        assertGt(bullDonated, bearDonated, "BULL should receive more rewards");
+    }
+
+    function test_DistributeRewards_ExactThreshold() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.784e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+
+        assertEq(bearPct, 10_000, "BEAR should get 100% at exact threshold");
+        assertEq(bullPct, 0, "BULL should get 0% at exact threshold");
+    }
+
+    function test_DistributeRewards_AboveThreshold() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.75e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+
+        assertEq(bearPct, 10_000, "BEAR should get 100% above threshold");
+        assertEq(bullPct, 0, "BULL should get 0% above threshold");
+    }
+
+    function test_DistributeRewards_SpotHigherThanTheoretical() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.84e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertGt(bullPct, bearPct, "BULL should get more when BEAR overpriced");
+
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+        assertGt(bullDonated, 0, "BULL should receive rewards");
+    }
+
+    function test_DistributeRewards_ZeroBullAllocation() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.75e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+        assertEq(bullDonated, 0, "BULL should receive zero when 100% to BEAR");
+    }
+
+    function test_DistributeRewards_ZeroBearTargetAllocation() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.85e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertEq(bearPct, 0, "BEAR target should be 0%");
+        assertEq(bullPct, 10_000, "BULL target should be 100%");
+
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+        assertGt(bullDonated, 0, "BULL should receive rewards");
+    }
+
+    function test_DistributeRewards_UpdatesLastDistributionTime() public {
+        usdc.mint(address(distributor), 100e6);
+
+        uint256 timeBefore = distributor.lastDistributionTime();
+        assertEq(timeBefore, 0, "Initial distribution time should be 0");
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 timeAfter = distributor.lastDistributionTime();
+        assertEq(timeAfter, block.timestamp, "Distribution time should update");
+    }
+
+    function test_DistributeRewards_CallerGetsReward() public {
+        usdc.mint(address(distributor), 1000e6);
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        vm.prank(alice);
+        uint256 callerReward = distributor.distributeRewards();
+
+        uint256 aliceAfter = usdc.balanceOf(alice);
+        assertEq(aliceAfter - aliceBefore, callerReward, "Alice should receive caller reward");
+        assertEq(callerReward, 1e6, "Reward should be 0.1% of 1000 USDC");
+    }
+
+    function test_PreviewDistribution_ZeroBalance() public {
+        (uint256 bearPct, uint256 bullPct, uint256 usdcBalance, uint256 callerReward) =
+            distributor.previewDistribution();
+
+        assertEq(usdcBalance, 0, "Balance should be zero");
+        assertEq(callerReward, 0, "Caller reward should be zero");
+        assertEq(bearPct + bullPct, 10_000, "Percentages should still sum to 100%");
+    }
+
+    function testFuzz_DistributeRewards_NonDollarOracle(
+        uint256 oraclePrice,
+        uint256 discrepancyBps
+    ) public {
+        oraclePrice = bound(oraclePrice, 0.5e8, 1.5e8);
+        discrepancyBps = bound(discrepancyBps, 0, 500);
+
+        oracle.setPrice(int256(oraclePrice));
+
+        uint256 theoreticalSpot = (oraclePrice * 1e6) / 1e8;
+        uint256 spotPrice = theoreticalSpot - (theoreticalSpot * discrepancyBps) / 10_000;
+        curvePool.setPrice(spotPrice);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertEq(bearPct + bullPct, 10_000, "Percentages should always sum to 100%");
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+    }
+
+    function test_Immutables() public view {
+        assertEq(address(distributor.SPLITTER()), address(splitter));
+        assertEq(address(distributor.USDC()), address(usdc));
+        assertEq(address(distributor.PLDXY_BEAR()), address(plDxyBear));
+        assertEq(address(distributor.PLDXY_BULL()), address(plDxyBull));
+        assertEq(address(distributor.STAKED_BEAR()), address(stakedBear));
+        assertEq(address(distributor.STAKED_BULL()), address(stakedBull));
+        assertEq(address(distributor.CURVE_POOL()), address(curvePool));
+        assertEq(address(distributor.ZAP_ROUTER()), address(zapRouter));
+        assertEq(address(distributor.ORACLE()), address(oracle));
+        assertEq(distributor.CAP(), CAP);
+    }
+
+    function test_Constants() public view {
+        assertEq(distributor.DISCREPANCY_THRESHOLD_BPS(), 200);
+        assertEq(distributor.MIN_DISTRIBUTION_INTERVAL(), 1 hours);
+        assertEq(distributor.CALLER_REWARD_BPS(), 10);
+        assertEq(distributor.USDC_INDEX(), 0);
+        assertEq(distributor.PLDXY_BEAR_INDEX(), 1);
+        assertEq(distributor.MAX_SWAP_SLIPPAGE_BPS(), 100);
+    }
+
+    function test_DistributeRewards_Equal5050_NoSwap() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.8e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertEq(bearPct, 5000, "BEAR should be exactly 50%");
+        assertEq(bullPct, 5000, "BULL should be exactly 50%");
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+
+        assertGt(bearDonated, 0, "BEAR should receive rewards");
+        assertGt(bullDonated, 0, "BULL should receive rewards");
+        assertEq(bearDonated, bullDonated, "Equal split means equal donations");
+    }
+
+    function test_DistributeRewards_100Bear_NoMint() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.75e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertEq(bearPct, 10_000, "BEAR should get 100%");
+        assertEq(bullPct, 0, "BULL should get 0%");
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        assertGt(bearDonated, 0, "BEAR should receive all rewards via swap");
+    }
+
+    function test_DistributeRewards_PartialBullAllocation() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.808e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertGt(bullPct, bearPct, "BULL should get more than BEAR");
+        assertGt(bearPct, 0, "BEAR should still get some");
+        assertLt(bullPct, 10_000, "BULL should not get 100%");
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+
+        assertGt(bearDonated, 0, "BEAR should receive some rewards");
+        assertGt(bullDonated, 0, "BULL should receive some rewards");
+        assertGt(bullDonated, bearDonated, "BULL should receive more");
+    }
+
+    function test_DistributeRewards_100Bull_NoMint() public {
+        oracle.setPrice(0.8e8);
+        curvePool.setPrice(0.85e6);
+
+        usdc.mint(address(distributor), 100e6);
+
+        (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
+        assertEq(bearPct, 0, "BEAR should get 0%");
+        assertEq(bullPct, 10_000, "BULL should get 100%");
+
+        uint256 stakedBullBefore = plDxyBull.balanceOf(address(stakedBull));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 bullDonated = plDxyBull.balanceOf(address(stakedBull)) - stakedBullBefore;
+        assertGt(bullDonated, 0, "BULL should receive rewards via zap");
     }
 
 }
