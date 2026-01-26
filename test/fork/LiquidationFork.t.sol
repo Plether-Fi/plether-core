@@ -248,7 +248,9 @@ contract LiquidationForkTest is BaseForkTest {
 
     function test_BullLiquidation_InterestAccrual() public {
         uint256 principal = 10_000e6;
-        uint256 leverage = 2e18;
+        // Use 4x leverage to ensure debt is created
+        // (at 2x with BEAR ~$1.08, selling BEAR covers the entire flash loan)
+        uint256 leverage = 4e18;
 
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(bullLeverageRouter), true);
