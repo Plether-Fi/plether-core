@@ -80,6 +80,11 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ### Oracle Layer
 
 **BasketOracle** - Computes plDXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF)
+- Returns the price of foreign currencies in USD (not the dollar index)
+- When USD weakens → basket price UP → BEAR appreciates
+- When USD strengthens → basket price DOWN → BULL appreciates
+- **BEAR price = basket price** (direct correlation)
+- **BULL price = CAP - basket price** (inverse correlation)
 
 **MorphoOracle** - Adapts BasketOracle to Morpho's 1e36 scale format
 

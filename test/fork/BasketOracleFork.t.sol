@@ -159,8 +159,8 @@ contract BasketOracleForkTest is Test {
 
         calculatedBasketPrice = _calculateBasketPrice();
 
-        // Mock Curve pool returns plDXY-BEAR price = CAP - plDXY
-        uint256 bearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        // BEAR tracks basket directly (not CAP - basket)
+        uint256 bearPrice = calculatedBasketPrice * 1e10;
         address tempCurvePool = address(new MockCurvePoolForOracleBasket(bearPrice));
 
         address[] memory feeds = new address[](6);
@@ -271,8 +271,8 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        // plDXY-BEAR price = CAP - plDXY (use original basket price for comparison)
-        uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        // BEAR tracks basket directly
+        uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
         BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
@@ -309,8 +309,8 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        // plDXY-BEAR price = CAP - plDXY (use original basket price for comparison)
-        uint256 expectedBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        // BEAR tracks basket directly
+        uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
         BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
@@ -347,8 +347,8 @@ contract BasketOracleForkTest is Test {
     }
 
     function test_FullBasket_DeviationCheckWithRealPool() public {
-        // Curve initial price is plDXY-BEAR = CAP - plDXY
-        uint256 initialBearPrice = CAP_SCALED - (calculatedBasketPrice * 1e10);
+        // BEAR tracks basket directly
+        uint256 initialBearPrice = calculatedBasketPrice * 1e10;
         curvePool = _deployCurvePool(initialBearPrice);
 
         address[] memory feeds = new address[](6);
@@ -563,7 +563,8 @@ contract DeviationCheckForkTest is Test {
         // With quantity=1e18: result in 8 decimals = price / basePrice (normalized)
         uint256 normalizedPrice8 = (uint256(eurPrice) * 1e18) / (BASE_EUR * 1e10);
         oraclePrice18 = normalizedPrice8 * 1e10;
-        bearPrice18 = CAP_18DEC - oraclePrice18;
+        // BEAR tracks basket directly (not CAP - basket)
+        bearPrice18 = oraclePrice18;
 
         _deployProtocol();
     }

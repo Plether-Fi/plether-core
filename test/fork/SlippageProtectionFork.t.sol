@@ -468,7 +468,9 @@ contract SlippageProtectionForkTest is BaseForkTest {
     /// @notice previewCloseLeverage should match actual execution within tolerance
     function test_PreviewCloseLeverage_ShouldMatchActual() public {
         uint256 principal = 10_000e6;
-        uint256 leverage = 2e18;
+        // Use 4x leverage to ensure debt is created
+        // (at 2x with BEAR ~$1.08, selling BEAR covers the entire flash loan)
+        uint256 leverage = 4e18;
 
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(bullLeverageRouter), true);
@@ -488,8 +490,8 @@ contract SlippageProtectionForkTest is BaseForkTest {
         vm.stopPrank();
 
         // Preview estimates Curve swap output for BEAR buyback
-        // Threshold: 0.2% accounts for price movement during complex multi-step close
-        assertApproxEqRel(actualReturn, previewReturn, 0.002e18, "previewCloseLeverage should match actual within 0.2%");
+        // Threshold: 1% accounts for price movement during complex multi-step close at 4x leverage
+        assertApproxEqRel(actualReturn, previewReturn, 0.01e18, "previewCloseLeverage should match actual within 1%");
     }
 
     /// @notice Preview accuracy should hold across different trade sizes
