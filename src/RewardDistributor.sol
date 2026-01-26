@@ -187,9 +187,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @return bearPct Percentage for BEAR stakers (basis points).
     /// @return bullPct Percentage for BULL stakers (basis points).
     function _calculateSplit() internal view returns (uint256 bearPct, uint256 bullPct) {
-        uint256 cap18 = CAP * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
-        (, int256 dxyPrice,,,) = ORACLE.latestRoundData();
-        uint256 theoreticalBear18 = cap18 - (uint256(dxyPrice) * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
+        uint256 theoreticalBear18 = uint256(basketPrice) * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         uint256 spotBear18 = CURVE_POOL.price_oracle();
 
