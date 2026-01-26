@@ -215,9 +215,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             return;
         }
 
-        uint256 cap18 = CAP * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
-        uint256 dxy18 = theoreticalDxy8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
-        uint256 theoreticalBear18 = cap18 - dxy18;
+        // BEAR tracks basket directly (not CAP - basket)
+        // When USD weakens, basket UP, BEAR UP
+        uint256 theoreticalBear18 = theoreticalDxy8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         uint256 spotBear18 = pool.price_oracle();
         if (spotBear18 == 0) {
