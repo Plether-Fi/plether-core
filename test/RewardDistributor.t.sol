@@ -33,7 +33,7 @@ contract RewardDistributorTest is Test {
     uint256 constant CAP = 2e8;
 
     function setUp() public {
-        vm.warp(2 hours);
+        vm.warp(10 hours);
 
         usdc = new MockToken("USDC", "USDC");
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");

@@ -11,6 +11,7 @@ import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IRewardDistributor} from "./interfaces/IRewardDistributor.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title RewardDistributor
 /// @notice Distributes staking rewards based on price discrepancy between oracle and Curve EMA.
@@ -37,6 +38,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
 
     /// @notice Maximum slippage for Curve swaps (1% = 100 bps).
     uint256 public constant MAX_SWAP_SLIPPAGE_BPS = 100;
+
+    /// @notice Maximum age for oracle price data (8 hours).
+    uint256 public constant ORACLE_TIMEOUT = 8 hours;
 
     /// @notice SyntheticSplitter contract.
     ISyntheticSplitter public immutable SPLITTER;
@@ -187,7 +191,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @return bearPct Percentage for BEAR stakers (basis points).
     /// @return bullPct Percentage for BULL stakers (basis points).
     function _calculateSplit() internal view returns (uint256 bearPct, uint256 bullPct) {
-        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
+        (, int256 basketPrice,, uint256 updatedAt,) = ORACLE.latestRoundData();
+        OracleLib.checkStaleness(updatedAt, ORACLE_TIMEOUT);
         uint256 theoreticalBear18 = uint256(basketPrice) * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         uint256 spotBear18 = CURVE_POOL.price_oracle();
