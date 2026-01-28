@@ -163,7 +163,7 @@ contract RewardDistributorForkTest is BaseForkTest {
         }
     }
 
-    /// @notice Verify small distributions succeed (baseline sanity check)
+    /// @notice Verify small distributions succeed with precise token amounts
     function test_SmallDistribution_Succeeds() public {
         uint256 smallAmount = 1000e6;
         deal(USDC, address(distributor), smallAmount);
@@ -174,26 +174,37 @@ contract RewardDistributorForkTest is BaseForkTest {
         vm.prank(keeper);
         uint256 callerReward = distributor.distributeRewards();
 
+        uint256 bearReceived = IERC20(bearToken).balanceOf(address(stBear)) - stBearBefore;
+        uint256 bullReceived = IERC20(bullToken).balanceOf(address(stBull)) - stBullBefore;
+
         assertEq(callerReward, 1e6, "Caller reward should be 0.1% of 1000 USDC");
-        assertGt(IERC20(bearToken).balanceOf(address(stBear)), stBearBefore, "stBear should receive BEAR");
-        assertGt(IERC20(bullToken).balanceOf(address(stBull)), stBullBefore, "stBull should receive BULL");
+
+        uint256 distributable = smallAmount - callerReward;
+        uint256 expectedPerSide = (distributable * 1e12) / 2;
+        assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within 1e10 of expected");
+        assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within 1e10 of expected");
     }
 
-    /// @notice Medium distribution should succeed with acceptable slippage
+    /// @notice Medium distribution with precise assertions
     function test_MediumDistribution_SucceedsWithSlippage() public {
         uint256 mediumAmount = 10_000e6;
         deal(USDC, address(distributor), mediumAmount);
 
         uint256 stBearBefore = IERC20(bearToken).balanceOf(address(stBear));
+        uint256 stBullBefore = IERC20(bullToken).balanceOf(address(stBull));
 
         vm.prank(keeper);
         uint256 callerReward = distributor.distributeRewards();
 
-        uint256 stBearAfter = IERC20(bearToken).balanceOf(address(stBear));
-        uint256 bearReceived = stBearAfter - stBearBefore;
+        uint256 bearReceived = IERC20(bearToken).balanceOf(address(stBear)) - stBearBefore;
+        uint256 bullReceived = IERC20(bullToken).balanceOf(address(stBull)) - stBullBefore;
 
-        assertGt(bearReceived, 0, "Should receive BEAR tokens");
         assertEq(callerReward, 10e6, "Caller reward should be 0.1%");
+
+        uint256 distributable = mediumAmount - callerReward;
+        uint256 expectedPerSide = (distributable * 1e12) / 2;
+        assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within 1e10 of expected");
+        assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within 1e10 of expected");
     }
 
     // ========================================================================
@@ -241,22 +252,23 @@ contract RewardDistributorForkTest is BaseForkTest {
         uint256 stBullBefore = IERC20(bullToken).balanceOf(address(stBull));
 
         vm.prank(keeper);
-        distributor.distributeRewards();
+        uint256 callerReward = distributor.distributeRewards();
 
         uint256 bearReceived = IERC20(bearToken).balanceOf(address(stBear)) - stBearBefore;
         uint256 bullReceived = IERC20(bullToken).balanceOf(address(stBull)) - stBullBefore;
 
-        uint256 totalReceived = bearReceived + bullReceived;
+        uint256 expectedReward = (oneUsdc * 10) / 10_000;
+        assertEq(callerReward, expectedReward, "Caller reward = 0.1% of 1 USDC");
 
-        assertGt(totalReceived, 0, "Should receive tokens for 1 USDC");
+        uint256 distributable = oneUsdc - callerReward;
+        uint256 expectedPerSide = (distributable * 1e12) / 2;
 
-        console.log("1 USDC distributed:");
-        console.log("  BEAR received (18 dec):", bearReceived);
-        console.log("  BULL received (18 dec):", bullReceived);
-        console.log("  Total tokens:", totalReceived);
+        assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within 1e10 of expected");
+        assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within 1e10 of expected");
+        assertApproxEqAbs(bearReceived + bullReceived, distributable * 1e12, 1e10, "Total within 1e10");
     }
 
-    /// @notice Test awkward amount with mixed decimals
+    /// @notice Test awkward amount with mixed decimals and tight assertions
     function test_AwkwardAmount_123456789() public {
         uint256 awkwardAmount = 123_456_789;
         deal(USDC, address(distributor), awkwardAmount);
@@ -274,7 +286,10 @@ contract RewardDistributorForkTest is BaseForkTest {
         uint256 bearReceived = IERC20(bearToken).balanceOf(address(stBear)) - stBearBefore;
         uint256 bullReceived = IERC20(bullToken).balanceOf(address(stBull)) - stBullBefore;
 
-        assertGt(bearReceived + bullReceived, 0, "Should distribute tokens");
+        uint256 distributable = awkwardAmount - callerReward;
+        uint256 expectedPerSide = (distributable * 1e12) / 2;
+        assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within 1e10 of expected");
+        assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within 1e10 of expected");
 
         uint256 keeperAfter = IERC20(USDC).balanceOf(keeper);
         assertEq(keeperAfter - keeperBefore, callerReward, "Keeper received exact reward");
@@ -304,6 +319,41 @@ contract RewardDistributorForkTest is BaseForkTest {
         } catch {
             // Slippage revert is acceptable for large amounts
         }
+    }
+
+    /// @notice Fuzz microscopic amounts (1 wei to 1 USDC) to test edge cases
+    /// @dev Tests how contract handles amounts where callerReward rounds to 0
+    function testFuzz_MicroscopicRewards(
+        uint256 usdcAmount
+    ) public {
+        usdcAmount = bound(usdcAmount, 1, 1e6);
+
+        deal(USDC, address(distributor), usdcAmount);
+
+        uint256 stBearBefore = IERC20(bearToken).balanceOf(address(stBear));
+        uint256 stBullBefore = IERC20(bullToken).balanceOf(address(stBull));
+        uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
+
+        vm.prank(keeper);
+        uint256 callerReward = distributor.distributeRewards();
+
+        uint256 expectedReward = (usdcAmount * 10) / 10_000;
+        assertEq(callerReward, expectedReward, "Reward matches expected");
+
+        uint256 keeperAfter = IERC20(USDC).balanceOf(keeper);
+        assertEq(keeperAfter - keeperBefore, callerReward, "Keeper received exact reward");
+
+        uint256 bearReceived = IERC20(bearToken).balanceOf(address(stBear)) - stBearBefore;
+        uint256 bullReceived = IERC20(bullToken).balanceOf(address(stBull)) - stBullBefore;
+
+        uint256 distributable = usdcAmount - callerReward;
+        if (distributable > 0) {
+            uint256 expectedPerSide = (distributable * 1e12) / 2;
+            assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within tolerance");
+            assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within tolerance");
+        }
+
+        assertEq(IERC20(USDC).balanceOf(address(distributor)), 0, "No USDC left in distributor");
     }
 
     // ========================================================================
