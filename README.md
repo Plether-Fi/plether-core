@@ -37,7 +37,13 @@ User deposits USDC
 |----------|-------------|
 | [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs, manages yield deployment |
 | [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
-| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper enabling yield accrual on deposited tokens |
+
+### Staking Layer
+
+| Contract | Description |
+|----------|-------------|
+| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) enabling yield accrual and Morpho collateral |
+| [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
 
 ### Oracle Layer
 
@@ -88,11 +94,6 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 |----------|-------------|
 | [`MorphoAdapter`](src/MorphoAdapter.sol) | ERC-4626 wrapper for Morpho Blue yield generation |
 
-### Staking & Rewards
-
-| Contract | Description |
-|----------|-------------|
-| [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
 
 ## Ecosystem Integrations
 
@@ -154,8 +155,8 @@ This mechanism incentivizes arbitrageurs to correct price deviations by rewardin
 
 The protocol operates in three states:
 
-1. **ACTIVE** - Normal operations (mint, burn, redeem)
-2. **PAUSED** - Emergency pause (minting blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
+1. **ACTIVE** - Normal operations (mint, burn, swap). If Chainlink and Curve EMA prices diverge >2%, an implicit "disordered" mode blocks minting, leverage, and reward distribution until prices converge. Burns and swaps remain available—the 10% liquid buffer ensures users can always exit.
+2. **PAUSED** - Emergency pause (minting and reward distribution blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
 3. **SETTLED** - End-of-life when plDXY hits CAP price (only redemptions allowed)
 
 ## Development

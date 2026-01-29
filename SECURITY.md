@@ -266,6 +266,34 @@ Conversion formula in Splitter:
 - `USDC_MULTIPLIER = 10^(18 - 6 + 8) = 10^20`
 - `usdcNeeded = (tokenAmount * CAP) / USDC_MULTIPLIER`
 
+### RewardDistributor Security
+
+The RewardDistributor allocates yield based on price discrepancy between Chainlink (theoretical) and Curve EMA (spot). Potential manipulation vectors have been analyzed:
+
+#### Price Manipulation for Reward Skew
+
+**Attack concept:** Manipulate Curve EMA to diverge from Chainlink, causing rewards to favor one side.
+
+**Why it's not economically viable:**
+
+| Factor | Constraint |
+|--------|------------|
+| **BasketOracle deviation check** | Reverts if Chainlink/Curve diverge >2%, limiting manipulation range |
+| **Curve EMA resistance** | Moving EMA requires sustained trading against arbitrageurs |
+| **Attack cost** | Moving price 2% on a deep pool costs $50k-200k+ in fees/slippage |
+| **Max profit** | Extra allocation × attacker's stake share × reward pool size |
+| **Cooldown** | 1-hour minimum between distributions limits frequency |
+
+**Example:** To gain an extra $5k (from 50/50 → 100/0 on a $100k reward pool with 10% stake), attacker spends $50k+ manipulating the pool. Net loss.
+
+#### Stale EMA Frontrunning
+
+**Attack concept:** During rapid price moves, Chainlink updates faster than Curve EMA, creating temporary discrepancy.
+
+**Why it's not exploitable:** The same 2% BasketOracle deviation check that prevents manipulation also prevents stale-EMA exploitation. Large moves (>2% divergence) cause the oracle to revert entirely, blocking distribution until prices converge.
+
+The system assumes that if the gap is >2%, the market is "disordered." By reverting, we protect the protocol from distributing based on noise. The 10% liquid buffer in the Splitter ensures that even if rewards are paused, users can still redeem their principal without friction.
+
 ### StakedToken Security
 
 StakedToken (splDXY-BEAR, splDXY-BULL) is an ERC-4626 vault used as Morpho collateral:
@@ -416,6 +444,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-29 | Added RewardDistributor Security section: economic analysis of price manipulation and stale EMA attacks |
 | 2026-01-21 | Added USDC (Circle) risks: depeg, blacklisting, upgradeability, and regulatory risks |
 | 2026-01-15 | Documented acknowledged risk: permissionless donateYield() griefing vector |
 | 2026-01-15 | Updated ownership model to reflect Ownable2Step pattern |
