@@ -1092,6 +1092,299 @@ contract MockCurvePoolWithMEV is ICurvePool {
 
 }
 
+// ==========================================
+// MUTATION TESTS
+// ==========================================
+
+contract ZapRouterMutationTest is Test {
+
+    MockToken public usdc;
+    MockFlashToken public plDxyBear;
+    MockFlashToken public plDxyBull;
+    MockSplitter public splitter;
+    MockCurvePool public curvePool;
+
+    address alice = address(0xA11ce);
+
+    function setUp() public {
+        usdc = new MockToken("USDC", "USDC");
+        plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
+        plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
+        splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
+        splitter.setUsdc(address(usdc));
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+
+        usdc.mint(alice, 10_000 * 1e6);
+    }
+
+    // ============================================
+    // Constructor zero-address checks (mutants 2, 4, 6, 8, 10)
+    // ============================================
+
+    function test_Constructor_ZeroAddress_Splitter() public {
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAddress.selector);
+        new ZapRouter(address(0), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+    }
+
+    function test_Constructor_ZeroAddress_PlDxyBear() public {
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAddress.selector);
+        new ZapRouter(address(splitter), address(0), address(plDxyBull), address(usdc), address(curvePool));
+    }
+
+    function test_Constructor_ZeroAddress_PlDxyBull() public {
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAddress.selector);
+        new ZapRouter(address(splitter), address(plDxyBear), address(0), address(usdc), address(curvePool));
+    }
+
+    function test_Constructor_ZeroAddress_Usdc() public {
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAddress.selector);
+        new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(0), address(curvePool));
+    }
+
+    function test_Constructor_ZeroAddress_CurvePool() public {
+        vm.expectRevert(ZapRouter.ZapRouter__ZeroAddress.selector);
+        new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(0));
+    }
+
+    // ============================================
+    // Deadline check (mutant 34)
+    // ============================================
+
+    function test_ZapMint_Expired_Reverts() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 100e6);
+
+        vm.expectRevert(ZapRouter.ZapRouter__Expired.selector);
+        zapRouter.zapMint(100e6, 0, 100, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    // ============================================
+    // Splitter status check (mutant 40)
+    // ============================================
+
+    function test_ZapMint_SplitterNotActive_Reverts() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        splitter.setStatus(ISyntheticSplitter.Status.PAUSED);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 100e6);
+
+        vm.expectRevert(ZapRouter.ZapRouter__SplitterNotActive.selector);
+        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_ZapMint_SplitterSettled_Reverts() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 100e6);
+
+        vm.expectRevert(ZapRouter.ZapRouter__SplitterNotActive.selector);
+        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    // ============================================
+    // minAmountOut check (mutant 142)
+    // ============================================
+
+    function test_ZapMint_InsufficientOutput_Reverts() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        curvePool.setPrice(1e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 100e6);
+
+        // Request way more BULL than possible
+        vm.expectRevert(ZapRouter.ZapRouter__InsufficientOutput.selector);
+        zapRouter.zapMint(100e6, 1000e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    // ============================================
+    // Zero Curve price check (mutant 152)
+    // ============================================
+
+    function test_ZapBurn_ZeroCurvePrice_Reverts() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        curvePool.setPrice(0);
+        plDxyBull.mint(alice, 100e18);
+
+        vm.startPrank(alice);
+        plDxyBull.approve(address(zapRouter), 100e18);
+
+        vm.expectRevert();
+        zapRouter.zapBurn(100e18, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    // ============================================
+    // Surplus handling (mutants 131, 137)
+    // ============================================
+
+    function test_ZapMint_SurplusBearSentToUser() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        curvePool.setPrice(1e6);
+
+        uint256 bearBefore = plDxyBear.balanceOf(alice);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 1000e6);
+        zapRouter.zapMint(1000e6, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 bearAfter = plDxyBear.balanceOf(alice);
+
+        // User should receive surplus BEAR (from buffer calculation)
+        assertGe(bearAfter, bearBefore, "User should receive BEAR surplus");
+
+        // Router holds nothing
+        assertEq(plDxyBear.balanceOf(address(zapRouter)), 0, "Router should not hold BEAR");
+    }
+
+    // ============================================
+    // Ternary swap (mutant 164) - actualBearFromLinear >= debtBear
+    // ============================================
+
+    function test_ZapBurn_AMMAdjustment_Correct() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        // At high BEAR price, AMM adjustment matters more
+        curvePool.setPrice(1.5e6);
+        plDxyBull.mint(alice, 100e18);
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        plDxyBull.approve(address(zapRouter), 100e18);
+        zapRouter.zapBurn(100e18, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        // Should still get some USDC
+        assertGt(usdcAfter, usdcBefore, "Should receive USDC from burn");
+
+        // Router is stateless
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "Router should not hold USDC");
+    }
+
+    // ============================================
+    // USDC swap amount edge cases (mutants 195, 196)
+    // ============================================
+
+    function test_ZapBurn_LargeAmount_UsdcToSwapCapped() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        // Set high BEAR price to trigger the cap logic
+        curvePool.setPrice(1.9e6);
+        plDxyBull.mint(alice, 1000e18);
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        plDxyBull.approve(address(zapRouter), 1000e18);
+
+        // This tests the usdcToSwap = totalUsdc cap
+        // If mutated to 0 or 1, the swap would fail
+        zapRouter.zapBurn(1000e18, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Should still succeed
+        assertGt(usdc.balanceOf(alice), usdcBefore, "Should receive USDC");
+    }
+
+    // ============================================
+    // Solvency check (mutant 129) - currentBalance < repayAmount
+    // ============================================
+
+    function test_ZapMint_SolvencyCheck_Enforced() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        // Set BEAR price at exactly CAP to trigger edge case
+        curvePool.setPrice(1_999_999); // Just under $2.00
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 100e6);
+
+        // Should succeed even at edge pricing
+        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        // Verify no tokens leaked
+        assertEq(plDxyBear.balanceOf(address(zapRouter)), 0, "No BEAR leak");
+        assertEq(usdc.balanceOf(address(zapRouter)), 0, "No USDC leak");
+    }
+
+    // ============================================
+    // Large values to catch arithmetic mutations
+    // ============================================
+
+    function test_ZapMint_LargeAmount_ArithmeticCorrect() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        curvePool.setPrice(1e6);
+
+        // Mint more USDC for large test
+        usdc.mint(alice, 1_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(zapRouter), 1_000_000e6);
+
+        uint256 bullBefore = plDxyBull.balanceOf(alice);
+        zapRouter.zapMint(1_000_000e6, 0, 100, block.timestamp + 1 hours);
+        uint256 bullAfter = plDxyBull.balanceOf(alice);
+        vm.stopPrank();
+
+        uint256 bullReceived = bullAfter - bullBefore;
+
+        // With 1M USDC at parity, should get ~1M BULL tokens (minus buffer)
+        assertGt(bullReceived, 900_000e18, "Should get substantial BULL");
+        assertLt(bullReceived, 1_100_000e18, "Should not get excessive BULL");
+    }
+
+    function test_ZapBurn_LargeAmount_ArithmeticCorrect() public {
+        ZapRouter zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        curvePool.setPrice(1e6);
+        plDxyBull.mint(alice, 1_000_000e18);
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        vm.startPrank(alice);
+        plDxyBull.approve(address(zapRouter), 1_000_000e18);
+        zapRouter.zapBurn(1_000_000e18, 0, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 usdcReceived = usdc.balanceOf(alice) - usdcBefore;
+
+        // With 1M BULL at parity, should get substantial USDC
+        assertGt(usdcReceived, 900_000e6, "Should get substantial USDC");
+    }
+
+}
+
 contract ZapRouterMEVTest is Test {
 
     ZapRouter public zapRouter;
