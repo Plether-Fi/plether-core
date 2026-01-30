@@ -107,7 +107,10 @@ contract StakedOracleTest is Test {
         underlyingToken.approve(address(vault), 10 ether);
         vault.donateYield(10 ether);
 
-        // 3. Price should increase by ~10%
+        // 3. Warp to fully vest streamed rewards
+        vm.warp(block.timestamp + vault.STREAM_DURATION());
+
+        // 4. Price should increase by ~10%
         uint256 priceAfter = stakedOracle.price();
 
         assertGt(priceAfter, priceBefore, "Price should increase after yield donation");
@@ -143,7 +146,10 @@ contract StakedOracleTest is Test {
         underlyingToken.approve(address(vault), 20 ether);
         vault.donateYield(20 ether);
 
-        // 3. Underlying price increases 50%
+        // 3. Warp to fully vest streamed rewards
+        vm.warp(block.timestamp + vault.STREAM_DURATION());
+
+        // 4. Underlying price increases 50%
         underlyingOracle.setPrice((BASE_PRICE * 150) / 100);
 
         // Expected: 1.5 * 1.2 = 1.8x original price
