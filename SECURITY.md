@@ -299,10 +299,29 @@ The system assumes that if the gap is >2%, the market is "disordered." By revert
 StakedToken (splDXY-BEAR, splDXY-BULL) is an ERC-4626 vault used as Morpho collateral:
 
 - **Inflation Attack Protection**: Uses `_decimalsOffset() = 3` (1000x multiplier)
-- **Permissionless Yield Injection**: `donateYield()` allows anyone to add yield
-- **Share Price**: Increases as yield is donated (benefits all stakers proportionally)
-- **Risk**: Donation could be used to manipulate share price for Morpho liquidations
-- **Mitigation**: Morpho uses time-weighted prices; instantaneous donations have limited impact
+- **Streaming Rewards**: `donateYield()` streams rewards linearly over 1 hour instead of instant distribution
+- **Withdrawal Delay**: 1 hour minimum stake duration before withdrawal (enforced via `maxWithdraw()`/`maxRedeem()`)
+- **Transfer Timer Reset**: Receiving shares via transfer resets your withdrawal timer (prevents bypass)
+
+#### Reward Sniping Protection
+
+The streaming + delay combination prevents reward sniping attacks:
+
+| Attack Vector | Mitigation |
+|---------------|------------|
+| Flash stake (same block) | Blocked by 1-hour withdrawal delay |
+| Deposit → claim → withdraw | Rewards stream over 1 hour; early exit captures only pro-rata portion |
+| Front-run `donateYield()` | Must hold for full stream duration to capture full rewards |
+| Transfer shares to bypass delay | Timer resets on transfer recipient |
+
+**How it works:**
+1. `donateYield(amount)` starts a 1-hour linear stream via `rewardRate` and `streamEndTime`
+2. `totalAssets()` excludes unvested rewards: `balance - _unvestedRewards()`
+3. Share price increases gradually as rewards vest (not instantly)
+4. `maxWithdraw()`/`maxRedeem()` return 0 during lock period (ERC4626 compliant)
+5. Attacker who deposits and exits after 1 hour only captures rewards proportional to their stake duration
+
+**Precision:** Streaming math uses 1e18 scaling. Truncation dust (~1000 wei per 100 ETH donation) vests immediately but is negligible and favors existing stakers.
 
 #### Acknowledged Risk: Permissionless donateYield()
 
@@ -444,6 +463,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-01-30 | StakedToken: Added streaming rewards (1h linear vesting) and withdrawal delay (1h minimum) to prevent reward sniping |
 | 2026-01-29 | Added RewardDistributor Security section: economic analysis of price manipulation and stale EMA attacks |
 | 2026-01-21 | Added USDC (Circle) risks: depeg, blacklisting, upgradeability, and regulatory risks |
 | 2026-01-15 | Documented acknowledged risk: permissionless donateYield() griefing vector |

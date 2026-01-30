@@ -42,7 +42,7 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) enabling yield accrual and Morpho collateral |
+| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards and withdrawal delay to prevent reward sniping |
 | [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
 
 ### Oracle Layer

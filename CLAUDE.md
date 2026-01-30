@@ -57,7 +57,9 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - Users stake plDXY tokens to receive staked tokens 1:1
 - Staked tokens are used as collateral in Morpho lending pools
 - Required for leverage positions (routers stake on behalf of users)
-- May accrue staking rewards (protocol-specific incentives)
+- Rewards stream linearly over 1 hour (prevents instant reward capture)
+- 1 hour minimum stake duration before withdrawal (prevents reward sniping)
+- Transfer resets recipient's withdrawal timer (prevents bypass via transfer)
 
 ### Routing Layer
 
