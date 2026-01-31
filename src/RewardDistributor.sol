@@ -260,7 +260,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             }
 
             if (zapUsdc > 0) {
-                ZAP_ROUTER.zapMint(zapUsdc, 0, 100, block.timestamp);
+                (,,, uint256 expectedBull,) = ZAP_ROUTER.previewZapMint(zapUsdc);
+                uint256 minBull = (expectedBull * (10_000 - MAX_SWAP_SLIPPAGE_BPS)) / 10_000;
+                ZAP_ROUTER.zapMint(zapUsdc, minBull, MAX_SWAP_SLIPPAGE_BPS, block.timestamp);
             }
 
             bearAmount = PLDXY_BEAR.balanceOf(address(this));
