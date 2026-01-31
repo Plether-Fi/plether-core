@@ -10,13 +10,10 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 /// @notice ERC4626 vault for staking plDXY-BEAR or plDXY-BULL tokens.
 /// @dev Used as Morpho collateral. Exchange rate increases via yield donations.
 ///      Implements 1000x virtual share offset to prevent inflation attacks.
-///      Implements streaming rewards and withdrawal delay to prevent reward sniping.
+///      Implements streaming rewards (1-hour linear vest) to prevent reward sniping.
 contract StakedToken is ERC4626 {
 
     using SafeERC20 for IERC20;
-
-    /// @notice Minimum time shares must be held before withdrawal.
-    uint256 public constant MIN_STAKE_DURATION = 1 hours;
 
     /// @notice Duration over which donated rewards are streamed.
     uint256 public constant STREAM_DURATION = 1 hours;
@@ -27,13 +24,8 @@ contract StakedToken is ERC4626 {
     /// @notice Timestamp when current reward stream ends.
     uint256 public streamEndTime;
 
-    /// @notice Tracks when each address last received shares (deposit or transfer).
-    mapping(address => uint256) public lastDepositTime;
-
     /// @notice Emitted when yield is donated and streaming begins/extends.
     event YieldDonated(address indexed donor, uint256 amount, uint256 newStreamEndTime);
-
-    error StakedToken__WithdrawalTooSoon(uint256 unlockTime);
 
     /// @notice Creates a new staking vault for a synthetic token.
     /// @param _asset The underlying plDXY token to stake (plDXY-BEAR or plDXY-BULL).
@@ -98,64 +90,6 @@ contract StakedToken is ERC4626 {
         }
         uint256 remainingTime = streamEndTime - block.timestamp;
         return (remainingTime * rewardRate) / 1e18;
-    }
-
-    /// @dev Records deposit time for withdrawal delay.
-    function _deposit(
-        address caller,
-        address receiver,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
-        lastDepositTime[receiver] = block.timestamp;
-        super._deposit(caller, receiver, assets, shares);
-    }
-
-    /// @dev Enforces minimum stake duration before withdrawal.
-    function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
-        uint256 unlockTime = lastDepositTime[owner] + MIN_STAKE_DURATION;
-        if (block.timestamp < unlockTime) {
-            revert StakedToken__WithdrawalTooSoon(unlockTime);
-        }
-        super._withdraw(caller, receiver, owner, assets, shares);
-    }
-
-    /// @notice Returns 0 if owner is still in lock period, otherwise delegates to parent.
-    function maxWithdraw(
-        address owner
-    ) public view override returns (uint256) {
-        if (block.timestamp < lastDepositTime[owner] + MIN_STAKE_DURATION) {
-            return 0;
-        }
-        return super.maxWithdraw(owner);
-    }
-
-    /// @notice Returns 0 if owner is still in lock period, otherwise delegates to parent.
-    function maxRedeem(
-        address owner
-    ) public view override returns (uint256) {
-        if (block.timestamp < lastDepositTime[owner] + MIN_STAKE_DURATION) {
-            return 0;
-        }
-        return super.maxRedeem(owner);
-    }
-
-    /// @dev Resets deposit time when shares are transferred to prevent delay bypass.
-    function _update(
-        address from,
-        address to,
-        uint256 value
-    ) internal override {
-        if (from != address(0) && to != address(0)) {
-            lastDepositTime[to] = block.timestamp;
-        }
-        super._update(from, to, value);
     }
 
     /// @dev Virtual share offset (10^3 = 1000x) to prevent inflation attacks.

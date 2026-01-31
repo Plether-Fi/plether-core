@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
+import {RewardDistributor} from "../src/RewardDistributor.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
@@ -174,6 +175,7 @@ contract DeployToSepolia is Script {
         ZapRouter zapRouter;
         LeverageRouter leverageRouter;
         BullLeverageRouter bullLeverageRouter;
+        RewardDistributor rewardDistributor;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
@@ -184,6 +186,17 @@ contract DeployToSepolia is Script {
         console.log("");
 
         vm.startBroadcast(privateKey);
+
+        // Predict RewardDistributor address (deployed at nonce + 34)
+        // Transaction count before RewardDistributor:
+        // MockUSDC(1) + Feeds(6) + BasketOracle(1) + Adapter(1) + Splitter(1) + deploy_pool(1) + setCurvePool(1)
+        // + _seedCurvePool: 2x mint + 2x approve + mint + approve + add_liquidity (7)
+        // + MorphoOracles(2) + StakedTokens(2) + StakedOracles(2)
+        // + createMarket(2) + _seedMorphoMarkets: mint + approve + 2x supply (4)
+        // + ZapRouter(1) + LeverageRouter(1) + BullLeverageRouter(1) = 34
+        uint64 startNonce = vm.getNonce(deployer);
+        address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + 34);
+        console.log("Predicted RewardDistributor:", predictedRewardDistributor);
 
         // Step 1: Deploy MockUSDC
         deployed.usdc = new MockUSDC();
@@ -197,18 +210,19 @@ contract DeployToSepolia is Script {
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates plDXY-BEAR/BULL)
-        (deployed.adapter, deployed.splitter) =
-            _deploySplitterWithAdapter(address(deployed.basketOracle), address(deployed.usdc), deployer);
+        // Treasury is set to predicted RewardDistributor address so all yield goes there
+        (deployed.adapter, deployed.splitter) = _deploySplitterWithAdapter(
+            address(deployed.basketOracle), address(deployed.usdc), deployer, predictedRewardDistributor
+        );
         deployed.plDxyBear = deployed.splitter.TOKEN_A();
         deployed.plDxyBull = deployed.splitter.TOKEN_B();
         console.log("plDXY-BEAR deployed:", address(deployed.plDxyBear));
         console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 
-        // Step 5: Calculate bearPrice from oracle (CAP - plDXY)
+        // Step 5: Get basket price from oracle
+        // BEAR tracks basket directly: when USD weakens, basket UP, BEAR UP
         (, int256 answer,,,) = deployed.basketOracle.latestRoundData();
-        uint256 plDxyPrice = uint256(answer) * 1e10;
-        uint256 bearPrice = CAP_SCALED - plDxyPrice;
-        console.log("plDXY price (18 decimals):", plDxyPrice);
+        uint256 bearPrice = uint256(answer) * 1e10;
         console.log("BEAR price (18 decimals):", bearPrice);
 
         // Step 6: Deploy Curve pool with real plDXY-BEAR address and calculated price
@@ -243,6 +257,13 @@ contract DeployToSepolia is Script {
         // Step 13: Mint USDC to deployer for testing
         deployed.usdc.mint(deployer, 100_000 * 1e6);
         console.log("Minted 100,000 USDC to deployer");
+
+        // Verify RewardDistributor address matches prediction
+        require(
+            address(deployed.rewardDistributor) == predictedRewardDistributor,
+            "RewardDistributor address mismatch - update nonce offset"
+        );
+        console.log("RewardDistributor configured as treasury in Splitter");
 
         vm.stopBroadcast();
 
@@ -312,13 +333,14 @@ contract DeployToSepolia is Script {
     function _deploySplitterWithAdapter(
         address oracle,
         address usdc,
-        address deployer
+        address deployer,
+        address treasury
     ) internal returns (MockYieldAdapter adapter, SyntheticSplitter splitter) {
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
         adapter = new MockYieldAdapter(IERC20(usdc), deployer, predictedSplitter);
-        splitter = new SyntheticSplitter(oracle, usdc, address(adapter), CAP, deployer, address(0));
+        splitter = new SyntheticSplitter(oracle, usdc, address(adapter), CAP, treasury, address(0));
 
         require(address(splitter) == predictedSplitter, "Splitter address mismatch in helper");
     }
@@ -419,6 +441,20 @@ contract DeployToSepolia is Script {
             bullMarketParams
         );
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
+
+        // Deploy RewardDistributor
+        d.rewardDistributor = new RewardDistributor(
+            address(d.splitter),
+            address(d.usdc),
+            address(d.plDxyBear),
+            address(d.plDxyBull),
+            address(d.stakedBear),
+            address(d.stakedBull),
+            d.curvePool,
+            address(d.zapRouter),
+            address(d.basketOracle)
+        );
+        console.log("RewardDistributor:", address(d.rewardDistributor));
     }
 
     function _createMorphoMarkets(
@@ -490,6 +526,9 @@ contract DeployToSepolia is Script {
         console.log("  ZapRouter:           ", address(d.zapRouter));
         console.log("  LeverageRouter:      ", address(d.leverageRouter));
         console.log("  BullLeverageRouter:  ", address(d.bullLeverageRouter));
+        console.log("");
+        console.log("Rewards:");
+        console.log("  RewardDistributor:   ", address(d.rewardDistributor));
         console.log("========================================");
     }
 

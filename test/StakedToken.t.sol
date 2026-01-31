@@ -191,94 +191,17 @@ contract StakedTokenTest is Test {
     }
 
     // ==========================================
-    // WITHDRAWAL DELAY TESTS
+    // STREAMING PROTECTS AGAINST FLASH SNIPING
     // ==========================================
 
-    function test_Withdraw_RevertsBeforeDelay() public {
-        vm.startPrank(alice);
-        underlying.approve(address(stakedToken), 100 ether);
-        uint256 shares = stakedToken.deposit(100 ether, alice);
-
-        // maxRedeem returns 0 during lock period, so ERC4626 reverts with ExceededMaxRedeem
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("ERC4626ExceededMaxRedeem(address,uint256,uint256)")), alice, shares, 0
-            )
-        );
-        stakedToken.redeem(shares, alice, alice);
-        vm.stopPrank();
-    }
-
-    function test_MaxWithdraw_ReturnsZeroDuringLockPeriod() public {
-        vm.startPrank(alice);
-        underlying.approve(address(stakedToken), 100 ether);
-        stakedToken.deposit(100 ether, alice);
-        vm.stopPrank();
-
-        // During lock period, max functions return 0
-        assertEq(stakedToken.maxWithdraw(alice), 0);
-        assertEq(stakedToken.maxRedeem(alice), 0);
-
-        // After lock period, max functions return actual values
-        vm.warp(block.timestamp + stakedToken.MIN_STAKE_DURATION());
-        assertGt(stakedToken.maxWithdraw(alice), 0);
-        assertGt(stakedToken.maxRedeem(alice), 0);
-    }
-
-    function test_Withdraw_SucceedsAfterDelay() public {
-        vm.startPrank(alice);
-        underlying.approve(address(stakedToken), 100 ether);
-        uint256 shares = stakedToken.deposit(100 ether, alice);
-
-        vm.warp(block.timestamp + stakedToken.MIN_STAKE_DURATION());
-
-        stakedToken.redeem(shares, alice, alice);
-        vm.stopPrank();
-
-        assertEq(underlying.balanceOf(alice), 1000 ether);
-        assertEq(stakedToken.balanceOf(alice), 0);
-    }
-
-    function test_Withdraw_TransferResetsDelay() public {
-        vm.startPrank(alice);
-        underlying.approve(address(stakedToken), 100 ether);
-        uint256 shares = stakedToken.deposit(100 ether, alice);
-
-        // Wait for delay
-        vm.warp(block.timestamp + stakedToken.MIN_STAKE_DURATION());
-
-        // Transfer to Bob resets his delay
-        stakedToken.transfer(bob, shares);
-        vm.stopPrank();
-
-        // Bob cannot withdraw immediately
-        vm.startPrank(bob);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                bytes4(keccak256("ERC4626ExceededMaxRedeem(address,uint256,uint256)")), bob, shares, 0
-            )
-        );
-        stakedToken.redeem(shares, bob, bob);
-
-        // Bob can withdraw after delay
-        vm.warp(block.timestamp + stakedToken.MIN_STAKE_DURATION());
-        stakedToken.redeem(shares, bob, bob);
-        vm.stopPrank();
-
-        assertEq(underlying.balanceOf(bob), 1100 ether);
-    }
-
-    function test_RewardSniping_Mitigated() public {
+    function test_FlashSnipingMitigated() public {
         // Alice is a long-term staker
         vm.startPrank(alice);
         underlying.approve(address(stakedToken), 100 ether);
         stakedToken.deposit(100 ether, alice);
         vm.stopPrank();
 
-        // Time passes
-        vm.warp(block.timestamp + 1 days);
-
-        // Attacker tries to snipe rewards: deposit right before donation
+        // Attacker deposits right before donation
         vm.startPrank(attacker);
         underlying.approve(address(stakedToken), 100 ether);
         stakedToken.deposit(100 ether, attacker);
@@ -289,27 +212,35 @@ contract StakedTokenTest is Test {
         underlying.approve(address(stakedToken), 100 ether);
         stakedToken.donateYield(100 ether);
 
-        // Attacker tries to withdraw immediately - BLOCKED by delay
-        uint256 attackerShares = stakedToken.balanceOf(attacker);
+        // Attacker withdraws immediately - gets almost no rewards (not vested yet)
         vm.startPrank(attacker);
-        vm.expectRevert();
+        uint256 attackerShares = stakedToken.balanceOf(attacker);
+        uint256 attackerValue = stakedToken.convertToAssets(attackerShares);
         stakedToken.redeem(attackerShares, attacker, attacker);
         vm.stopPrank();
 
-        // Even after delay, rewards are still streaming
-        vm.warp(block.timestamp + stakedToken.MIN_STAKE_DURATION());
+        // Attacker only gets back ~100 ether (their deposit) + dust from the few seconds of vesting
+        assertApproxEqAbs(attackerValue, 100 ether, 0.01 ether);
 
-        // At this point rewards are fully vested but attacker only captured
-        // rewards proportional to their time in the vault
-        uint256 attackerValue = stakedToken.convertToAssets(stakedToken.balanceOf(attacker));
-
-        // Attacker gets ~50% of rewards (50 ether) since they had 50% of shares during stream
-        // Total: 100 deposit + ~50 rewards = ~150
-        assertApproxEqAbs(attackerValue, 150 ether, 1000);
-
-        // Alice also gets ~50% of rewards
+        // After stream completes, Alice gets almost all rewards
+        vm.warp(block.timestamp + stakedToken.STREAM_DURATION());
         uint256 aliceValue = stakedToken.convertToAssets(stakedToken.balanceOf(alice));
-        assertApproxEqAbs(aliceValue, 150 ether, 1000);
+
+        // Alice gets her 100 + almost all of the 100 reward (attacker left early)
+        assertGt(aliceValue, 199 ether);
+    }
+
+    function test_ImmediateWithdraw_Works() public {
+        // Deposit and withdraw immediately - should work (no delay)
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 100 ether);
+        uint256 shares = stakedToken.deposit(100 ether, alice);
+
+        stakedToken.redeem(shares, alice, alice);
+        vm.stopPrank();
+
+        assertEq(underlying.balanceOf(alice), 1000 ether);
+        assertEq(stakedToken.balanceOf(alice), 0);
     }
 
     // ==========================================
