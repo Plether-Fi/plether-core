@@ -137,6 +137,8 @@ Users can open leveraged positions through the routers:
 1. **LeverageRouter** (Bear): Morpho flash loan USDC → Swap to plDXY-BEAR → Stake → Deposit to Morpho as collateral → Borrow USDC to repay flash loan
 2. **BullLeverageRouter** (Bull): Morpho flash loan USDC → Mint pairs → Sell plDXY-BEAR → Stake plDXY-BULL → Deposit to Morpho → Borrow to repay
 
+Both routers use a fixed debt model: `debt = principal × (leverage - 1)`. For 2x leverage with $100 principal, Morpho debt is always $100.
+
 Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
 
 Both routers include MEV protection via user-defined slippage caps (max 1%).

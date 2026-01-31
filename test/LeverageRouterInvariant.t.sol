@@ -4,9 +4,11 @@ pragma solidity ^0.8.20;
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
+import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
+import {MockOracle} from "./utils/MockOracle.sol";
 import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -611,16 +613,19 @@ contract InvariantMockSplitter is ISyntheticSplitter {
     InvariantMockToken public usdc;
     InvariantMockFlashToken public plDxyBear;
     InvariantMockToken public plDxyBull;
+    AggregatorV3Interface public ORACLE;
     uint256 public constant CAP_VALUE = 200_000_000; // $2.00 in 8 decimals
 
     constructor(
         address _usdc,
         address _plDxyBear,
-        address _plDxyBull
+        address _plDxyBull,
+        address _oracle
     ) {
         usdc = InvariantMockToken(_usdc);
         plDxyBear = InvariantMockFlashToken(_plDxyBear);
         plDxyBull = InvariantMockToken(_plDxyBull);
+        ORACLE = AggregatorV3Interface(_oracle);
     }
 
     function CAP() external pure override returns (uint256) {
@@ -990,6 +995,7 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     InvariantMockStakedToken public stakedPlDxyBull;
     InvariantMockCurvePool public curvePool;
     InvariantMockSplitter public splitter;
+    MockOracle public oracle;
     BullLeverageRouterHandler public handler;
     MarketParams public marketParams;
 
@@ -1000,7 +1006,8 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
         plDxyBull = new InvariantMockToken("plDXY-BULL", "BULL", 18);
         stakedPlDxyBull = new InvariantMockStakedToken(address(plDxyBull));
         curvePool = new InvariantMockCurvePool(address(usdc), address(plDxyBear));
-        splitter = new InvariantMockSplitter(address(usdc), address(plDxyBear), address(plDxyBull));
+        oracle = new MockOracle(92_000_000, "Basket"); // BEAR price $0.92
+        splitter = new InvariantMockSplitter(address(usdc), address(plDxyBear), address(plDxyBull), address(oracle));
         morpho = new InvariantMockMorphoBull(address(usdc), address(0), address(stakedPlDxyBull));
 
         // Fund Morpho for flash loans

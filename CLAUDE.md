@@ -79,6 +79,8 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - Morpho market uses splDXY-BULL as collateral token
 - Requires user authorization in Morpho (`isAuthorized`)
 
+**Fixed Debt Model**: Both routers use identical debt calculation: `debt = principal × (leverage - 1)`. For 2x leverage with $100, debt is always $100 regardless of Curve prices.
+
 ### Oracle Layer
 
 **BasketOracle** - Computes plDXY as weighted basket of 6 Chainlink feeds (EUR, JPY, GBP, CAD, SEK, CHF)
