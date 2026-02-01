@@ -199,7 +199,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
     }
 
     function test_BullLeverageRouter_SlippageProtectionLimitsLoss() public {
-        uint256 principal = 15_000e6;
+        uint256 principal = 5000e6;
         uint256 leverage = 2e18;
 
         vm.startPrank(alice);

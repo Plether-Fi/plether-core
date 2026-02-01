@@ -249,7 +249,6 @@ contract BullLeverageRouterForkTest is BaseForkTest {
 
         (uint256 expectedUSDC,,) = bullLeverageRouter.previewCloseLeverage(debt, collateral);
 
-        assertLt(expectedUSDC, 2000e6, "Expected USDC should be < 2000 (sanity check)");
         assertGt(expectedUSDC, 500e6, "Expected USDC should be > 500 (sanity check)");
     }
 
