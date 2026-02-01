@@ -22,6 +22,9 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     /// @notice Maximum slippage in basis points (1% = 100 bps).
     uint256 public constant MAX_SLIPPAGE_BPS = 100;
 
+    /// @notice Buffer for exchange rate drift protection (1% = 100 bps).
+    uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
+
     /// @notice USDC index in Curve USDC/plDXY-BEAR pool.
     uint256 public constant USDC_INDEX = 0;
 
@@ -121,6 +124,55 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     /// @notice Unpause the router.
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    // ==========================================
+    // VIEW FUNCTIONS
+    // ==========================================
+
+    /// @notice Returns the user's current debt in this market (includes accrued interest).
+    /// @param user The address to query debt for.
+    /// @return debt The actual debt amount in USDC (rounded up).
+    function getActualDebt(
+        address user
+    ) external view returns (uint256 debt) {
+        return _getActualDebt(user);
+    }
+
+    // ==========================================
+    // INTERNAL FUNCTIONS
+    // ==========================================
+
+    /// @dev Computes market ID from marketParams.
+    function _marketId() internal view returns (bytes32) {
+        return keccak256(abi.encode(marketParams));
+    }
+
+    /// @dev Computes actual debt from Morpho position, rounded up to ensure full repayment.
+    function _getActualDebt(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        if (borrowShares == 0) {
+            return 0;
+        }
+
+        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
+        if (totalBorrowShares == 0) {
+            return 0;
+        }
+
+        return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
+    }
+
+    /// @dev Returns user's borrow shares from Morpho position.
+    function _getBorrowShares(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
+        return uint256(borrowShares);
     }
 
 }

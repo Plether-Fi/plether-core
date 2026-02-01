@@ -40,9 +40,6 @@ contract LeverageRouter is LeverageRouterBase {
     /// @notice StakedToken vault for plDXY-BEAR (used as Morpho collateral).
     IERC4626 public immutable STAKED_PLDXY_BEAR;
 
-    /// @notice Buffer for exchange rate drift protection (1% = 100 bps).
-    uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
-
     /// @notice Deploys LeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
@@ -179,49 +176,6 @@ contract LeverageRouter is LeverageRouterBase {
         }
 
         // Event emitted in _executeClose or _executeCloseNoDebt
-    }
-
-    /// @notice Returns the user's current debt in this market (includes accrued interest).
-    /// @param user The address to query debt for.
-    /// @return debt The actual debt amount in USDC (rounded up).
-    function getActualDebt(
-        address user
-    ) external view returns (uint256 debt) {
-        return _getActualDebt(user);
-    }
-
-    /// @dev Computes actual debt from Morpho position, rounded up to ensure full repayment.
-    function _getActualDebt(
-        address user
-    ) internal view returns (uint256) {
-        bytes32 marketId = _marketId();
-        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        if (borrowShares == 0) {
-            return 0;
-        }
-
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
-        if (totalBorrowShares == 0) {
-            return 0;
-        }
-
-        // Round up to ensure full repayment
-        return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
-    }
-
-    /// @dev Returns user's borrow shares from Morpho position.
-    /// @dev Used for shares-based repayment to avoid Morpho edge case when repaying exact debt.
-    function _getBorrowShares(
-        address user
-    ) internal view returns (uint256) {
-        bytes32 marketId = _marketId();
-        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        return uint256(borrowShares);
-    }
-
-    /// @dev Computes market ID from marketParams.
-    function _marketId() internal view returns (bytes32) {
-        return keccak256(abi.encode(marketParams));
     }
 
     /// @notice Morpho flash loan callback. Routes to open or close handler.

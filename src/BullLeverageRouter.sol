@@ -88,9 +88,12 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice Oracle for plDXY basket price (returns BEAR price in 8 decimals).
     AggregatorV3Interface public immutable ORACLE;
 
-    /// @notice Buffer for exchange rate drift between previewRedeem and redeem (1%).
-    /// @dev Protects against DoS attacks via yield donation front-running.
-    uint256 public constant EXCHANGE_RATE_BUFFER_BPS = 100;
+    struct OpenParams {
+        uint256 targetDebt;
+        uint256 loanAmount;
+        uint256 tokensToMint;
+        uint256 expectedBearSale;
+    }
 
     /// @notice Deploys BullLeverageRouter with Morpho market configuration.
     /// @param _morpho Morpho Blue protocol address.
@@ -186,48 +189,20 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__SplitterNotActive();
         }
 
-        // Target debt = what user expects to owe (same formula as BEAR router)
-        uint256 targetDebt = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
-        if (targetDebt == 0) {
+        OpenParams memory params = _calculateOpenParams(principal, leverage);
+        if (params.targetDebt == 0) {
             revert LeverageRouterBase__LeverageTooLow();
         }
 
         USDC.safeTransferFrom(msg.sender, address(this), principal);
 
-        // Get BEAR price from oracle to calculate target tokens
-        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
-        uint256 bearPrice = uint256(rawPrice);
-        uint256 bullPrice = CAP - bearPrice;
+        uint256 minSwapOut = (params.expectedBearSale * (10_000 - maxSlippageBps)) / 10_000;
 
-        // Target collateral value = principal * leverage
-        uint256 targetCollateralValue = (principal * leverage) / DecimalConstants.ONE_WAD;
+        bytes memory data = abi.encode(
+            OP_OPEN, msg.sender, deadline, principal, leverage, params.targetDebt, maxSlippageBps, minSwapOut
+        );
 
-        // Target tokens = targetCollateralValue / bullPrice (based on oracle)
-        uint256 tokensToMint = (targetCollateralValue * DecimalConstants.USDC_TO_TOKEN_SCALE) / bullPrice;
-
-        // Calculate initial flash loan estimate based on Curve quote
-        uint256 expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, tokensToMint);
-        uint256 loanAmount = expectedBearSale + targetDebt;
-
-        // Recalculate tokensToMint based on actual loan amount
-        uint256 totalUSDC = principal + loanAmount;
-        tokensToMint = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
-
-        // Final calculation: get Curve quote for actual tokens we'll mint
-        expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, tokensToMint);
-
-        // CRITICAL: Use slightly LOWER loanAmount to guarantee repayment
-        // The circular dependency (loanAmount → tokensToMint → bearSale → loanAmount) means
-        // we need a buffer. 0.1% reduction ensures bearSaleProceeds + morphoBorrow > loanAmount.
-        uint256 bufferedBearSale = (expectedBearSale * 9990) / 10_000;
-        loanAmount = bufferedBearSale + targetDebt;
-
-        uint256 minSwapOut = (expectedBearSale * (10_000 - maxSlippageBps)) / 10_000;
-
-        bytes memory data =
-            abi.encode(OP_OPEN, msg.sender, deadline, principal, leverage, targetDebt, maxSlippageBps, minSwapOut);
-
-        MORPHO.flashLoan(address(USDC), loanAmount, data);
+        MORPHO.flashLoan(address(USDC), params.loanAmount, data);
     }
 
     /**
@@ -306,49 +281,6 @@ contract BullLeverageRouter is LeverageRouterBase {
         IERC3156FlashLender(address(PLDXY_BEAR)).flashLoan(this, address(PLDXY_BEAR), flashAmount, data);
 
         // Event emitted in _executeClose callback
-    }
-
-    /// @notice Returns the user's current debt in this market (includes accrued interest).
-    /// @param user The address to query debt for.
-    /// @return debt The actual debt amount in USDC (rounded up).
-    function getActualDebt(
-        address user
-    ) external view returns (uint256 debt) {
-        return _getActualDebt(user);
-    }
-
-    /// @dev Computes actual debt from Morpho position, rounded up to ensure full repayment.
-    function _getActualDebt(
-        address user
-    ) internal view returns (uint256) {
-        bytes32 marketId = _marketId();
-        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        if (borrowShares == 0) {
-            return 0;
-        }
-
-        (,, uint128 totalBorrowAssets, uint128 totalBorrowShares,,) = MORPHO.market(marketId);
-        if (totalBorrowShares == 0) {
-            return 0;
-        }
-
-        // Round up to ensure full repayment
-        return (uint256(borrowShares) * totalBorrowAssets + totalBorrowShares - 1) / totalBorrowShares;
-    }
-
-    /// @dev Returns user's borrow shares from Morpho position.
-    /// @dev Used for shares-based repayment to avoid Morpho edge case when repaying exact debt.
-    function _getBorrowShares(
-        address user
-    ) internal view returns (uint256) {
-        bytes32 marketId = _marketId();
-        (, uint128 borrowShares,) = MORPHO.position(marketId, user);
-        return uint256(borrowShares);
-    }
-
-    /// @dev Computes market ID from marketParams.
-    function _marketId() internal view returns (bytes32) {
-        return keccak256(abi.encode(marketParams));
     }
 
     /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
@@ -577,36 +509,11 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__LeverageTooLow();
         }
 
-        // Fixed debt model: Morpho debt = principal * (leverage - 1)
-        expectedDebt = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
-
-        // Get BEAR price from oracle (8 decimals)
-        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
-        uint256 bearPrice = uint256(rawPrice);
-        uint256 bullPrice = CAP - bearPrice;
-
-        // Target collateral value = principal * leverage (in USDC terms)
-        uint256 targetCollateralValue = (principal * leverage) / DecimalConstants.ONE_WAD;
-
-        // Initial token estimate based on oracle
-        uint256 initialTokens = (targetCollateralValue * DecimalConstants.USDC_TO_TOKEN_SCALE) / bullPrice;
-
-        // Calculate initial flash loan estimate based on Curve quote
-        uint256 expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, initialTokens);
-        loanAmount = expectedBearSale + expectedDebt;
-
-        // Recalculate tokens with the loan amount
-        totalUSDC = principal + loanAmount;
-        uint256 tokensToMint = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
-
-        // Final calculation: get Curve quote for actual tokens we'll mint (matches openLeverage)
-        expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, tokensToMint);
-
-        // CRITICAL: Use slightly LOWER loanAmount to guarantee repayment (matches openLeverage)
-        uint256 bufferedBearSale = (expectedBearSale * 9990) / 10_000;
-        loanAmount = bufferedBearSale + expectedDebt;
+        OpenParams memory params = _calculateOpenParams(principal, leverage);
+        loanAmount = params.loanAmount;
         totalUSDC = principal + loanAmount;
         expectedPlDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        expectedDebt = params.targetDebt;
     }
 
     /**
@@ -656,6 +563,30 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 totalOutflows = debtToRepay + usdcForBearBuyback;
 
         expectedReturn = totalInflows > totalOutflows ? totalInflows - totalOutflows : 0;
+    }
+
+    /// @dev Calculates parameters for opening a leveraged position.
+    function _calculateOpenParams(
+        uint256 principal,
+        uint256 leverage
+    ) private view returns (OpenParams memory params) {
+        params.targetDebt = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
+
+        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
+        uint256 bullPrice = CAP - uint256(rawPrice);
+
+        uint256 targetCollateralValue = (principal * leverage) / DecimalConstants.ONE_WAD;
+        uint256 initialTokens = (targetCollateralValue * DecimalConstants.USDC_TO_TOKEN_SCALE) / bullPrice;
+
+        params.expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, initialTokens);
+        uint256 initialLoan = params.expectedBearSale + params.targetDebt;
+
+        uint256 totalUSDC = principal + initialLoan;
+        params.tokensToMint = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+
+        params.expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, params.tokensToMint);
+        uint256 bufferedBearSale = (params.expectedBearSale * 9990) / 10_000;
+        params.loanAmount = bufferedBearSale + params.targetDebt;
     }
 
     /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.
