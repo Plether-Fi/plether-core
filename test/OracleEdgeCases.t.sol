@@ -136,8 +136,8 @@ contract OracleEdgeCasesTest is Test {
         // First mint works
         splitter.mint(mintAmount);
 
-        // Advance time by 9 hours (staleness threshold is typically 8 hours)
-        vm.warp(block.timestamp + 9 hours);
+        // Advance time by 25 hours (staleness threshold is 24 hours)
+        vm.warp(block.timestamp + 25 hours);
 
         // Oracle data is now stale - mint should revert
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);

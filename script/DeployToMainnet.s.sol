@@ -11,6 +11,7 @@ import {ZapRouter} from "../src/ZapRouter.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
+import {PythAdapter} from "../src/oracles/PythAdapter.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
@@ -70,13 +71,18 @@ contract DeployToMainnet is Script {
     // ==========================================
 
     // Chainlink Price Feeds (Mainnet)
-    // Note: These are USD/XXX feeds, we need XXX/USD so we invert in BasketOracle
     address constant CHAINLINK_EUR_USD = 0xb49f677943BC038e9857d61E7d053CaA2C1734C1;
     address constant CHAINLINK_JPY_USD = 0xBcE206caE7f0ec07b545EddE332A47C2F75bbeb3;
     address constant CHAINLINK_GBP_USD = 0x5c0Ab2d9b5a7ed9f470386e82BB36A3613cDd4b5;
     address constant CHAINLINK_CAD_USD = 0xa34317DB73e77d453b1B8d04550c44D10e981C8e;
-    address constant CHAINLINK_SEK_USD = 0x803a123F84E77A13C69459F0C8952d7d5a6f1B8c; // Note: May need verification
+    // SEK/USD: No Chainlink feed on mainnet - use PythAdapter
     address constant CHAINLINK_CHF_USD = 0x449d117117838fFA61263B61dA6301AA2a88B13A;
+
+    // Pyth Configuration (Ethereum Mainnet)
+    address constant PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
+    // USD/SEK price ID (inverted to get SEK/USD)
+    bytes32 constant USD_SEK_PRICE_ID = 0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676;
+    uint256 constant PYTH_MAX_STALENESS = 24 hours;
 
     // L2 Sequencer Uptime Feed (address(0) for L1 mainnet)
     address constant SEQUENCER_UPTIME_FEED = address(0);
@@ -113,6 +119,7 @@ contract DeployToMainnet is Script {
     // ==========================================
 
     struct DeployedContracts {
+        PythAdapter sekPythAdapter;
         BasketOracle basketOracle;
         MorphoAdapter morphoAdapter;
         SyntheticSplitter splitter;
@@ -142,9 +149,15 @@ contract DeployToMainnet is Script {
         vm.startBroadcast(privateKey);
 
         // ==========================================
+        // STEP 0: Deploy PythAdapter for SEK/USD (inverts USD/SEK from Pyth)
+        // ==========================================
+        deployed.sekPythAdapter = new PythAdapter(PYTH, USD_SEK_PRICE_ID, PYTH_MAX_STALENESS, "SEK / USD", true);
+        console.log("PythAdapter (SEK/USD) deployed:", address(deployed.sekPythAdapter));
+
+        // ==========================================
         // STEP 1: Deploy BasketOracle (without Curve pool)
         // ==========================================
-        deployed.basketOracle = _deployBasketOracle(deployer);
+        deployed.basketOracle = _deployBasketOracle(deployer, address(deployed.sekPythAdapter));
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // ==========================================
@@ -271,14 +284,15 @@ contract DeployToMainnet is Script {
     // ==========================================
 
     function _deployBasketOracle(
-        address owner
+        address owner,
+        address sekPythAdapter
     ) internal returns (BasketOracle) {
         address[] memory feeds = new address[](6);
         feeds[0] = CHAINLINK_EUR_USD;
         feeds[1] = CHAINLINK_JPY_USD;
         feeds[2] = CHAINLINK_GBP_USD;
         feeds[3] = CHAINLINK_CAD_USD;
-        feeds[4] = CHAINLINK_SEK_USD;
+        feeds[4] = sekPythAdapter; // PythAdapter for SEK/USD
         feeds[5] = CHAINLINK_CHF_USD;
 
         uint256[] memory quantities = new uint256[](6);
@@ -358,11 +372,12 @@ contract DeployToMainnet is Script {
         console.log("========================================");
         console.log("");
         console.log("Core Contracts:");
+        console.log("  PythAdapter (SEK):   ", address(d.sekPythAdapter));
         console.log("  BasketOracle:        ", address(d.basketOracle));
         console.log("  MorphoAdapter:       ", address(d.morphoAdapter));
         console.log("  SyntheticSplitter:   ", address(d.splitter));
-        console.log("  plDXY-BEAR:            ", address(d.plDxyBear));
-        console.log("  plDXY-BULL:            ", address(d.plDxyBull));
+        console.log("  plDXY-BEAR:          ", address(d.plDxyBear));
+        console.log("  plDXY-BULL:          ", address(d.plDxyBull));
         console.log("  Curve Pool:          ", d.curvePool);
         console.log("");
         console.log("Morpho Oracles:");

@@ -21,7 +21,7 @@ import "forge-std/Script.sol";
  *   (source .env && forge script script/DeployRewardDistributor.s.sol --tc DeployRewardDistributor --rpc-url $SEPOLIA_RPC_URL --broadcast)
  *
  * Required environment variables:
- *   SEPOLIA_PRIVATE_KEY - Deployer private key
+ *   TEST_PRIVATE_KEY - Deployer private key
  *
  * Required constructor addresses (update before deployment):
  *   SPLITTER, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BEAR, STAKED_BULL, CURVE_POOL, ZAP_ROUTER, ORACLE
@@ -32,7 +32,7 @@ contract DeployRewardDistributor is Script {
     // DEPLOYMENT ADDRESSES (UPDATE BEFORE DEPLOY)
     // ==========================================
 
-    // These should be set to the actual deployed addresses from DeployToSepolia
+    // These should be set to the actual deployed addresses from DeployToTest
     address constant SPLITTER = address(0);
     address constant USDC = address(0);
     address constant PLDXY_BEAR = address(0);
@@ -44,7 +44,7 @@ contract DeployRewardDistributor is Script {
     address constant ORACLE = address(0);
 
     function run() external returns (RewardDistributor distributor) {
-        uint256 privateKey = vm.envUint("SEPOLIA_PRIVATE_KEY");
+        uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
         console.log("Deployer:", deployer);
@@ -63,7 +63,7 @@ contract DeployRewardDistributor is Script {
         vm.startBroadcast(privateKey);
 
         distributor = new RewardDistributor(
-            SPLITTER, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BEAR, STAKED_BULL, CURVE_POOL, ZAP_ROUTER, ORACLE
+            SPLITTER, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BEAR, STAKED_BULL, CURVE_POOL, ZAP_ROUTER, ORACLE, address(0)
         );
 
         vm.stopBroadcast();

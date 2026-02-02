@@ -30,6 +30,14 @@ interface IRewardDistributor {
     /// @return callerReward Amount of USDC sent to caller as incentive.
     function distributeRewards() external returns (uint256 callerReward);
 
+    /// @notice Distributes rewards after updating the Pyth oracle price.
+    /// @dev Bundles Pyth price update with reward distribution. Pass empty array if no update needed.
+    /// @param pythUpdateData Price update data from Pyth Hermes API.
+    /// @return callerReward Amount of USDC sent to caller as incentive.
+    function distributeRewardsWithPriceUpdate(
+        bytes[] calldata pythUpdateData
+    ) external payable returns (uint256 callerReward);
+
     /// @notice Preview the distribution without executing.
     /// @return bearPct Expected percentage to BEAR stakers (basis points).
     /// @return bullPct Expected percentage to BULL stakers (basis points).

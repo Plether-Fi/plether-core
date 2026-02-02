@@ -12,6 +12,7 @@ import {IRewardDistributor} from "./interfaces/IRewardDistributor.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
+import {PythAdapter} from "./oracles/PythAdapter.sol";
 
 /// @title RewardDistributor
 /// @notice Distributes staking rewards based on price discrepancy between oracle and Curve EMA.
@@ -39,8 +40,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @notice Maximum slippage for Curve swaps (1% = 100 bps).
     uint256 public constant MAX_SWAP_SLIPPAGE_BPS = 100;
 
-    /// @notice Maximum age for oracle price data (8 hours).
-    uint256 public constant ORACLE_TIMEOUT = 8 hours;
+    /// @notice Maximum age for oracle price data (24 hours to match Chainlink CHF/CAD heartbeat).
+    uint256 public constant ORACLE_TIMEOUT = 24 hours;
 
     /// @notice SyntheticSplitter contract.
     ISyntheticSplitter public immutable SPLITTER;
@@ -69,6 +70,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @notice BasketOracle for theoretical price.
     AggregatorV3Interface public immutable ORACLE;
 
+    /// @notice Optional PythAdapter for SEK/USD price updates (address(0) if not used).
+    PythAdapter public immutable PYTH_ADAPTER;
+
     /// @notice Protocol CAP price (8 decimals).
     uint256 public immutable CAP;
 
@@ -85,6 +89,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @param _curvePool Curve USDC/plDXY-BEAR pool.
     /// @param _zapRouter ZapRouter for BULL acquisition.
     /// @param _oracle BasketOracle for price data.
+    /// @param _pythAdapter Optional PythAdapter for SEK/USD updates (address(0) if not used).
     constructor(
         address _splitter,
         address _usdc,
@@ -94,7 +99,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         address _stakedBull,
         address _curvePool,
         address _zapRouter,
-        address _oracle
+        address _oracle,
+        address _pythAdapter
     ) {
         if (_splitter == address(0)) {
             revert RewardDistributor__ZeroAddress();
@@ -133,6 +139,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         CURVE_POOL = ICurvePool(_curvePool);
         ZAP_ROUTER = ZapRouter(_zapRouter);
         ORACLE = AggregatorV3Interface(_oracle);
+        PYTH_ADAPTER = PythAdapter(_pythAdapter);
 
         CAP = ISyntheticSplitter(_splitter).CAP();
 
@@ -145,6 +152,11 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
 
     /// @inheritdoc IRewardDistributor
     function distributeRewards() external nonReentrant returns (uint256 callerReward) {
+        return _distributeRewardsInternal();
+    }
+
+    /// @dev Internal implementation of reward distribution.
+    function _distributeRewardsInternal() internal returns (uint256 callerReward) {
         if (block.timestamp < lastDistributionTime + MIN_DISTRIBUTION_INTERVAL) {
             revert RewardDistributor__DistributionTooSoon();
         }
@@ -174,6 +186,20 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         USDC.safeTransfer(msg.sender, callerReward);
 
         emit RewardsDistributed(bearAmount, bullAmount, bearPct, bullPct);
+    }
+
+    /// @notice Distributes rewards after updating the Pyth oracle price.
+    /// @dev Bundles Pyth price update with reward distribution to save gas.
+    ///      Caller receives the same reward as distributeRewards().
+    /// @param pythUpdateData Price update data from Pyth Hermes API.
+    /// @return callerReward Amount of USDC sent to caller as incentive.
+    function distributeRewardsWithPriceUpdate(
+        bytes[] calldata pythUpdateData
+    ) external payable nonReentrant returns (uint256 callerReward) {
+        if (address(PYTH_ADAPTER) != address(0) && pythUpdateData.length > 0) {
+            PYTH_ADAPTER.updatePrice{value: msg.value}(pythUpdateData);
+        }
+        return _distributeRewardsInternal();
     }
 
     /// @inheritdoc IRewardDistributor

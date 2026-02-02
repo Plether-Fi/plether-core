@@ -473,8 +473,8 @@ contract BasketOracleForkTest is Test {
         (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
         IERC20(USDC).approve(address(splitter), usdcRequired);
 
-        // Warp 9 hours past the feed's updatedAt (staleness threshold is 8 hours)
-        vm.warp(block.timestamp + 9 hours);
+        // Warp 25 hours past the feed's updatedAt (staleness threshold is 24 hours)
+        vm.warp(block.timestamp + 25 hours);
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
         splitter.mint(mintAmount);
@@ -483,7 +483,7 @@ contract BasketOracleForkTest is Test {
     function test_StaleOracle_RecoveryAfterFreshUpdate() public {
         _deployProtocolWithBasket();
 
-        vm.warp(block.timestamp + 9 hours);
+        vm.warp(block.timestamp + 25 hours);
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
         splitter.previewMint(1000e18);

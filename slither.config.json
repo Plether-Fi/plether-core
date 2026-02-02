@@ -4,11 +4,11 @@
     "timestamp",
     "divide-before-multiply",
     "reentrancy-events",
-    "calls-inside-a-loop",
+    "reentrancy-balance",
+    "reentrancy-no-eth",
     "calls-loop",
     "unused-state",
-    "unused-return",
-    "reentrancy-no-eth"
+    "unused-return"
   ],
   "filter_paths": "lib/,test/,script/",
   "exclude_dependencies": true

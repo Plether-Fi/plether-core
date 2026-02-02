@@ -50,7 +50,8 @@ contract RewardDistributorForkTest is BaseForkTest {
             address(stBull),
             curvePool,
             address(zapRouter),
-            address(basketOracle)
+            address(basketOracle),
+            address(0)
         );
 
         IERC20(bearToken).transfer(address(stBear), 100_000e18);
@@ -397,24 +398,24 @@ contract RewardDistributorForkTest is BaseForkTest {
         distributor.previewDistribution();
     }
 
-    /// @notice Distribution succeeds within 8-hour timeout window
-    /// @dev setUp warps to updatedAt + 1 hour, so we have 7 hours remaining
+    /// @notice Distribution succeeds within 24-hour timeout window
+    /// @dev setUp warps to updatedAt + 1 hour, so we have 23 hours remaining
     function test_OracleTimeout_SucceedsWithinWindow() public {
         deal(USDC, address(distributor), 10_000e6);
 
-        vm.warp(block.timestamp + 6 hours);
+        vm.warp(block.timestamp + 22 hours);
 
         vm.prank(keeper);
         uint256 callerReward = distributor.distributeRewards();
         assertGt(callerReward, 0, "Distribution should succeed within timeout window");
     }
 
-    /// @notice Distribution fails after 8-hour timeout
+    /// @notice Distribution fails after 24-hour timeout
     /// @dev OracleLib uses `<` so we need to exceed timeout by at least 1 second
     function test_OracleTimeout_FailsAfterTimeout() public {
         deal(USDC, address(distributor), 10_000e6);
 
-        vm.warp(block.timestamp + 7 hours + 1);
+        vm.warp(block.timestamp + 23 hours + 1);
 
         vm.prank(keeper);
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);

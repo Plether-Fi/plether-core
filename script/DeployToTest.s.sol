@@ -11,8 +11,10 @@ import {ZapRouter} from "../src/ZapRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
+import {IPyth, PythStructs} from "../src/interfaces/IPyth.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
+import {PythAdapter} from "../src/oracles/PythAdapter.sol";
 import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {MockYieldAdapter} from "../test/utils/MockYieldAdapter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -69,7 +71,7 @@ contract MockUSDC is ERC20 {
 
 }
 
-// Mock AggregatorV3Interface for testing on Sepolia (since fiat feeds may not be available)
+// Mock AggregatorV3Interface for testing (since fiat feeds may not be available)
 contract MockV3Aggregator is AggregatorV3Interface {
 
     int256 private immutable _price;
@@ -114,21 +116,60 @@ contract MockV3Aggregator is AggregatorV3Interface {
 
 }
 
+// Mock Pyth for testing (allows setting arbitrary prices)
+contract MockPyth is IPyth {
+
+    mapping(bytes32 => PythStructs.Price) public prices;
+
+    function setPrice(
+        bytes32 id,
+        int64 price,
+        uint64 conf,
+        int32 expo
+    ) external {
+        prices[id] = PythStructs.Price({price: price, conf: conf, expo: expo, publishTime: block.timestamp});
+    }
+
+    function getPriceUnsafe(
+        bytes32 id
+    ) external view returns (PythStructs.Price memory) {
+        return prices[id];
+    }
+
+    function getPriceNoOlderThan(
+        bytes32 id,
+        uint256
+    ) external view returns (PythStructs.Price memory) {
+        return prices[id];
+    }
+
+    function updatePriceFeeds(
+        bytes[] calldata
+    ) external payable {}
+
+    function getUpdateFee(
+        bytes[] calldata
+    ) external pure returns (uint256) {
+        return 0;
+    }
+
+}
+
 /**
- * @title DeployToSepolia
- * @notice Deployment script for Plether protocol on Sepolia testnet
+ * @title DeployToTest
+ * @notice Deployment script for Plether protocol on test networks (Sepolia, Anvil)
  * @dev Deploys all contracts in correct dependency order using mock adapters
  */
-contract DeployToSepolia is Script {
+contract DeployToTest is Script {
 
     // ==========================================
-    // SEPOLIA ADDRESSES
+    // TEST NETWORK ADDRESSES (Sepolia)
     // ==========================================
 
-    // Curve Twocrypto-NG Factory on Sepolia
+    // Curve Twocrypto-NG Factory
     address constant TWOCRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
 
-    // Morpho Blue on Sepolia
+    // Morpho Blue
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
     address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
 
@@ -175,11 +216,13 @@ contract DeployToSepolia is Script {
         ZapRouter zapRouter;
         LeverageRouter leverageRouter;
         BullLeverageRouter bullLeverageRouter;
+        MockPyth mockPyth;
+        PythAdapter pythAdapter;
         RewardDistributor rewardDistributor;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
-        uint256 privateKey = vm.envUint("SEPOLIA_PRIVATE_KEY");
+        uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
         console.log("Deployer:", deployer);
@@ -187,15 +230,16 @@ contract DeployToSepolia is Script {
 
         vm.startBroadcast(privateKey);
 
-        // Predict RewardDistributor address (deployed at nonce + 34)
+        // Predict RewardDistributor address (deployed at nonce + 37)
         // Transaction count before RewardDistributor:
         // MockUSDC(1) + Feeds(6) + BasketOracle(1) + Adapter(1) + Splitter(1) + deploy_pool(1) + setCurvePool(1)
         // + _seedCurvePool: 2x mint + 2x approve + mint + approve + add_liquidity (7)
         // + MorphoOracles(2) + StakedTokens(2) + StakedOracles(2)
         // + createMarket(2) + _seedMorphoMarkets: mint + approve + 2x supply (4)
-        // + ZapRouter(1) + LeverageRouter(1) + BullLeverageRouter(1) = 34
+        // + ZapRouter(1) + LeverageRouter(1) + BullLeverageRouter(1)
+        // + MockPyth(1) + PythAdapter(1) + setPrice(1) = 37
         uint64 startNonce = vm.getNonce(deployer);
-        address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + 34);
+        address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + 37);
         console.log("Predicted RewardDistributor:", predictedRewardDistributor);
 
         // Step 1: Deploy MockUSDC
@@ -442,7 +486,17 @@ contract DeployToSepolia is Script {
         );
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
 
-        // Deploy RewardDistributor
+        // Deploy MockPyth and PythAdapter for SEK/USD
+        // USD/SEK price ID (will be inverted to SEK/USD)
+        bytes32 usdSekPriceId = 0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676;
+        d.mockPyth = new MockPyth();
+        d.pythAdapter = new PythAdapter(address(d.mockPyth), usdSekPriceId, 24 hours, "SEK / USD", true);
+        // Set USD/SEK = 10.75 (1075000 with expo -5) → SEK/USD ≈ 0.093
+        d.mockPyth.setPrice(usdSekPriceId, 1_075_000, 10_000, -5);
+        console.log("MockPyth:", address(d.mockPyth));
+        console.log("PythAdapter (SEK/USD):", address(d.pythAdapter));
+
+        // Deploy RewardDistributor with PythAdapter
         d.rewardDistributor = new RewardDistributor(
             address(d.splitter),
             address(d.usdc),
@@ -452,7 +506,8 @@ contract DeployToSepolia is Script {
             address(d.stakedBull),
             d.curvePool,
             address(d.zapRouter),
-            address(d.basketOracle)
+            address(d.basketOracle),
+            address(d.pythAdapter)
         );
         console.log("RewardDistributor:", address(d.rewardDistributor));
     }
@@ -498,7 +553,7 @@ contract DeployToSepolia is Script {
         DeployedContracts memory d
     ) internal pure {
         console.log("========================================");
-        console.log("SEPOLIA DEPLOYMENT COMPLETE");
+        console.log("TEST DEPLOYMENT COMPLETE");
         console.log("========================================");
         console.log("");
         console.log("Infrastructure:");
@@ -526,6 +581,10 @@ contract DeployToSepolia is Script {
         console.log("  ZapRouter:           ", address(d.zapRouter));
         console.log("  LeverageRouter:      ", address(d.leverageRouter));
         console.log("  BullLeverageRouter:  ", address(d.bullLeverageRouter));
+        console.log("");
+        console.log("Pyth Oracle:");
+        console.log("  MockPyth:            ", address(d.mockPyth));
+        console.log("  PythAdapter (SEK):   ", address(d.pythAdapter));
         console.log("");
         console.log("Rewards:");
         console.log("  RewardDistributor:   ", address(d.rewardDistributor));

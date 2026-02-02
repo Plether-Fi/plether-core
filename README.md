@@ -222,8 +222,8 @@ For frontend development and testing without spending real ETH:
 anvil --fork-url $MAINNET_RPC_URL --chain-id 31337
 
 # 2. Deploy all contracts (mints 100k USDC to deployer)
-SEPOLIA_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
-forge script script/DeployToSepolia.s.sol --tc DeployToSepolia \
+TEST_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+forge script script/DeployToTest.s.sol --tc DeployToTest \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
 

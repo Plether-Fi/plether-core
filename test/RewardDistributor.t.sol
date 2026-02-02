@@ -33,7 +33,7 @@ contract RewardDistributorTest is Test {
     uint256 constant CAP = 2e8;
 
     function setUp() public {
-        vm.warp(10 hours);
+        vm.warp(25 hours); // Must be > 24 hours to avoid underflow in staleness check
 
         usdc = new MockToken("USDC", "USDC");
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
@@ -60,7 +60,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
 
         plDxyBear.mint(address(stakedBear), 1000e18);
@@ -229,7 +230,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -244,7 +246,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -259,7 +262,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -274,7 +278,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -289,7 +294,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -304,7 +310,8 @@ contract RewardDistributorTest is Test {
             address(0),
             address(curvePool),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -319,7 +326,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(0),
             address(zapRouter),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -334,7 +342,8 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(0),
-            address(oracle)
+            address(oracle),
+            address(0)
         );
     }
 
@@ -349,6 +358,7 @@ contract RewardDistributorTest is Test {
             address(stakedBull),
             address(curvePool),
             address(zapRouter),
+            address(0),
             address(0)
         );
     }
@@ -1136,6 +1146,59 @@ contract RewardDistributorTest is Test {
         assertGt(bullDonated, 0, "BULL should receive rewards via zap");
     }
 
+    // ============================================
+    // DISTRIBUTE REWARDS WITH PRICE UPDATE TESTS
+    // ============================================
+
+    function test_DistributeRewardsWithPriceUpdate_WorksWithNoPythAdapter() public {
+        // PYTH_ADAPTER is address(0) in setUp
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+        usdc.mint(address(distributor), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        bytes[] memory emptyUpdateData = new bytes[](0);
+
+        vm.prank(alice);
+        uint256 callerReward = distributor.distributeRewardsWithPriceUpdate(emptyUpdateData);
+
+        assertEq(callerReward, 0.1e6, "Caller should receive 0.1% reward");
+
+        uint256 bearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        assertGt(bearDonated, 0, "BEAR should receive rewards");
+    }
+
+    function test_DistributeRewardsWithPriceUpdate_SkipsUpdateWhenEmptyData() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+        usdc.mint(address(distributor), 100e6);
+
+        bytes[] memory emptyUpdateData = new bytes[](0);
+
+        vm.prank(alice);
+        uint256 callerReward = distributor.distributeRewardsWithPriceUpdate(emptyUpdateData);
+
+        assertEq(callerReward, 0.1e6, "Should work with empty update data");
+    }
+
+    function test_DistributeRewardsWithPriceUpdate_RespectsCooldown() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+        usdc.mint(address(distributor), 100e6);
+
+        bytes[] memory emptyUpdateData = new bytes[](0);
+
+        vm.prank(alice);
+        distributor.distributeRewardsWithPriceUpdate(emptyUpdateData);
+
+        usdc.mint(address(distributor), 100e6);
+
+        vm.prank(alice);
+        vm.expectRevert(IRewardDistributor.RewardDistributor__DistributionTooSoon.selector);
+        distributor.distributeRewardsWithPriceUpdate(emptyUpdateData);
+    }
+
 }
 
 contract MockToken is ERC20 {
@@ -1366,6 +1429,106 @@ contract MockOracle is AggregatorV3Interface {
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
         return (0, _price, 0, block.timestamp, 0);
+    }
+
+}
+
+contract MockPythAdapter {
+
+    bool public updateCalled;
+    uint256 public lastUpdateValue;
+
+    function updatePrice(
+        bytes[] calldata
+    ) external payable {
+        updateCalled = true;
+        lastUpdateValue = msg.value;
+    }
+
+}
+
+contract RewardDistributorPythTest is Test {
+
+    RewardDistributor public distributor;
+    MockPythAdapter public pythAdapter;
+
+    MockToken public usdc;
+    MockFlashToken public plDxyBear;
+    MockFlashToken public plDxyBull;
+    MockSplitter public splitter;
+    MockCurvePool public curvePool;
+    MockOracle public oracle;
+    StakedToken public stakedBear;
+    StakedToken public stakedBull;
+    ZapRouter public zapRouter;
+
+    address alice = address(0xA11ce);
+
+    function setUp() public {
+        vm.warp(25 hours);
+
+        usdc = new MockToken("USDC", "USDC");
+        plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
+        plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
+        splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
+        splitter.setUsdc(address(usdc));
+
+        oracle = new MockOracle(1e8);
+        curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
+        curvePool.setPrice(1e6);
+
+        stakedBear = new StakedToken(IERC20(address(plDxyBear)), "Staked BEAR", "sBEAR");
+        stakedBull = new StakedToken(IERC20(address(plDxyBull)), "Staked BULL", "sBULL");
+
+        zapRouter =
+            new ZapRouter(address(splitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool));
+
+        pythAdapter = new MockPythAdapter();
+
+        distributor = new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle),
+            address(pythAdapter)
+        );
+
+        plDxyBear.mint(address(stakedBear), 1000e18);
+        plDxyBull.mint(address(stakedBull), 1000e18);
+    }
+
+    function test_DistributeRewardsWithPriceUpdate_CallsPythAdapter() public {
+        usdc.mint(address(distributor), 100e6);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "test";
+
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        distributor.distributeRewardsWithPriceUpdate{value: 1 wei}(updateData);
+
+        assertTrue(pythAdapter.updateCalled(), "PythAdapter.updatePrice should be called");
+        assertEq(pythAdapter.lastUpdateValue(), 1 wei, "Should forward msg.value");
+    }
+
+    function test_DistributeRewardsWithPriceUpdate_SkipsWhenEmptyData() public {
+        usdc.mint(address(distributor), 100e6);
+
+        bytes[] memory emptyData = new bytes[](0);
+
+        vm.prank(alice);
+        distributor.distributeRewardsWithPriceUpdate(emptyData);
+
+        assertFalse(pythAdapter.updateCalled(), "Should not call updatePrice with empty data");
+    }
+
+    function test_PYTH_ADAPTER_Immutable() public view {
+        assertEq(address(distributor.PYTH_ADAPTER()), address(pythAdapter));
     }
 
 }

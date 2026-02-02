@@ -58,7 +58,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     FeeConfig public pendingFees;
     uint256 public feesActivationTime;
 
-    uint256 public constant ORACLE_TIMEOUT = 8 hours;
+    uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant TIMELOCK_DELAY = 7 days;
     uint256 public lastUnpauseTime;
 
