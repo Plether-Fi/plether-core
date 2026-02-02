@@ -21,6 +21,7 @@ contract PythAdapter is AggregatorV3Interface {
 
     error PythAdapter__StalePrice(uint256 publishTime, uint256 maxAge);
     error PythAdapter__InvalidPrice();
+    error PythAdapter__InvalidRoundId();
 
     /// @param pyth_ Pyth contract address on this chain.
     /// @param priceId_ Pyth price feed ID (e.g., USD/SEK).
@@ -69,10 +70,14 @@ contract PythAdapter is AggregatorV3Interface {
         return (1, answer, price.publishTime, price.publishTime, 1);
     }
 
-    /// @notice Returns data for a specific round (delegates to latestRoundData).
+    /// @notice Returns data for a specific round ID.
+    /// @dev Only round ID 1 is supported (Pyth doesn't use rounds).
     function getRoundData(
-        uint80
+        uint80 _roundId
     ) external view returns (uint80, int256, uint256, uint256, uint80) {
+        if (_roundId != 1) {
+            revert PythAdapter__InvalidRoundId();
+        }
         return this.latestRoundData();
     }
 

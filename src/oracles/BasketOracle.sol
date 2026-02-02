@@ -78,6 +78,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
 
     /// @notice Thrown when quantities don't sum to 1e18.
     error BasketOracle__InvalidWeights();
+    error BasketOracle__InvalidRoundId();
 
     /// @notice Creates basket oracle with currency components.
     /// @param _feeds Array of Chainlink feed addresses.
@@ -257,10 +258,14 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         return 1;
     }
 
-    /// @notice Returns latest data for any round ID (delegates to latestRoundData).
+    /// @notice Returns data for a specific round ID.
+    /// @dev Only round ID 1 is supported (synthetic basket has no historical rounds).
     function getRoundData(
-        uint80
+        uint80 _roundId
     ) external view returns (uint80, int256, uint256, uint256, uint80) {
+        if (_roundId != 1) {
+            revert BasketOracle__InvalidRoundId();
+        }
         return this.latestRoundData();
     }
 

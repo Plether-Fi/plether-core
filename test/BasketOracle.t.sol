@@ -544,6 +544,32 @@ contract BasketOracleTest is Test {
         assertEq(answer, 105_000_000, "Basket should be $1.05");
     }
 
+    // ==========================================
+    // GETROUNDDATA TESTS
+    // ==========================================
+
+    function test_GetRoundData_SucceedsForRoundId1() public view {
+        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
+            basket.getRoundData(1);
+
+        assertEq(roundId, 1);
+        assertEq(answer, 105_000_000);
+        assertTrue(startedAt > 0);
+        assertTrue(updatedAt > 0);
+        assertEq(answeredInRound, 1);
+    }
+
+    function test_GetRoundData_RevertsForInvalidRoundId() public {
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidRoundId.selector);
+        basket.getRoundData(0);
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidRoundId.selector);
+        basket.getRoundData(2);
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidRoundId.selector);
+        basket.getRoundData(999);
+    }
+
 }
 
 // Helper mock with wrong decimals (6 instead of 8)

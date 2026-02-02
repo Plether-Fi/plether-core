@@ -160,15 +160,26 @@ contract PythAdapterTest is Test {
         adapter.latestRoundData();
     }
 
-    function test_GetRoundData_DelegatesToLatestRoundData() public view {
+    function test_GetRoundData_SucceedsForRoundId1() public view {
         (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
-            adapter.getRoundData(999);
+            adapter.getRoundData(1);
 
         assertEq(roundId, 1);
         assertEq(answer, SEK_PRICE);
         assertTrue(startedAt > 0);
         assertTrue(updatedAt > 0);
         assertEq(answeredInRound, 1);
+    }
+
+    function test_GetRoundData_RevertsForInvalidRoundId() public {
+        vm.expectRevert(PythAdapter.PythAdapter__InvalidRoundId.selector);
+        adapter.getRoundData(0);
+
+        vm.expectRevert(PythAdapter.PythAdapter__InvalidRoundId.selector);
+        adapter.getRoundData(2);
+
+        vm.expectRevert(PythAdapter.PythAdapter__InvalidRoundId.selector);
+        adapter.getRoundData(999);
     }
 
     function test_UpdatePrice_ForwardsToMockPyth() public {
