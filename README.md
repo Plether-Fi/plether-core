@@ -49,7 +49,8 @@ User deposits USDC
 
 | Contract | Description |
 |----------|-------------|
-| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 Chainlink feeds, with bound validation against Curve EMA price |
+| [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 price feeds, with bound validation against Curve EMA price |
+| [`PythAdapter`](src/oracles/PythAdapter.sol) | Adapts Pyth Network feeds to Chainlink's AggregatorV3Interface (used for SEK/USD) |
 | [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
@@ -61,7 +62,7 @@ The BasketOracle computes a USDX-like index using **normalized arithmetic weight
 Price = Σ(Weight_i × Price_i / BasePrice_i)
 ```
 
-Each currency's contribution is normalized by its base price, ensuring the intended USDX weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (~$0.007) would be nearly ignored compared to EUR (~$1.08), causing severe weight distortion.
+Each currency's contribution is normalized by its base price, ensuring the intended USDX weights are preserved regardless of absolute FX rate scales. Without normalization, low-priced currencies like JPY (\~$0.007) would be nearly ignored compared to EUR (\~$1.08), causing severe weight distortion.
 
 This design enables gas-efficient on-chain computation and eliminates rebalancing requirements, which guarantees protocol solvency.
 
@@ -98,12 +99,14 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 ## Ecosystem Integrations
 
 ```
-                    ┌─────────────┐
-                    │  Chainlink  │
-                    │   Oracles   │
-                    └──────┬──────┘
-                           │ Price Feeds
-                           ▼
+       ┌─────────────┐     ┌─────────────┐
+       │  Chainlink  │     │    Pyth     │
+       │   Oracles   │     │   Network   │
+       └──────┬──────┘     └──────┬──────┘
+              │                   │
+              └────────┬──────────┘
+                       │ Price Feeds
+                       ▼
 ┌─────────┐    USDC    ┌───────────────────┐
 │  Users  │◄─────────►│      Plether      │
 └─────────┘            │   (Splitter +     │
@@ -118,7 +121,8 @@ Both weights and base prices are permanently fixed and cannot be changed after d
                        └─────────────────┘
 ```
 
-- **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD
+- **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, CHF/USD
+- **Pyth Network** - Price feed for SEK/USD (via PythAdapter)
 - **Curve Finance** - AMM pools for USDC/plDXY-BEAR swaps
 - **Morpho Blue** - Lending markets for leveraged positions, yield generation on idle USDC reserves, and fee-free flash loans
 

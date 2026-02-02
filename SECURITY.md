@@ -48,9 +48,17 @@ These properties must always hold. Violation indicates a critical bug.
 ### External Protocol Dependencies
 
 #### Chainlink Oracles
-- **Assumption**: Chainlink price feeds provide accurate, timely data for EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, and CHF/USD
+- **Assumption**: Chainlink price feeds provide accurate, timely data for EUR/USD, JPY/USD, GBP/USD, CAD/USD, and CHF/USD
 - **Mitigation**: 8-hour staleness timeout rejects stale data; sequencer uptime check on L2s
-- **Risk**: If Chainlink is compromised or all 6 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed
+- **Risk**: If Chainlink is compromised or all 5 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed
+
+#### Pyth Network (SEK/USD)
+- **Assumption**: Pyth Network provides accurate SEK/USD price data via PythAdapter
+- **Architecture**: PythAdapter wraps Pyth's pull-based oracle to match Chainlink's AggregatorV3Interface
+- **Mitigation**: 24-hour staleness timeout; price inversion validated (USD/SEK → SEK/USD)
+- **Risk (Staleness)**: Pyth is pull-based—prices must be pushed on-chain before reading. If no one updates the price, operations using SEK/USD will fail with stale price error.
+- **Risk (Single Feed)**: Unlike Chainlink's decentralized network, Pyth SEK/USD has different trust assumptions. A Pyth compromise affects only SEK (4.2% basket weight).
+- **Mitigation (Update)**: RewardDistributor provides `distributeRewardsWithPriceUpdate()` that accepts Pyth update data, allowing atomic price refresh + distribution.
 
 #### Curve Finance
 - **Assumption**: Curve pool for USDC/plDXY-BEAR operates correctly and provides fair exchange rates
@@ -463,6 +471,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-02 | Added Pyth Network dependency for SEK/USD price feed (PythAdapter); documented pull-based oracle risks |
 | 2026-01-30 | StakedToken: Added streaming rewards (1h linear vesting) and withdrawal delay (1h minimum) to prevent reward sniping |
 | 2026-01-29 | Added RewardDistributor Security section: economic analysis of price manipulation and stale EMA attacks |
 | 2026-01-21 | Added USDC (Circle) risks: depeg, blacklisting, upgradeability, and regulatory risks |
