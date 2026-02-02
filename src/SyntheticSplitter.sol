@@ -105,6 +105,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     error Splitter__NotPaused();
     error Splitter__CannotRescueCoreAsset();
     error Splitter__MigrationLostFunds();
+    error Splitter__InvalidAdapter();
 
     // Structs for Views
     struct SystemStatus {
@@ -620,6 +621,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     ) external onlyOwner {
         if (_newAdapter == address(0)) {
             revert Splitter__ZeroAddress();
+        }
+        if (IERC4626(_newAdapter).asset() != address(USDC)) {
+            revert Splitter__InvalidAdapter();
         }
         pendingAdapter = _newAdapter;
         adapterActivationTime = block.timestamp + TIMELOCK_DELAY;

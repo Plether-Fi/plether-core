@@ -736,6 +736,16 @@ contract SyntheticSplitterTest is Test {
         splitter.proposeAdapter(address(0));
     }
 
+    function test_ProposeAdapter_RevertsAssetMismatch() public {
+        // Create adapter with wrong underlying asset
+        MockERC20 wrongAsset = new MockERC20("Wrong", "WRONG");
+        MockYieldAdapter wrongAdapter =
+            new MockYieldAdapter(IERC20(address(wrongAsset)), address(this), address(splitter));
+
+        vm.expectRevert(SyntheticSplitter.Splitter__InvalidAdapter.selector);
+        splitter.proposeAdapter(address(wrongAdapter));
+    }
+
     function test_FinalizeAdapter_RevertsNoProposal() public {
         vm.expectRevert(SyntheticSplitter.Splitter__InvalidProposal.selector);
         splitter.finalizeAdapter();
