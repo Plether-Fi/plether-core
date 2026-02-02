@@ -15,6 +15,7 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 import {PythAdapter} from "./oracles/PythAdapter.sol";
 
 /// @title RewardDistributor
+/// @custom:security-contact contact@plether.com
 /// @notice Distributes staking rewards based on price discrepancy between oracle and Curve EMA.
 /// @dev Receives USDC from SyntheticSplitter.harvestYield() and allocates to StakedToken vaults
 /// proportionally based on which token is underperforming relative to theoretical price.

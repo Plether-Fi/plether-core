@@ -7,6 +7,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title StakedToken
+/// @custom:security-contact contact@plether.com
 /// @notice ERC4626 vault for staking plDXY-BEAR or plDXY-BULL tokens.
 /// @dev Used as Morpho collateral. Exchange rate increases via yield donations.
 ///      Implements 1000x virtual share offset to prevent inflation attacks.

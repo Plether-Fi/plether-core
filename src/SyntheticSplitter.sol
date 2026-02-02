@@ -18,6 +18,7 @@ import {IYieldAdapter} from "./interfaces/IYieldAdapter.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title SyntheticSplitter
+/// @custom:security-contact contact@plether.com
 /// @notice Core protocol contract for minting/burning synthetic plDXY tokens.
 /// @dev Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL tokens.
 ///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.

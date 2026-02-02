@@ -22,6 +22,7 @@ interface IUniversalRewardsDistributor {
 }
 
 /// @title MorphoAdapter
+/// @custom:security-contact contact@plether.com
 /// @notice ERC4626-compliant wrapper for Morpho Blue lending.
 /// @dev Interchangeable with other yield adapters. Only accepts deposits from SyntheticSplitter.
 contract MorphoAdapter is ERC4626, Ownable2Step {

@@ -6,6 +6,7 @@ import {ERC20FlashMint} from "@openzeppelin/contracts/token/ERC20/extensions/ERC
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
 /// @title SyntheticToken
+/// @custom:security-contact contact@plether.com
 /// @notice ERC20 token with flash mint and permit capability, controlled by SyntheticSplitter.
 /// @dev Used for plDXY-BEAR and plDXY-BULL tokens. Only the Splitter can mint/burn.
 ///      Inherits ERC20FlashMint for fee-free flash loans used by routers.

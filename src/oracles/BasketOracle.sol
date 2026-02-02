@@ -8,6 +8,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title BasketOracle
+/// @custom:security-contact contact@plether.com
 /// @notice Aggregates multiple Chainlink feeds into a normalized weighted plDXY basket price.
 /// @dev Price = Sum(Weight_i * Price_i / BasePrice_i). Normalization preserves intended currency weights.
 contract BasketOracle is AggregatorV3Interface, Ownable2Step {

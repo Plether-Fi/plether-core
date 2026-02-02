@@ -13,6 +13,7 @@ interface IOracle {
 }
 
 /// @title StakedOracle
+/// @custom:security-contact contact@plether.com
 /// @notice Prices ERC4626 vault shares by combining underlying price with exchange rate.
 /// @dev Price = UnderlyingPrice * ExchangeRate. Used for splDXY-BEAR/splDXY-BULL in Morpho.
 contract StakedOracle is IOracle {

@@ -13,6 +13,7 @@ interface IMorphoOracle {
 }
 
 /// @title MorphoOracle
+/// @custom:security-contact contact@plether.com
 /// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
 /// @dev Supports both plDXY-BEAR (direct) and plDXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {

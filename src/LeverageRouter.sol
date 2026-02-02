@@ -9,6 +9,7 @@ import {MarketParams} from "./interfaces/IMorpho.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title LeverageRouter
+/// @custom:security-contact contact@plether.com
 /// @notice Leverage router for plDXY-BEAR positions via Morpho Blue.
 /// @dev Flash loans USDC from Morpho → swaps to plDXY-BEAR on Curve → stakes → deposits to Morpho as collateral.
 ///      Requires user to authorize this contract in Morpho before use.

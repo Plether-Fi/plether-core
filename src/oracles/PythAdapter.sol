@@ -5,6 +5,7 @@ import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 
 /// @title PythAdapter
+/// @custom:security-contact contact@plether.com
 /// @notice Adapts Pyth Network price feeds to Chainlink's AggregatorV3Interface.
 /// @dev Pyth is pull-based: prices must be pushed on-chain before reading.
 ///      This adapter reads the latest price and converts it to 8 decimals.

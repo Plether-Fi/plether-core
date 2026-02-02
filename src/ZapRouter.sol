@@ -15,6 +15,7 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title ZapRouter
+/// @custom:security-contact contact@plether.com
 /// @notice Efficient router for acquiring plDXY-BULL tokens using flash mints.
 /// @dev Flash mints plDXY-BEAR → swaps to USDC via Curve → mints pairs → keeps plDXY-BULL.
 ///      For plDXY-BEAR, users should swap directly on Curve instead.

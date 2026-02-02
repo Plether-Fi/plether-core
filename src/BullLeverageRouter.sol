@@ -13,6 +13,7 @@ import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 
 /// @title BullLeverageRouter
+/// @custom:security-contact contact@plether.com
 /// @notice Leverage router for plDXY-BULL positions via Morpho Blue.
 /// @dev Uses Morpho flash loans + Splitter minting to acquire plDXY-BULL, then deposits as Morpho collateral.
 ///      Close operation uses a single plDXY-BEAR flash mint for simplicity and gas efficiency.
