@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
+import {MorphoBalancesLib} from "./libraries/MorphoBalancesLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -94,13 +95,13 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     // ==========================================
 
     /// @notice Returns total USDC value of this adapter's Morpho position.
-    /// @return Total assets including accrued interest.
+    /// @return Total assets including pending (unaccrued) interest.
     function totalAssets() public view override returns (uint256) {
         (uint256 supplyShares,,) = MORPHO.position(MARKET_ID, address(this));
         if (supplyShares == 0) {
             return 0;
         }
-        return _convertMorphoSharesToAssets(supplyShares);
+        return MorphoBalancesLib.expectedSupplyAssets(MORPHO, marketParams, supplyShares);
     }
 
     /// @dev Deposits assets to Morpho after ERC4626 share minting.
@@ -149,6 +150,12 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     // MORPHO HELPERS
     // ==========================================
 
+    /// @notice Forces Morpho to accrue interest, syncing expected and actual values.
+    /// @dev Call before totalAssets() if you need exact values for calculations.
+    function accrueInterest() external {
+        MORPHO.accrueInterest(marketParams);
+    }
+
     /// @dev Computes market ID from parameters (keccak256 hash).
     /// @param params Market parameters struct.
     /// @return Market identifier used by Morpho.
@@ -156,20 +163,6 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         MarketParams memory params
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(params));
-    }
-
-    /// @dev Converts Morpho supply shares to asset amount.
-    /// @param shares Morpho supply shares.
-    /// @return Equivalent asset amount.
-    function _convertMorphoSharesToAssets(
-        uint256 shares
-    ) internal view returns (uint256) {
-        (uint128 totalSupplyAssets, uint128 totalSupplyShares,,,,) = MORPHO.market(MARKET_ID);
-
-        if (totalSupplyShares == 0) {
-            return shares;
-        }
-        return (shares * uint256(totalSupplyAssets)) / uint256(totalSupplyShares);
     }
 
     // ==========================================

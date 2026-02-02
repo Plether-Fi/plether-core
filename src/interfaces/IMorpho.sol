@@ -20,6 +20,16 @@ struct MarketParams {
 /// @dev See https://docs.morpho.org for full documentation.
 interface IMorpho {
 
+    /// @notice Market state for IRM calculations.
+    struct MarketState {
+        uint128 totalSupplyAssets;
+        uint128 totalSupplyShares;
+        uint128 totalBorrowAssets;
+        uint128 totalBorrowShares;
+        uint128 lastUpdate;
+        uint128 fee;
+    }
+
     // ==========================================
     // AUTHORIZATION
     // ==========================================

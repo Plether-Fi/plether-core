@@ -14,6 +14,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SyntheticToken} from "./SyntheticToken.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
+import {IYieldAdapter} from "./interfaces/IYieldAdapter.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title SyntheticSplitter
@@ -510,6 +511,10 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (address(yieldAdapter) == address(0)) {
             revert Splitter__AdapterNotSet();
         }
+
+        // Poke adapter to accrue pending interest before calculating surplus
+        // This ensures totalAssets() returns actual (not expected) values
+        try IYieldAdapter(address(yieldAdapter)).accrueInterest() {} catch {}
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
         uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
