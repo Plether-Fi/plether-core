@@ -692,7 +692,10 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         address token,
         address to
     ) external onlyOwner {
-        if (token == address(USDC) || token == address(TOKEN_A) || token == address(TOKEN_B)) {
+        if (
+            token == address(USDC) || token == address(TOKEN_A) || token == address(TOKEN_B)
+                || token == address(yieldAdapter)
+        ) {
             revert Splitter__CannotRescueCoreAsset();
         }
         uint256 balance = IERC20(token).balanceOf(address(this));

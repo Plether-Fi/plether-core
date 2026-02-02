@@ -1844,6 +1844,11 @@ contract SyntheticSplitterTest is Test {
         splitter.rescueToken(tokenB, treasury);
     }
 
+    function test_RescueToken_RevertsForYieldAdapter() public {
+        vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
+        splitter.rescueToken(address(adapter), treasury);
+    }
+
     function test_RescueToken_OnlyOwner() public {
         MockERC20 randomToken = new MockERC20("Random", "RND");
         randomToken.mint(address(splitter), 1000 * 1e18);
