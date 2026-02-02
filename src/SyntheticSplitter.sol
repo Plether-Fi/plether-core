@@ -31,15 +31,16 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     // ==========================================
 
     // Assets
-    SyntheticToken public immutable TOKEN_A; // Bear
-    SyntheticToken public immutable TOKEN_B; // Bull
+    SyntheticToken public immutable BEAR;
+    SyntheticToken public immutable BULL;
     IERC20 public immutable USDC;
 
     // Logic
     AggregatorV3Interface public immutable ORACLE;
     uint256 public immutable CAP;
-    uint256 public immutable USDC_MULTIPLIER; // Cached math scaler
-    uint256 public constant BUFFER_PERCENT = 10; // Keep 10% liquid in Splitter
+    uint256 private constant USDC_DECIMALS = 6;
+    uint256 public constant USDC_MULTIPLIER = 10 ** (18 + 8 - USDC_DECIMALS);
+    uint256 public constant BUFFER_PERCENT = 10;
 
     // The Bank
     IERC4626 public yieldAdapter;
@@ -64,7 +65,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     uint256 public lastUnpauseTime;
 
     uint256 public constant HARVEST_REWARD_BPS = 10;
-    uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 1e6;
+    uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 10 ** USDC_DECIMALS;
 
     // Liquidation State
     bool public isLiquidated;
@@ -157,11 +158,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         treasury = _treasury;
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        TOKEN_A = new SyntheticToken("Plether Dollar Index Bear", "plDXY-BEAR", address(this));
-        TOKEN_B = new SyntheticToken("Plether Dollar Index Bull", "plDXY-BULL", address(this));
-
-        uint256 decimals = ERC20(_usdc).decimals();
-        USDC_MULTIPLIER = 10 ** (18 + 8 - decimals);
+        BEAR = new SyntheticToken("Plether Dollar Index Bear", "plDXY-BEAR", address(this));
+        BULL = new SyntheticToken("Plether Dollar Index Bull", "plDXY-BULL", address(this));
     }
 
     // ==========================================
@@ -234,8 +232,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             yieldAdapter.deposit(depositAmount, address(this));
         }
 
-        TOKEN_A.mint(msg.sender, amount);
-        TOKEN_B.mint(msg.sender, amount);
+        BEAR.mint(msg.sender, amount);
+        BULL.mint(msg.sender, amount);
 
         emit Minted(msg.sender, amount);
     }
@@ -319,8 +317,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         USDC.safeTransfer(msg.sender, usdcRefund);
 
         // 3. Burn tokens AFTER successful USDC transfer
-        TOKEN_A.burn(msg.sender, amount);
-        TOKEN_B.burn(msg.sender, amount);
+        BEAR.burn(msg.sender, amount);
+        BULL.burn(msg.sender, amount);
 
         emit Burned(msg.sender, amount);
     }
@@ -396,7 +394,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
 
         USDC.safeTransfer(msg.sender, usdcRefund);
-        TOKEN_A.burn(msg.sender, amount);
+        BEAR.burn(msg.sender, amount);
 
         emit EmergencyRedeemed(msg.sender, amount);
     }
@@ -481,7 +479,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         uint256 totalHoldings = adapterAssets + localBuffer;
 
         // 2. Calculate Liabilities
-        uint256 requiredBacking = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
+        uint256 requiredBacking = (BEAR.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         // 3. Determine Surplus
         if (totalHoldings > requiredBacking) {
@@ -518,11 +516,11 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         try IYieldAdapter(address(yieldAdapter)).accrueInterest() {} catch {}
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
-        uint256 totalAssets = yieldAdapter.convertToAssets(myShares);
+        uint256 adapterAssets = yieldAdapter.convertToAssets(myShares);
         uint256 localBuffer = USDC.balanceOf(address(this));
-        uint256 totalHoldings = totalAssets + localBuffer;
+        uint256 totalHoldings = adapterAssets + localBuffer;
 
-        uint256 requiredBacking = (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
+        uint256 requiredBacking = (BEAR.totalSupply() * CAP) / USDC_MULTIPLIER;
 
         if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) {
             revert Splitter__NoSurplus();
@@ -531,9 +529,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         uint256 surplus = totalHoldings - requiredBacking;
 
         // Withdraw from adapter
-        uint256 expectedPull = totalAssets > surplus ? surplus : totalAssets;
+        uint256 expectedPull = adapterAssets > surplus ? surplus : adapterAssets;
         uint256 balanceBefore = USDC.balanceOf(address(this));
-        if (totalAssets > surplus) {
+        if (adapterAssets > surplus) {
             yieldAdapter.withdraw(surplus, address(this), address(this));
         } else {
             yieldAdapter.redeem(myShares, address(this), address(this));
@@ -693,8 +691,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         address to
     ) external onlyOwner {
         if (
-            token == address(USDC) || token == address(TOKEN_A) || token == address(TOKEN_B)
-                || token == address(yieldAdapter)
+            token == address(USDC) || token == address(BEAR) || token == address(BULL) || token == address(yieldAdapter)
         ) {
             revert Splitter__CannotRescueCoreAsset();
         }
@@ -757,9 +754,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     // INTERNAL HELPERS
     // ==========================================
 
-    /// @dev Calculates total liabilities based on TOKEN_A supply at CAP price.
+    /// @dev Calculates total liabilities based on BEAR supply at CAP price.
     function _getTotalLiabilities() internal view returns (uint256) {
-        return (TOKEN_A.totalSupply() * CAP) / USDC_MULTIPLIER;
+        return (BEAR.totalSupply() * CAP) / USDC_MULTIPLIER;
     }
 
     /// @dev Calculates total assets (local USDC + adapter value).

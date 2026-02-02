@@ -70,7 +70,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         // 200 bps = 2% max deviation, CAP = $2.00
-        basket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        basket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
         basket.setCurvePool(address(curvePool));
     }
 
@@ -118,7 +118,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](2);
 
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     function test_Components() public view {
@@ -140,7 +140,7 @@ contract BasketOracleTest is Test {
         basePrices[0] = 0; // Invalid: zero base price
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidBasePrice.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     function test_Revert_WeightsSumTooLow() public {
@@ -157,7 +157,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     function test_Revert_WeightsSumTooHigh() public {
@@ -174,7 +174,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     function test_Revert_AllZeroWeights() public {
@@ -191,7 +191,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     function test_Revert_InvalidDecimals() public {
@@ -210,7 +210,7 @@ contract BasketOracleTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(BasketOracle.BasketOracle__InvalidPrice.selector, address(wrongDecimalFeed))
         );
-        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
     }
 
     // ==========================================
@@ -227,7 +227,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
 
         vm.prank(address(0xdead));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
@@ -244,7 +244,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
         newBasket.setCurvePool(address(curvePool));
 
         vm.expectRevert(BasketOracle.BasketOracle__AlreadySet.selector);
@@ -261,7 +261,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
         // Don't set curvePool - deviation check should be skipped
         // Normalized: 1.0 * (121_000_000 / 110_000_000) = 1.1 = 110_000_000
         (, int256 answer,,,) = newBasket.latestRoundData();
@@ -321,7 +321,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidProposal.selector);
         newBasket.proposeCurvePool(address(curvePool));
@@ -408,7 +408,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
 
         vm.expectEmit(true, true, false, false);
         emit BasketOracle.CurvePoolUpdated(address(0), address(curvePool));

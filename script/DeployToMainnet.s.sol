@@ -167,8 +167,8 @@ contract DeployToMainnet is Script {
             _deploySplitterWithAdapter(address(deployed.basketOracle), treasury, deployer);
 
         // Get token addresses from Splitter
-        deployed.plDxyBear = deployed.splitter.TOKEN_A();
-        deployed.plDxyBull = deployed.splitter.TOKEN_B();
+        deployed.plDxyBear = deployed.splitter.BEAR();
+        deployed.plDxyBull = deployed.splitter.BULL();
         console.log("plDXY-BEAR deployed:", address(deployed.plDxyBear));
         console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 
@@ -312,7 +312,7 @@ contract DeployToMainnet is Script {
         basePrices[4] = 10_860_000; // SEK: $0.1086
         basePrices[5] = 126_100_000; // CHF: $1.2610
 
-        return new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, owner);
+        return new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, owner);
     }
 
     function _deployCurvePool(
@@ -404,8 +404,8 @@ contract DeployToMainnet is Script {
         console.log("Verifying deployment...");
 
         // Check Splitter state
-        require(address(d.splitter.TOKEN_A()) == address(d.plDxyBear), "BEAR token mismatch");
-        require(address(d.splitter.TOKEN_B()) == address(d.plDxyBull), "BULL token mismatch");
+        require(address(d.splitter.BEAR()) == address(d.plDxyBear), "BEAR token mismatch");
+        require(address(d.splitter.BULL()) == address(d.plDxyBull), "BULL token mismatch");
         require(d.splitter.CAP() == CAP, "CAP mismatch");
 
         // Check token ownership

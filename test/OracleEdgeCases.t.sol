@@ -74,8 +74,8 @@ contract OracleEdgeCasesTest is Test {
         vm.stopPrank();
 
         // Alice should have received tokens
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
-        assertEq(splitter.TOKEN_B().balanceOf(alice), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount);
+        assertEq(splitter.BULL().balanceOf(alice), mintAmount);
     }
 
     /// @notice Test: Price reaches CAP between preview and mint
@@ -119,7 +119,7 @@ contract OracleEdgeCasesTest is Test {
         vm.stopPrank();
 
         // All mints should have succeeded
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 4000 ether);
+        assertEq(splitter.BEAR().balanceOf(alice), 4000 ether);
     }
 
     // ==========================================
@@ -167,7 +167,7 @@ contract OracleEdgeCasesTest is Test {
 
         vm.stopPrank();
 
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 2 * mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), 2 * mintAmount);
     }
 
     // ==========================================
@@ -297,7 +297,7 @@ contract OracleEdgeCasesTest is Test {
 
         vm.stopPrank();
 
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount);
     }
 
     /// @notice Test: Very low price (near zero)
@@ -315,7 +315,7 @@ contract OracleEdgeCasesTest is Test {
 
         vm.stopPrank();
 
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount);
     }
 
     /// @notice Test: Zero price reverts to prevent operations during oracle failures

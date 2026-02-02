@@ -307,7 +307,7 @@ contract SecurityAttackVectorsTest is Test {
 
         // Normalized basket = 0.5 * (110/110) + 0.5 * (1/1) = 1.0
         // theoreticalBear = basket = 1.0 ether (BEAR tracks basket directly)
-        BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+        BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
 
         // 2% above: 1.0 * 1.02 = 1.02 ether - this PASSES with current code
         MockCurvePool curvePool = new MockCurvePool(1.02 ether);

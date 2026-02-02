@@ -42,7 +42,7 @@ contract SplitterHandler is Test {
     uint256 public ghost_totalUsdcFairPrice; // Fair price (ceiling division) - what SHOULD be charged
     uint256 public ghost_totalUsdcWithdrawn;
     bool public ghost_wasEverLiquidated;
-    uint256 public ghost_supplyAtLiquidation; // TOKEN_A supply when liquidation occurred
+    uint256 public ghost_supplyAtLiquidation; // BEAR supply when liquidation occurred
     uint256 public ghost_totalEmergencyRedeemed;
     uint256 public ghost_burnedAfterLiquidation; // Tracks burns via burn() after liquidation
     uint256 public ghost_totalYieldSimulated; // Tracks yield added via simulateYield()
@@ -169,13 +169,13 @@ contract SplitterHandler is Test {
         uint256 actorSeed,
         uint256 amount
     ) external useActor(actorSeed) {
-        uint256 balance = splitter.TOKEN_A().balanceOf(currentActor);
+        uint256 balance = splitter.BEAR().balanceOf(currentActor);
         if (balance == 0) {
             return;
         }
 
-        // Also need TOKEN_B balance for burn (burns both)
-        uint256 balanceB = splitter.TOKEN_B().balanceOf(currentActor);
+        // Also need BULL balance for burn (burns both)
+        uint256 balanceB = splitter.BULL().balanceOf(currentActor);
         if (balanceB == 0) {
             return;
         }
@@ -281,7 +281,7 @@ contract SplitterHandler is Test {
         if (uint256(price) >= CAP) {
             try splitter.triggerLiquidation() {
                 ghost_wasEverLiquidated = true;
-                ghost_supplyAtLiquidation = splitter.TOKEN_A().totalSupply();
+                ghost_supplyAtLiquidation = splitter.BEAR().totalSupply();
             } catch (bytes memory reason) {
                 // Only expected error: already liquidated
                 bytes4[] memory allowed = new bytes4[](1);
@@ -306,7 +306,7 @@ contract SplitterHandler is Test {
         }
 
         // Bound to actor's Bear token balance
-        uint256 bearBalance = splitter.TOKEN_A().balanceOf(currentActor);
+        uint256 bearBalance = splitter.BEAR().balanceOf(currentActor);
         if (bearBalance == 0) {
             return;
         }
@@ -335,7 +335,7 @@ contract SplitterHandler is Test {
     }
 
     function getTotalLiabilities() external view returns (uint256) {
-        return (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
+        return (splitter.BEAR().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
     }
 
 }
@@ -397,15 +397,15 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
     // INVARIANTS
     // ==========================================
 
-    /// @notice TOKEN_A and TOKEN_B supplies relationship
+    /// @notice BEAR and BULL supplies relationship
     /// @dev Before liquidation: A == B (minted/burned in pairs)
     /// @dev After liquidation: A == B - emergencyRedeemed (only Bear burns in emergencyRedeem)
     function invariant_tokenParity() public view {
-        uint256 supplyA = splitter.TOKEN_A().totalSupply();
-        uint256 supplyB = splitter.TOKEN_B().totalSupply();
+        uint256 supplyA = splitter.BEAR().totalSupply();
+        uint256 supplyB = splitter.BULL().totalSupply();
         uint256 emergencyRedeemed = handler.ghost_totalEmergencyRedeemed();
 
-        // TOKEN_A = TOKEN_B - emergencyRedeemed (since emergencyRedeem only burns Bear)
+        // BEAR = BULL - emergencyRedeemed (since emergencyRedeem only burns Bear)
         assertEq(supplyA, supplyB - emergencyRedeemed, "INVARIANT VIOLATED: Token supply relationship broken");
     }
 
@@ -448,7 +448,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
 
     /// @notice If there are significant tokens, there must be collateral
     function invariant_noOrphanedTokens() public view {
-        uint256 totalSupply = splitter.TOKEN_A().totalSupply();
+        uint256 totalSupply = splitter.BEAR().totalSupply();
         // Only check if there's meaningful supply (> dust threshold)
         // Very small supplies can have 0 assets due to rounding
         if (totalSupply > 1e15) {
@@ -462,7 +462,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
     function invariant_ghostConsistency() public view {
         uint256 expectedSupply =
             handler.ghost_totalMinted() - handler.ghost_totalBurned() - handler.ghost_totalEmergencyRedeemed();
-        assertEq(splitter.TOKEN_A().totalSupply(), expectedSupply, "INVARIANT VIOLATED: Ghost tracking mismatch");
+        assertEq(splitter.BEAR().totalSupply(), expectedSupply, "INVARIANT VIOLATED: Ghost tracking mismatch");
     }
 
     /// @notice Treasury and staking addresses should never be the splitter itself
@@ -491,8 +491,8 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         console.log("Harvest calls:", handler.harvestCalls());
         console.log("Total minted:", handler.ghost_totalMinted());
         console.log("Total burned:", handler.ghost_totalBurned());
-        console.log("Token A supply:", splitter.TOKEN_A().totalSupply());
-        console.log("Token B supply:", splitter.TOKEN_B().totalSupply());
+        console.log("Token A supply:", splitter.BEAR().totalSupply());
+        console.log("Token B supply:", splitter.BULL().totalSupply());
         console.log("Is liquidated:", splitter.isLiquidated());
     }
 
@@ -554,7 +554,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
         if (handler.ghost_wasEverLiquidated()) {
             // Current supply should be <= supply at liquidation time
             // (can only decrease via emergencyRedeem, never increase)
-            uint256 currentSupply = splitter.TOKEN_A().totalSupply();
+            uint256 currentSupply = splitter.BEAR().totalSupply();
             uint256 supplyAtLiquidation = handler.ghost_supplyAtLiquidation();
 
             assertLe(currentSupply, supplyAtLiquidation, "INVARIANT VIOLATED: Tokens created after liquidation");
@@ -568,7 +568,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
             uint256 supplyAtLiquidation = handler.ghost_supplyAtLiquidation();
             uint256 totalRedeemed = handler.ghost_totalEmergencyRedeemed();
             uint256 burnedAfterLiq = handler.ghost_burnedAfterLiquidation();
-            uint256 currentSupply = splitter.TOKEN_A().totalSupply();
+            uint256 currentSupply = splitter.BEAR().totalSupply();
 
             // Bear supply = supplyAtLiquidation - emergencyRedeemed - burnedAfterLiquidation
             assertEq(
@@ -584,7 +584,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
         (, int256 price,,,) = oracle.latestRoundData();
 
         // If price >= CAP and there's supply, system should be liquidatable
-        if (uint256(price) >= CAP && splitter.TOKEN_A().totalSupply() > 0) {
+        if (uint256(price) >= CAP && splitter.BEAR().totalSupply() > 0) {
             // Either already liquidated, or triggerLiquidation should succeed
             // (we can't call functions in invariants, so just verify state)
             assertTrue(splitter.isLiquidated() || uint256(price) >= CAP, "Price/liquidation state inconsistent");
@@ -596,7 +596,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
         if (handler.ghost_wasEverLiquidated()) {
             uint256 supplyAtLiquidation = handler.ghost_supplyAtLiquidation();
             uint256 burnedAfterLiq = handler.ghost_burnedAfterLiquidation();
-            uint256 currentBullSupply = splitter.TOKEN_B().totalSupply();
+            uint256 currentBullSupply = splitter.BULL().totalSupply();
 
             // Bull supply = supplyAtLiquidation - burnedAfterLiquidation
             // (emergencyRedeem doesn't burn Bull, only burn() does)
@@ -615,8 +615,8 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
             console.log("Supply at liquidation:", handler.ghost_supplyAtLiquidation());
             console.log("Emergency redeems:", handler.emergencyRedeemCalls());
             console.log("Total redeemed:", handler.ghost_totalEmergencyRedeemed());
-            console.log("Current Bear supply:", splitter.TOKEN_A().totalSupply());
-            console.log("Current Bull supply:", splitter.TOKEN_B().totalSupply());
+            console.log("Current Bear supply:", splitter.BEAR().totalSupply());
+            console.log("Current Bull supply:", splitter.BULL().totalSupply());
         }
     }
 

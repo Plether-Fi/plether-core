@@ -69,8 +69,8 @@ contract IntegrationTest is Test {
         vm.stopPrank();
 
         // Get the real synthetic tokens created by splitter
-        plDxyBear = splitter.TOKEN_A();
-        plDxyBull = splitter.TOKEN_B();
+        plDxyBear = splitter.BEAR();
+        plDxyBull = splitter.BULL();
 
         // Deploy Curve pool mock (external dependency)
         curvePool = new MockCurvePool(address(usdc), address(plDxyBear));

@@ -154,7 +154,7 @@ abstract contract BaseForkTest is Test {
 
         // Mock Pool for Oracle Init (BEAR price = basket)
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
-        basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, 2e8, address(this));
+        basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, address(this));
         basketOracle.setCurvePool(tempCurvePool);
 
         // Create a Morpho yield market for the adapter (USDC lending market)
@@ -177,8 +177,8 @@ abstract contract BaseForkTest is Test {
         splitter = new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, treasury, address(0));
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
 
-        bullToken = address(splitter.TOKEN_B());
-        bearToken = address(splitter.TOKEN_A());
+        bullToken = address(splitter.BULL());
+        bearToken = address(splitter.BEAR());
     }
 
     /// @notice Deploy Curve pool with USDC/BEAR pair

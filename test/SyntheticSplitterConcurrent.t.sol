@@ -306,16 +306,16 @@ contract SyntheticSplitterConcurrentTest is Test {
         vm.prank(carol);
         splitter.burn(burnAmount);
 
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
-        assertEq(splitter.TOKEN_A().balanceOf(bob), mintAmount - burnAmount);
-        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(bob), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(carol), mintAmount - burnAmount);
 
         assertEq(usdc.balanceOf(alice) - aliceBefore, expectedRefundEach);
         assertEq(usdc.balanceOf(bob) - bobBefore, expectedRefundEach);
         assertEq(usdc.balanceOf(carol) - carolBefore, expectedRefundEach);
 
         uint256 totalAssets = handlerLikeTotalAssets(unlimitedAdapter);
-        uint256 totalLiabilities = (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
+        uint256 totalLiabilities = (splitter.BEAR().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
         assertGe(totalAssets, totalLiabilities);
     }
 
@@ -365,7 +365,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(burnAmount);
 
         uint256 totalAssets = handlerLikeTotalAssets(unlimitedAdapter);
-        uint256 totalLiabilities = (splitter.TOKEN_A().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
+        uint256 totalLiabilities = (splitter.BEAR().totalSupply() * CAP) / splitter.USDC_MULTIPLIER();
         assertGe(
             totalAssets,
             totalLiabilities,
@@ -418,9 +418,9 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(burnAmount);
 
         // Verify everyone got their refunds
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
-        assertEq(splitter.TOKEN_A().balanceOf(bob), mintAmount - burnAmount);
-        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(bob), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(carol), mintAmount - burnAmount);
 
         assertEq(usdc.balanceOf(alice) - aliceBefore, expectedRefundEach);
         assertEq(usdc.balanceOf(bob) - bobBefore, expectedRefundEach);
@@ -461,7 +461,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.mint(mintAmount);
 
         // Record state before price change
-        uint256 aliceTokensBefore = splitter.TOKEN_A().balanceOf(alice);
+        uint256 aliceTokensBefore = splitter.BEAR().balanceOf(alice);
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
         // Price increases to $1.95 (just below CAP of $2.00)
@@ -480,10 +480,10 @@ contract SyntheticSplitterConcurrentTest is Test {
         // Verify Alice got her refund
         (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
-        assertEq(splitter.TOKEN_A().balanceOf(alice), aliceTokensBefore - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), aliceTokensBefore - burnAmount);
 
         // Verify Carol got her tokens
-        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(carol), mintAmount);
 
         // Verify system solvency
         _verifySolvency();
@@ -528,7 +528,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedTotal);
 
         // Verify remaining tokens
-        assertEq(splitter.TOKEN_A().balanceOf(alice), largeAmount - (burnChunk * 3));
+        assertEq(splitter.BEAR().balanceOf(alice), largeAmount - (burnChunk * 3));
 
         // Verify solvency maintained
         _verifySolvency();
@@ -564,7 +564,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         // Verify burn succeeded
         (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - burnAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount - burnAmount);
 
         // Verify solvency
         _verifySolvency();
@@ -605,9 +605,9 @@ contract SyntheticSplitterConcurrentTest is Test {
         splitter.burn(largeBurn);
 
         // Verify final state
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount - largeBurn);
-        assertEq(splitter.TOKEN_A().balanceOf(bob), mintAmount - largeBurn);
-        assertEq(splitter.TOKEN_A().balanceOf(carol), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount - largeBurn);
+        assertEq(splitter.BEAR().balanceOf(bob), mintAmount - largeBurn);
+        assertEq(splitter.BEAR().balanceOf(carol), mintAmount);
 
         _verifySolvency();
     }
@@ -633,12 +633,12 @@ contract SyntheticSplitterConcurrentTest is Test {
             splitter.mint(amount);
 
             // Partial burns
-            if (splitter.TOKEN_A().balanceOf(alice) >= amount / 2) {
+            if (splitter.BEAR().balanceOf(alice) >= amount / 2) {
                 vm.prank(alice);
                 splitter.burn(amount / 2);
             }
 
-            if (splitter.TOKEN_A().balanceOf(bob) >= amount / 2) {
+            if (splitter.BEAR().balanceOf(bob) >= amount / 2) {
                 vm.prank(bob);
                 splitter.burn(amount / 2);
             }
@@ -648,8 +648,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         _verifySolvency();
 
         // Both users should have non-zero balances
-        assertGt(splitter.TOKEN_A().balanceOf(alice), 0, "Alice should have tokens");
-        assertGt(splitter.TOKEN_A().balanceOf(bob), 0, "Bob should have tokens");
+        assertGt(splitter.BEAR().balanceOf(alice), 0, "Alice should have tokens");
+        assertGt(splitter.BEAR().balanceOf(bob), 0, "Bob should have tokens");
     }
 
     /// @notice Test: Liquidation blocks new mints but allows burns and emergency redemption
@@ -706,7 +706,7 @@ contract SyntheticSplitterConcurrentTest is Test {
     // ==========================================
 
     function _verifySolvency() internal view {
-        uint256 totalSupply = splitter.TOKEN_A().totalSupply();
+        uint256 totalSupply = splitter.BEAR().totalSupply();
         uint256 liabilities = (totalSupply * CAP) / splitter.USDC_MULTIPLIER();
 
         uint256 localBuffer = usdc.balanceOf(address(splitter));

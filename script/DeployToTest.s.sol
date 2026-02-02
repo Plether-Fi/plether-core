@@ -250,7 +250,7 @@ contract DeployToTest is Script {
         (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices) = _deployMockFeeds();
 
         // Step 3: Deploy BasketOracle (without Curve pool - will be set later)
-        deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, deployer);
+        deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, deployer);
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates plDXY-BEAR/BULL)
@@ -258,8 +258,8 @@ contract DeployToTest is Script {
         (deployed.adapter, deployed.splitter) = _deploySplitterWithAdapter(
             address(deployed.basketOracle), address(deployed.usdc), deployer, predictedRewardDistributor
         );
-        deployed.plDxyBear = deployed.splitter.TOKEN_A();
-        deployed.plDxyBull = deployed.splitter.TOKEN_B();
+        deployed.plDxyBear = deployed.splitter.BEAR();
+        deployed.plDxyBull = deployed.splitter.BULL();
         console.log("plDXY-BEAR deployed:", address(deployed.plDxyBear));
         console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 

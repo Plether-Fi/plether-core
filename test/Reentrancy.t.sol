@@ -117,7 +117,7 @@ contract ReentrancyTest is Test {
         splitter.mint(1000 ether);
 
         // Verify only one mint occurred (not doubled from reentrancy)
-        assertEq(splitter.TOKEN_A().balanceOf(address(attacker)), 1000 ether, "Should mint exactly once");
+        assertEq(splitter.BEAR().balanceOf(address(attacker)), 1000 ether, "Should mint exactly once");
     }
 
     function test_Splitter_Burn_ReentrancyBlocked() public {
@@ -128,8 +128,8 @@ contract ReentrancyTest is Test {
         splitter.mint(1000 ether);
 
         // Transfer tokens to attacker
-        splitter.TOKEN_A().transfer(address(attacker), 500 ether);
-        splitter.TOKEN_B().transfer(address(attacker), 500 ether);
+        splitter.BEAR().transfer(address(attacker), 500 ether);
+        splitter.BULL().transfer(address(attacker), 500 ether);
         vm.stopPrank();
 
         // Configure attacker
@@ -141,7 +141,7 @@ contract ReentrancyTest is Test {
         splitter.burn(500 ether);
 
         // Verify only one burn occurred
-        assertEq(splitter.TOKEN_A().balanceOf(address(attacker)), 0, "Should burn all tokens");
+        assertEq(splitter.BEAR().balanceOf(address(attacker)), 0, "Should burn all tokens");
     }
 
     // ==========================================

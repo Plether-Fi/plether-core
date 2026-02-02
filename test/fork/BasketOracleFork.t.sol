@@ -187,7 +187,7 @@ contract BasketOracleForkTest is Test {
         basePrices[4] = BASE_SEK;
         basePrices[5] = BASE_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
         basketOracle.setCurvePool(tempCurvePool);
     }
 
@@ -275,7 +275,7 @@ contract BasketOracleForkTest is Test {
         uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -313,7 +313,7 @@ contract BasketOracleForkTest is Test {
         uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -369,7 +369,7 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
         basketOracle.setCurvePool(curvePool);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
@@ -458,8 +458,8 @@ contract BasketOracleForkTest is Test {
 
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
 
-        bearToken = address(splitter.TOKEN_A());
-        bullToken = address(splitter.TOKEN_B());
+        bearToken = address(splitter.BEAR());
+        bullToken = address(splitter.BULL());
 
         (uint256 usdcRequired,,) = splitter.previewMint(600_000e18);
         IERC20(USDC).approve(address(splitter), usdcRequired);
@@ -656,7 +656,7 @@ contract DeviationCheckForkTest is Test {
 
         // Burn still works because it doesn't query oracle
         IERC20(bearToken).approve(address(splitter), mintAmount);
-        IERC20(splitter.TOKEN_B()).approve(address(splitter), mintAmount);
+        IERC20(splitter.BULL()).approve(address(splitter), mintAmount);
         splitter.burn(mintAmount);
 
         assertEq(IERC20(bearToken).balanceOf(address(this)), 0, "Burn should succeed");
@@ -684,7 +684,7 @@ contract DeviationCheckForkTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP_8DEC, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, address(this));
 
         address yieldOracle = address(new MockMorphoOracleForYieldBasket());
         MarketParams memory yieldParams = MarketParams({
@@ -706,7 +706,7 @@ contract DeviationCheckForkTest is Test {
 
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
 
-        bearToken = address(splitter.TOKEN_A());
+        bearToken = address(splitter.BEAR());
     }
 
     function _deployCurvePoolAtPrice(

@@ -31,14 +31,33 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     /// @notice Morpho Blue protocol contract.
     IMorpho public immutable MORPHO;
 
-    /// @notice Morpho market parameters for this adapter.
-    MarketParams public marketParams;
+    /// @notice Morpho market loan token.
+    address internal immutable LOAN_TOKEN;
+
+    /// @notice Morpho market collateral token.
+    address internal immutable COLLATERAL_TOKEN;
+
+    /// @notice Morpho market price oracle.
+    address internal immutable MARKET_ORACLE;
+
+    /// @notice Morpho market interest rate model.
+    address internal immutable IRM;
+
+    /// @notice Morpho market liquidation loan-to-value.
+    uint256 internal immutable LLTV;
 
     /// @notice Computed market ID (keccak256 of marketParams).
     bytes32 public immutable MARKET_ID;
 
     /// @notice SyntheticSplitter authorized to deposit/withdraw.
     address public immutable SPLITTER;
+
+    /// @notice Returns Morpho market parameters for this adapter.
+    function marketParams() public view returns (MarketParams memory) {
+        return MarketParams({
+            loanToken: LOAN_TOKEN, collateralToken: COLLATERAL_TOKEN, oracle: MARKET_ORACLE, irm: IRM, lltv: LLTV
+        });
+    }
 
     /// @notice Universal Rewards Distributor for Morpho incentives.
     address public urd;
@@ -82,7 +101,11 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         }
 
         MORPHO = IMorpho(_morpho);
-        marketParams = _marketParams;
+        LOAN_TOKEN = _marketParams.loanToken;
+        COLLATERAL_TOKEN = _marketParams.collateralToken;
+        MARKET_ORACLE = _marketParams.oracle;
+        IRM = _marketParams.irm;
+        LLTV = _marketParams.lltv;
         MARKET_ID = _computeMarketId(_marketParams);
         SPLITTER = _splitter;
 
@@ -101,7 +124,7 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         if (supplyShares == 0) {
             return 0;
         }
-        return MorphoBalancesLib.expectedSupplyAssets(MORPHO, marketParams, supplyShares);
+        return MorphoBalancesLib.expectedSupplyAssets(MORPHO, marketParams(), supplyShares);
     }
 
     /// @dev Deposits assets to Morpho after ERC4626 share minting.
@@ -123,7 +146,7 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         super._deposit(caller, receiver, assets, shares);
 
         // 2. Supply to Morpho Blue (assets mode, shares = 0)
-        MORPHO.supply(marketParams, assets, 0, address(this), "");
+        MORPHO.supply(marketParams(), assets, 0, address(this), "");
     }
 
     /// @dev Withdraws assets from Morpho before ERC4626 share burning.
@@ -140,7 +163,7 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         uint256 shares
     ) internal override {
         // 1. Withdraw from Morpho to 'this' (assets mode, shares = 0)
-        MORPHO.withdraw(marketParams, assets, 0, address(this), address(this));
+        MORPHO.withdraw(marketParams(), assets, 0, address(this), address(this));
 
         // 2. OpenZeppelin's logic sends assets to 'receiver'
         super._withdraw(caller, receiver, owner, assets, shares);
@@ -153,7 +176,7 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     /// @notice Forces Morpho to accrue interest, syncing expected and actual values.
     /// @dev Call before totalAssets() if you need exact values for calculations.
     function accrueInterest() external {
-        MORPHO.accrueInterest(marketParams);
+        MORPHO.accrueInterest(marketParams());
     }
 
     /// @dev Computes market ID from parameters (keccak256 hash).

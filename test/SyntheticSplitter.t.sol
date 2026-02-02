@@ -197,8 +197,8 @@ contract SyntheticSplitterTest is Test {
         assertEq(adapter.balanceOf(address(splitter)), 180 * 1e6, "Vault Incorrect");
 
         // Check Tokens
-        assertEq(splitter.TOKEN_A().balanceOf(alice), mintAmount);
-        assertEq(splitter.TOKEN_B().balanceOf(alice), mintAmount);
+        assertEq(splitter.BEAR().balanceOf(alice), mintAmount);
+        assertEq(splitter.BULL().balanceOf(alice), mintAmount);
     }
 
     function test_Burn_UsesBufferFirst() public {
@@ -315,7 +315,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
         // 5. Verify the burn actually happened
         // Alice started with 100 Minted. Burned 10. Should have 90 left.
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 90 * 1e18, "Burn failed to execute during pause");
+        assertEq(splitter.BEAR().balanceOf(alice), 90 * 1e18, "Burn failed to execute during pause");
     }
 
     // ==========================================
@@ -407,9 +407,9 @@ contract SyntheticSplitterTest is Test {
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE, "Alice didn't get full payout");
 
         // Bear tokens burned
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 0);
+        assertEq(splitter.BEAR().balanceOf(alice), 0);
         // Bull tokens still in wallet (but worthless)
-        assertEq(splitter.TOKEN_B().balanceOf(alice), 100 * 1e18);
+        assertEq(splitter.BULL().balanceOf(alice), 100 * 1e18);
 
         // Contract is marked liquidated
         assertTrue(splitter.isLiquidated());
@@ -789,7 +789,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 4. Verify Alice got her refund via redeem fallback
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 50 * 1e18, "Alice should have 50 tokens left");
+        assertEq(splitter.BEAR().balanceOf(alice), 50 * 1e18, "Alice should have 50 tokens left");
         // Alice started with 100k, spent 200, got 100 back = 99,900
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 100 * 1e6, "Alice should have received $100 refund");
     }
@@ -818,7 +818,7 @@ contract SyntheticSplitterTest is Test {
 
         // Verify: Alice got her $20 back
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE - 180 * 1e6, "Alice should have received refund from buffer");
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 90 * 1e18, "Alice should have 90 tokens left");
+        assertEq(splitter.BEAR().balanceOf(alice), 90 * 1e18, "Alice should have 90 tokens left");
     }
 
     /**
@@ -846,7 +846,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 5. Verify Alice got her refund
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 50 * 1e18, "Alice should have 50 BEAR tokens left");
+        assertEq(splitter.BEAR().balanceOf(alice), 50 * 1e18, "Alice should have 50 BEAR tokens left");
     }
 
     /**
@@ -1193,8 +1193,8 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 3. Verify no state changes occurred (atomicity)
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 0, "No tokens should be minted");
-        assertEq(splitter.TOKEN_B().balanceOf(alice), 0, "No tokens should be minted");
+        assertEq(splitter.BEAR().balanceOf(alice), 0, "No tokens should be minted");
+        assertEq(splitter.BULL().balanceOf(alice), 0, "No tokens should be minted");
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE, "USDC should not be deducted");
     }
 
@@ -1216,7 +1216,7 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 3. Verify state unchanged
-        assertEq(splitter.TOKEN_A().totalSupply(), 0, "Total supply should be 0");
+        assertEq(splitter.BEAR().totalSupply(), 0, "Total supply should be 0");
     }
 
     /**
@@ -1311,9 +1311,9 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 4. Verify no tokens minted for either user
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 0);
-        assertEq(splitter.TOKEN_A().balanceOf(carol), 0);
-        assertEq(splitter.TOKEN_A().totalSupply(), 0);
+        assertEq(splitter.BEAR().balanceOf(alice), 0);
+        assertEq(splitter.BEAR().balanceOf(carol), 0);
+        assertEq(splitter.BEAR().totalSupply(), 0);
     }
 
     /**
@@ -1340,8 +1340,8 @@ contract SyntheticSplitterTest is Test {
         vm.stopPrank();
 
         // 5. Verify successful mint
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 100 * 1e18);
-        assertEq(splitter.TOKEN_B().balanceOf(alice), 100 * 1e18);
+        assertEq(splitter.BEAR().balanceOf(alice), 100 * 1e18);
+        assertEq(splitter.BULL().balanceOf(alice), 100 * 1e18);
     }
 
     /**
@@ -1355,7 +1355,7 @@ contract SyntheticSplitterTest is Test {
         splitter.mint(100 * 1e18);
         vm.stopPrank();
 
-        uint256 aliceTokensBefore = splitter.TOKEN_A().balanceOf(alice);
+        uint256 aliceTokensBefore = splitter.BEAR().balanceOf(alice);
         assertEq(aliceTokensBefore, 100 * 1e18);
 
         // 2. Mock adapter deposit to revert (adapter breaks for new deposits)
@@ -1378,7 +1378,7 @@ contract SyntheticSplitterTest is Test {
         splitter.burn(10 * 1e18);
         vm.stopPrank();
 
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 90 * 1e18, "Alice should be able to burn");
+        assertEq(splitter.BEAR().balanceOf(alice), 90 * 1e18, "Alice should be able to burn");
     }
 
     /**
@@ -1410,7 +1410,7 @@ contract SyntheticSplitterTest is Test {
         mintAmount = bound(mintAmount, 1e18, 1_000_000 * 1e18);
 
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
-        uint256 totalSupplyBefore = splitter.TOKEN_A().totalSupply();
+        uint256 totalSupplyBefore = splitter.BEAR().totalSupply();
 
         // 1. Mock adapter deposit to revert
         vm.mockCallRevert(
@@ -1426,8 +1426,8 @@ contract SyntheticSplitterTest is Test {
 
         // 3. Invariants: no state changes
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore, "USDC unchanged");
-        assertEq(splitter.TOKEN_A().totalSupply(), totalSupplyBefore, "Token supply unchanged");
-        assertEq(splitter.TOKEN_A().balanceOf(alice), 0, "No tokens minted");
+        assertEq(splitter.BEAR().totalSupply(), totalSupplyBefore, "Token supply unchanged");
+        assertEq(splitter.BEAR().balanceOf(alice), 0, "No tokens minted");
     }
 
     // ==========================================
@@ -1833,13 +1833,13 @@ contract SyntheticSplitterTest is Test {
     }
 
     function test_RescueToken_RevertsForTokenA() public {
-        address tokenA = address(splitter.TOKEN_A());
+        address tokenA = address(splitter.BEAR());
         vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
         splitter.rescueToken(tokenA, treasury);
     }
 
     function test_RescueToken_RevertsForTokenB() public {
-        address tokenB = address(splitter.TOKEN_B());
+        address tokenB = address(splitter.BULL());
         vm.expectRevert(SyntheticSplitter.Splitter__CannotRescueCoreAsset.selector);
         splitter.rescueToken(tokenB, treasury);
     }

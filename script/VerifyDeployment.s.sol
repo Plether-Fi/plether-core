@@ -145,8 +145,8 @@ contract VerifyDeployment is Script {
         console2.log("[OK] Splitter CAP correct:", CAP);
 
         // Check tokens are correctly set
-        require(address(splitter.TOKEN_A()) == PLDXY_BEAR, "TOKEN_A mismatch");
-        require(address(splitter.TOKEN_B()) == PLDXY_BULL, "TOKEN_B mismatch");
+        require(address(splitter.BEAR()) == PLDXY_BEAR, "BEAR mismatch");
+        require(address(splitter.BULL()) == PLDXY_BULL, "BULL mismatch");
         console2.log("[OK] Splitter tokens correctly configured");
 
         // Check Splitter is active (not paused and not liquidated)
