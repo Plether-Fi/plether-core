@@ -76,6 +76,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @notice Thrown when a base price is zero.
     error BasketOracle__InvalidBasePrice();
 
+    /// @notice Thrown when quantities don't sum to 1e18.
+    error BasketOracle__InvalidWeights();
+
     /// @notice Creates basket oracle with currency components.
     /// @param _feeds Array of Chainlink feed addresses.
     /// @param _quantities Array of basket weights (1e18 precision).
@@ -101,6 +104,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             revert BasketOracle__InvalidDeviation();
         }
 
+        uint256 totalWeight = 0;
         for (uint256 i = 0; i < _feeds.length; i++) {
             AggregatorV3Interface feed = AggregatorV3Interface(_feeds[i]);
             if (feed.decimals() != DECIMALS) {
@@ -111,6 +115,11 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             }
 
             components.push(Component({feed: feed, quantity: _quantities[i], basePrice: _basePrices[i]}));
+            totalWeight += _quantities[i];
+        }
+
+        if (totalWeight != 1e18) {
+            revert BasketOracle__InvalidWeights();
         }
 
         MAX_DEVIATION_BPS = _maxDeviationBps;

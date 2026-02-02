@@ -143,6 +143,57 @@ contract BasketOracleTest is Test {
         new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
     }
 
+    function test_Revert_WeightsSumTooLow() public {
+        address[] memory feeds = new address[](2);
+        feeds[0] = address(feedEUR);
+        feeds[1] = address(feedJPY);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0.3 ether; // 30%
+        quantities[1] = 0.3 ether; // 30% - total 60%, not 100%
+
+        uint256[] memory basePrices = new uint256[](2);
+        basePrices[0] = BASE_EUR;
+        basePrices[1] = BASE_JPY;
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
+        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+    }
+
+    function test_Revert_WeightsSumTooHigh() public {
+        address[] memory feeds = new address[](2);
+        feeds[0] = address(feedEUR);
+        feeds[1] = address(feedJPY);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0.6 ether; // 60%
+        quantities[1] = 0.6 ether; // 60% - total 120%, not 100%
+
+        uint256[] memory basePrices = new uint256[](2);
+        basePrices[0] = BASE_EUR;
+        basePrices[1] = BASE_JPY;
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
+        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+    }
+
+    function test_Revert_AllZeroWeights() public {
+        address[] memory feeds = new address[](2);
+        feeds[0] = address(feedEUR);
+        feeds[1] = address(feedJPY);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0;
+        quantities[1] = 0;
+
+        uint256[] memory basePrices = new uint256[](2);
+        basePrices[0] = BASE_EUR;
+        basePrices[1] = BASE_JPY;
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
+        new BasketOracle(feeds, quantities, basePrices, 200, 2e8, address(this));
+    }
+
     function test_Revert_InvalidDecimals() public {
         // Create a mock oracle with wrong decimals
         MockOracleWrongDecimals wrongDecimalFeed = new MockOracleWrongDecimals(110_000_000, "BAD/USD");
