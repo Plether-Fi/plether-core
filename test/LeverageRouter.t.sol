@@ -689,6 +689,156 @@ contract LeverageRouterTest is Test {
         assertGt(morpho.collateralBalance(alice), 0, "Position should be created");
     }
 
+    // ==========================================
+    // COLLATERAL ADJUSTMENT TESTS
+    // ==========================================
+
+    function test_AddCollateral_Success() public {
+        // First create a position
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+
+        uint256 collateralBefore = morpho.collateralBalance(alice);
+
+        // Add more collateral
+        usdc.mint(alice, 500 * 1e6);
+        usdc.approve(address(router), 500 * 1e6);
+        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 collateralAfter = morpho.collateralBalance(alice);
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+    }
+
+    function test_AddCollateral_NoPosition_Reverts() public {
+        vm.startPrank(alice);
+        usdc.approve(address(router), 500 * 1e6);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
+        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_ZeroAmount_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
+        router.addCollateral(0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_NotAuthorized_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Revoke authorization
+        morpho.setAuthorization(address(router), false);
+
+        usdc.mint(alice, 500 * 1e6);
+        usdc.approve(address(router), 500 * 1e6);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
+        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_Expired_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000 * 1e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+
+        usdc.mint(alice, 500 * 1e6);
+        usdc.approve(address(router), 500 * 1e6);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
+        router.addCollateral(500 * 1e6, 100, block.timestamp - 1);
+        vm.stopPrank();
+    }
+
+    function test_RemoveCollateral_Success() public {
+        // First create a position with zero debt for simplicity
+        vm.startPrank(alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
+
+        uint256 collateralBefore = morpho.collateralBalance(alice);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        morpho.setAuthorization(address(router), true);
+        router.removeCollateral(1000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 collateralAfter = morpho.collateralBalance(alice);
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        assertEq(collateralBefore - collateralAfter, 1000 * 1e18, "Collateral should decrease by amount");
+        assertGt(usdcAfter, usdcBefore, "User should receive USDC");
+    }
+
+    function test_RemoveCollateral_NoPosition_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
+        router.removeCollateral(1000 * 1e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_RemoveCollateral_ZeroAmount_Reverts() public {
+        // First create a position
+        vm.startPrank(alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
+
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
+        router.removeCollateral(0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_PreviewAddCollateral() public view {
+        (uint256 expectedBear, uint256 expectedShares) = router.previewAddCollateral(1000 * 1e6);
+        assertGt(expectedBear, 0, "Should return expected BEAR");
+        assertGt(expectedShares, 0, "Should return expected shares");
+    }
+
+    function test_PreviewRemoveCollateral() public view {
+        (uint256 expectedBear, uint256 expectedUsdc) = router.previewRemoveCollateral(1000 * 1e18);
+        assertGt(expectedBear, 0, "Should return expected BEAR");
+        assertGt(expectedUsdc, 0, "Should return expected USDC");
+    }
+
+    function test_GetCollateral() public {
+        vm.startPrank(alice);
+        plDxyBear.mint(alice, 3000 * 1e18);
+        plDxyBear.approve(address(stakedPlDxyBear), 3000 * 1e18);
+        stakedPlDxyBear.deposit(3000 * 1e18, alice);
+        stakedPlDxyBear.approve(address(morpho), 3000 * 1e18);
+        morpho.supplyCollateral(params, 3000 * 1e18, alice, "");
+        vm.stopPrank();
+
+        assertEq(router.getCollateral(alice), 3000 * 1e18, "Should return correct collateral");
+    }
+
 }
 
 // ==========================================
@@ -754,6 +904,12 @@ contract MockStakedToken is ERC20 {
         uint256 shares
     ) external pure returns (uint256) {
         return shares; // 1:1 for simplicity
+    }
+
+    function previewDeposit(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets; // 1:1 for simplicity
     }
 
 }

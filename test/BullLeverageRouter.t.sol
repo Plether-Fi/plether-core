@@ -928,6 +928,180 @@ contract BullLeverageRouterTest is Test {
         assertEq(debtAfter, 0, "Debt should be fully repaid");
     }
 
+    // ==========================================
+    // COLLATERAL ADJUSTMENT TESTS
+    // ==========================================
+
+    function test_AddCollateral_Success() public {
+        // First create a position
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+
+        // Add more collateral
+        usdc.approve(address(router), 500e6);
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+    }
+
+    function test_AddCollateral_NoPosition_Reverts() public {
+        usdc.mint(alice, 1000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 500e6);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_ZeroAmount_Reverts() public {
+        // First create a position
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
+        router.addCollateral(0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_NotAuthorized_Reverts() public {
+        // First create a position
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Revoke authorization
+        morpho.setAuthorization(address(router), false);
+        usdc.approve(address(router), 500e6);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_AddCollateral_SplitterNotActive_Reverts() public {
+        // First create a position
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 1000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Pause splitter
+        splitter.setStatus(ISyntheticSplitter.Status.PAUSED);
+        usdc.approve(address(router), 500e6);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector);
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_RemoveCollateral_Success() public {
+        // Create a position with zero debt for simplicity
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        // Create splBull collateral directly
+        plDxyBull.mint(alice, 3000e18);
+        plDxyBull.approve(address(stakedPlDxyBull), 3000e18);
+        stakedPlDxyBull.deposit(3000e18, alice);
+        stakedPlDxyBull.approve(address(morpho), 3000e18);
+        morpho.supplyCollateral(params, 3000e18, alice, "");
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        morpho.setAuthorization(address(router), true);
+        router.removeCollateral(1000e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        assertEq(collateralBefore - collateralAfter, 1000e18, "Collateral should decrease by amount");
+        assertGt(usdcAfter, usdcBefore, "User should receive USDC");
+    }
+
+    function test_RemoveCollateral_NoPosition_Reverts() public {
+        vm.startPrank(alice);
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
+        router.removeCollateral(1000e18, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_RemoveCollateral_ZeroAmount_Reverts() public {
+        vm.startPrank(alice);
+        // Create splBull collateral directly
+        plDxyBull.mint(alice, 3000e18);
+        plDxyBull.approve(address(stakedPlDxyBull), 3000e18);
+        stakedPlDxyBull.deposit(3000e18, alice);
+        stakedPlDxyBull.approve(address(morpho), 3000e18);
+        morpho.supplyCollateral(params, 3000e18, alice, "");
+
+        morpho.setAuthorization(address(router), true);
+
+        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
+        router.removeCollateral(0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_PreviewAddCollateral() public view {
+        (uint256 tokensToMint, uint256 expectedUsdc, uint256 expectedShares) = router.previewAddCollateral(1000e6);
+        assertGt(tokensToMint, 0, "Should return expected tokens");
+        assertGt(expectedUsdc, 0, "Should return expected USDC from BEAR sale");
+        assertGt(expectedShares, 0, "Should return expected shares");
+    }
+
+    function test_PreviewRemoveCollateral() public view {
+        (uint256 expectedBull, uint256 expectedUsdc, uint256 usdcForBuyback, uint256 expectedReturn) =
+            router.previewRemoveCollateral(1000e18);
+        assertGt(expectedBull, 0, "Should return expected BULL");
+        assertGt(expectedUsdc, 0, "Should return expected USDC from burn");
+        // usdcForBuyback may be 0 if the buffer is small
+        assertGe(usdcForBuyback, 0, "Should return USDC for buyback");
+        assertGe(expectedReturn, 0, "Should return expected return");
+    }
+
+    function test_GetCollateral() public {
+        vm.startPrank(alice);
+        plDxyBull.mint(alice, 3000e18);
+        plDxyBull.approve(address(stakedPlDxyBull), 3000e18);
+        stakedPlDxyBull.deposit(3000e18, alice);
+        stakedPlDxyBull.approve(address(morpho), 3000e18);
+        morpho.supplyCollateral(params, 3000e18, alice, "");
+        vm.stopPrank();
+
+        assertEq(router.getCollateral(alice), 3000e18, "Should return correct collateral");
+    }
+
 }
 
 // ==========================================
@@ -1002,6 +1176,12 @@ contract MockStakedToken is ERC20 {
         uint256 shares
     ) external pure returns (uint256) {
         return shares; // 1:1 for simplicity
+    }
+
+    function previewDeposit(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets; // 1:1 for simplicity
     }
 
 }

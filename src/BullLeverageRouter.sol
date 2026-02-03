@@ -74,6 +74,17 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
+    /// @notice Emitted when collateral is added to a position.
+    /// @dev Net USDC cost = usdcAmount - usdcReturned (BEAR sale proceeds returned to user).
+    event CollateralAdded(
+        address indexed user, uint256 usdcAmount, uint256 usdcReturned, uint256 collateralAdded, uint256 maxSlippageBps
+    );
+
+    /// @notice Emitted when collateral is removed from a position.
+    event CollateralRemoved(
+        address indexed user, uint256 collateralWithdrawn, uint256 usdcReturned, uint256 maxSlippageBps
+    );
+
     /// @notice SyntheticSplitter for minting/burning token pairs.
     ISyntheticSplitter public immutable SPLITTER;
 
@@ -88,6 +99,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /// @notice Oracle for plDXY basket price (returns BEAR price in 8 decimals).
     AggregatorV3Interface public immutable ORACLE;
+
+    /// @dev Operation type: remove collateral (flash mint).
+    uint8 internal constant OP_REMOVE_COLLATERAL = 3;
 
     struct OpenParams {
         uint256 targetDebt;
@@ -284,6 +298,114 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Event emitted in _executeClose callback
     }
 
+    /**
+     * @notice Add collateral to an existing leveraged position.
+     * @dev Mints pairs via Splitter, sells BEAR on Curve, stakes BULL, and deposits to Morpho.
+     * @param usdcAmount Amount of USDC to use for minting pairs.
+     * @param maxSlippageBps Maximum slippage tolerance in basis points.
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * @param deadline Unix timestamp after which the transaction reverts.
+     */
+    function addCollateral(
+        uint256 usdcAmount,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
+        if (usdcAmount == 0) {
+            revert LeverageRouterBase__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
+        if (_getCollateral(msg.sender) == 0) {
+            revert LeverageRouterBase__NoPosition();
+        }
+        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.ACTIVE) {
+            revert LeverageRouterBase__SplitterNotActive();
+        }
+
+        USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        // 1. Mint pairs via Splitter (USDC → BEAR + BULL)
+        uint256 tokensToMint = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        if (tokensToMint == 0) {
+            revert LeverageRouterBase__AmountTooSmall();
+        }
+        SPLITTER.mint(tokensToMint);
+
+        // 2. Sell ALL BEAR for USDC via Curve (with slippage protection)
+        uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
+        uint256 expectedUsdcFromBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance);
+        uint256 minUsdcOut = (expectedUsdcFromBear * (10_000 - maxSlippageBps)) / 10_000;
+        CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minUsdcOut);
+
+        // 3. Stake BULL → splDXY-BULL
+        uint256 plDxyBullBalance = PLDXY_BULL.balanceOf(address(this));
+        uint256 stakedShares = STAKED_PLDXY_BULL.deposit(plDxyBullBalance, address(this));
+
+        // 4. Deposit splDXY-BULL to Morpho on behalf of user
+        MORPHO.supplyCollateral(marketParams, stakedShares, msg.sender, "");
+
+        // 5. Return excess USDC to user
+        uint256 excessUsdc = USDC.balanceOf(address(this));
+        if (excessUsdc > 0) {
+            USDC.safeTransfer(msg.sender, excessUsdc);
+        }
+
+        emit CollateralAdded(msg.sender, usdcAmount, excessUsdc, stakedShares, maxSlippageBps);
+    }
+
+    /**
+     * @notice Remove collateral from an existing leveraged position.
+     * @dev Uses flash mint of BEAR to redeem pairs, then buys back BEAR with USDC.
+     *      Reverts if the resulting position would be unhealthy.
+     * @param collateralToWithdraw Amount of splDXY-BULL shares to withdraw.
+     *        NOTE: This is staked token shares, not underlying plDXY-BULL amount.
+     * @param maxSlippageBps Maximum slippage tolerance in basis points.
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * @param deadline Unix timestamp after which the transaction reverts.
+     */
+    function removeCollateral(
+        uint256 collateralToWithdraw,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
+        if (collateralToWithdraw == 0) {
+            revert LeverageRouterBase__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
+
+        uint256 currentCollateral = _getCollateral(msg.sender);
+        if (currentCollateral == 0) {
+            revert LeverageRouterBase__NoPosition();
+        }
+
+        // Calculate BEAR needed to match BULL for pair redemption
+        uint256 plDxyBullAmount = STAKED_PLDXY_BULL.previewRedeem(collateralToWithdraw);
+
+        // Add buffer for exchange rate drift
+        uint256 bufferedBullAmount = plDxyBullAmount + (plDxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
+
+        // Flash mint BEAR for pair redemption
+        bytes memory data = abi.encode(OP_REMOVE_COLLATERAL, msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
+
+        IERC3156FlashLender(address(PLDXY_BEAR)).flashLoan(this, address(PLDXY_BEAR), bufferedBullAmount, data);
+    }
+
     /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
     /// @param amount Amount of USDC borrowed.
     /// @param data Encoded open operation parameters.
@@ -306,11 +428,11 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Constructor grants max approval, so no additional approval needed.
     }
 
-    /// @notice ERC-3156 flash loan callback for plDXY-BEAR flash mints (OP_CLOSE only).
+    /// @notice ERC-3156 flash loan callback for plDXY-BEAR flash mints.
     /// @param initiator Address that initiated the flash loan (must be this contract).
     /// @param amount Amount of plDXY-BEAR borrowed.
     /// @param fee Flash loan fee (always 0 for SyntheticToken).
-    /// @param data Encoded close operation parameters.
+    /// @param data Encoded operation parameters.
     /// @return CALLBACK_SUCCESS on successful execution.
     function onFlashLoan(
         address initiator,
@@ -325,6 +447,8 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         if (operation == OP_CLOSE) {
             _executeClose(amount, fee, data);
+        } else if (operation == OP_REMOVE_COLLATERAL) {
+            _executeRemoveCollateral(amount, fee, data);
         } else {
             revert FlashLoan__InvalidOperation();
         }
@@ -486,6 +610,75 @@ contract BullLeverageRouter is LeverageRouterBase {
         // plDXY-BEAR token will burn repayAmount from this contract
     }
 
+    /// @dev Executes remove collateral operation within plDXY-BEAR flash mint callback.
+    /// @param flashAmount Amount of plDXY-BEAR flash minted.
+    /// @param flashFee Flash mint fee (always 0).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, maxSlippageBps).
+    function _executeRemoveCollateral(
+        uint256 flashAmount,
+        uint256 flashFee,
+        bytes calldata data
+    ) private {
+        // Decode: (op, user, deadline, collateralToWithdraw, maxSlippageBps)
+        (, address user,, uint256 collateralToWithdraw, uint256 maxSlippageBps) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256));
+
+        // 1. Withdraw splDXY-BULL from Morpho (will revert if unhealthy)
+        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
+
+        // 2. Unstake splDXY-BULL → plDXY-BULL
+        uint256 plDxyBullReceived = STAKED_PLDXY_BULL.redeem(collateralToWithdraw, address(this), address(this));
+
+        // 3. Burn pairs (BEAR + BULL → USDC)
+        SPLITTER.burn(plDxyBullReceived);
+
+        // 4. Buy back BEAR to repay flash mint
+        uint256 repayAmount = flashAmount + flashFee;
+        uint256 bearBalance = PLDXY_BEAR.balanceOf(address(this));
+
+        if (repayAmount > bearBalance) {
+            uint256 bearToBuy = repayAmount - bearBalance;
+
+            // Estimate USDC needed using Curve price discovery
+            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
+            if (bearPerUsdc == 0) {
+                revert LeverageRouterBase__InvalidCurvePrice();
+            }
+
+            // Calculate USDC needed with slippage buffer
+            uint256 estimatedUsdcNeeded = (bearToBuy * DecimalConstants.ONE_USDC) / bearPerUsdc;
+            uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
+
+            uint256 usdcBalance = USDC.balanceOf(address(this));
+            uint256 usdcToSpend = usdcBalance < maxUsdcToSpend ? usdcBalance : maxUsdcToSpend;
+
+            if (usdcBalance < estimatedUsdcNeeded) {
+                revert LeverageRouterBase__InsufficientOutput();
+            }
+
+            // Swap USDC → BEAR with slippage-tolerant min_dy
+            uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
+            CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, usdcToSpend, minBearOut);
+        }
+
+        // 5. Transfer remaining USDC to user
+        uint256 usdcToReturn = USDC.balanceOf(address(this));
+        if (usdcToReturn > 0) {
+            USDC.safeTransfer(user, usdcToReturn);
+        }
+
+        // 6. Sweep excess BEAR to user (from exchange rate buffer)
+        uint256 finalBearBalance = PLDXY_BEAR.balanceOf(address(this));
+        if (finalBearBalance > repayAmount) {
+            PLDXY_BEAR.safeTransfer(user, finalBearBalance - repayAmount);
+        }
+
+        // 7. Emit event
+        emit CollateralRemoved(user, collateralToWithdraw, usdcToReturn, maxSlippageBps);
+
+        // Flash mint repayment happens automatically when callback returns
+    }
+
     // ==========================================
     // VIEW FUNCTIONS (for frontend)
     // ==========================================
@@ -564,6 +757,53 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 totalOutflows = debtToRepay + usdcForBearBuyback;
 
         expectedReturn = totalInflows > totalOutflows ? totalInflows - totalOutflows : 0;
+    }
+
+    /**
+     * @notice Preview the result of adding collateral.
+     * @param usdcAmount Amount of USDC to use for minting pairs.
+     * @return tokensToMint Expected plDXY-BULL tokens to mint.
+     * @return expectedUsdcFromBearSale Expected USDC from selling BEAR.
+     * @return expectedStakedShares Expected splDXY-BULL shares to receive.
+     */
+    function previewAddCollateral(
+        uint256 usdcAmount
+    ) external view returns (uint256 tokensToMint, uint256 expectedUsdcFromBearSale, uint256 expectedStakedShares) {
+        tokensToMint = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        expectedUsdcFromBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, tokensToMint);
+        expectedStakedShares = STAKED_PLDXY_BULL.previewDeposit(tokensToMint);
+    }
+
+    /**
+     * @notice Preview the result of removing collateral.
+     * @param collateralToWithdraw Amount of splDXY-BULL shares to withdraw.
+     * @return expectedPlDxyBull Expected plDXY-BULL from unstaking.
+     * @return expectedUsdcFromBurn Expected USDC from burning pairs.
+     * @return usdcForBearBuyback Expected USDC needed to buy back flash-minted BEAR.
+     * @return expectedReturn Expected USDC returned to user.
+     */
+    function previewRemoveCollateral(
+        uint256 collateralToWithdraw
+    )
+        external
+        view
+        returns (
+            uint256 expectedPlDxyBull,
+            uint256 expectedUsdcFromBurn,
+            uint256 usdcForBearBuyback,
+            uint256 expectedReturn
+        )
+    {
+        expectedPlDxyBull = STAKED_PLDXY_BULL.previewRedeem(collateralToWithdraw);
+
+        // USDC from burning pairs at CAP price
+        expectedUsdcFromBurn = (expectedPlDxyBull * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+
+        // After burning pairs, we have (buffer) BEAR remaining but need to repay (buffer + expectedPlDxyBull).
+        // So we need to buy back expectedPlDxyBull BEAR (the amount consumed by burning).
+        usdcForBearBuyback = _estimateUsdcForBearBuyback(expectedPlDxyBull);
+
+        expectedReturn = expectedUsdcFromBurn > usdcForBearBuyback ? expectedUsdcFromBurn - usdcForBearBuyback : 0;
     }
 
     /// @dev Calculates parameters for opening a leveraged position.

@@ -13,6 +13,7 @@ import {IMorpho, MarketParams} from "../interfaces/IMorpho.sol";
 import {FlashLoanBase} from "./FlashLoanBase.sol";
 
 /// @title LeverageRouterBase
+/// @custom:security-contact contact@plether.com
 /// @notice Abstract base for leverage routers with shared validation and admin logic.
 /// @dev Common infrastructure for LeverageRouter (plDXY-BEAR) and BullLeverageRouter (plDXY-BULL).
 abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
@@ -82,6 +83,18 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     /// @notice Thrown when Splitter is not active.
     error LeverageRouterBase__SplitterNotActive();
 
+    /// @notice Thrown when amount is zero.
+    error LeverageRouterBase__ZeroAmount();
+
+    /// @notice Thrown when user has no position in Morpho.
+    error LeverageRouterBase__NoPosition();
+
+    /// @notice Thrown when withdrawal would make position unhealthy.
+    error LeverageRouterBase__Unhealthy();
+
+    /// @notice Thrown when amount is too small after conversion.
+    error LeverageRouterBase__AmountTooSmall();
+
     /// @notice Initializes base router with core dependencies.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _curvePool Curve USDC/plDXY-BEAR pool address.
@@ -139,6 +152,15 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
         return _getActualDebt(user);
     }
 
+    /// @notice Returns the user's collateral in this market.
+    /// @param user The address to query collateral for.
+    /// @return collateral The collateral amount in staked token shares.
+    function getCollateral(
+        address user
+    ) external view returns (uint256 collateral) {
+        return _getCollateral(user);
+    }
+
     // ==========================================
     // INTERNAL FUNCTIONS
     // ==========================================
@@ -173,6 +195,15 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
         bytes32 marketId = _marketId();
         (, uint128 borrowShares,) = MORPHO.position(marketId, user);
         return uint256(borrowShares);
+    }
+
+    /// @dev Returns user's collateral from Morpho position.
+    function _getCollateral(
+        address user
+    ) internal view returns (uint256) {
+        bytes32 marketId = _marketId();
+        (,, uint128 collateral) = MORPHO.position(marketId, user);
+        return uint256(collateral);
     }
 
 }

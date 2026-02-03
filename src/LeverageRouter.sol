@@ -38,6 +38,17 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps
     );
 
+    /// @notice Emitted when collateral is added to a position.
+    /// @dev usdcReturned is always 0 for BEAR router (full amount swapped to BEAR).
+    event CollateralAdded(
+        address indexed user, uint256 usdcAmount, uint256 usdcReturned, uint256 collateralAdded, uint256 maxSlippageBps
+    );
+
+    /// @notice Emitted when collateral is removed from a position.
+    event CollateralRemoved(
+        address indexed user, uint256 collateralWithdrawn, uint256 usdcReturned, uint256 maxSlippageBps
+    );
+
     /// @notice StakedToken vault for plDXY-BEAR (used as Morpho collateral).
     IERC4626 public immutable STAKED_PLDXY_BEAR;
 
@@ -177,6 +188,106 @@ contract LeverageRouter is LeverageRouterBase {
         }
 
         // Event emitted in _executeClose or _executeCloseNoDebt
+    }
+
+    /**
+     * @notice Add collateral to an existing leveraged position.
+     * @dev Swaps USDC to plDXY-BEAR on Curve, stakes, and deposits to Morpho.
+     * @param usdcAmount Amount of USDC to add as collateral.
+     * @param maxSlippageBps Maximum slippage tolerance in basis points.
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * @param deadline Unix timestamp after which the transaction reverts.
+     */
+    function addCollateral(
+        uint256 usdcAmount,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
+        if (usdcAmount == 0) {
+            revert LeverageRouterBase__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
+        if (_getCollateral(msg.sender) == 0) {
+            revert LeverageRouterBase__NoPosition();
+        }
+
+        USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        // Calculate minimum plDXY-BEAR output with slippage protection
+        uint256 expectedPlDxyBear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, usdcAmount);
+        uint256 minPlDxyBear = (expectedPlDxyBear * (10_000 - maxSlippageBps)) / 10_000;
+
+        // 1. Swap USDC → plDXY-BEAR via Curve
+        uint256 plDxyBearReceived = CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, usdcAmount, minPlDxyBear);
+        if (plDxyBearReceived == 0) {
+            revert LeverageRouterBase__AmountTooSmall();
+        }
+
+        // 2. Stake plDXY-BEAR → splDXY-BEAR
+        uint256 stakedShares = STAKED_PLDXY_BEAR.deposit(plDxyBearReceived, address(this));
+
+        // 3. Deposit splDXY-BEAR to Morpho on behalf of user
+        MORPHO.supplyCollateral(marketParams, stakedShares, msg.sender, "");
+
+        emit CollateralAdded(msg.sender, usdcAmount, 0, stakedShares, maxSlippageBps);
+    }
+
+    /**
+     * @notice Remove collateral from an existing leveraged position.
+     * @dev Withdraws from Morpho, unstakes, and swaps to USDC.
+     *      Reverts if the resulting position would be unhealthy.
+     * @param collateralToWithdraw Amount of splDXY-BEAR shares to withdraw.
+     *        NOTE: This is staked token shares, not underlying plDXY-BEAR amount.
+     * @param maxSlippageBps Maximum slippage tolerance in basis points.
+     *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
+     * @param deadline Unix timestamp after which the transaction reverts.
+     */
+    function removeCollateral(
+        uint256 collateralToWithdraw,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) external nonReentrant whenNotPaused {
+        if (collateralToWithdraw == 0) {
+            revert LeverageRouterBase__ZeroAmount();
+        }
+        if (block.timestamp > deadline) {
+            revert LeverageRouterBase__Expired();
+        }
+        if (maxSlippageBps > MAX_SLIPPAGE_BPS) {
+            revert LeverageRouterBase__SlippageExceedsMax();
+        }
+        if (!MORPHO.isAuthorized(msg.sender, address(this))) {
+            revert LeverageRouterBase__NotAuthorized();
+        }
+
+        uint256 currentCollateral = _getCollateral(msg.sender);
+        if (currentCollateral == 0) {
+            revert LeverageRouterBase__NoPosition();
+        }
+
+        // 1. Withdraw splDXY-BEAR from Morpho (will revert if unhealthy)
+        MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, msg.sender, address(this));
+
+        // 2. Unstake splDXY-BEAR → plDXY-BEAR
+        uint256 plDxyBearReceived = STAKED_PLDXY_BEAR.redeem(collateralToWithdraw, address(this), address(this));
+
+        // 3. Swap plDXY-BEAR → USDC via Curve with slippage protection
+        uint256 expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearReceived);
+        uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
+        uint256 usdcReceived = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearReceived, minUsdcOut);
+
+        // 4. Send USDC to user
+        USDC.safeTransfer(msg.sender, usdcReceived);
+
+        emit CollateralRemoved(msg.sender, collateralToWithdraw, usdcReceived, maxSlippageBps);
     }
 
     /// @notice Morpho flash loan callback. Routes to open or close handler.
@@ -372,6 +483,32 @@ contract LeverageRouter is LeverageRouterBase {
         // No flash fee with Morpho
         flashFee = 0;
         expectedReturn = expectedUSDC > debtToRepay ? expectedUSDC - debtToRepay : 0;
+    }
+
+    /**
+     * @notice Preview the result of adding collateral.
+     * @param usdcAmount Amount of USDC to add as collateral.
+     * @return expectedPlDxyBear Expected plDXY-BEAR from Curve swap.
+     * @return expectedStakedShares Expected splDXY-BEAR shares to receive.
+     */
+    function previewAddCollateral(
+        uint256 usdcAmount
+    ) external view returns (uint256 expectedPlDxyBear, uint256 expectedStakedShares) {
+        expectedPlDxyBear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, usdcAmount);
+        expectedStakedShares = STAKED_PLDXY_BEAR.previewDeposit(expectedPlDxyBear);
+    }
+
+    /**
+     * @notice Preview the result of removing collateral.
+     * @param collateralToWithdraw Amount of splDXY-BEAR shares to withdraw.
+     * @return expectedPlDxyBear Expected plDXY-BEAR from unstaking.
+     * @return expectedUSDC Expected USDC from Curve swap.
+     */
+    function previewRemoveCollateral(
+        uint256 collateralToWithdraw
+    ) external view returns (uint256 expectedPlDxyBear, uint256 expectedUSDC) {
+        expectedPlDxyBear = STAKED_PLDXY_BEAR.previewRedeem(collateralToWithdraw);
+        expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, expectedPlDxyBear);
     }
 
 }
