@@ -1022,6 +1022,168 @@ contract BullLeverageRouterTest is Test {
         vm.stopPrank();
     }
 
+    function test_AddCollateral_WithCurvePriceImpact() public {
+        // This test verifies addCollateral handles Curve price impact correctly.
+        // The flash loan buffer must account for the difference between oracle price
+        // and actual Curve swap output.
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+        uint256 usdcBefore = usdc.balanceOf(alice);
+
+        // Add collateral with 1% slippage tolerance (100 bps)
+        // This should succeed even with Curve price impact
+        uint256 addAmount = 500e6;
+        router.addCollateral(addAmount, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        // Collateral should increase
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+
+        // User's USDC should decrease (they spent some to add collateral)
+        // Excess from the BEAR sale buffer is returned, so spent < input
+        uint256 usdcSpent = usdcBefore - usdcAfter;
+        assertGt(usdcSpent, 0, "User should spend some USDC");
+        assertLe(usdcSpent, addAmount, "User should not spend more than input");
+    }
+
+    function test_AddCollateral_LargeAmount_WithPriceImpact() public {
+        // Test with larger amount to ensure price impact is handled
+        usdc.mint(alice, 100_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 100_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(5000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+
+        // Add large collateral amount - should handle price impact
+        router.addCollateral(10_000e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase significantly");
+    }
+
+    function test_AddCollateral_SlippageBuffer_EnsuresSurplus() public {
+        // This test verifies the fix for the addCollateral slippage bug.
+        // The flash loan amount uses a SUBTRACT buffer (not add) to ensure
+        // BEAR sale proceeds exceed flash loan repayment even with slippage.
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Set slippage on Curve pool to simulate real-world conditions
+        // The get_dy() quote won't include this, but exchange() will
+        curvePool.setSlippage(50); // 0.5% slippage
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+        (uint256 collateralBefore,) = morpho.positions(alice);
+
+        // Add collateral with 1% max slippage - should succeed
+        // because flash loan buffer is subtracted (borrow less, easier to repay)
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        uint256 usdcAfter = usdc.balanceOf(alice);
+
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+        // User gets excess USDC back (BEAR sale proceeds > flash loan)
+        assertGt(usdcBefore - usdcAfter, 0, "User should spend USDC");
+        assertLe(usdcBefore - usdcAfter, 500e6, "User should not spend more than input");
+    }
+
+    function test_AddCollateral_SlippageBuffer_WorksAtMaxSlippage() public {
+        // Test at maximum allowed slippage (1% = 100 bps)
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Set slippage close to max tolerance
+        curvePool.setSlippage(90); // 0.9% slippage (just under 1% max)
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+
+        // Should still succeed with 1% max slippage tolerance
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+    }
+
+    function test_AddCollateral_RevertsWhenSlippageExceedsTolerance() public {
+        // Test that addCollateral reverts when actual slippage far exceeds tolerance.
+        // The flash loan buffer (subtract 1%) makes the system more robust, so we need
+        // significant slippage (>10%) to cause the Curve min_dy check to fail.
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        // Set extreme slippage that exceeds what the buffer can handle
+        curvePool.setSlippage(1500); // 15% slippage - way beyond 1% tolerance
+
+        vm.expectRevert("Too little received"); // Curve min_dy check
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function testFuzz_AddCollateral_SlippageHandling(
+        uint256 slippageBps
+    ) public {
+        // Fuzz test: any slippage <= maxSlippageBps should succeed
+        slippageBps = bound(slippageBps, 0, 90); // Up to 0.9% (leave margin for rounding)
+
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        curvePool.setSlippage(slippageBps);
+
+        (uint256 collateralBefore,) = morpho.positions(alice);
+
+        // Should succeed with 1% max slippage tolerance
+        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        assertGt(collateralAfter, collateralBefore, "Collateral should increase");
+    }
+
     function test_RemoveCollateral_Success() public {
         // Create a position with zero debt for simplicity
         usdc.mint(address(curvePool), 10_000_000e6);
@@ -1080,6 +1242,34 @@ contract BullLeverageRouterTest is Test {
         assertGt(totalUSDC, flashLoanAmount, "Total USDC should be greater than flash loan");
         assertGt(expectedBull, 0, "Should return expected BULL");
         assertGt(expectedShares, 0, "Should return expected shares");
+    }
+
+    function test_PreviewAddCollateral_MatchesActual() public {
+        // Verify preview matches actual execution to catch "lying preview" bugs
+        usdc.mint(alice, 10_000e6);
+        usdc.mint(address(morpho), 10_000_000e6);
+        usdc.mint(address(curvePool), 10_000_000e6);
+
+        vm.startPrank(alice);
+        usdc.approve(address(router), 10_000e6);
+        morpho.setAuthorization(address(router), true);
+        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+
+        uint256 addAmount = 500e6;
+
+        // Get preview
+        (,, uint256 expectedBull, uint256 expectedShares) = router.previewAddCollateral(addAmount);
+
+        // Execute actual
+        (uint256 collateralBefore,) = morpho.positions(alice);
+        router.addCollateral(addAmount, 100, block.timestamp + 1 hours);
+        (uint256 collateralAfter,) = morpho.positions(alice);
+        vm.stopPrank();
+
+        uint256 actualShares = collateralAfter - collateralBefore;
+
+        // Preview should match actual within 1% tolerance (due to slippage buffer)
+        assertApproxEqRel(actualShares, expectedShares, 0.01e18, "Preview shares should match actual");
     }
 
     function test_PreviewRemoveCollateral() public view {

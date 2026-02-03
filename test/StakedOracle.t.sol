@@ -170,6 +170,33 @@ contract StakedOracleTest is Test {
         stakedOracle.price();
     }
 
+    function test_Price_RevertsWhenUnderlyingOracleHasNoCode() public {
+        // Simulate deployment failure: underlying oracle address has no contract code.
+        // This can happen when:
+        // - Deployment script didn't complete
+        // - Anvil/node was restarted and state was lost
+        // - Wrong address was configured
+        address noCodeAddress = address(0xDEAD);
+
+        // Create StakedOracle with a non-contract address as oracle
+        StakedOracle brokenOracle = new StakedOracle(address(vault), noCodeAddress);
+
+        // Calling price() should revert because the external call to a non-contract
+        // returns empty data, which fails abi.decode expectations
+        vm.expectRevert();
+        brokenOracle.price();
+    }
+
+    function test_Constructor_RevertsOnZeroVaultAddress() public {
+        vm.expectRevert(StakedOracle.StakedOracle__ZeroAddress.selector);
+        new StakedOracle(address(0), address(underlyingOracle));
+    }
+
+    function test_Constructor_RevertsOnZeroOracleAddress() public {
+        vm.expectRevert(StakedOracle.StakedOracle__ZeroAddress.selector);
+        new StakedOracle(address(vault), address(0));
+    }
+
     // ==========================================
     // Edge Case Tests
     // ==========================================

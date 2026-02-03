@@ -358,9 +358,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 bullPrice = CAP - bearPrice;
 
         // flashLoanAmount = usdcAmount * bearPrice / bullPrice
-        // Add 10 bps (0.1%) buffer to ensure we have enough for flash loan repayment after slippage
+        // Subtract buffer to ensure BEAR sale proceeds exceed flash loan repayment
         uint256 flashLoanAmount = (usdcAmount * bearPrice) / bullPrice;
-        flashLoanAmount = flashLoanAmount + (flashLoanAmount * 10 / 10_000);
+        flashLoanAmount = flashLoanAmount - (flashLoanAmount * maxSlippageBps / 10_000);
 
         // Calculate tokens to mint
         uint256 totalUSDC = usdcAmount + flashLoanAmount;
@@ -369,8 +369,8 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__AmountTooSmall();
         }
 
-        // minSwapOut must cover flashLoanAmount - if swap succeeds, repayment is guaranteed
-        uint256 minSwapOut = flashLoanAmount;
+        // Allow slippage on Curve swap, but callback verifies we have enough to repay
+        uint256 minSwapOut = (flashLoanAmount * (10_000 - maxSlippageBps)) / 10_000;
 
         bytes memory data = abi.encode(OP_ADD_COLLATERAL, msg.sender, deadline, usdcAmount, maxSlippageBps, minSwapOut);
 
@@ -844,7 +844,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 bullPrice = CAP - bearPrice;
 
         flashLoanAmount = (usdcAmount * bearPrice) / bullPrice;
-        flashLoanAmount = flashLoanAmount + (flashLoanAmount * 10 / 10_000); // 0.1% buffer
+        flashLoanAmount = flashLoanAmount - (flashLoanAmount * MAX_SLIPPAGE_BPS / 10_000);
 
         totalUSDC = usdcAmount + flashLoanAmount;
         expectedPlDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
