@@ -50,6 +50,21 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 ///      │                  8. Emit LeverageClosed event                           │
 ///      └─────────────────────────────────────────────────────────────────────────┘
 ///
+/// @dev STATE MACHINE - ADD COLLATERAL (Morpho Flash Loan):
+///      ┌─────────────────────────────────────────────────────────────────────────┐
+///      │ addCollateral(usdcAmount)                                               │
+///      │   1. Pull USDC from user                                                │
+///      │   2. Flash loan USDC from Morpho (F = U × bearPrice / bullPrice)        │
+///      │      └──► onMorphoFlashLoan(OP_ADD_COLLATERAL)                          │
+///      │            └──► _executeAddCollateral()                                 │
+///      │                  1. Mint plDXY-BEAR + plDXY-BULL pairs via Splitter       │
+///      │                  2. Sell ALL plDXY-BEAR on Curve → USDC                   │
+///      │                  3. Stake plDXY-BULL → splDXY-BULL                         │
+///      │                  4. Deposit splDXY-BULL to Morpho (user's collateral)    │
+///      │                  5. Repay flash loan from BEAR sale proceeds            │
+///      │                  6. Emit CollateralAdded event                          │
+///      └─────────────────────────────────────────────────────────────────────────┘
+///
 contract BullLeverageRouter is LeverageRouterBase {
 
     using SafeERC20 for IERC20;
@@ -102,6 +117,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /// @dev Operation type: remove collateral (flash mint).
     uint8 internal constant OP_REMOVE_COLLATERAL = 3;
+
+    /// @dev Operation type: add collateral (Morpho flash loan).
+    uint8 internal constant OP_ADD_COLLATERAL = 4;
 
     struct OpenParams {
         uint256 targetDebt;
@@ -300,8 +318,10 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /**
      * @notice Add collateral to an existing leveraged position.
-     * @dev Mints pairs via Splitter, sells BEAR on Curve, stakes BULL, and deposits to Morpho.
-     * @param usdcAmount Amount of USDC to use for minting pairs.
+     * @dev Uses Morpho flash loan so user's USDC input ≈ collateral value added.
+     *      Flow: Flash loan USDC → Mint pairs → Sell ALL BEAR to repay flash loan → Keep BULL as collateral.
+     *      Formula: flashLoan = userUSDC × bearPrice / bullPrice
+     * @param usdcAmount Amount of USDC representing desired collateral value.
      * @param maxSlippageBps Maximum slippage tolerance in basis points.
      *        Capped at MAX_SLIPPAGE_BPS (1%) to limit MEV extraction.
      * @param deadline Unix timestamp after which the transaction reverts.
@@ -332,33 +352,29 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // 1. Mint pairs via Splitter (USDC → BEAR + BULL)
-        uint256 tokensToMint = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        // Calculate flash loan amount: F = U × bearPrice / bullPrice
+        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
+        uint256 bearPrice = uint256(rawPrice);
+        uint256 bullPrice = CAP - bearPrice;
+
+        // flashLoanAmount = usdcAmount * bearPrice / bullPrice
+        // Add 10 bps (0.1%) buffer to ensure we have enough for flash loan repayment after slippage
+        uint256 flashLoanAmount = (usdcAmount * bearPrice) / bullPrice;
+        flashLoanAmount = flashLoanAmount + (flashLoanAmount * 10 / 10_000);
+
+        // Calculate tokens to mint
+        uint256 totalUSDC = usdcAmount + flashLoanAmount;
+        uint256 tokensToMint = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
         if (tokensToMint == 0) {
             revert LeverageRouterBase__AmountTooSmall();
         }
-        SPLITTER.mint(tokensToMint);
 
-        // 2. Sell ALL BEAR for USDC via Curve (with slippage protection)
-        uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
-        uint256 expectedUsdcFromBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance);
-        uint256 minUsdcOut = (expectedUsdcFromBear * (10_000 - maxSlippageBps)) / 10_000;
-        CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minUsdcOut);
+        // minSwapOut must cover flashLoanAmount - if swap succeeds, repayment is guaranteed
+        uint256 minSwapOut = flashLoanAmount;
 
-        // 3. Stake BULL → splDXY-BULL
-        uint256 plDxyBullBalance = PLDXY_BULL.balanceOf(address(this));
-        uint256 stakedShares = STAKED_PLDXY_BULL.deposit(plDxyBullBalance, address(this));
+        bytes memory data = abi.encode(OP_ADD_COLLATERAL, msg.sender, deadline, usdcAmount, maxSlippageBps, minSwapOut);
 
-        // 4. Deposit splDXY-BULL to Morpho on behalf of user
-        MORPHO.supplyCollateral(marketParams, stakedShares, msg.sender, "");
-
-        // 5. Return excess USDC to user
-        uint256 excessUsdc = USDC.balanceOf(address(this));
-        if (excessUsdc > 0) {
-            USDC.safeTransfer(msg.sender, excessUsdc);
-        }
-
-        emit CollateralAdded(msg.sender, usdcAmount, excessUsdc, stakedShares, maxSlippageBps);
+        MORPHO.flashLoan(address(USDC), flashLoanAmount, data);
     }
 
     /**
@@ -406,9 +422,9 @@ contract BullLeverageRouter is LeverageRouterBase {
         IERC3156FlashLender(address(PLDXY_BEAR)).flashLoan(this, address(PLDXY_BEAR), bufferedBullAmount, data);
     }
 
-    /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN only).
+    /// @notice Morpho flash loan callback for USDC flash loans (OP_OPEN, OP_ADD_COLLATERAL).
     /// @param amount Amount of USDC borrowed.
-    /// @param data Encoded open operation parameters.
+    /// @param data Encoded operation parameters.
     function onMorphoFlashLoan(
         uint256 amount,
         bytes calldata data
@@ -420,6 +436,8 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         if (operation == OP_OPEN) {
             _executeOpen(amount, data);
+        } else if (operation == OP_ADD_COLLATERAL) {
+            _executeAddCollateral(amount, data);
         } else {
             revert FlashLoan__InvalidOperation();
         }
@@ -508,6 +526,51 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // 8. Emit event for off-chain tracking
         emit LeverageOpened(user, principal, leverage, loanAmount, plDxyBullReceived, targetDebt, maxSlippageBps);
+    }
+
+    /// @dev Executes add collateral operation within Morpho flash loan callback.
+    /// @param flashLoanAmount Amount of USDC flash loaned.
+    /// @param data Encoded parameters (op, user, deadline, usdcAmount, maxSlippageBps, minSwapOut).
+    function _executeAddCollateral(
+        uint256 flashLoanAmount,
+        bytes calldata data
+    ) private {
+        // Decode: (op, user, deadline, usdcAmount, maxSlippageBps, minSwapOut)
+        (, address user,, uint256 usdcAmount, uint256 maxSlippageBps, uint256 minSwapOut) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256));
+
+        // 1. Total USDC = user's USDC + flash loan
+        uint256 totalUSDC = usdcAmount + flashLoanAmount;
+
+        // 2. Mint pairs via Splitter (USDC → BEAR + BULL)
+        uint256 tokensToMint = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        SPLITTER.mint(tokensToMint);
+
+        // 3. Sell ALL BEAR for USDC (to repay flash loan)
+        uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
+        CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
+
+        // 4. Stake BULL → splDXY-BULL
+        uint256 plDxyBullBalance = PLDXY_BULL.balanceOf(address(this));
+        uint256 stakedShares = STAKED_PLDXY_BULL.deposit(plDxyBullBalance, address(this));
+
+        // 5. Deposit splDXY-BULL to Morpho on behalf of user
+        MORPHO.supplyCollateral(marketParams, stakedShares, user, "");
+
+        // 6. Verify we can repay flash loan
+        uint256 usdcBalance = USDC.balanceOf(address(this));
+        if (usdcBalance < flashLoanAmount) {
+            revert LeverageRouterBase__InsufficientOutput();
+        }
+
+        // 7. Return any excess USDC to user (should be minimal with correct flash loan calculation)
+        uint256 excessUsdc = usdcBalance - flashLoanAmount;
+        if (excessUsdc > 0) {
+            USDC.safeTransfer(user, excessUsdc);
+        }
+
+        // 8. Emit event (usdcReturned reflects actual excess, should be near-zero)
+        emit CollateralAdded(user, usdcAmount, excessUsdc, stakedShares, maxSlippageBps);
     }
 
     /// @dev Executes close leverage operation within plDXY-BEAR flash mint callback.
@@ -761,17 +824,31 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /**
      * @notice Preview the result of adding collateral.
-     * @param usdcAmount Amount of USDC to use for minting pairs.
-     * @return tokensToMint Expected plDXY-BULL tokens to mint.
-     * @return expectedUsdcFromBearSale Expected USDC from selling BEAR.
+     * @dev Uses flash loan so user's USDC input ≈ collateral value added.
+     * @param usdcAmount Amount of USDC representing desired collateral value.
+     * @return flashLoanAmount Amount of USDC to flash loan.
+     * @return totalUSDC Total USDC for minting pairs.
+     * @return expectedPlDxyBull Expected plDXY-BULL tokens to receive.
      * @return expectedStakedShares Expected splDXY-BULL shares to receive.
      */
     function previewAddCollateral(
         uint256 usdcAmount
-    ) external view returns (uint256 tokensToMint, uint256 expectedUsdcFromBearSale, uint256 expectedStakedShares) {
-        tokensToMint = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
-        expectedUsdcFromBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, tokensToMint);
-        expectedStakedShares = STAKED_PLDXY_BULL.previewDeposit(tokensToMint);
+    )
+        external
+        view
+        returns (uint256 flashLoanAmount, uint256 totalUSDC, uint256 expectedPlDxyBull, uint256 expectedStakedShares)
+    {
+        // Calculate flash loan amount: F = U × bearPrice / bullPrice
+        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
+        uint256 bearPrice = uint256(rawPrice);
+        uint256 bullPrice = CAP - bearPrice;
+
+        flashLoanAmount = (usdcAmount * bearPrice) / bullPrice;
+        flashLoanAmount = flashLoanAmount + (flashLoanAmount * 10 / 10_000); // 0.1% buffer
+
+        totalUSDC = usdcAmount + flashLoanAmount;
+        expectedPlDxyBull = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        expectedStakedShares = STAKED_PLDXY_BULL.previewDeposit(expectedPlDxyBull);
     }
 
     /**

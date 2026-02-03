@@ -1074,9 +1074,11 @@ contract BullLeverageRouterTest is Test {
     }
 
     function test_PreviewAddCollateral() public view {
-        (uint256 tokensToMint, uint256 expectedUsdc, uint256 expectedShares) = router.previewAddCollateral(1000e6);
-        assertGt(tokensToMint, 0, "Should return expected tokens");
-        assertGt(expectedUsdc, 0, "Should return expected USDC from BEAR sale");
+        (uint256 flashLoanAmount, uint256 totalUSDC, uint256 expectedBull, uint256 expectedShares) =
+            router.previewAddCollateral(1000e6);
+        assertGt(flashLoanAmount, 0, "Should return flash loan amount");
+        assertGt(totalUSDC, flashLoanAmount, "Total USDC should be greater than flash loan");
+        assertGt(expectedBull, 0, "Should return expected BULL");
         assertGt(expectedShares, 0, "Should return expected shares");
     }
 
