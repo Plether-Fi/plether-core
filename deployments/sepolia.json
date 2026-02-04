@@ -1,0 +1,62 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "deployedAt": "2026-02-04",
+  "commit": "d3a5a8a",
+  "contracts": {
+    "core": {
+      "SyntheticSplitter": "0xc26803107be110F6De1c5b51cae746CAA4f97A9a",
+      "plDXY-BEAR": "0x961008336E7D6d12B5C01928ddc4D0090a231941",
+      "plDXY-BULL": "0x487f83F75A312E469a09988bEEeb598EE1769a6E"
+    },
+    "staking": {
+      "StakedBear": "0x48733c6b5926219947494Bae3249053B94782128",
+      "StakedBull": "0x1f6f2560e0BB9534B469777c8646cAB63Da7Eb01",
+      "RewardDistributor": "0x5E3Ac79fBFd6f59787aAE817a1a8aFeF6Bc5B659"
+    },
+    "oracles": {
+      "BasketOracle": "0xAC94e5630A8dF7EBd291D4544b21625Ec3e42f26",
+      "MorphoOracleBear": "0xe445FC09E0825d3434658825bFa9667d0Ffd46c1",
+      "MorphoOracleBull": "0x952a3466A933e8767D7FD1272896222CC8843906",
+      "StakedOracleBear": "0x1E83c0b1e94eBA3660c09114a7717acecbBE5976",
+      "StakedOracleBull": "0x9721B12983eB55Ca69131f7C7C464dd55751732B",
+      "PythAdapter": "0x472707a2CF6cbcd9D17cFd66ef42b8aa0839C601"
+    },
+    "routers": {
+      "ZapRouter": "0xa2C9868C3e0B0497B4c130c4b5A8a96d84C8f7A3",
+      "LeverageRouter": "0x9641bcAeBd132F22A60Bd27559fF581a07a30910",
+      "BullLeverageRouter": "0x749E5102a2375E6c91dB8C10a79008C6923a98DC"
+    },
+    "external": {
+      "Morpho": "0xe1BaBdC1F575024C8356FdE169b206851A0D4d1c",
+      "ZeroRateIrm": "0xB0a34b1313E24D293e25e359071907b115578346",
+      "CurvePool": "0x9AF34331175e053Bcff330d7Bb7A6ea2bA53e83d"
+    },
+    "mocks": {
+      "MockUSDC": "0xDbEa7230f285c5Fce55a724D4A2dB5C2BE6da8e5",
+      "MockYieldAdapter": "0x5513A1C2B05E2931d7081BD56baCFa812065Eba5",
+      "MockPyth": "0xd69304cc9225Bd3CE53de963551964D789A51136"
+    }
+  },
+  "etherscan": {
+    "SyntheticSplitter": "https://sepolia.etherscan.io/address/0xc26803107be110F6De1c5b51cae746CAA4f97A9a",
+    "plDXY-BEAR": "https://sepolia.etherscan.io/address/0x961008336E7D6d12B5C01928ddc4D0090a231941",
+    "plDXY-BULL": "https://sepolia.etherscan.io/address/0x487f83F75A312E469a09988bEEeb598EE1769a6E",
+    "StakedBear": "https://sepolia.etherscan.io/address/0x48733c6b5926219947494Bae3249053B94782128",
+    "StakedBull": "https://sepolia.etherscan.io/address/0x1f6f2560e0BB9534B469777c8646cAB63Da7Eb01",
+    "RewardDistributor": "https://sepolia.etherscan.io/address/0x5E3Ac79fBFd6f59787aAE817a1a8aFeF6Bc5B659",
+    "BasketOracle": "https://sepolia.etherscan.io/address/0xAC94e5630A8dF7EBd291D4544b21625Ec3e42f26",
+    "MorphoOracleBear": "https://sepolia.etherscan.io/address/0xe445FC09E0825d3434658825bFa9667d0Ffd46c1",
+    "MorphoOracleBull": "https://sepolia.etherscan.io/address/0x952a3466A933e8767D7FD1272896222CC8843906",
+    "StakedOracleBear": "https://sepolia.etherscan.io/address/0x1E83c0b1e94eBA3660c09114a7717acecbBE5976",
+    "StakedOracleBull": "https://sepolia.etherscan.io/address/0x9721B12983eB55Ca69131f7C7C464dd55751732B",
+    "PythAdapter": "https://sepolia.etherscan.io/address/0x472707a2CF6cbcd9D17cFd66ef42b8aa0839C601",
+    "ZapRouter": "https://sepolia.etherscan.io/address/0xa2C9868C3e0B0497B4c130c4b5A8a96d84C8f7A3",
+    "LeverageRouter": "https://sepolia.etherscan.io/address/0x9641bcAeBd132F22A60Bd27559fF581a07a30910",
+    "BullLeverageRouter": "https://sepolia.etherscan.io/address/0x749E5102a2375E6c91dB8C10a79008C6923a98DC",
+    "ZeroRateIrm": "https://sepolia.etherscan.io/address/0xB0a34b1313E24D293e25e359071907b115578346",
+    "MockUSDC": "https://sepolia.etherscan.io/address/0xDbEa7230f285c5Fce55a724D4A2dB5C2BE6da8e5",
+    "MockYieldAdapter": "https://sepolia.etherscan.io/address/0x5513A1C2B05E2931d7081BD56baCFa812065Eba5",
+    "MockPyth": "https://sepolia.etherscan.io/address/0xd69304cc9225Bd3CE53de963551964D789A51136"
+  }
+}
