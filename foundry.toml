@@ -6,15 +6,20 @@ libs = ["lib"]
 # Remappings
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@morpho-blue/=lib/morpho-blue/src/",
 ]
 
 # Compiler settings
 solc = "0.8.33"
+auto_detect_solc = true
 optimizer = true
 optimizer_runs = 200
 via_ir = true
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# File system permissions for scripts
+fs_permissions = [{ access = "read", path = "script/bytecode/" }]
 
 [fuzz]
 seed = "0xdeadbeef"

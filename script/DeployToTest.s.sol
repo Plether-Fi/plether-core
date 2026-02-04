@@ -170,8 +170,8 @@ contract DeployToTest is Script {
     address constant TWOCRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
 
     // Morpho Blue
-    address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
-    address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
+    address internal constant DEFAULT_MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
+    address internal constant DEFAULT_MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
 
     // Protocol Parameters
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
@@ -194,6 +194,22 @@ contract DeployToTest is Script {
     // CAP scaled to 18 decimals for Curve price calculations
     // CAP = 2e8 (8 decimals) -> 2e18 (18 decimals)
     uint256 constant CAP_SCALED = 2e18;
+
+    // ==========================================
+    // VIRTUAL HOOKS (override in subclasses)
+    // ==========================================
+
+    function _getMorphoAddress() internal virtual returns (address) {
+        return DEFAULT_MORPHO_BLUE;
+    }
+
+    function _getIrmAddress() internal virtual returns (address) {
+        return DEFAULT_MORPHO_IRM;
+    }
+
+    function _getNonceOffset() internal pure virtual returns (uint64) {
+        return 37;
+    }
 
     // ==========================================
     // DEPLOYMENT STATE
@@ -230,16 +246,10 @@ contract DeployToTest is Script {
 
         vm.startBroadcast(privateKey);
 
-        // Predict RewardDistributor address (deployed at nonce + 37)
-        // Transaction count before RewardDistributor:
-        // MockUSDC(1) + Feeds(6) + BasketOracle(1) + Adapter(1) + Splitter(1) + deploy_pool(1) + setCurvePool(1)
-        // + _seedCurvePool: 2x mint + 2x approve + mint + approve + add_liquidity (7)
-        // + MorphoOracles(2) + StakedTokens(2) + StakedOracles(2)
-        // + createMarket(2) + _seedMorphoMarkets: mint + approve + 2x supply (4)
-        // + ZapRouter(1) + LeverageRouter(1) + BullLeverageRouter(1)
-        // + MockPyth(1) + PythAdapter(1) + setPrice(1) = 37
+        // Predict RewardDistributor address
+        // Base nonce offset = 37 (see _getNonceOffset for breakdown)
         uint64 startNonce = vm.getNonce(deployer);
-        address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + 37);
+        address predictedRewardDistributor = vm.computeCreateAddress(deployer, startNonce + _getNonceOffset());
         console.log("Predicted RewardDistributor:", predictedRewardDistributor);
 
         // Step 1: Deploy MockUSDC
@@ -439,13 +449,16 @@ contract DeployToTest is Script {
     function _deployRoutersAndMarkets(
         DeployedContracts memory d,
         address deployer
-    ) internal {
+    ) internal virtual {
+        // Get IRM address (can be overridden by subclasses)
+        address irm = _getIrmAddress();
+
         // Build market params
         MarketParams memory bearMarketParams = MarketParams({
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBear),
             oracle: address(d.stakedOracleBear),
-            irm: MORPHO_IRM,
+            irm: irm,
             lltv: LLTV
         });
 
@@ -453,7 +466,7 @@ contract DeployToTest is Script {
             loanToken: address(d.usdc),
             collateralToken: address(d.stakedBull),
             oracle: address(d.stakedOracleBull),
-            irm: MORPHO_IRM,
+            irm: irm,
             lltv: LLTV
         });
 
@@ -467,15 +480,18 @@ contract DeployToTest is Script {
         );
         console.log("ZapRouter:", address(d.zapRouter));
 
+        // Get Morpho address (can be overridden by subclasses)
+        address morpho = _getMorphoAddress();
+
         // Deploy LeverageRouter (BEAR)
         d.leverageRouter = new LeverageRouter(
-            MORPHO_BLUE, d.curvePool, address(d.usdc), address(d.plDxyBear), address(d.stakedBear), bearMarketParams
+            morpho, d.curvePool, address(d.usdc), address(d.plDxyBear), address(d.stakedBear), bearMarketParams
         );
         console.log("LeverageRouter:", address(d.leverageRouter));
 
         // Deploy BullLeverageRouter
         d.bullLeverageRouter = new BullLeverageRouter(
-            MORPHO_BLUE,
+            morpho,
             address(d.splitter),
             d.curvePool,
             address(d.usdc),
@@ -515,8 +531,8 @@ contract DeployToTest is Script {
     function _createMorphoMarkets(
         MarketParams memory bearMarketParams,
         MarketParams memory bullMarketParams
-    ) internal {
-        IMorpho morpho = IMorpho(MORPHO_BLUE);
+    ) internal virtual {
+        IMorpho morpho = IMorpho(_getMorphoAddress());
 
         // Create BEAR market (splDXY-BEAR as collateral, USDC as loan token)
         morpho.createMarket(bearMarketParams);
@@ -532,13 +548,14 @@ contract DeployToTest is Script {
         address deployer,
         MarketParams memory bearMarketParams,
         MarketParams memory bullMarketParams
-    ) internal {
-        IMorpho morpho = IMorpho(MORPHO_BLUE);
+    ) internal virtual {
+        address morphoAddr = _getMorphoAddress();
+        IMorpho morpho = IMorpho(morphoAddr);
 
         // Mint USDC for Morpho liquidity (100k per market = 200k total)
         uint256 totalLiquidity = MORPHO_LIQUIDITY * 2;
         d.usdc.mint(deployer, totalLiquidity);
-        d.usdc.approve(MORPHO_BLUE, totalLiquidity);
+        d.usdc.approve(morphoAddr, totalLiquidity);
 
         // Supply to BEAR market
         morpho.supply(bearMarketParams, MORPHO_LIQUIDITY, 0, deployer, "");

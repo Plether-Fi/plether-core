@@ -217,7 +217,35 @@ Run a specific fork test file:
 source .env && forge test --match-path test/fork/LeverageRouterFork.t.sol --fork-url $MAINNET_RPC_URL -vvv
 ```
 
-### Local Development (Anvil)
+### Testnet Deployment
+
+#### Sepolia
+
+Deploy to Sepolia testnet with a custom Morpho Blue instance (the public Morpho on Sepolia has no enabled IRMs/LLTVs):
+
+```bash
+# Required environment variables in .env:
+# TEST_PRIVATE_KEY=0x...  (your deployer private key)
+# SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
+
+# Deploy (43 transactions - may take a few minutes)
+source .env && forge script script/DeployToSepolia.s.sol --tc DeployToSepolia \
+  --rpc-url $SEPOLIA_RPC_URL \
+  --broadcast
+
+# Verify contracts on Etherscan (optional)
+# ETHERSCAN_API_KEY=... in .env
+source .env && forge verify-contract <ADDRESS> <CONTRACT> \
+  --chain sepolia --etherscan-api-key $ETHERSCAN_API_KEY
+```
+
+The Sepolia deployment script:
+- Deploys its own Morpho Blue instance with a ZeroRateIrm (0% interest for testnet)
+- Creates all protocol contracts, oracles, and routers
+- Seeds Curve pool and Morpho markets with liquidity
+- Mints 100k MockUSDC to the deployer
+
+#### Anvil (Local)
 
 For frontend development and testing without spending real ETH:
 
