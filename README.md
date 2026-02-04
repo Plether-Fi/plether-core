@@ -253,13 +253,18 @@ For frontend development and testing without spending real ETH:
 # 1. Start local Anvil node forking Ethereum mainnet
 anvil --fork-url $MAINNET_RPC_URL --chain-id 31337
 
-# 2. Deploy all contracts (mints 100k USDC to deployer)
+# 2. Deploy all contracts with real Chainlink/Pyth oracles (mints 100k USDC to deployer)
 TEST_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
-forge script script/DeployToTest.s.sol --tc DeployToTest \
+forge script script/DeployToAnvilFork.s.sol --tc DeployToAnvilFork \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
 
-# 3. (Optional) Seed Morpho markets with 1M USDC each for leverage testing
+# 3. (Optional) Simulate yield accrual (1% of adapter assets)
+cast send <MOCK_YIELD_ADAPTER> "generateYield()" \
+  --rpc-url http://127.0.0.1:8545 \
+  --private-key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+
+# 4. (Optional) Seed Morpho markets with 1M USDC each for leverage testing
 #    Use addresses from step 2 output
 USDC=<MockUSDC address> \
 STAKED_BEAR=<StakedToken BEAR address> \
@@ -270,6 +275,8 @@ forge script script/SeedMorphoMarkets.s.sol \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
 ```
+
+The Anvil fork deployment uses real mainnet oracles (Chainlink for EUR/JPY/GBP/CAD/CHF, Pyth for SEK) with prices frozen at the fork block. MockUSDC and MockYieldAdapter are still used for flexible testing.
 
 **Anvil Test Accounts** (pre-funded with 10,000 ETH each):
 

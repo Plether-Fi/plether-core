@@ -211,6 +211,10 @@ contract DeployToTest is Script {
         return 37;
     }
 
+    function _getPythAddress() internal virtual returns (address) {
+        return address(0); // Deploy MockPyth by default
+    }
+
     // ==========================================
     // DEPLOYMENT STATE
     // ==========================================
@@ -333,6 +337,7 @@ contract DeployToTest is Script {
 
     function _deployMockFeeds()
         internal
+        virtual
         returns (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices)
     {
         feeds = new address[](6);
@@ -502,14 +507,21 @@ contract DeployToTest is Script {
         );
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
 
-        // Deploy MockPyth and PythAdapter for SEK/USD
+        // Deploy PythAdapter for SEK/USD (used by RewardDistributor)
         // USD/SEK price ID (will be inverted to SEK/USD)
         bytes32 usdSekPriceId = 0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676;
-        d.mockPyth = new MockPyth();
-        d.pythAdapter = new PythAdapter(address(d.mockPyth), usdSekPriceId, 24 hours, "SEK / USD", true);
-        // Set USD/SEK = 10.75 (1075000 with expo -5) → SEK/USD ≈ 0.093
-        d.mockPyth.setPrice(usdSekPriceId, 1_075_000, 10_000, -5);
-        console.log("MockPyth:", address(d.mockPyth));
+        address pythAddress = _getPythAddress();
+        if (pythAddress == address(0)) {
+            // Deploy MockPyth for local/test environments
+            d.mockPyth = new MockPyth();
+            pythAddress = address(d.mockPyth);
+            // Set USD/SEK = 10.75 (1075000 with expo -5) → SEK/USD ≈ 0.093
+            d.mockPyth.setPrice(usdSekPriceId, 1_075_000, 10_000, -5);
+            console.log("MockPyth:", address(d.mockPyth));
+        } else {
+            console.log("Using real Pyth:", pythAddress);
+        }
+        d.pythAdapter = new PythAdapter(pythAddress, usdSekPriceId, 24 hours, "SEK / USD", true);
         console.log("PythAdapter (SEK/USD):", address(d.pythAdapter));
 
         // Deploy RewardDistributor with PythAdapter

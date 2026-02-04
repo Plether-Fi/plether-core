@@ -6,6 +6,15 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+interface IMintable {
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external;
+
+}
+
 /**
  * @title MockYieldAdapter
  * @notice Simple ERC4626 vault that holds USDC internally (no external yield, for testing).
@@ -67,6 +76,14 @@ contract MockYieldAdapter is ERC4626, Ownable {
             revert("Cannot rescue underlying");
         }
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
+    }
+
+    /// @notice Simulate 1% yield by minting additional USDC to the adapter
+    /// @dev Only works with MockUSDC that has a public mint function
+    function generateYield() external {
+        uint256 currentAssets = totalAssets();
+        uint256 yieldAmount = currentAssets / 100; // 1% yield
+        IMintable(asset()).mint(address(this), yieldAmount);
     }
 
 }
