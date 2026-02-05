@@ -167,7 +167,9 @@ contract LiquidationForkTest is BaseForkTest {
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
         (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        vm.warp(block.timestamp + 10 * 365 days);
+        // At 2x leverage, initial LTV is ~50% against 86% LLTV.
+        // Interest should push it past LLTV within a few years.
+        vm.warp(block.timestamp + 3 * 365 days);
         _refreshOracleTimestamp();
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 

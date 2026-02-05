@@ -7,73 +7,68 @@ import {Test} from "forge-std/Test.sol";
 
 contract MorphoOracleTest is Test {
 
-    MockOracle public basket; // The Source
+    MockOracle public basket;
     MorphoOracle public bearOracle;
     MorphoOracle public bullOracle;
 
     uint256 constant CAP = 200_000_000; // $2.00 in 8 decimals
 
+    uint256 constant COLLATERAL_DECIMALS = 18; // plDXY tokens
+    uint256 constant LOAN_DECIMALS = 6; // USDC
+    uint256 constant CHAINLINK_DECIMALS = 8;
+    uint256 constant ORACLE_PRICE_SCALE = 1e36; // Morpho's divisor
+
+    // Morpho spec: precision = 36 + loanDec - collateralDec = 24
+    // Scale from Chainlink 8-dec: 10^(24 - 8) = 10^16
+    uint256 constant SCALE = 10 ** (36 + LOAN_DECIMALS - COLLATERAL_DECIMALS - CHAINLINK_DECIMALS);
+
     function setUp() public {
-        // 1. Deploy Mock Basket starting at $1.04
         basket = new MockOracle(104_000_000, "Basket");
-
-        // 2. Deploy Bear Oracle (Standard)
-        // isInverse = false
         bearOracle = new MorphoOracle(address(basket), CAP, false);
-
-        // 3. Deploy Bull Oracle (Inverse)
-        // isInverse = true
         bullOracle = new MorphoOracle(address(basket), CAP, true);
     }
 
     // ==========================================
     // 1. plDXY-BEAR - Direct Token Logic
     // ==========================================
-    function test_BearOracle_ReturnsBasketPrice() public {
-        // Basket = $1.04
+    function test_BearOracle_ReturnsBasketPrice() public view {
         uint256 price = bearOracle.price();
 
-        // Expected: 1.04 * 1e36
-        // In code: 104_000_000 * 1e28
-        uint256 expected = 104_000_000 * 1e28;
-
+        // Morpho requires: 36 + loanDec - collateralDec = 36 + 6 - 18 = 24 decimals of precision
+        // $1.04 in 24 decimals = 1.04e24
+        // From Chainlink 8-dec: 104_000_000 * SCALE
+        uint256 expected = 104_000_000 * SCALE;
         assertEq(price, expected);
+        assertEq(price, 1.04e24);
     }
 
     // ==========================================
     // 2. plDXY-BULL - Inverse Token Logic
     // ==========================================
-    function test_BullOracle_ReturnsInvertedPrice() public {
-        // Basket = $1.04
-        // Cap = $2.00
-        // Expected Value = $0.96
-
+    function test_BullOracle_ReturnsInvertedPrice() public view {
         uint256 price = bullOracle.price();
 
-        uint256 expected = 96_000_000 * 1e28; // ($0.96 scaled)
+        // CAP($2.00) - Basket($1.04) = $0.96 in 24 decimals
+        uint256 expected = 96_000_000 * SCALE;
         assertEq(price, expected);
+        assertEq(price, 0.96e24);
     }
 
     function test_BullOracle_UpdatesDynamically() public {
-        // Market Shock: Basket drops to $0.50 (Dollar Strong)
         basket.updatePrice(50_000_000);
 
-        // Bull Token should go UP to $1.50 ($2.00 - $0.50)
         uint256 price = bullOracle.price();
 
-        uint256 expected = 150_000_000 * 1e28;
+        // CAP($2.00) - Basket($0.50) = $1.50 in 24 decimals
+        uint256 expected = 150_000_000 * SCALE;
         assertEq(price, expected);
+        assertEq(price, 1.5e24);
     }
 
     // ==========================================
     // 3. Edge Cases
     // ==========================================
     function test_BullOracle_RevertsIfCapBreached() public {
-        // Market Shock: Basket pumps to $2.10 (Dollar Crash)
-        // Cap is $2.00.
-        // Value would technically be -$0.10.
-        // Oracle must revert to signal liquidation state.
-
         basket.updatePrice(210_000_000);
 
         vm.expectRevert(MorphoOracle.MorphoOracle__PriceExceedsCap.selector);
@@ -81,11 +76,49 @@ contract MorphoOracleTest is Test {
     }
 
     function test_Revert_IfBasketIsBroken() public {
-        // Basket returns 0 or negative
         basket.updatePrice(0);
 
         vm.expectRevert(MorphoOracle.MorphoOracle__InvalidPrice.selector);
         bearOracle.price();
+    }
+
+    // ==========================================
+    // 4. Morpho Integration Sanity
+    // ==========================================
+    function test_BearOracle_MorphoHealthCheck() public view {
+        // Verify oracle price produces correct maxBorrow when used in Morpho's formula:
+        //   maxBorrow = collateral * oraclePrice / ORACLE_PRICE_SCALE * lltv
+        //
+        // 1 plDXY-BEAR token ($1.04) as collateral, LLTV = 86%
+        uint256 collateral = 1e18; // 1 token (18 decimals)
+        uint256 lltv = 0.86e18;
+        uint256 oraclePrice = bearOracle.price();
+
+        uint256 maxBorrow = (collateral * oraclePrice / ORACLE_PRICE_SCALE) * lltv / 1e18;
+
+        // 1 token * $1.04 * 86% = ~$0.8944 USDC = ~894_400 in 6-dec
+        assertApproxEqAbs(maxBorrow, 894_400, 100);
+    }
+
+    function test_BullOracle_MorphoHealthCheck() public view {
+        uint256 collateral = 1e18;
+        uint256 lltv = 0.86e18;
+        uint256 oraclePrice = bullOracle.price();
+
+        uint256 maxBorrow = (collateral * oraclePrice / ORACLE_PRICE_SCALE) * lltv / 1e18;
+
+        // 1 token * $0.96 * 86% = ~$0.8256 USDC = ~825_600 in 6-dec
+        assertApproxEqAbs(maxBorrow, 825_600, 100);
+    }
+
+    function test_ScaleFactorMatchesMorphoSpec() public pure {
+        // Morpho spec: precision = 36 + loan_decimals - collateral_decimals
+        uint256 requiredPrecision = 36 + LOAN_DECIMALS - COLLATERAL_DECIMALS; // = 24
+        uint256 chainlinkDecimals = 8;
+
+        // Scale converts Chainlink 8-dec to required precision
+        uint256 expectedScale = 10 ** (requiredPrecision - chainlinkDecimals); // 10^16
+        assertEq(SCALE, expectedScale);
     }
 
 }

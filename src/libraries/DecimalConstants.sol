@@ -15,8 +15,8 @@ library DecimalConstants {
     /// @notice USDC (6 dec) + Chainlink (8 dec) -> Token (18 dec): 10^20.
     uint256 internal constant USDC_TO_TOKEN_SCALE = 1e20;
 
-    /// @notice Chainlink (8 dec) -> Morpho (36 dec): 10^28.
-    uint256 internal constant CHAINLINK_TO_MORPHO_SCALE = 1e28;
+    /// @notice Chainlink (8 dec) -> Morpho (36 + loanDec - collateralDec = 24 dec): 10^16.
+    uint256 internal constant CHAINLINK_TO_MORPHO_SCALE = 1e16;
 
     /// @notice Chainlink (8 dec) -> Token (18 dec): 10^10.
     uint256 internal constant CHAINLINK_TO_TOKEN_SCALE = 1e10;
