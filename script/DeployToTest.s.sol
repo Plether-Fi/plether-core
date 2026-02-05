@@ -268,9 +268,14 @@ contract DeployToTest is Script {
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates plDXY-BEAR/BULL)
-        // Treasury is set to predicted RewardDistributor address so all yield goes there
+        // Treasury receives 20% of yield, staking (RewardDistributor) receives 79.9%
+        // For testnet, both point to RewardDistributor (100% to stakers)
         (deployed.adapter, deployed.splitter) = _deploySplitterWithAdapter(
-            address(deployed.basketOracle), address(deployed.usdc), deployer, predictedRewardDistributor
+            address(deployed.basketOracle),
+            address(deployed.usdc),
+            deployer,
+            predictedRewardDistributor, // treasury (20%)
+            predictedRewardDistributor // staking (79.9%)
         );
         deployed.plDxyBear = deployed.splitter.BEAR();
         deployed.plDxyBull = deployed.splitter.BULL();
@@ -393,13 +398,14 @@ contract DeployToTest is Script {
         address oracle,
         address usdc,
         address deployer,
-        address treasury
+        address treasury,
+        address staking
     ) internal returns (MockYieldAdapter adapter, SyntheticSplitter splitter) {
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
         adapter = new MockYieldAdapter(IERC20(usdc), deployer, predictedSplitter);
-        splitter = new SyntheticSplitter(oracle, usdc, address(adapter), CAP, treasury, address(0));
+        splitter = new SyntheticSplitter(oracle, usdc, address(adapter), CAP, treasury, staking);
 
         require(address(splitter) == predictedSplitter, "Splitter address mismatch in helper");
     }
