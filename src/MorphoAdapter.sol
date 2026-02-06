@@ -75,6 +75,9 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
     /// @notice Thrown when attempting to rescue the underlying asset.
     error MorphoAdapter__CannotRescueUnderlying();
 
+    /// @notice Thrown when Morpho returns fewer assets than requested.
+    error MorphoAdapter__PartialWithdrawal();
+
     /// @notice Emitted when URD address is updated.
     event UrdUpdated(address indexed oldUrd, address indexed newUrd);
 
@@ -164,7 +167,10 @@ contract MorphoAdapter is ERC4626, Ownable2Step {
         uint256 shares
     ) internal override {
         // 1. Withdraw from Morpho to 'this' (assets mode, shares = 0)
-        MORPHO.withdraw(marketParams(), assets, 0, address(this), address(this));
+        (uint256 assetsWithdrawn,) = MORPHO.withdraw(marketParams(), assets, 0, address(this), address(this));
+        if (assetsWithdrawn < assets) {
+            revert MorphoAdapter__PartialWithdrawal();
+        }
 
         // 2. OpenZeppelin's logic sends assets to 'receiver'
         super._withdraw(caller, receiver, owner, assets, shares);
