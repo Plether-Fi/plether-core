@@ -308,36 +308,40 @@ StakedToken (splDXY-BEAR, splDXY-BULL) is an ERC-4626 vault used as Morpho colla
 
 - **Inflation Attack Protection**: Uses `_decimalsOffset() = 3` (1000x multiplier)
 - **Streaming Rewards**: `donateYield()` streams rewards linearly over 1 hour instead of instant distribution
-- **Withdrawal Delay**: 1 hour minimum stake duration before withdrawal (enforced via `maxWithdraw()`/`maxRedeem()`)
-- **Transfer Timer Reset**: Receiving shares via transfer resets your withdrawal timer (prevents bypass)
+- **Griefing Protection**: Proportional stream extension prevents zero-amount timer resets
 
 #### Reward Sniping Protection
 
-The streaming + delay combination prevents reward sniping attacks:
+Streaming prevents reward sniping attacks:
 
 | Attack Vector | Mitigation |
 |---------------|------------|
-| Flash stake (same block) | Blocked by 1-hour withdrawal delay |
 | Deposit → claim → withdraw | Rewards stream over 1 hour; early exit captures only pro-rata portion |
 | Front-run `donateYield()` | Must hold for full stream duration to capture full rewards |
-| Transfer shares to bypass delay | Timer resets on transfer recipient |
 
 **How it works:**
 1. `donateYield(amount)` starts a 1-hour linear stream via `rewardRate` and `streamEndTime`
 2. `totalAssets()` excludes unvested rewards: `balance - _unvestedRewards()`
 3. Share price increases gradually as rewards vest (not instantly)
-4. `maxWithdraw()`/`maxRedeem()` return 0 during lock period (ERC4626 compliant)
-5. Attacker who deposits and exits after 1 hour only captures rewards proportional to their stake duration
 
 **Precision:** Streaming math uses 1e18 scaling. Truncation dust (~1000 wei per 100 ETH donation) vests immediately but is negligible and favors existing stakers.
 
-#### Acknowledged Risk: Permissionless donateYield()
+#### Griefing Protection: Proportional Stream Extension
 
-`StakedToken.donateYield()` is intentionally permissionless. While this allows anyone to inflate the vault exchange rate, exploitation requires burning capital with no economic return. The protocol accepts this griefing risk because:
-- Attack is not profitable (attacker loses funds)
-- Benefits existing stakers (higher share value)
-- Morpho's time-weighted pricing limits liquidation manipulation
-- Router contracts include exchange rate buffers (1%) to handle drift
+`donateYield()` is permissionless but resistant to timer-reset griefing. The stream duration extends proportionally to the donation size relative to the unvested total:
+
+```
+newDuration = remainingTime + (STREAM_DURATION × amount) / (remaining + amount)
+```
+
+| Scenario | Effect |
+|----------|--------|
+| `donateYield(0)` | No-op: duration unchanged, rewards keep vesting |
+| `donateYield(1 wei)` against large unvested balance | Negligible extension (~0 seconds) |
+| Fresh donation (no active stream) | Full `STREAM_DURATION` (1 hour) |
+| Duration capped at `STREAM_DURATION` | Cannot extend beyond 1 hour |
+
+This makes griefing economically useless: an attacker calling `donateYield(0)` has zero effect on the vesting schedule.
 
 ### Curve Pool Configuration
 
@@ -471,6 +475,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-06 | StakedToken: Replaced permissionless donateYield acknowledgement with proportional stream extension fix; removed stale withdrawal delay references |
 | 2026-02-02 | Added Pyth Network dependency for SEK/USD price feed (PythAdapter); documented pull-based oracle risks |
 | 2026-01-30 | StakedToken: Added streaming rewards (1h linear vesting) and withdrawal delay (1h minimum) to prevent reward sniping |
 | 2026-01-29 | Added RewardDistributor Security section: economic analysis of price manipulation and stale EMA attacks |
