@@ -1006,6 +1006,8 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     MarketParams public marketParams;
 
     function setUp() public {
+        vm.warp(1_700_000_000);
+
         // Deploy mocks
         usdc = new InvariantMockToken("USDC", "USDC", 6);
         plDxyBear = new InvariantMockFlashToken("plDXY-BEAR", "BEAR", 18);
@@ -1039,7 +1041,8 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
             address(plDxyBear),
             address(plDxyBull),
             address(stakedPlDxyBull),
-            marketParams
+            marketParams,
+            address(0)
         );
 
         handler = new BullLeverageRouterHandler(

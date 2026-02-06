@@ -60,7 +60,15 @@ contract LiquidationForkTest is BaseForkTest {
 
         leverageRouter = new LeverageRouter(MORPHO, curvePool, USDC, bearToken, address(stBear), bearMarketParams);
         bullLeverageRouter = new BullLeverageRouter(
-            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), bullMarketParams
+            MORPHO,
+            address(splitter),
+            curvePool,
+            USDC,
+            bearToken,
+            bullToken,
+            address(stBull),
+            bullMarketParams,
+            address(0)
         );
     }
 

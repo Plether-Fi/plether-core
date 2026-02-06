@@ -32,6 +32,7 @@ contract BullLeverageRouterTest is Test {
     MarketParams params;
 
     function setUp() public {
+        vm.warp(1_700_000_000);
         usdc = new MockToken("USDC", "USDC", 6);
         plDxyBear = new MockFlashToken("plDXY-BEAR", "plDXY-BEAR");
         plDxyBull = new MockToken("plDXY-BULL", "plDXY-BULL", 18);
@@ -62,7 +63,8 @@ contract BullLeverageRouterTest is Test {
             address(plDxyBear),
             address(plDxyBull),
             address(stakedPlDxyBull),
-            params
+            params,
+            address(0)
         );
 
         // Setup Alice
@@ -1757,6 +1759,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
     MarketParams params;
 
     function setUp() public {
+        vm.warp(1_700_000_000);
         usdc = new MockToken("USDC", "USDC", 6);
         plDxyBear = new MockFlashToken("plDXY-BEAR", "plDXY-BEAR");
         plDxyBull = new MockToken("plDXY-BULL", "plDXY-BULL", 18);
@@ -1784,7 +1787,8 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
             address(plDxyBear),
             address(plDxyBull),
             address(stakedPlDxyBull),
-            params
+            params,
+            address(0)
         );
 
         usdc.mint(alice, 10_000 * 1e6);

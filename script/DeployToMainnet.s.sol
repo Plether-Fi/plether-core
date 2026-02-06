@@ -261,7 +261,8 @@ contract DeployToMainnet is Script {
             address(deployed.plDxyBear),
             address(deployed.plDxyBull),
             address(deployed.stakedBull),
-            bullMarketParams
+            bullMarketParams,
+            SEQUENCER_UPTIME_FEED
         );
 
         vm.stopBroadcast();

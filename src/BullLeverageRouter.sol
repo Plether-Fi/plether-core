@@ -11,6 +11,7 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {MarketParams} from "./interfaces/IMorpho.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 /// @title BullLeverageRouter
 /// @custom:security-contact contact@plether.com
@@ -115,6 +116,15 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @notice Oracle for plDXY basket price (returns BEAR price in 8 decimals).
     AggregatorV3Interface public immutable ORACLE;
 
+    /// @notice Chainlink L2 sequencer uptime feed (address(0) on L1).
+    AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
+
+    /// @notice Maximum age for a valid oracle price.
+    uint256 public constant ORACLE_TIMEOUT = 24 hours;
+
+    /// @notice Grace period after L2 sequencer restarts before accepting prices.
+    uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
+
     /// @dev Operation type: remove collateral (flash mint).
     uint8 internal constant OP_REMOVE_COLLATERAL = 3;
 
@@ -137,6 +147,7 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @param _plDxyBull plDXY-BULL token address.
     /// @param _stakedPlDxyBull splDXY-BULL staking vault address.
     /// @param _marketParams Morpho market parameters for splDXY-BULL/USDC.
+    /// @param _sequencerUptimeFeed Chainlink L2 sequencer feed (address(0) on L1/testnet).
     constructor(
         address _morpho,
         address _splitter,
@@ -145,7 +156,8 @@ contract BullLeverageRouter is LeverageRouterBase {
         address _plDxyBear,
         address _plDxyBull,
         address _stakedPlDxyBull,
-        MarketParams memory _marketParams
+        MarketParams memory _marketParams,
+        address _sequencerUptimeFeed
     ) LeverageRouterBase(_morpho, _curvePool, _usdc, _plDxyBear) {
         if (_splitter == address(0)) {
             revert LeverageRouterBase__ZeroAddress();
@@ -165,6 +177,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Cache CAP and ORACLE from Splitter (8 decimals)
         CAP = ISyntheticSplitter(_splitter).CAP();
         ORACLE = AggregatorV3Interface(SyntheticSplitter(_splitter).ORACLE());
+        SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
         // Approvals (One-time)
         // 1. Allow Splitter to take USDC (for minting pairs)
@@ -353,9 +366,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
         // Calculate flash loan amount: F = U × bearPrice / bullPrice
-        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
-        uint256 bearPrice = uint256(rawPrice);
-        uint256 bullPrice = CAP - bearPrice;
+        (uint256 bearPrice, uint256 bullPrice) = _getValidatedOraclePrice();
 
         // flashLoanAmount = usdcAmount * bearPrice / bullPrice
         // Subtract buffer to ensure BEAR sale proceeds exceed flash loan repayment
@@ -839,9 +850,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         returns (uint256 flashLoanAmount, uint256 totalUSDC, uint256 expectedPlDxyBull, uint256 expectedStakedShares)
     {
         // Calculate flash loan amount: F = U × bearPrice / bullPrice
-        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
-        uint256 bearPrice = uint256(rawPrice);
-        uint256 bullPrice = CAP - bearPrice;
+        (uint256 bearPrice, uint256 bullPrice) = _getValidatedOraclePrice();
 
         flashLoanAmount = (usdcAmount * bearPrice) / bullPrice;
         flashLoanAmount = flashLoanAmount - (flashLoanAmount * MAX_SLIPPAGE_BPS / 10_000);
@@ -890,8 +899,7 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) private view returns (OpenParams memory params) {
         params.targetDebt = (principal * (leverage - DecimalConstants.ONE_WAD)) / DecimalConstants.ONE_WAD;
 
-        (, int256 rawPrice,,,) = ORACLE.latestRoundData();
-        uint256 bullPrice = CAP - uint256(rawPrice);
+        (, uint256 bullPrice) = _getValidatedOraclePrice();
 
         uint256 targetCollateralValue = (principal * leverage) / DecimalConstants.ONE_WAD;
         uint256 initialTokens = (targetCollateralValue * DecimalConstants.USDC_TO_TOKEN_SCALE) / bullPrice;
@@ -905,6 +913,15 @@ contract BullLeverageRouter is LeverageRouterBase {
         params.expectedBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, params.tokensToMint);
         uint256 bufferedBearSale = (params.expectedBearSale * 9990) / 10_000;
         params.loanAmount = bufferedBearSale + params.targetDebt;
+    }
+
+    /// @dev Returns validated oracle prices with staleness, sequencer, and CAP checks.
+    function _getValidatedOraclePrice() private view returns (uint256 bearPrice, uint256 bullPrice) {
+        bearPrice = OracleLib.getValidatedPrice(ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        if (bearPrice >= CAP) {
+            revert LeverageRouterBase__SplitterNotActive();
+        }
+        bullPrice = CAP - bearPrice;
     }
 
     /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.

@@ -148,7 +148,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         morphoOracle = new MorphoOracle(address(basketOracle), 2e8, true);
         marketParams = _createMorphoMarket(address(stBull), address(morphoOracle), 1_000_000e6);
         bullLeverageRouter = new BullLeverageRouter(
-            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), marketParams
+            MORPHO, address(splitter), curvePool, USDC, bearToken, bullToken, address(stBull), marketParams, address(0)
         );
     }
 

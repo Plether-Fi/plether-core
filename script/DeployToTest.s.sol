@@ -509,7 +509,8 @@ contract DeployToTest is Script {
             address(d.plDxyBear),
             address(d.plDxyBull),
             address(d.stakedBull),
-            bullMarketParams
+            bullMarketParams,
+            address(0)
         );
         console.log("BullLeverageRouter:", address(d.bullLeverageRouter));
 
