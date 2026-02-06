@@ -48,4 +48,9 @@ contract SyntheticTokenTest is Test {
         token.burn(alice, 100 ether);
     }
 
+    function test_Revert_Constructor_ZeroAddress() public {
+        vm.expectRevert(SyntheticToken.SyntheticToken__ZeroAddress.selector);
+        new SyntheticToken("X", "X", address(0));
+    }
+
 }

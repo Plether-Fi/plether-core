@@ -533,6 +533,56 @@ contract BasketOracleTest is Test {
         basket.getRoundData(999);
     }
 
+    // ==========================================
+    // GETTER COVERAGE
+    // ==========================================
+
+    function test_Decimals_Returns8() public view {
+        assertEq(basket.decimals(), 8);
+    }
+
+    function test_Description_ReturnsExpected() public view {
+        assertEq(basket.description(), "plDXY Fixed Basket (Bounded)");
+    }
+
+    function test_Version_Returns1() public view {
+        assertEq(basket.version(), 1);
+    }
+
+    // ==========================================
+    // CONSTRUCTOR EDGE CASES
+    // ==========================================
+
+    function test_Revert_InvalidDeviation() public {
+        address[] memory feeds = new address[](1);
+        feeds[0] = address(feedEUR);
+
+        uint256[] memory quantities = new uint256[](1);
+        quantities[0] = 1 ether;
+
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = BASE_EUR;
+
+        vm.expectRevert(BasketOracle.BasketOracle__InvalidDeviation.selector);
+        new BasketOracle(feeds, quantities, basePrices, 0, address(this));
+    }
+
+    function test_Revert_LengthMismatch_BasePrices() public {
+        address[] memory feeds = new address[](2);
+        feeds[0] = address(feedEUR);
+        feeds[1] = address(feedJPY);
+
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0.5 ether;
+        quantities[1] = 0.5 ether;
+
+        uint256[] memory basePrices = new uint256[](1);
+        basePrices[0] = BASE_EUR;
+
+        vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
+        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+    }
+
 }
 
 // Helper mock with wrong decimals (6 instead of 8)
