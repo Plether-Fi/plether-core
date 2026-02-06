@@ -191,6 +191,99 @@ contract StakedTokenTest is Test {
     }
 
     // ==========================================
+    // PROPORTIONAL EXTENSION (GRIEFING PROTECTION)
+    // ==========================================
+
+    function test_DonateYield_ZeroAmount_NoTimerReset() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.deposit(100 ether, alice);
+        vm.stopPrank();
+
+        underlying.mint(address(this), 100 ether);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.donateYield(100 ether);
+
+        uint256 streamStart = block.timestamp;
+        vm.warp(streamStart + stakedToken.STREAM_DURATION() / 2);
+        uint256 endBefore = stakedToken.streamEndTime();
+
+        // Attacker calls donateYield(0) — should NOT reset timer
+        vm.prank(attacker);
+        stakedToken.donateYield(0);
+
+        assertEq(stakedToken.streamEndTime(), endBefore, "Timer must not reset on zero donation");
+    }
+
+    function test_DonateYield_TinyAmount_NegligibleExtension() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.deposit(100 ether, alice);
+        vm.stopPrank();
+
+        underlying.mint(address(this), 100 ether);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.donateYield(100 ether);
+
+        uint256 streamStart = block.timestamp;
+        vm.warp(streamStart + stakedToken.STREAM_DURATION() / 2);
+        uint256 endBefore = stakedToken.streamEndTime();
+
+        // Attacker donates 1 wei against 50 ether unvested — negligible extension
+        underlying.mint(attacker, 1);
+        vm.startPrank(attacker);
+        underlying.approve(address(stakedToken), 1);
+        stakedToken.donateYield(1);
+        vm.stopPrank();
+
+        // Extension = STREAM_DURATION * 1 / (50e18 + 1) ≈ 0 seconds
+        assertLe(stakedToken.streamEndTime() - endBefore, 1, "Extension must be negligible");
+    }
+
+    function test_DonateYield_FreshDonation_FullDuration() public {
+        underlying.mint(address(this), 100 ether);
+        underlying.approve(address(stakedToken), 100 ether);
+
+        uint256 t = block.timestamp;
+        stakedToken.donateYield(100 ether);
+
+        assertEq(stakedToken.streamEndTime(), t + stakedToken.STREAM_DURATION());
+    }
+
+    function test_DonateYield_ZeroAmountNoStream_NoOp() public {
+        uint256 endBefore = stakedToken.streamEndTime();
+        uint256 rateBefore = stakedToken.rewardRate();
+
+        vm.prank(attacker);
+        stakedToken.donateYield(0);
+
+        assertEq(stakedToken.streamEndTime(), endBefore);
+        assertEq(stakedToken.rewardRate(), rateBefore);
+    }
+
+    function test_DonateYield_RepeatedZeroGriefing_RewardsStillVest() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.deposit(100 ether, alice);
+        vm.stopPrank();
+
+        uint256 streamStart = block.timestamp;
+        underlying.mint(address(this), 100 ether);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.donateYield(100 ether);
+
+        // Attacker griefs every 10 minutes for the full stream duration
+        for (uint256 i = 1; i <= 6; i++) {
+            vm.warp(streamStart + i * 10 minutes);
+            vm.prank(attacker);
+            stakedToken.donateYield(0);
+        }
+
+        // All 100 ether should be fully vested despite griefing
+        assertApproxEqAbs(stakedToken.totalAssets(), 200 ether, 10);
+    }
+
+    // ==========================================
     // STREAMING PROTECTS AGAINST FLASH SNIPING
     // ==========================================
 

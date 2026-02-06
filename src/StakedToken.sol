@@ -47,7 +47,8 @@ contract StakedToken is ERC4626 {
     }
 
     /// @notice Donates yield that streams to stakers over STREAM_DURATION.
-    /// @dev Rewards vest linearly. New donations extend the stream with combined remaining + new amount.
+    /// @dev Rewards vest linearly. New donations extend the stream proportionally to
+    ///      the donation size, preventing griefing via zero-amount timer resets.
     /// @param amount The amount of underlying tokens to donate.
     function donateYield(
         uint256 amount
@@ -57,8 +58,18 @@ contract StakedToken is ERC4626 {
         IERC20(asset()).safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 total = remaining + amount;
-        rewardRate = (total * 1e18) / STREAM_DURATION;
-        streamEndTime = block.timestamp + STREAM_DURATION;
+        if (total == 0) {
+            return;
+        }
+
+        uint256 remainingTime = streamEndTime > block.timestamp ? streamEndTime - block.timestamp : 0;
+        uint256 newDuration = remainingTime + (STREAM_DURATION * amount) / total;
+        if (newDuration > STREAM_DURATION) {
+            newDuration = STREAM_DURATION;
+        }
+
+        rewardRate = (total * 1e18) / newDuration;
+        streamEndTime = block.timestamp + newDuration;
 
         emit YieldDonated(msg.sender, amount, streamEndTime);
     }
