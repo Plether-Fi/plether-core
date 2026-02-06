@@ -49,7 +49,7 @@ These properties must always hold. Violation indicates a critical bug.
 
 #### Chainlink Oracles
 - **Assumption**: Chainlink price feeds provide accurate, timely data for EUR/USD, JPY/USD, GBP/USD, CAD/USD, and CHF/USD
-- **Mitigation**: 8-hour staleness timeout rejects stale data; sequencer uptime check on L2s
+- **Mitigation**: Staleness timeouts reject stale data (24 hours for SyntheticSplitter/RewardDistributor/BullLeverageRouter, 8 hours for MorphoOracle); sequencer uptime check on L2s
 - **Risk**: If Chainlink is compromised or all 5 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed
 
 #### Pyth Network (SEK/USD)

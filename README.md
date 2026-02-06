@@ -31,7 +31,7 @@ These tokens are always minted and burned in pairs, maintaining a zero-sum relat
 
 | Contract | Description |
 |----------|-------------|
-| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards and withdrawal delay to prevent reward sniping |
+| [`StakedToken`](src/StakedToken.sol) | ERC-4626 vault wrapper (splDXY-BEAR, splDXY-BULL) with streaming rewards to prevent reward sniping |
 | [`RewardDistributor`](src/RewardDistributor.sol) | Distributes USDC yield to StakedToken vaults, favoring the underperforming token |
 
 ### Oracle Layer
@@ -152,7 +152,7 @@ This mechanism incentivizes arbitrageurs to correct price deviations by rewardin
 
 The protocol operates in three states:
 
-1. **ACTIVE** - Normal operations (mint, burn, swap). If Chainlink and Curve EMA prices diverge >2%, an implicit "disordered" mode blocks minting, leverage, and reward distribution until prices converge. Burns and swaps remain available—the 10% liquid buffer ensures users can always exit.
+1. **ACTIVE** - Normal operations (mint, burn, swap). If Chainlink and Curve EMA prices diverge >2%, BasketOracle reverts, blocking minting, leverage, and reward distribution until prices converge. Burns and swaps remain available—the 10% liquid buffer ensures users can always exit.
 2. **PAUSED** - Emergency pause (minting and reward distribution blocked, burning allowed so users can exit, gradual adapter withdrawal enabled)
 3. **SETTLED** - End-of-life when plDXY hits CAP price (only redemptions allowed)
 
@@ -202,6 +202,9 @@ source .env && forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC
 | `SlippageProtectionFork.t.sol` | MEV protection and slippage scenarios |
 | `LiquidationFork.t.sol` | Interest accrual and liquidation mechanics |
 | `BasketOracleFork.t.sol` | Full 6-feed plDXY basket oracle validation |
+| `RewardDistributorFork.t.sol` | Reward distribution with real oracle prices |
+| `PermitFork.t.sol` | EIP-2612 permit-based deposits |
+| `SlippageReport.t.sol` | Slippage analysis across trade sizes |
 
 Run a specific fork test file:
 ```bash
@@ -255,16 +258,9 @@ cast send <MOCK_YIELD_ADAPTER> "generateYield()" \
   --rpc-url http://127.0.0.1:8545 \
   --private-key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
 
-# 4. (Optional) Seed Morpho markets with 1M USDC each for leverage testing
-#    Use addresses from step 2 output
-USDC=<MockUSDC address> \
-STAKED_BEAR=<StakedToken BEAR address> \
-STAKED_BULL=<StakedToken BULL address> \
-STAKED_ORACLE_BEAR=<StakedOracle BEAR address> \
-STAKED_ORACLE_BULL=<StakedOracle BULL address> \
-forge script script/SeedMorphoMarkets.s.sol \
-  --rpc-url http://127.0.0.1:8545 \
-  --broadcast
+# 4. (Optional) Seed Morpho markets for leverage testing
+#    Morpho seeding is built into DeployToTest.s.sol for testnet deploys.
+#    For Anvil fork, create markets manually using cast commands.
 ```
 
 The Anvil fork deployment uses real mainnet oracles (Chainlink for EUR/JPY/GBP/CAD/CHF, Pyth for SEK) with prices frozen at the fork block. MockUSDC and MockYieldAdapter are still used for flexible testing.
@@ -304,7 +300,7 @@ forge doc --build       # Build static site to ./docs/book
 - All contracts use OpenZeppelin's battle-tested implementations
 - Reentrancy protection on state-changing functions
 - 7-day timelock for critical governance changes
-- Oracle staleness checks (8-hour timeout)
+- Oracle staleness checks (8–24 hour timeouts depending on context)
 - Oracle bound validation against Curve EMA to prevent price manipulation
 - Flash loan callback validation (initiator + lender checks)
 - Yield adapter uses Morpho's internal accounting (immune to donation attacks)
