@@ -293,8 +293,8 @@ contract SplitterHandler is Test {
     }
 
     function setPriceAboveCap() external {
-        // Force price above CAP for liquidation testing
         oracle.updatePrice(int256(CAP + 1_000_000)); // $2.01
+        splitter.triggerLiquidation();
     }
 
     function emergencyRedeem(
