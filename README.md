@@ -16,18 +16,7 @@ The protocol creates two synthetic tokens from USDC collateral:
 
 These tokens are always minted and burned in pairs, maintaining a zero-sum relationship. When you deposit 100 USDC, you receive equal amounts of both tokens. The combined value of a BEAR + BULL pair always equals the original USDC deposit.
 
-```
-User deposits USDC
-        │
-        ▼
-┌───────────────────┐
-│ SyntheticSplitter │
-└───────────────────┘
-        │
-        ├──► plDXY-BEAR (gains when USD weakens)
-        │
-        └──► plDXY-BULL (gains when USD strengthens)
-```
+![How It Works](assets/diagrams/how-it-works.svg)
 
 ## Architecture
 
@@ -98,33 +87,35 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 ## Ecosystem Integrations
 
-```
-       ┌─────────────┐     ┌─────────────┐
-       │  Chainlink  │     │    Pyth     │
-       │   Oracles   │     │   Network   │
-       └──────┬──────┘     └──────┬──────┘
-              │                   │
-              └────────┬──────────┘
-                       │ Price Feeds
-                       ▼
-┌─────────┐    USDC    ┌───────────────────┐
-│  Users  │◄─────────►│      Plether      │
-└─────────┘            │   (Splitter +     │
-     │                 │    Routers)       │
-     │                 └─────────┬─────────┘             ┌───────────┐
-     │                           │         Yield + ────►│  Morpho   │
-     │                           │         Lending      │   Blue    │
-     │                           ▼                       └───────────┘
-     │                 ┌─────────────────┐
-     └────────────────►│   Curve AMM     │
-        Swap Tokens    │  (USDC/BEAR)    │
-                       └─────────────────┘
-```
+### Token Flow
+
+![Token Flow](assets/diagrams/token-flow.svg)
 
 - **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, CHF/USD
 - **Pyth Network** - Price feed for SEK/USD (via PythAdapter)
 - **Curve Finance** - AMM pools for USDC/plDXY-BEAR swaps
-- **Morpho Blue** - Lending markets for leveraged positions, yield generation on idle USDC reserves, and fee-free flash loans
+- **Morpho Blue** - Yield generation on idle USDC reserves via MorphoAdapter
+
+### Bear Leverage
+
+![Bear Leverage](assets/diagrams/bear-leverage.svg)
+
+Flash loan USDC from Morpho → swap to plDXY-BEAR on Curve → stake → deposit splDXY-BEAR as Morpho collateral.
+
+### Bull Leverage
+
+![Bull Leverage](assets/diagrams/bull-leverage.svg)
+
+Flash loan USDC from Morpho → mint BEAR+BULL pairs → sell BEAR on Curve → stake BULL → deposit splDXY-BULL as Morpho collateral.
+
+Both routers use fee-free Morpho flash loans and a fixed debt model: `debt = principal × (leverage - 1)`.
+
+### Staking & Rewards
+
+![Staking & Rewards](assets/diagrams/staking.svg)
+
+- **StakedToken** - ERC-4626 vaults (splDXY-BEAR, splDXY-BULL) that receive streaming USDC rewards
+- **RewardDistributor** - Allocates yield from SyntheticSplitter, favoring the underperforming token's stakers to incentivize price convergence
 
 ## Protocol Mechanics
 

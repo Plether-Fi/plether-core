@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 535.2 344" width="535.2" height="344" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<polyline points="260.45,76 260.45,116" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="260.45,152 260.45,172 140.64999999999998,172 140.64999999999998,192" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="260.45,152 260.45,172 380.25,172 380.25,192" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="140.64999999999998,228 140.64999999999998,268" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="380.25,228 380.25,268" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<rect x="201.54999999999998" y="40" width="117.80000000000001" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<rect x="183.67499999999998" y="116" width="153.55" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="88.89999999999998" y="192" width="103.5" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<rect x="328.5" y="192" width="103.5" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<polygon points="51.99999999999997,268 241.29999999999998,268 241.29999999999998,304 51.99999999999997,304 39.99999999999997,286" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="277.3,268 495.20000000000005,268 495.20000000000005,304 277.3,304 265.3,286" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<text x="260.45" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Deposit USDC</text>
+<text x="260.45" y="134" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">SyntheticSplitter</text>
+<text x="140.64999999999998" y="210" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">plDXY-BEAR</text>
+<text x="380.25" y="210" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">plDXY-BULL</text>
+<text x="140.64999999999998" y="286" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">gains when USD weakens</text>
+<text x="380.25" y="286" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">gains when USD strengthens</text>
+</svg>

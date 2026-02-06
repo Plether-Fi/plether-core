@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 790.175 564" width="790.175" height="564" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<polyline points="400.45,76 400.45,133" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="400.45,169 400.45,197.5 258.625,197.5 258.625,226" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="258.625,262 258.625,319" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="258.625,355 258.625,412" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="400.45,169 400.45,197.5 542.275,197.5 542.275,226" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="258.625,448 258.625,488" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<rect x="352.40999999999997" y="91" width="96.08" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="400.45" y="104.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">USDC Principal</text>
+<rect x="179.125" y="184" width="159" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="258.625" y="197.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Swap USDC → BEAR on Curve</text>
+<rect x="236.325" y="277" width="44.6" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="258.625" y="290.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Stake</text>
+<rect x="199.14499999999998" y="370" width="118.96000000000001" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="258.625" y="383.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Deposit Collateral</text>
+<rect x="366.575" y="40" width="67.75" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<rect x="334.4" y="133" width="132.10000000000002" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="206.875" y="226" width="103.5" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<rect x="203.3" y="319" width="110.65" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<polygon points="204.3,412 312.95000000000005,412 321.95000000000005,430 312.95000000000005,448 204.3,448 195.3,430" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5px" />
+<polygon points="346.375,226 750.175,226 750.175,262 346.375,262 334.375,244" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="51.99999999999997,488 477.25,488 477.25,524 51.99999999999997,524 39.99999999999997,506" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<text x="400.45" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Users</text>
+<text x="400.45" y="151" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">LeverageRouter</text>
+<text x="258.625" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">plDXY-BEAR</text>
+<text x="258.625" y="337" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">splDXY-BEAR</text>
+<text x="258.625" y="430" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#713f12">Morpho Blue</text>
+<text x="542.275" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Flash Loan: borrow USDC from Morpho · repaid same tx</text>
+<text x="258.625" y="506" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Position: borrow USDC against collateral · ongoing debt</text>
+</svg>

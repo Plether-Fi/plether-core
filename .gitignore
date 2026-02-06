@@ -19,3 +19,4 @@ docs/
 artifacts/
 coverage/
 broadcast/
+node_modules/
