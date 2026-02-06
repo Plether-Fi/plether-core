@@ -400,6 +400,30 @@ contract LeverageRouterHandler is Test {
     // Position tracking
     mapping(address => bool) public hasPosition;
 
+    // Expected error selectors
+    bytes4 private constant ERR_INSUFFICIENT_OUTPUT =
+        LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
+    bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
+    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+
+    function _assertExpectedError(
+        bytes memory reason,
+        bytes4[] memory allowed
+    ) internal pure {
+        if (reason.length < 4) {
+            revert("Unknown error (no selector)");
+        }
+        bytes4 selector = bytes4(reason);
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (selector == allowed[i]) {
+                return;
+            }
+        }
+        assembly {
+            revert(add(reason, 32), mload(reason))
+        }
+    }
+
     modifier useActor(
         uint256 actorSeed
     ) {
@@ -457,8 +481,12 @@ contract LeverageRouterHandler is Test {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
             hasPosition[currentActor] = true;
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](3);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -482,8 +510,12 @@ contract LeverageRouterHandler is Test {
                 hasPosition[currentActor] = false;
                 ghost_totalFullyClosed++;
             }
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](3);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -507,15 +539,22 @@ contract LeverageRouterHandler is Test {
             return;
         }
 
+        uint256 usdcBefore = usdc.balanceOf(currentActor);
+
         // Router queries actual debt from Morpho
         try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
+            ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
                 hasPosition[currentActor] = false;
                 ghost_totalFullyClosed++;
             }
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](3);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -599,6 +638,27 @@ contract LeverageRouterInvariantTest is StdInvariant, Test {
     /// @notice Total fully closed positions should be <= total opened positions
     function invariant_openCloseConsistency() public view {
         assertGe(handler.ghost_totalOpened(), handler.ghost_totalFullyClosed(), "More full closes than opens");
+    }
+
+    /// @notice Protocol cannot create value — total returned USDC <= total deposited principal
+    function invariant_valueConservation() public view {
+        assertGe(
+            handler.ghost_totalPrincipalDeposited(),
+            handler.ghost_totalUsdcReturned(),
+            "More USDC returned than deposited (value created from nothing)"
+        );
+    }
+
+    /// @notice If an actor has zero collateral, their debt must also be zero
+    function invariant_noOrphanedDebt() public view {
+        for (uint256 i = 0; i < handler.getActorCount(); i++) {
+            address actor = handler.getActor(i);
+            uint256 collateral = morpho.collateralBalance(actor);
+            uint256 debt = morpho.borrowBalance(actor);
+            if (collateral == 0) {
+                assertEq(debt, 0, "Orphaned debt: actor has debt but no collateral");
+            }
+        }
     }
 
 }
@@ -858,6 +918,31 @@ contract BullLeverageRouterHandler is Test {
     uint256 public ghost_totalPrincipalDeposited;
     uint256 public ghost_totalUsdcReturned;
 
+    // Expected error selectors
+    bytes4 private constant ERR_INSUFFICIENT_OUTPUT =
+        LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
+    bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
+    bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector;
+    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+
+    function _assertExpectedError(
+        bytes memory reason,
+        bytes4[] memory allowed
+    ) internal pure {
+        if (reason.length < 4) {
+            revert("Unknown error (no selector)");
+        }
+        bytes4 selector = bytes4(reason);
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (selector == allowed[i]) {
+                return;
+            }
+        }
+        assembly {
+            revert(add(reason, 32), mload(reason))
+        }
+    }
+
     modifier useActor(
         uint256 actorSeed
     ) {
@@ -917,8 +1002,13 @@ contract BullLeverageRouterHandler is Test {
         try router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours) {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](4);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[3] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -940,8 +1030,13 @@ contract BullLeverageRouterHandler is Test {
             if (morpho.collateralBalance(currentActor) == 0) {
                 ghost_totalFullyClosed++;
             }
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](4);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[3] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -964,14 +1059,22 @@ contract BullLeverageRouterHandler is Test {
             return;
         }
 
+        uint256 usdcBefore = usdc.balanceOf(currentActor);
+
         // Router queries actual debt from Morpho
         try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
+            ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
                 ghost_totalFullyClosed++;
             }
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](4);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_INVALID_CURVE_PRICE;
+            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[3] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -1069,6 +1172,27 @@ contract BullLeverageRouterInvariantTest is StdInvariant, Test {
     /// @notice Total fully closed positions should be <= total opened positions
     function invariant_openCloseConsistency() public view {
         assertGe(handler.ghost_totalOpened(), handler.ghost_totalFullyClosed(), "More full closes than opens");
+    }
+
+    /// @notice Protocol cannot create value — total returned USDC <= total deposited principal
+    function invariant_valueConservation() public view {
+        assertGe(
+            handler.ghost_totalPrincipalDeposited(),
+            handler.ghost_totalUsdcReturned(),
+            "More USDC returned than deposited (value created from nothing)"
+        );
+    }
+
+    /// @notice If an actor has zero collateral, their debt must also be zero
+    function invariant_noOrphanedDebt() public view {
+        for (uint256 i = 0; i < handler.getActorCount(); i++) {
+            address actor = handler.getActor(i);
+            uint256 collateral = morpho.collateralBalance(actor);
+            uint256 debt = morpho.borrowBalance(actor);
+            if (collateral == 0) {
+                assertEq(debt, 0, "Orphaned debt: actor has debt but no collateral");
+            }
+        }
     }
 
     /// @notice Summary for debugging

@@ -65,7 +65,7 @@ contract MockMorpho is IMorpho {
         uint256, // shares (unused)
         address onBehalf,
         address receiver
-    ) external override returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn) {
+    ) external virtual override returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn) {
         bytes32 id = keccak256(abi.encode(marketParams));
 
         // Calculate shares to burn
@@ -237,6 +237,42 @@ contract MockURD is IUniversalRewardsDistributor {
 contract MockRewardToken is MockERC20 {
 
     constructor() MockERC20("Morpho Token", "MORPHO") {}
+
+}
+
+contract PartialWithdrawMorpho is MockMorpho {
+
+    uint256 public shortfall;
+
+    constructor(
+        address _loanToken
+    ) MockMorpho(_loanToken) {}
+
+    function setShortfall(
+        uint256 _shortfall
+    ) external {
+        shortfall = _shortfall;
+    }
+
+    function withdraw(
+        MarketParams memory _marketParams,
+        uint256 assets,
+        uint256,
+        address onBehalf,
+        address receiver
+    ) external override returns (uint256 assetsWithdrawn, uint256 sharesWithdrawn) {
+        bytes32 id = keccak256(abi.encode(_marketParams));
+
+        sharesWithdrawn = (assets * totalSupplyShares[id]) / totalSupplyAssets[id];
+        require(supplyShares[id][onBehalf] >= sharesWithdrawn, "Insufficient shares");
+
+        supplyShares[id][onBehalf] -= sharesWithdrawn;
+        totalSupplyAssets[id] -= assets;
+        totalSupplyShares[id] -= sharesWithdrawn;
+
+        assetsWithdrawn = assets - shortfall;
+        loanToken.transfer(receiver, assetsWithdrawn);
+    }
 
 }
 
@@ -523,6 +559,49 @@ contract MorphoAdapterTest is Test {
 
         vm.expectRevert(MorphoAdapter.MorphoAdapter__InvalidMarket.selector);
         new MorphoAdapter(IERC20(address(usdc)), address(morpho), badParams, owner, user);
+    }
+
+    // ==========================================
+    // 6. Partial Withdrawal Protection
+    // ==========================================
+
+    function test_Withdraw_RevertsOnPartialMorphoReturn() public {
+        PartialWithdrawMorpho partialMorpho = new PartialWithdrawMorpho(address(usdc));
+        usdc.mint(address(partialMorpho), 1_000_000 * 1e6);
+
+        MorphoAdapter partialAdapter =
+            new MorphoAdapter(IERC20(address(usdc)), address(partialMorpho), marketParams, owner, user);
+
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(user);
+        usdc.approve(address(partialAdapter), amount);
+        partialAdapter.deposit(amount, user);
+
+        partialMorpho.setShortfall(1);
+
+        vm.expectRevert(MorphoAdapter.MorphoAdapter__PartialWithdrawal.selector);
+        partialAdapter.withdraw(amount, user, user);
+        vm.stopPrank();
+    }
+
+    function test_Withdraw_SucceedsOnFullMorphoReturn() public {
+        PartialWithdrawMorpho partialMorpho = new PartialWithdrawMorpho(address(usdc));
+        usdc.mint(address(partialMorpho), 1_000_000 * 1e6);
+
+        MorphoAdapter partialAdapter =
+            new MorphoAdapter(IERC20(address(usdc)), address(partialMorpho), marketParams, owner, user);
+
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(user);
+        usdc.approve(address(partialAdapter), amount);
+        partialAdapter.deposit(amount, user);
+
+        partialAdapter.withdraw(amount, user, user);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(user), 1000 * 1e6);
     }
 
 }

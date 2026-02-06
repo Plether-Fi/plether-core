@@ -241,6 +241,32 @@ contract ZapRouterHandler is Test {
     uint256 public ghost_totalBullBurned;
     uint256 public ghost_totalUsdcReturned;
 
+    // Expected error selectors
+    bytes4 private constant ERR_INSUFFICIENT_OUTPUT = ZapRouter.ZapRouter__InsufficientOutput.selector;
+    bytes4 private constant ERR_SOLVENCY_BREACH = ZapRouter.ZapRouter__SolvencyBreach.selector;
+    bytes4 private constant ERR_INVALID_CURVE_PRICE = ZapRouter.ZapRouter__InvalidCurvePrice.selector;
+    bytes4 private constant ERR_BEAR_PRICE_ABOVE_CAP = ZapRouter.ZapRouter__BearPriceAboveCap.selector;
+    bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = ZapRouter.ZapRouter__SplitterNotActive.selector;
+    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+
+    function _assertExpectedError(
+        bytes memory reason,
+        bytes4[] memory allowed
+    ) internal pure {
+        if (reason.length < 4) {
+            revert("Unknown error (no selector)");
+        }
+        bytes4 selector = bytes4(reason);
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (selector == allowed[i]) {
+                return;
+            }
+        }
+        assembly {
+            revert(add(reason, 32), mload(reason))
+        }
+    }
+
     modifier useActor(
         uint256 actorSeed
     ) {
@@ -297,8 +323,15 @@ contract ZapRouterHandler is Test {
             ghost_totalUsdcDeposited += usdcAmount;
             uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](6);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_SOLVENCY_BREACH;
+            allowed[2] = ERR_INVALID_CURVE_PRICE;
+            allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
+            allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[5] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -323,8 +356,15 @@ contract ZapRouterHandler is Test {
             ghost_totalBullBurned += bullAmount;
             uint256 usdcReceived = usdc.balanceOf(currentActor) - usdcBefore;
             ghost_totalUsdcReturned += usdcReceived;
-        } catch {
-            // Expected failures are OK
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](6);
+            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+            allowed[1] = ERR_SOLVENCY_BREACH;
+            allowed[2] = ERR_INVALID_CURVE_PRICE;
+            allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
+            allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[5] = ERR_STRING;
+            _assertExpectedError(reason, allowed);
         }
     }
 
@@ -342,6 +382,14 @@ contract ZapRouterHandler is Test {
         uint256 bullBefore = plDxyBull.balanceOf(currentActor);
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
+        bytes4[] memory allowed = new bytes4[](6);
+        allowed[0] = ERR_INSUFFICIENT_OUTPUT;
+        allowed[1] = ERR_SOLVENCY_BREACH;
+        allowed[2] = ERR_INVALID_CURVE_PRICE;
+        allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
+        allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
+        allowed[5] = ERR_STRING;
+
         // Mint
         try router.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours) {
             ghost_totalZapMints++;
@@ -356,12 +404,12 @@ contract ZapRouterHandler is Test {
                     ghost_totalBullBurned += bullReceived;
                     uint256 usdcReturned = usdc.balanceOf(currentActor) - (usdcBefore - usdcAmount);
                     ghost_totalUsdcReturned += usdcReturned;
-                } catch {
-                    // Burn failed, that's OK
+                } catch (bytes memory reason) {
+                    _assertExpectedError(reason, allowed);
                 }
             }
-        } catch {
-            // Mint failed, that's OK
+        } catch (bytes memory reason) {
+            _assertExpectedError(reason, allowed);
         }
     }
 
