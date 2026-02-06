@@ -398,26 +398,6 @@ contract SlippageProtectionForkTest is BaseForkTest {
         assertGe(totalBuyCost, redeemValue, "Buy-and-burn should not be profitable");
     }
 
-    /// @notice Verify BEAR + BULL prices approximately sum to CAP (market efficiency)
-    function test_CurvePool_TokenPricesSumToCAP() public view {
-        uint256 testAmount = 1e18;
-
-        uint256 usdcPerBear = ICurvePoolExtended(curvePool).get_dy(1, 0, testAmount);
-        uint256 usdcPerBull = CAP_SCALED / 1e12 - usdcPerBear;
-
-        uint256 sum = usdcPerBear + usdcPerBull;
-        uint256 capIn6Decimals = CAP_SCALED / 1e12;
-
-        // Market efficiency check: BEAR + BULL should equal CAP
-        // Deviation indicates mispricing or arbitrage opportunity
-        // Threshold: 5% allows for fees and temporary imbalances
-        uint256 minSum = (capIn6Decimals * 95) / 100;
-        uint256 maxSum = (capIn6Decimals * 105) / 100;
-
-        assertGe(sum, minSum, "Token prices sum below CAP - 5%");
-        assertLe(sum, maxSum, "Token prices sum above CAP + 5%");
-    }
-
     // ==========================================
     // PREVIEW FUNCTION ACCURACY TESTS
     // ==========================================
@@ -489,10 +469,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         uint256 actualReturn = IERC20(USDC).balanceOf(alice) - usdcBefore;
         vm.stopPrank();
 
-        // Preview estimates Curve swap output for BEAR buyback
-        // Fixed debt model uses larger flash loans, so allow more tolerance for slippage
-        // Threshold: 15% accounts for price movement during complex multi-step close
-        assertApproxEqRel(actualReturn, previewReturn, 0.15e18, "previewCloseLeverage should match actual within 15%");
+        assertApproxEqRel(actualReturn, previewReturn, 0.05e18, "previewCloseLeverage should match actual within 5%");
     }
 
     /// @notice Preview accuracy should hold across different trade sizes

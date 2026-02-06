@@ -191,13 +191,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
         assertEq(collateralAfter, 0, "Collateral should be cleared");
 
-        // Fixed debt model: BULL router now has same debt as BEAR router
-        // This means larger flash loans and more Curve slippage
-        // Cost sources for Bull close:
-        // - Curve swap fees and price impact for larger positions
-        // - Flash mint for pair redemption
-        // User should still get reasonable return (position equity)
-        assertGt(usdcReturned, 0, "Should return some USDC");
+        assertGt(usdcReturned, (principal * 90) / 100, "Should return >90% of principal");
     }
 
     function test_LeverageRoundTrip_RealCurve_RealMorpho() public {
@@ -221,14 +215,7 @@ contract BullLeverageRouterForkTest is BaseForkTest {
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
         uint256 totalCost = aliceUsdcStart - aliceUsdcEnd;
 
-        // Fixed debt model: BULL router now has same debt as BEAR router
-        // This means larger flash loans, more token minting, and more Curve swaps
-        // Round-trip cost sources (Bull leverage has more swap steps than Bear):
-        // - Open: Larger flash loan → more tokens minted → more BEAR to sell
-        // - Close: Larger flash mint → more Curve swaps for buyback
-        // Cost depends on Curve pool liquidity and current price impact
-        // Verify position was opened and closed successfully (any cost < 100% is acceptable)
-        assertLt(totalCost, principal, "Round-trip cost should not exceed principal");
+        assertLt(totalCost, (principal * 10) / 100, "Bull round-trip cost should be <10%");
     }
 
     function test_PreviewCloseLeverage_WithOffset() public {

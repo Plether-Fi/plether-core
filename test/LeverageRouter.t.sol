@@ -466,56 +466,6 @@ contract LeverageRouterTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice Test pause blocks operations
-    function test_OpenLeverage_WhenPaused_Reverts() public {
-        // Owner pauses router
-        router.pause();
-
-        vm.startPrank(alice);
-        morpho.setAuthorization(address(router), true);
-        usdc.approve(address(router), 1000 * 1e6);
-
-        vm.expectRevert();
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-    }
-
-    /// @notice Test close when paused also reverts
-    function test_CloseLeverage_WhenPaused_Reverts() public {
-        // First create a position
-        vm.startPrank(alice);
-        morpho.setAuthorization(address(router), true);
-        usdc.approve(address(router), 1000 * 1e6);
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        // Owner pauses router
-        router.pause();
-
-        // Alice tries to close
-        vm.startPrank(alice);
-        vm.expectRevert();
-        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-    }
-
-    /// @notice Test unpause allows operations
-    function test_Unpause_AllowsOperations() public {
-        // Pause then unpause
-        router.pause();
-        router.unpause();
-
-        vm.startPrank(alice);
-        morpho.setAuthorization(address(router), true);
-        usdc.approve(address(router), 1000 * 1e6);
-
-        // Should work after unpause
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        assertGt(morpho.collateralBalance(alice), 0, "Position should be created");
-    }
-
     /// @notice Test flash loan from unauthorized caller reverts
     function test_FlashLoanCallback_UnauthorizedCaller_Reverts() public {
         // Try to call onMorphoFlashLoan directly (not from Morpho)

@@ -582,8 +582,7 @@ contract BullLeverageRouterTest is Test {
         // Verify actual matches preview
         uint256 actualReturn = usdc.balanceOf(alice) - usdcBefore;
 
-        // Allow 15% tolerance due to curve slippage and complex multi-swap flow
-        assertApproxEqRel(actualReturn, expectedReturn, 0.15e18, "Return should match preview");
+        assertApproxEqRel(actualReturn, expectedReturn, 0.05e18, "Return should match preview within 5%");
 
         // Position should be closed
         (uint256 collateralAfter, uint256 debtAfter) = morpho.positions(alice);
@@ -673,66 +672,6 @@ contract BullLeverageRouterTest is Test {
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
         assertGt(supplied, 0, "Should have some collateral");
-    }
-
-    /// @notice Test pause blocks open
-    function test_OpenLeverage_WhenPaused_Reverts() public {
-        router.pause();
-
-        vm.startPrank(alice);
-        usdc.approve(address(router), 1000 * 1e6);
-        morpho.setAuthorization(address(router), true);
-
-        vm.expectRevert();
-        router.openLeverage(1000 * 1e6, 3 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-    }
-
-    /// @notice Test pause blocks close
-    function test_CloseLeverage_WhenPaused_Reverts() public {
-        // First create a position
-        vm.startPrank(alice);
-        usdc.approve(address(router), 1000 * 1e6);
-        morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000 * 1e6, 2 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        // Pause router
-        router.pause();
-
-        // Close should fail
-        vm.startPrank(alice);
-        (uint256 supplied,) = morpho.positions(alice);
-        vm.expectRevert();
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-    }
-
-    /// @notice Test unpause allows operations
-    function test_Unpause_AllowsOperations() public {
-        router.pause();
-        router.unpause();
-
-        vm.startPrank(alice);
-        usdc.approve(address(router), 1000 * 1e6);
-        morpho.setAuthorization(address(router), true);
-
-        // Should work after unpause
-        router.openLeverage(1000 * 1e6, 2 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        (uint256 supplied,) = morpho.positions(alice);
-        assertGt(supplied, 0, "Position should be created");
-    }
-
-    /// @notice Test zero principal reverts
-    function test_OpenLeverage_ZeroPrincipal_Reverts() public {
-        vm.startPrank(alice);
-        morpho.setAuthorization(address(router), true);
-
-        vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
-        router.openLeverage(0, 3 * 1e18, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
     }
 
     /// @notice Test close with low leverage (1.1x) works correctly
@@ -840,39 +779,6 @@ contract BullLeverageRouterTest is Test {
         assertEq(debtAfter, 0, "All debt repaid");
     }
 
-    /// @notice Fuzz test: Various BEAR prices shouldn't break the router
-    /// @dev Skipped: MockCurvePool doesn't perfectly simulate Curve AMM pricing, causing
-    ///      the BEAR sale proceeds to not match what the oracle-based calculation expects.
-    ///      In production, the oracle and Curve pool prices are validated to be within 2%.
-    function testFuzz_OpenLeverage_VariableBearPrice(
-        uint256 principal,
-        uint256 bearPriceBps
-    ) public {
-        // Skip this test - mock limitations cause false failures
-        vm.skip(true);
-
-        principal = bound(principal, 10_000e6, 50_000e6);
-        bearPriceBps = bound(bearPriceBps, 9000, 11_000);
-
-        int256 oraclePrice = int256((bearPriceBps * 1e8) / 10_000);
-        oracle.updatePrice(oraclePrice);
-        curvePool.setRate(bearPriceBps, 10_000);
-
-        usdc.mint(alice, principal);
-        usdc.mint(address(morpho), principal * 200);
-        usdc.mint(address(curvePool), principal * 200);
-        plDxyBear.mint(address(curvePool), principal * 200 * 1e12);
-
-        vm.startPrank(alice);
-        usdc.approve(address(router), principal);
-        morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, 15e17, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        (uint256 collateral,) = morpho.positions(alice);
-        assertGt(collateral, 0, "Should have collateral");
-    }
-
     /// @notice Fuzz test: Slippage within bounds should succeed
     function testFuzz_OpenLeverage_SlippageTolerance(
         uint256 slippageBps
@@ -897,13 +803,8 @@ contract BullLeverageRouterTest is Test {
         assertGt(collateral, 0, "Position should be created");
     }
 
-    /// @notice Fuzz test: Close with varying debt amounts
-    function testFuzz_CloseLeverage_VariableDebt(
-        uint256 debtPercent
-    ) public {
-        // Bound debt repayment to 0-100%
-        debtPercent = bound(debtPercent, 0, 100);
-
+    /// @notice Fuzz test: Full close with 2x leverage
+    function testFuzz_CloseLeverage_FullClose() public {
         // Setup: Create a 2x position
         uint256 principal = 10_000e6;
 
@@ -1275,11 +1176,9 @@ contract BullLeverageRouterTest is Test {
     function test_PreviewRemoveCollateral() public view {
         (uint256 expectedBull, uint256 expectedUsdc, uint256 usdcForBuyback, uint256 expectedReturn) =
             router.previewRemoveCollateral(1000e18);
-        assertGt(expectedBull, 0, "Should return expected BULL");
-        assertGt(expectedUsdc, 0, "Should return expected USDC from burn");
-        // usdcForBuyback may be 0 if the buffer is small
-        assertGe(usdcForBuyback, 0, "Should return USDC for buyback");
-        assertGe(expectedReturn, 0, "Should return expected return");
+        assertEq(expectedBull, 1000e18, "Should unstake 1:1");
+        assertEq(expectedUsdc, 2000e6, "1000 tokens at CAP=$2.00 = 2000 USDC");
+        assertGt(usdcForBuyback, 0, "Should need USDC for BEAR buyback");
     }
 
     function test_GetCollateral() public {

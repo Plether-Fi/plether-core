@@ -491,8 +491,6 @@ contract RewardDistributorForkTest is BaseForkTest {
         console.log("  Caller reward:", reward);
 
         assertEq(bearPct + bullPct, 10_000, "Percentages must sum to 100%");
-        assertGe(bearPct, 0, "BEAR % must be non-negative");
-        assertGe(bullPct, 0, "BULL % must be non-negative");
     }
 
 }

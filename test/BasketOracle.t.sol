@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Test} from "forge-std/Test.sol";
 
 // Mock Curve Pool for bound validation
@@ -217,23 +216,6 @@ contract BasketOracleTest is Test {
     // BOUND VALIDATION TESTS
     // ==========================================
 
-    function test_SetCurvePool_OnlyOwner() public {
-        address[] memory feeds = new address[](1);
-        feeds[0] = address(feedEUR);
-
-        uint256[] memory quantities = new uint256[](1);
-        quantities[0] = 1 ether;
-
-        uint256[] memory basePrices = new uint256[](1);
-        basePrices[0] = BASE_EUR;
-
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
-
-        vm.prank(address(0xdead));
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
-        newBasket.setCurvePool(address(curvePool));
-    }
-
     function test_SetCurvePool_OnlyOnce() public {
         address[] memory feeds = new address[](1);
         feeds[0] = address(feedEUR);
@@ -303,14 +285,6 @@ contract BasketOracleTest is Test {
     // CURVE POOL TIMELOCK TESTS
     // ==========================================
 
-    function test_ProposeCurvePool_OnlyOwner() public {
-        MockCurvePool newPool = new MockCurvePool(0.95 ether);
-
-        vm.prank(address(0xdead));
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
-        basket.proposeCurvePool(address(newPool));
-    }
-
     function test_ProposeCurvePool_RevertsIfPoolNotSet() public {
         address[] memory feeds = new address[](1);
         feeds[0] = address(feedEUR);
@@ -343,17 +317,6 @@ contract BasketOracleTest is Test {
         emit BasketOracle.CurvePoolProposed(address(newPool), block.timestamp + 7 days);
 
         basket.proposeCurvePool(address(newPool));
-    }
-
-    function test_FinalizeCurvePool_OnlyOwner() public {
-        MockCurvePool newPool = new MockCurvePool(0.95 ether);
-        basket.proposeCurvePool(address(newPool));
-
-        vm.warp(block.timestamp + 7 days);
-
-        vm.prank(address(0xdead));
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xdead)));
-        basket.finalizeCurvePool();
     }
 
     function test_FinalizeCurvePool_RevertsIfNoPendingProposal() public {

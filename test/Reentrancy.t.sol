@@ -38,9 +38,6 @@ contract ReentrancyTest is Test {
     MockOracle public sequencer;
     MockCurvePool public curvePool;
 
-    // Attackers
-    ReentrantFlashBorrower public attacker;
-
     address owner = address(0x1);
     address alice = address(0xA11ce);
     address treasury = address(0x99);
@@ -83,9 +80,6 @@ contract ReentrancyTest is Test {
             address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool)
         );
 
-        // Deploy attacker
-        attacker = new ReentrantFlashBorrower();
-
         // Fund accounts
         usdc.mint(alice, 1_000_000e6);
         usdc.mint(address(curvePool), 10_000_000e6);
@@ -93,104 +87,6 @@ contract ReentrancyTest is Test {
         // Labels
         vm.label(address(splitter), "Splitter");
         vm.label(address(zapRouter), "ZapRouter");
-        vm.label(address(attacker), "Attacker");
-    }
-
-    // ==========================================
-    // SPLITTER REENTRANCY TESTS
-    // ==========================================
-
-    function test_Splitter_Mint_ReentrancyBlocked() public {
-        // Setup: Fund attacker with USDC
-        usdc.mint(address(attacker), 1_000_000e6);
-
-        vm.prank(address(attacker));
-        usdc.approve(address(splitter), type(uint256).max);
-
-        // Configure attacker to try reentering mint during a transfer callback
-        attacker.setTarget(address(splitter));
-        attacker.setReentryFunction(ReentrantFlashBorrower.ReentryType.SPLITTER_MINT);
-
-        // The attacker tries to mint, which should succeed without reentrancy
-        // If reentrancy was possible, the test would detect doubled minting
-        vm.prank(address(attacker));
-        splitter.mint(1000 ether);
-
-        // Verify only one mint occurred (not doubled from reentrancy)
-        assertEq(splitter.BEAR().balanceOf(address(attacker)), 1000 ether, "Should mint exactly once");
-    }
-
-    function test_Splitter_Burn_ReentrancyBlocked() public {
-        // Setup: First mint some tokens
-        usdc.mint(alice, 1_000_000e6);
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), type(uint256).max);
-        splitter.mint(1000 ether);
-
-        // Transfer tokens to attacker
-        splitter.BEAR().transfer(address(attacker), 500 ether);
-        splitter.BULL().transfer(address(attacker), 500 ether);
-        vm.stopPrank();
-
-        // Configure attacker
-        attacker.setTarget(address(splitter));
-        attacker.setReentryFunction(ReentrantFlashBorrower.ReentryType.SPLITTER_BURN);
-
-        // Attacker tries to burn with reentrancy
-        vm.prank(address(attacker));
-        splitter.burn(500 ether);
-
-        // Verify only one burn occurred
-        assertEq(splitter.BEAR().balanceOf(address(attacker)), 0, "Should burn all tokens");
-    }
-
-    // ==========================================
-    // ZAPROUTER REENTRANCY TESTS
-    // ==========================================
-
-    function test_ZapRouter_ZapMint_ReentrancyBlocked() public {
-        // Fund attacker
-        usdc.mint(address(attacker), 1_000_000e6);
-
-        vm.prank(address(attacker));
-        usdc.approve(address(zapRouter), type(uint256).max);
-
-        // Configure attacker to try reentering during flash loan callback
-        attacker.setTarget(address(zapRouter));
-        attacker.setReentryFunction(ReentrantFlashBorrower.ReentryType.ZAP_MINT);
-
-        uint256 bullBefore = plDxyBull.balanceOf(address(attacker));
-
-        // Attempt zapMint - nonReentrant should block any callback reentrancy
-        vm.prank(address(attacker));
-        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
-
-        // Verify attacker received BULL (meaning normal execution completed)
-        uint256 bullAfter = plDxyBull.balanceOf(address(attacker));
-        assertGt(bullAfter, bullBefore, "Attacker should receive BULL from normal execution");
-
-        // Verify no double-minting occurred (reentrancy was blocked)
-        // If reentrancy worked, attacker would have received more than expected
-        assertLt(bullAfter, 200 ether, "Should not have double-minted from reentrancy");
-    }
-
-    function test_ZapRouter_ZapBurn_ReentrancyBlocked() public {
-        // Fund attacker with BULL tokens
-        plDxyBull.mint(address(attacker), 100 ether);
-
-        vm.prank(address(attacker));
-        plDxyBull.approve(address(zapRouter), type(uint256).max);
-
-        // Configure attacker
-        attacker.setTarget(address(zapRouter));
-        attacker.setReentryFunction(ReentrantFlashBorrower.ReentryType.ZAP_BURN);
-
-        // Attempt zapBurn - should execute normally without reentrancy
-        vm.prank(address(attacker));
-        zapRouter.zapBurn(100 ether, 0, block.timestamp + 1 hours);
-
-        // Verify tokens were burned
-        assertEq(plDxyBull.balanceOf(address(attacker)), 0, "Should burn all BULL");
     }
 
     // ==========================================
@@ -216,11 +112,8 @@ contract ReentrancyTest is Test {
     // ==========================================
 
     function test_CurvePoolReentrancy_Blocked() public {
-        // This test simulates a malicious Curve pool that tries to
-        // reenter during exchange()
-
-        // Deploy malicious curve pool
-        MaliciousCurvePool maliciousPool = new MaliciousCurvePool(address(usdc), address(plDxyBear), address(zapRouter));
+        // Deploy malicious curve pool (target set after router creation)
+        MaliciousCurvePool maliciousPool = new MaliciousCurvePool(address(usdc), address(plDxyBear));
 
         // Create new ZapRouter with malicious pool
         MockSplitter mockSplitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
@@ -229,112 +122,20 @@ contract ReentrancyTest is Test {
             address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(maliciousPool)
         );
 
-        // Fund attacker
+        // Point reentrancy at the SAME router (not a different one)
+        maliciousPool.setTargetRouter(address(maliciousRouter));
+
         usdc.mint(alice, 1_000_000e6);
 
         vm.startPrank(alice);
         usdc.approve(address(maliciousRouter), type(uint256).max);
 
-        // The malicious pool will try to reenter during exchange
-        // nonReentrant should block this
-        // This will revert because the router is already in a call
+        // Malicious pool calls maliciousRouter.zapMint during exchange,
+        // which reverts because nonReentrant is already locked
         vm.expectRevert();
         maliciousRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
-
-    // ==========================================
-    // PAUSE FUNCTIONALITY TESTS
-    // ==========================================
-
-    function test_ZapRouter_Pause_BlocksOperations() public {
-        usdc.mint(alice, 1_000_000e6);
-
-        // Pause the router
-        zapRouter.pause();
-
-        // Try to zapMint while paused
-        vm.startPrank(alice);
-        usdc.approve(address(zapRouter), type(uint256).max);
-
-        vm.expectRevert();
-        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-    }
-
-    function test_ZapRouter_Unpause_AllowsOperations() public {
-        usdc.mint(alice, 1_000_000e6);
-
-        // Pause then unpause
-        zapRouter.pause();
-        zapRouter.unpause();
-
-        // Should work now
-        vm.startPrank(alice);
-        usdc.approve(address(zapRouter), type(uint256).max);
-        zapRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
-        vm.stopPrank();
-
-        // Verify execution
-        assertGt(plDxyBull.balanceOf(alice), 0, "Should have received BULL");
-    }
-
-}
-
-// ==========================================
-// ATTACK CONTRACTS
-// ==========================================
-
-contract ReentrantFlashBorrower is IERC3156FlashBorrower {
-
-    enum ReentryType {
-        NONE,
-        SPLITTER_MINT,
-        SPLITTER_BURN,
-        ZAP_MINT,
-        ZAP_BURN
-    }
-
-    address public target;
-    ReentryType public reentryType;
-    bool public hasReentered;
-
-    function setTarget(
-        address _target
-    ) external {
-        target = _target;
-    }
-
-    function setReentryFunction(
-        ReentryType _type
-    ) external {
-        reentryType = _type;
-    }
-
-    function onFlashLoan(
-        address,
-        address,
-        uint256,
-        uint256,
-        bytes calldata
-    ) external override returns (bytes32) {
-        // Try to reenter based on configured type
-        if (!hasReentered && reentryType != ReentryType.NONE) {
-            hasReentered = true;
-
-            if (reentryType == ReentryType.ZAP_MINT) {
-                // This should fail due to nonReentrant
-                try ZapRouter(target).zapMint(100e6, 0, 100, block.timestamp + 1 hours) {} catch {}
-            } else if (reentryType == ReentryType.ZAP_BURN) {
-                try ZapRouter(target).zapBurn(100 ether, 0, block.timestamp + 1 hours) {} catch {}
-            }
-        }
-
-        return keccak256("ERC3156FlashBorrower.onFlashLoan");
-    }
-
-    // Allow receiving tokens
-    receive() external payable {}
 
 }
 
@@ -347,11 +148,15 @@ contract MaliciousCurvePool {
 
     constructor(
         address _token0,
-        address _token1,
-        address _router
+        address _token1
     ) {
         token0 = _token0;
         token1 = _token1;
+    }
+
+    function setTargetRouter(
+        address _router
+    ) external {
         targetRouter = _router;
     }
 

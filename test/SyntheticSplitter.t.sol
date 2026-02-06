@@ -569,6 +569,9 @@ contract SyntheticSplitterTest is Test {
 
         usdc.mint(address(splitter), 1000 * 1e6);
 
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        uint256 callerBefore = usdc.balanceOf(bob);
+
         vm.startPrank(bob);
         vm.mockCallRevert(
             address(adapter),
@@ -578,6 +581,9 @@ contract SyntheticSplitterTest is Test {
         vm.expectCall(address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector));
         splitter.harvestYield();
         vm.stopPrank();
+
+        assertGt(usdc.balanceOf(bob) - callerBefore, 0, "Caller should receive reward");
+        assertGt(usdc.balanceOf(treasury) - treasuryBefore, 0, "Treasury should receive reward");
     }
 
     function test_Harvest_RevertsWhenSlippageExceeds10Percent() public {
@@ -1117,17 +1123,7 @@ contract SyntheticSplitterTest is Test {
         splitter.ejectLiquidity();
     }
 
-    function test_EjectLiquidity_RevertsIfNoAdapter() public {
-        // Deploy splitter without adapter
-        SyntheticSplitter noAdapterSplitter =
-            new SyntheticSplitter(address(oracle), address(usdc), address(adapter), CAP, treasury, address(0));
-
-        // Remove adapter by migrating to address(0) - but this isn't possible
-        // So instead test when adapter has no shares
-        // Actually the check is for yieldAdapter == address(0), which we can't easily test
-        // because constructor requires valid adapter
-
-        // Instead, test the happy path which covers line 377
+    function test_EjectLiquidity_PausesAndWithdraws() public {
         vm.startPrank(alice);
         usdc.approve(address(splitter), 200 * 1e6);
         splitter.mint(100 * 1e18);
@@ -1196,124 +1192,6 @@ contract SyntheticSplitterTest is Test {
         assertEq(splitter.BEAR().balanceOf(alice), 0, "No tokens should be minted");
         assertEq(splitter.BULL().balanceOf(alice), 0, "No tokens should be minted");
         assertEq(usdc.balanceOf(alice), INITIAL_BALANCE, "USDC should not be deducted");
-    }
-
-    /**
-     * @notice Test that mint() reverts when adapter is paused
-     * @dev Simulates scenario where underlying protocol (e.g., Aave) is paused
-     */
-    function test_Mint_RevertsWhenAdapterIsPaused() public {
-        // 1. Mock adapter deposit to revert with paused message
-        vm.mockCallRevert(
-            address(adapter), abi.encodeWithSelector(IERC4626.deposit.selector), abi.encode("PROTOCOL_PAUSED")
-        );
-
-        // 2. Alice tries to mint - should fail
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 200 * 1e6);
-        vm.expectRevert();
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-
-        // 3. Verify state unchanged
-        assertEq(splitter.BEAR().totalSupply(), 0, "Total supply should be 0");
-    }
-
-    /**
-     * @notice Test that small mints (all goes to buffer) succeed even if adapter is broken
-     * @dev If depositAmount = 0, adapter.deposit() is never called
-     */
-    function test_Mint_SucceedsWithBufferOnlyWhenAdapterBroken() public {
-        // 1. Mock adapter deposit to revert
-        vm.mockCallRevert(
-            address(adapter), abi.encodeWithSelector(IERC4626.deposit.selector), abi.encode("ADAPTER_BROKEN")
-        );
-
-        // 2. Calculate minimum mint where all USDC stays in buffer
-        // For 10% buffer: if usdcNeeded * 10% >= usdcNeeded, depositAmount = 0
-        // This happens when usdcNeeded is very small due to rounding
-        // mintAmount * CAP / USDC_MULTIPLIER = usdcNeeded
-        // For CAP = 2e8, USDC_MULTIPLIER = 1e20
-        // usdcNeeded = mintAmount * 2e8 / 1e20 = mintAmount / 5e11
-        // For usdcNeeded = 1, mintAmount = 5e11
-        // Buffer = 1 * 10% = 0, depositAmount = 1
-        // Actually, for depositAmount = 0, we need usdcNeeded < 10 (so buffer rounds to usdcNeeded)
-        // usdcNeeded = 9 means mintAmount = 9 * 5e11 = 4.5e12
-
-        // Actually simpler: if usdcNeeded = 1, keepAmount = 0, depositAmount = 1
-        // So there's no case where depositAmount = 0 for non-zero mint
-        // Let's verify the actual behavior with edge case
-
-        // Test very small mint - 1 unit of synthetic token
-        // usdcNeeded = ceil(1 * 2e8 / 1e20) = ceil(2e-12) = 1 (due to ceiling)
-        // keepAmount = 1 * 10 / 100 = 0
-        // depositAmount = 1 - 0 = 1
-        // So adapter IS called even for tiny amounts
-
-        // This test verifies that even tiny mints require adapter
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 1);
-        vm.expectRevert(); // Adapter is broken, mint fails
-        splitter.mint(1);
-        vm.stopPrank();
-    }
-
-    /**
-     * @notice Test that USDC is not stuck in splitter when adapter deposit fails
-     * @dev Verifies atomic behavior - either full success or full rollback
-     */
-    function test_Mint_USDCNotStuckOnAdapterFailure() public {
-        uint256 aliceBalanceBefore = usdc.balanceOf(alice);
-        uint256 splitterBalanceBefore = usdc.balanceOf(address(splitter));
-
-        // 1. Mock adapter deposit to revert
-        vm.mockCallRevert(
-            address(adapter), abi.encodeWithSelector(IERC4626.deposit.selector), abi.encode("DEPOSIT_FAILED")
-        );
-
-        // 2. Alice tries to mint - should fail
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 200 * 1e6);
-        vm.expectRevert();
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-
-        // 3. Verify USDC balances unchanged (transaction reverted entirely)
-        assertEq(usdc.balanceOf(alice), aliceBalanceBefore, "Alice balance should be unchanged");
-        assertEq(usdc.balanceOf(address(splitter)), splitterBalanceBefore, "Splitter balance should be unchanged");
-    }
-
-    /**
-     * @notice Test multiple users affected by adapter failure
-     * @dev Ensures consistent behavior across different callers
-     */
-    function test_Mint_MultipleUsersBlockedByAdapterFailure() public {
-        address carol = address(0xCA201);
-        usdc.mint(carol, INITIAL_BALANCE);
-
-        // 1. Mock adapter deposit to revert
-        vm.mockCallRevert(
-            address(adapter), abi.encodeWithSelector(IERC4626.deposit.selector), abi.encode("CAPACITY_FULL")
-        );
-
-        // 2. Alice tries to mint - fails
-        vm.startPrank(alice);
-        usdc.approve(address(splitter), 200 * 1e6);
-        vm.expectRevert();
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-
-        // 3. Carol also tries to mint - also fails
-        vm.startPrank(carol);
-        usdc.approve(address(splitter), 200 * 1e6);
-        vm.expectRevert();
-        splitter.mint(100 * 1e18);
-        vm.stopPrank();
-
-        // 4. Verify no tokens minted for either user
-        assertEq(splitter.BEAR().balanceOf(alice), 0);
-        assertEq(splitter.BEAR().balanceOf(carol), 0);
-        assertEq(splitter.BEAR().totalSupply(), 0);
     }
 
     /**

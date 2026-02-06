@@ -57,9 +57,6 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - Users stake plDXY tokens to receive staked tokens 1:1
 - Staked tokens are used as collateral in Morpho lending pools
 - Required for leverage positions (routers stake on behalf of users)
-- Rewards stream linearly over 1 hour (prevents instant reward capture)
-- 1 hour minimum stake duration before withdrawal (prevents reward sniping)
-- Transfer resets recipient's withdrawal timer (prevents bypass via transfer)
 
 ### Routing Layer
 
@@ -117,6 +114,11 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 **Test Guidelines**:
 - Only write tests for application-specific logic. Do not add tests that verify library behavior (OpenZeppelin ERC20/ERC4626/Ownable/Pausable, Chainlink AggregatorV3Interface, etc.) - those are already tested by their maintainers.
 - **Oracle tests must use basket ≠ $1.00** (e.g., $0.80, $1.20). At $1.00, the formulas `BEAR = basket` and `BEAR = CAP - basket` give identical results, hiding bugs.
+- **No tautological assertions**: Never assert `uint256 >= 0` (always true), never assert a computed value equals the same computation repeated in the test. Tests must be falsifiable.
+- **No circular assertions**: If a test mirrors the contract's exact math to compute an expected value, the test cannot catch math bugs. Use known input/output pairs or range checks instead.
+- **Mocks must return realistic values**: Mock functions like `position()` and `market()` must return meaningful state. Returning all zeros silently breaks dependent logic (e.g., division by zero → try/catch swallows the error).
+- **Flash loan buffer dust**: LeverageRouter's `closeLeverage` adds a 1 bps buffer to flash loans for interest protection. In mock environments (no interest accrual), this buffer accumulates in the router. Invariant tests should use `assertLe` with a proportional bound, not `assertEq(balance, 0)`.
+- **Integer precision in comparisons**: When comparing computed ratios (LTV, percentages), integer division can mask real changes. Compare raw values (debt amounts) when detecting small deltas like interest accrual.
 
 ## External Integrations
 

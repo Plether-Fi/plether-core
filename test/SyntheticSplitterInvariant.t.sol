@@ -187,10 +187,11 @@ contract SplitterHandler is Test {
         bool wasLiquidated = splitter.isLiquidated();
 
         // Burn can fail if paused AND insolvent
+        uint256 usdcBefore = usdc.balanceOf(currentActor);
+
         try splitter.burn(amount) {
             ghost_totalBurned += amount;
-            (uint256 usdcReturned,) = splitter.previewBurn(amount);
-            ghost_totalUsdcWithdrawn += usdcReturned;
+            ghost_totalUsdcWithdrawn += usdc.balanceOf(currentActor) - usdcBefore;
             burnCalls++;
 
             // Track burns that happen after liquidation
@@ -418,10 +419,7 @@ contract SyntheticSplitterInvariantTest is StdInvariant, Test {
         uint256 totalAssets = handler.getTotalAssets();
         uint256 totalLiabilities = handler.getTotalLiabilities();
 
-        // Allow small tolerance for rounding (max 100 wei per 1M USDC of liabilities)
-        uint256 tolerance = (totalLiabilities / 1e6) + 10;
-
-        assertGe(totalAssets + tolerance, totalLiabilities, "INVARIANT VIOLATED: System is insolvent");
+        assertGe(totalAssets + 10, totalLiabilities, "INVARIANT VIOLATED: System is insolvent");
     }
 
     /// @notice Assets should not exceed liabilities + yield + dust (upper bound / "stuck funds" check)
@@ -587,7 +585,7 @@ contract SyntheticSplitterLiquidationInvariantTest is StdInvariant, Test {
         if (uint256(price) >= CAP && splitter.BEAR().totalSupply() > 0) {
             // Either already liquidated, or triggerLiquidation should succeed
             // (we can't call functions in invariants, so just verify state)
-            assertTrue(splitter.isLiquidated() || uint256(price) >= CAP, "Price/liquidation state inconsistent");
+            assertTrue(splitter.isLiquidated(), "Price >= CAP but system not liquidated");
         }
     }
 

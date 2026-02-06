@@ -368,8 +368,8 @@ contract RewardDistributorTest is Test {
         curvePool.setPrice(1e6);
         usdc.mint(address(distributor), 100e6);
 
-        vm.expectEmit(false, false, false, false);
-        emit IRewardDistributor.RewardsDistributed(0, 0, 0, 0);
+        vm.expectEmit(true, false, false, true);
+        emit IRewardDistributor.RewardsDistributed(49.95e18, 49.95e18, 5000, 5000);
 
         vm.prank(alice);
         distributor.distributeRewards();
@@ -388,7 +388,6 @@ contract RewardDistributorTest is Test {
         usdc.mint(address(distributor), 100e6);
 
         (uint256 bearPct, uint256 bullPct,,) = distributor.previewDistribution();
-        assertEq(bearPct + bullPct, 10_000, "Percentages should always sum to 100%");
         assertGe(bearPct, 5000, "BEAR should get at least 50% when underperforming");
     }
 

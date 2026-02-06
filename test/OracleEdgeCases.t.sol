@@ -67,23 +67,29 @@ contract OracleEdgeCasesTest is Test {
         // Price increases to $1.50
         oracle.setPrice(150_000_000);
 
+        // Preview at new price should be same (mint cost is CAP-based, not oracle-based)
+        (uint256 previewUsdcAfter,,) = splitter.previewMint(mintAmount);
+        assertEq(previewUsdc, previewUsdcAfter, "Mint cost should be oracle-independent");
+
         // Execute mint - should still work (price below CAP)
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
         vm.startPrank(alice);
         usdc.approve(address(splitter), type(uint256).max);
         splitter.mint(mintAmount);
         vm.stopPrank();
 
-        // Alice should have received tokens
+        // Verify actual cost matches preview
+        assertEq(aliceUsdcBefore - usdc.balanceOf(alice), previewUsdc, "Actual cost should match preview");
         assertEq(splitter.BEAR().balanceOf(alice), mintAmount);
-        assertEq(splitter.BULL().balanceOf(alice), mintAmount);
     }
 
     /// @notice Test: Price reaches CAP between preview and mint
     function test_PriceReachesCap_PreviewToMint() public {
         uint256 mintAmount = 1000 ether;
 
-        // Preview at $1.00
+        // Preview at $1.00 succeeds
         (uint256 previewUsdc,,) = splitter.previewMint(mintAmount);
+        assertGt(previewUsdc, 0, "Preview should return non-zero cost");
 
         // Price reaches CAP ($2.00)
         oracle.setPrice(int256(CAP));
@@ -235,10 +241,9 @@ contract OracleEdgeCasesTest is Test {
 
         vm.stopPrank();
 
-        // Should have received CAP-based refund (not affected by oracle price)
-        (uint256 expectedRefund,) = splitter.previewBurn(500 ether);
+        // Actual refund should match the pre-change preview (burn uses CAP, not oracle)
         uint256 actualRefund = usdc.balanceOf(alice) - aliceUsdcBefore;
-        assertEq(actualRefund, expectedRefund, "Refund should match preview");
+        assertEq(actualRefund, previewRefund, "Refund should match pre-change preview (CAP-based, oracle-independent)");
     }
 
     /// @notice Test: Preview accurate despite flash price manipulation
@@ -256,9 +261,8 @@ contract OracleEdgeCasesTest is Test {
         oracle.setPrice(100_000_000);
         (uint256 preview3,,) = splitter.previewMint(mintAmount);
 
-        // Previews at same price should be equal
+        assertEq(preview1, preview2, "Preview should be oracle-independent");
         assertEq(preview1, preview3, "Same price should give same preview");
-        // Preview at higher price might differ based on implementation
     }
 
     // ==========================================

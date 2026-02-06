@@ -77,20 +77,8 @@ contract PythAdapterTest is Test {
         assertEq(adapter.INVERSE(), false);
     }
 
-    function test_Constructor_SetsDescription() public view {
-        assertEq(adapter.DESCRIPTION(), "SEK / USD");
-    }
-
-    function test_Decimals_Returns8() public view {
-        assertEq(adapter.decimals(), 8);
-    }
-
     function test_Description_ReturnsCorrectValue() public view {
         assertEq(adapter.description(), "SEK / USD");
-    }
-
-    function test_Version_Returns1() public view {
-        assertEq(adapter.version(), 1);
     }
 
     function test_LatestRoundData_ReturnsCorrectPrice() public view {
@@ -188,6 +176,9 @@ contract PythAdapterTest is Test {
 
         uint256 fee = adapter.getUpdateFee(updateData);
         adapter.updatePrice{value: fee}(updateData);
+
+        (, int256 answer,,,) = adapter.latestRoundData();
+        assertEq(answer, SEK_PRICE, "Price should be valid after update");
     }
 
     function test_UpdatePrice_RevertsOnInsufficientValue() public {

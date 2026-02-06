@@ -112,17 +112,19 @@ contract LiquidationForkTest is BaseForkTest {
         require(collateralInitial > 0, "Setup failed: no collateral deposited");
         require(borrowSharesInitial > 0, "Setup failed: no debt created");
 
-        uint256 ltvInitial = _calculateLTV(marketId, alice, bearMarketParams);
+        (,, uint128 totalBorrowAssetsBefore, uint128 totalBorrowSharesBefore,,) = IMorpho(MORPHO).market(marketId);
+        uint256 debtBefore = (uint256(borrowSharesInitial) * totalBorrowAssetsBefore + totalBorrowSharesBefore - 1)
+            / totalBorrowSharesBefore;
 
         vm.warp(block.timestamp + 3 * 365 days);
         _refreshOracleTimestamp();
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
-        uint256 ltvAfter = _calculateLTV(marketId, alice, bearMarketParams);
+        (,, uint128 totalBorrowAssetsAfter, uint128 totalBorrowSharesAfter,,) = IMorpho(MORPHO).market(marketId);
+        uint256 debtAfter = (uint256(borrowSharesInitial) * totalBorrowAssetsAfter + totalBorrowSharesAfter - 1)
+            / totalBorrowSharesAfter;
 
-        if (ltvInitial > 0) {
-            assertGt(ltvAfter, ltvInitial, "LTV should increase as debt grows");
-        }
+        assertGt(debtAfter, debtBefore, "Debt should increase as interest accrues");
     }
 
     function test_InterestAccrual_ClosePositionWithAccruedInterest() public {
@@ -150,7 +152,9 @@ contract LiquidationForkTest is BaseForkTest {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Collateral should be 0");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
-        } catch {}
+        } catch {
+            fail("Close should succeed after 180 days of interest");
+        }
         vm.stopPrank();
     }
 
@@ -244,7 +248,9 @@ contract LiquidationForkTest is BaseForkTest {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Should be fully closed");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
-        } catch {}
+        } catch {
+            fail("User should be able to close before liquidation");
+        }
         vm.stopPrank();
     }
 
@@ -272,7 +278,9 @@ contract LiquidationForkTest is BaseForkTest {
         try bullLeverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Position should be closed");
-        } catch {}
+        } catch {
+            fail("Bull close should succeed after 180 days of interest");
+        }
         vm.stopPrank();
     }
 

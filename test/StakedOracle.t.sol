@@ -210,21 +210,18 @@ contract StakedOracleTest is Test {
         vault.deposit(1_000_000_000 ether, alice);
         vm.stopPrank();
 
-        // Should not overflow
         uint256 price = stakedOracle.price();
-        assertGt(price, 0);
+        assertEq(price, BASE_PRICE, "Price should equal base (1:1 exchange rate, no yield)");
     }
 
     function test_Price_WorksWithSmallAmounts() public {
-        // Deposit small amount
         vm.startPrank(alice);
         underlyingToken.approve(address(vault), 1);
         vault.deposit(1, alice);
         vm.stopPrank();
 
-        // Should still work
         uint256 price = stakedOracle.price();
-        assertGt(price, 0);
+        assertEq(price, BASE_PRICE, "Price should equal base (1:1 exchange rate, no yield)");
     }
 
     function test_Price_ConsistentAcrossMultipleDeposits() public {

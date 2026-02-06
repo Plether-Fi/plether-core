@@ -426,6 +426,9 @@ contract ZapRouterInvariantTest is StdInvariant, Test {
     /// @notice Total BULL burned should be <= total BULL minted
     function invariant_mintBurnConsistency() public view {
         assertGe(handler.ghost_totalBullMinted(), handler.ghost_totalBullBurned(), "More BULL burned than minted");
+        assertGe(
+            handler.ghost_totalUsdcDeposited(), handler.ghost_totalUsdcReturned(), "More USDC withdrawn than deposited"
+        );
     }
 
     /// @notice Summary for debugging

@@ -30,12 +30,6 @@ contract SyntheticTokenTest is Test {
     // ==========================================
     // 2. Minting Tests
     // ==========================================
-    function test_Mint_Success() public {
-        vm.prank(splitter);
-        token.mint(alice, 100 ether);
-        assertEq(token.balanceOf(alice), 100 ether);
-    }
-
     function test_RevertMint_Unauthorized() public {
         vm.prank(hacker);
         vm.expectRevert(SyntheticToken.SyntheticToken__Unauthorized.selector);
@@ -45,15 +39,6 @@ contract SyntheticTokenTest is Test {
     // ==========================================
     // 3. Burning Tests
     // ==========================================
-    function test_Burn_Success() public {
-        vm.prank(splitter);
-        token.mint(alice, 100 ether);
-
-        vm.prank(splitter);
-        token.burn(alice, 40 ether);
-        assertEq(token.balanceOf(alice), 60 ether);
-    }
-
     function test_RevertBurn_Unauthorized() public {
         vm.prank(splitter);
         token.mint(alice, 100 ether);

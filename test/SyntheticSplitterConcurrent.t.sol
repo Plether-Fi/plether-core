@@ -465,8 +465,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
         // Price increases to $1.95 (just below CAP of $2.00)
-        oracle = new MockOracle(195_000_000, block.timestamp, block.timestamp);
-        // Note: Can't change oracle after construction, so simulate via state
+        oracle.setPrice(195_000_000);
 
         // Alice burns while Bob mints (concurrent operations)
         vm.prank(alice);
@@ -477,8 +476,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         vm.prank(carol);
         splitter.mint(mintAmount);
 
-        // Verify Alice got her refund
-        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
+        // Verify Alice's burn succeeded - refund is CAP-based (oracle-independent)
+        uint256 expectedRefund = (burnAmount * CAP) / splitter.USDC_MULTIPLIER();
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
         assertEq(splitter.BEAR().balanceOf(alice), aliceTokensBefore - burnAmount);
 
@@ -556,13 +555,13 @@ contract SyntheticSplitterConcurrentTest is Test {
         // Alice tries to burn during migration timelock
         // Burns should still work with the current adapter
         uint256 burnAmount = 50_000 ether;
+        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
 
         vm.prank(alice);
         splitter.burn(burnAmount);
 
         // Verify burn succeeded
-        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
         assertEq(splitter.BEAR().balanceOf(alice), mintAmount - burnAmount);
 
@@ -682,23 +681,22 @@ contract SyntheticSplitterConcurrentTest is Test {
 
         // Regular burn still works during liquidation (requires both BEAR + BULL)
         uint256 burnAmount = 50_000 ether;
+        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         uint256 aliceUsdcBefore = usdc.balanceOf(alice);
         vm.prank(alice);
         splitter.burn(burnAmount);
 
         // Verify burn succeeded
-        (uint256 expectedRefund,) = splitter.previewBurn(burnAmount);
         assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
 
         // emergencyRedeem also works (only needs BEAR - BULL is worthless at CAP)
         uint256 emergencyAmount = 10_000 ether;
+        uint256 expectedEmergencyRefund = (emergencyAmount * CAP) / splitter.USDC_MULTIPLIER();
         aliceUsdcBefore = usdc.balanceOf(alice);
         vm.prank(alice);
         splitter.emergencyRedeem(emergencyAmount);
 
-        // Verify emergency redeem succeeded (uses same pricing as burn)
-        (expectedRefund,) = splitter.previewBurn(emergencyAmount);
-        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedRefund);
+        assertEq(usdc.balanceOf(alice) - aliceUsdcBefore, expectedEmergencyRefund);
     }
 
     // ==========================================

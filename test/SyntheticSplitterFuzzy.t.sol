@@ -79,7 +79,7 @@ contract SyntheticSplitterFuzzTest is Test {
         uint256 adapterAssets = adapter.convertToAssets(adapter.balanceOf(address(splitter)));
         uint256 totalAssets = localBuffer + adapterAssets;
 
-        assertGe(totalAssets + 1, totalLiabilities, "Solvency Broken");
+        assertGe(totalAssets, totalLiabilities, "Solvency Broken");
     }
 
     /// @notice Verify that users pay at least fair price (catches rounding exploits)
@@ -214,30 +214,25 @@ contract SyntheticSplitterFuzzTest is Test {
         // Inject Yield
         aUsdc.mint(address(adapter), yield);
         usdc.mint(address(pool), yield);
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        uint256 callerBefore = usdc.balanceOf(address(this));
+
         try splitter.harvestYield() {
-        // Success is allowed (if yield > threshold)
-        }
-        catch Error(string memory reason) {
-            // This catches standard require(..., "Reason") failures
-            // We consider this a failure because we only expect "NoSurplus" or Success
-            fail(string.concat("Harvest failed with string error: ", reason));
+            uint256 callerReward = usdc.balanceOf(address(this)) - callerBefore;
+            uint256 treasuryReward = usdc.balanceOf(treasury) - treasuryBefore;
+
+            assertGt(callerReward, 0, "Caller should receive reward on success");
+            assertGt(treasuryReward, 0, "Treasury should receive reward on success");
         } catch (bytes memory reason) {
-            // This catches Custom Errors (like Splitter__NoSurplus)
-            // Log the error selector to identify it
-            console.log("Custom error selector:");
-            console.logBytes4(bytes4(reason));
-            // If more data in the error, log full bytes (if the error has params)
-            console.log("Full error bytes:");
-            console.logBytes(reason);
-            // Check if the selector matches Splitter__NoSurplus
-            if (bytes4(reason) != SyntheticSplitter.Splitter__NoSurplus.selector) {
-                fail("Harvest failed with unexpected custom error");
+            if (reason.length >= 4 && bytes4(reason) == SyntheticSplitter.Splitter__NoSurplus.selector) {
+                return;
             }
-            // If it matches NoSurplus, the test passes (Expected behavior for low yield)
-        } catch Panic(uint256 panicCode) {
-            // This catches Panics (Math overflow, division by zero)
-            console.log("Panic code: %d", panicCode);
-            fail("Harvest crashed (Panic/Overflow)");
+            if (reason.length >= 4 && bytes4(reason) == SyntheticSplitter.Splitter__InsufficientHarvest.selector) {
+                return;
+            }
+            assembly {
+                revert(add(reason, 32), mload(reason))
+            }
         }
     }
 
