@@ -126,6 +126,19 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - **Curve**: ICurvePool for USDC/plDXY-BEAR swaps (indices: USDC=0, plDXY-BEAR=1)
 - **Morpho Blue**: IMorpho for lending with staked tokens (splDXY-BEAR, splDXY-BULL) as collateral, and yield via MorphoAdapter
 
+## Diagram Guidelines
+
+Diagrams are rendered via `node scripts/render-diagrams.mjs` using `beautiful-mermaid` with the `github-light` theme. When editing or adding diagrams:
+
+- **Visual categories**: Use distinct shapes + colors per node type: `([...])` blue for user actions, `[...]` slate for contracts, `(...)` green for tokens, `{{...}}` amber for external protocols, `>...]` muted for descriptions
+- **Node labels must be defined before referenced**: If `RD -->|Rewards| SBU` appears before `BULL -->|Stake| SBU(splDXY-BULL)`, Mermaid renders "SBU" as the label instead of "splDXY-BULL"
+- **Edge declaration order controls layout**: In `graph TD`, the first-declared edges position nodes leftmost. Interleave edges to control column placement (e.g., BEAR edges, then center edges, then BULL edges)
+- **Avoid cycles in TD graphs**: Cycles cause unpredictable node placement. For bidirectional relationships, use `-->` with a `⇄` label instead of `<-->` (which produces arrows hidden behind nodes)
+- **`<-->` arrows are broken**: beautiful-mermaid renders `marker-start` and `marker-end` but both get hidden behind adjacent node rects due to z-order. Use one-way arrows with descriptive labels instead
+- **Be explicit on edge labels**: Always specify what asset flows where (e.g., "Swap USDC → BEAR on Curve" not "Swap on Curve"). For DeFi diagrams, ambiguous labels defeat the purpose
+- **Complex flows as linear pipelines**: For multi-step flows (leverage), use separate diagrams with clean top-to-bottom chains rather than trying to merge shared nodes into one tangled graph
+- **Shared classes**: Define `classDef` once in a shared string and append via template literal to each diagram
+
 ## Git Workflow
 
 Do not push or ask to push the git repo to origin. The user will handle pushes manually.
