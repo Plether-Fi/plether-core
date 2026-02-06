@@ -413,6 +413,104 @@ contract MorphoAdapterTest is Test {
         assertApproxEqAbs(usdc.balanceOf(user), 1010 * 1e6, 1);
     }
 
+    function test_DepositAfterYield_SharePriceAboveOne() public {
+        // Alice deposits $100 into an empty pool → gets 100e6 shares (1:1)
+        address alice = address(0xA11CE);
+        usdc.mint(user, 200 * 1e6);
+
+        vm.startPrank(user);
+        usdc.approve(address(adapter), type(uint256).max);
+        adapter.deposit(100 * 1e6, alice);
+        vm.stopPrank();
+
+        assertEq(adapter.balanceOf(alice), 100 * 1e6);
+
+        // Yield accrues: pool is now worth $110 backed by 100e6 shares
+        // Share price = 110/100 = $1.10
+        morpho.simulateYield(marketId, 10 * 1e6);
+        assertEq(adapter.totalAssets(), 110 * 1e6);
+
+        // Bob deposits $55 at $1.10/share → expects 50e6 shares (55/1.10 = 50)
+        address bob = address(0xB0B);
+        usdc.mint(user, 55 * 1e6);
+
+        vm.startPrank(user);
+        uint256 bobShares = adapter.deposit(55 * 1e6, bob);
+        vm.stopPrank();
+
+        assertEq(bobShares, 50 * 1e6, "Bob should get 50e6 shares at $1.10/share");
+        assertEq(adapter.totalAssets(), 165 * 1e6, "Pool should hold $165 total");
+    }
+
+    function test_TwoDepositors_YieldSplitProportionally() public {
+        address alice = address(0xA11CE);
+        address bob = address(0xB0B);
+        usdc.mint(user, 500 * 1e6);
+
+        // Alice deposits $100, Bob deposits $200 (same share price, 1:1)
+        vm.startPrank(user);
+        usdc.approve(address(adapter), type(uint256).max);
+        adapter.deposit(100 * 1e6, alice);
+        adapter.deposit(200 * 1e6, bob);
+        vm.stopPrank();
+
+        assertEq(adapter.balanceOf(alice), 100 * 1e6);
+        assertEq(adapter.balanceOf(bob), 200 * 1e6);
+
+        // $30 yield accrues → pool is $330 backed by 300e6 shares
+        // Alice owns 1/3 → entitled to $110
+        // Bob owns 2/3 → entitled to $220
+        morpho.simulateYield(marketId, 30 * 1e6);
+        assertEq(adapter.totalAssets(), 330 * 1e6);
+
+        // Alice redeems all (1 wei rounding from integer division in share→asset)
+        vm.prank(alice);
+        adapter.redeem(100 * 1e6, alice, alice);
+        assertApproxEqAbs(usdc.balanceOf(alice), 110 * 1e6, 1, "Alice should get ~$110 (principal + 1/3 yield)");
+
+        // Bob redeems all
+        vm.prank(bob);
+        adapter.redeem(200 * 1e6, bob, bob);
+        assertApproxEqAbs(usdc.balanceOf(bob), 220 * 1e6, 1, "Bob should get ~$220 (principal + 2/3 yield)");
+
+        assertLe(adapter.totalAssets(), 1, "Pool should be empty (1 wei rounding dust)");
+    }
+
+    function test_DepositAfterYield_WithdrawReturnsCorrectAmount() public {
+        address alice = address(0xA11CE);
+        usdc.mint(user, 300 * 1e6);
+
+        // Alice deposits $200
+        vm.startPrank(user);
+        usdc.approve(address(adapter), type(uint256).max);
+        adapter.deposit(200 * 1e6, alice);
+        vm.stopPrank();
+
+        // 50% yield → pool worth $300, still 200e6 shares, price = $1.50/share
+        morpho.simulateYield(marketId, 100 * 1e6);
+
+        // Bob deposits $150 → gets 100e6 shares (150/1.50 = 100)
+        address bob = address(0xB0B);
+        usdc.mint(user, 150 * 1e6);
+
+        vm.startPrank(user);
+        uint256 bobShares = adapter.deposit(150 * 1e6, bob);
+        vm.stopPrank();
+
+        assertEq(bobShares, 100 * 1e6, "Bob gets 100e6 shares at $1.50");
+        assertEq(adapter.totalAssets(), 450 * 1e6);
+
+        // Alice withdraws ~$300 (her 200 shares × $1.50, 1 wei rounding)
+        vm.prank(alice);
+        adapter.redeem(200 * 1e6, alice, alice);
+        assertApproxEqAbs(usdc.balanceOf(alice), 300 * 1e6, 1, "Alice gets ~$300 (200 shares at $1.50)");
+
+        // Bob withdraws $150 (his 100 shares × $1.50)
+        vm.prank(bob);
+        adapter.redeem(100 * 1e6, bob, bob);
+        assertApproxEqAbs(usdc.balanceOf(bob), 150 * 1e6, 1, "Bob gets ~$150 (100 shares at $1.50)");
+    }
+
     // ==========================================
     // 3. Security Tests
     // ==========================================
