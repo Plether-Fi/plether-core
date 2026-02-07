@@ -389,6 +389,19 @@ All routers implement multiple layers of MEV protection:
 - Transactions are visible in the public mempool before inclusion; users can mitigate this by using private mempools (e.g., Flashbots Protect)
 - The 1% cap is a maximum; users can specify lower values for tighter protection, but large positions may still experience significant slippage in dollar terms
 
+#### Token Approval Model
+
+Router contracts use `type(uint256).max` approvals in their constructors for all protocol-to-protocol interactions (Splitter, Curve, Morpho, StakedTokens). This is safe because routers are **stateless**: they never hold user funds between transactions. All tokens flow in and out within a single atomic call, so an infinite approval from an empty contract to a known immutable address has no exploitable surface.
+
+| Approval Type | Pattern | Example |
+|---------------|---------|---------|
+| Router → Protocol (constructor) | `type(uint256).max` to immutable addresses | ZapRouter approves Splitter to spend USDC |
+| Router → Flash Lender (runtime) | Exact repayment amount | ZapRouter approves `repayAmount` for flash mint callback |
+
+Users never grant token approvals to the routers. Instead:
+- **LeverageRouter / BullLeverageRouter**: Users authorize the router in Morpho via `morpho.setAuthorization(router, true)`. This grants position management rights, not token spending.
+- **ZapRouter**: Users call the router directly with USDC. No prior approval needed — USDC is transferred via `transferFrom` with the exact mint amount.
+
 ## Emergency Procedures
 
 ### Protocol Pause
@@ -475,6 +488,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-07 | Added Token Approval Model section under Router Architecture: documents stateless router approval pattern and user authorization model |
 | 2026-02-06 | StakedToken: Replaced permissionless donateYield acknowledgement with proportional stream extension fix; removed stale withdrawal delay references |
 | 2026-02-02 | Added Pyth Network dependency for SEK/USD price feed (PythAdapter); documented pull-based oracle risks |
 | 2026-01-30 | StakedToken: Added streaming rewards (1h linear vesting) and withdrawal delay (1h minimum) to prevent reward sniping |
