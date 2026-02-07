@@ -87,14 +87,42 @@ const staking = `graph TD
     class BEAR,BULL,SB,SBU token
 ${classes}`;
 
+const burn = `graph TD
+    B([Send plDXY-BEAR]) --> SP[SyntheticSplitter]
+    BU([Send plDXY-BULL]) --> SP
+    MA[MorphoAdapter] -->|Withdraw if buffer insufficient| SP
+    SP -->|Refund at $2.00 CAP rate| USDC(USDC)
+    USDC --> R([Receive USDC])
+
+    class B,BU,R user
+    class SP,MA contract
+    class USDC token
+${classes}`;
+
+const flywheel = `graph TD
+    OR[BasketOracle] -->|Theoretical Price| RD[RewardDistributor]
+    SP[SyntheticSplitter] -->|USDC Yield| RD
+    CU{{Curve AMM}} -->|Spot EMA| RD
+    RD -.- BAL>Rebalancer · larger share to undervalued token · higher yield → more stakers → price corrects]
+    BAL -->|Buy spot + donate| SB(splDXY-BEAR)
+    BAL -->|Buy spot + donate| SBU(splDXY-BULL)
+
+    class SP,RD,OR contract
+    class CU external
+    class SB,SBU token
+    class BAL desc
+${classes}`;
+
 mkdirSync(outDir, { recursive: true });
 
-const [svg1, svg2, svg3, svg4, svg5] = await Promise.all([
+const [svg1, svg2, svg3, svg4, svg5, svg6, svg7] = await Promise.all([
   renderMermaid(howItWorks, theme),
   renderMermaid(tokenFlow, theme),
   renderMermaid(bearLeverage, theme),
   renderMermaid(bullLeverage, theme),
   renderMermaid(staking, theme),
+  renderMermaid(burn, theme),
+  renderMermaid(flywheel, theme),
 ]);
 
 writeFileSync(`${outDir}/how-it-works.svg`, svg1);
@@ -102,5 +130,7 @@ writeFileSync(`${outDir}/token-flow.svg`, svg2);
 writeFileSync(`${outDir}/bear-leverage.svg`, svg3);
 writeFileSync(`${outDir}/bull-leverage.svg`, svg4);
 writeFileSync(`${outDir}/staking.svg`, svg5);
+writeFileSync(`${outDir}/burn.svg`, svg6);
+writeFileSync(`${outDir}/flywheel.svg`, svg7);
 
-console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking');
+console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel');

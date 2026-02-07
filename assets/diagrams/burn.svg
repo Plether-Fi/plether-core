@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 561.635 378" width="561.635" height="378" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<polyline points="109.625,76 109.625,151 196.1,151" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="272.875,76 272.875,133" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="428.975,76 428.975,151 349.65,151" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="272.875,169 272.875,226" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="272.875,262 272.875,302" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<rect x="332.31500000000005" y="91" width="193.32" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="428.975" y="104.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Withdraw if buffer insufficient</text>
+<rect x="196.235" y="184" width="153.28" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="272.875" y="197.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Refund at $2.00 CAP rate</text>
+<rect x="40" y="40" width="139.25" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<rect x="196.1" y="133" width="153.55" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="203.25" y="40" width="139.25" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<rect x="366.5" y="40" width="124.95" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="242.575" y="226" width="60.6" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<rect x="213.975" y="302" width="117.80000000000001" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<text x="109.625" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Send plDXY-BEAR</text>
+<text x="272.875" y="151" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">SyntheticSplitter</text>
+<text x="272.875" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Send plDXY-BULL</text>
+<text x="428.975" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">MorphoAdapter</text>
+<text x="272.875" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">USDC</text>
+<text x="272.875" y="320" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Receive USDC</text>
+</svg>
