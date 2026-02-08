@@ -95,9 +95,9 @@ contract DeployToSepolia is DeployToTest {
         console.log("Using Chainlink GBP/USD:", CHAINLINK_GBP_USD);
 
         // Pyth adapters (CAD, CHF, SEK) - inverted from USD/X to X/USD
-        feeds[3] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_CAD_USD, 24 hours, "CAD / USD", true));
-        feeds[4] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_SEK_USD, 24 hours, "SEK / USD", true));
-        feeds[5] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_CHF_USD, 24 hours, "CHF / USD", true));
+        feeds[3] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_CAD_USD, 72 hours, "CAD / USD", true));
+        feeds[4] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_SEK_USD, 72 hours, "SEK / USD", true));
+        feeds[5] = address(new PythAdapter(PYTH_SEPOLIA, PYTH_CHF_USD, 72 hours, "CHF / USD", true));
         console.log("PythAdapter CAD/USD:", feeds[3]);
         console.log("PythAdapter SEK/USD:", feeds[4]);
         console.log("PythAdapter CHF/USD:", feeds[5]);

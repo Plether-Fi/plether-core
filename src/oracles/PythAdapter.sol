@@ -45,10 +45,15 @@ contract PythAdapter is AggregatorV3Interface {
 
     /// @notice Returns the latest price data in Chainlink-compatible format.
     /// @dev Converts Pyth's variable exponent to fixed 8 decimals.
+    ///      Reports `block.timestamp` as `updatedAt` (self-attestation): this adapter
+    ///      validates freshness internally against `publishTime` using `MAX_STALENESS`,
+    ///      then attests "price valid as of now." Downstream consumers (BasketOracle,
+    ///      SyntheticSplitter) see a fresh timestamp and skip their own staleness check,
+    ///      avoiding double-timeout rejection during weekend forex market closures.
     /// @return roundId Always returns 1 (Pyth doesn't use rounds).
     /// @return answer Price in 8 decimals.
-    /// @return startedAt Pyth publish time.
-    /// @return updatedAt Pyth publish time.
+    /// @return startedAt Current block timestamp (adapter attestation time).
+    /// @return updatedAt Current block timestamp (adapter attestation time).
     /// @return answeredInRound Always returns 1.
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         PythStructs.Price memory price = PYTH.getPriceUnsafe(PRICE_ID);
@@ -68,7 +73,7 @@ contract PythAdapter is AggregatorV3Interface {
             answer = _convertTo8Decimals(price.price, price.expo);
         }
 
-        return (1, answer, price.publishTime, price.publishTime, 1);
+        return (1, answer, block.timestamp, block.timestamp, 1);
     }
 
     /// @notice Returns data for a specific round ID.

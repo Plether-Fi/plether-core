@@ -55,8 +55,10 @@ These properties must always hold. Violation indicates a critical bug.
 #### Pyth Network (SEK/USD)
 - **Assumption**: Pyth Network provides accurate SEK/USD price data via PythAdapter
 - **Architecture**: PythAdapter wraps Pyth's pull-based oracle to match Chainlink's AggregatorV3Interface
-- **Mitigation**: 24-hour staleness timeout; price inversion validated (USD/SEK → SEK/USD)
-- **Risk (Staleness)**: Pyth is pull-based—prices must be pushed on-chain before reading. If no one updates the price, operations using SEK/USD will fail with stale price error.
+- **Mitigation**: 72-hour staleness timeout in PythAdapter; price validated as positive; price inversion validated (USD/SEK → SEK/USD)
+- **Risk (Weekend Staleness)**: Pyth forex feeds stop publishing during weekend market closures (~48h gap). The 72-hour tolerance covers weekends plus holiday Mondays. Friday's close price is the correct price through Sunday since forex markets are closed.
+- **Self-Attestation Model**: PythAdapter reports `block.timestamp` as `updatedAt` after validating freshness internally. This mirrors Chainlink's semantics (attestation time, not data origin time) and prevents downstream consumers from rejecting valid weekend prices with tighter timeouts.
+- **Risk (Staleness Tradeoff)**: Up to 72 hours of stale price data is accepted. This is acceptable because forex markets are closed during that window, but a Pyth feed failure during market hours would not be detected for up to 72 hours.
 - **Risk (Single Feed)**: Unlike Chainlink's decentralized network, Pyth SEK/USD has different trust assumptions. A Pyth compromise affects only SEK (4.2% basket weight).
 - **Mitigation (Update)**: RewardDistributor provides `distributeRewardsWithPriceUpdate()` that accepts Pyth update data, allowing atomic price refresh + distribution.
 
@@ -488,6 +490,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-08 | PythAdapter: Updated staleness from 24h to 72h for weekend forex closures; documented self-attestation model and staleness tradeoff |
 | 2026-02-07 | Added Token Approval Model section under Router Architecture: documents stateless router approval pattern and user authorization model |
 | 2026-02-06 | StakedToken: Replaced permissionless donateYield acknowledgement with proportional stream extension fix; removed stale withdrawal delay references |
 | 2026-02-02 | Added Pyth Network dependency for SEK/USD price feed (PythAdapter); documented pull-based oracle risks |

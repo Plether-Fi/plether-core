@@ -82,7 +82,7 @@ contract DeployToMainnet is Script {
     address constant PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
     // USD/SEK price ID (inverted to get SEK/USD)
     bytes32 constant USD_SEK_PRICE_ID = 0x8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc676;
-    uint256 constant PYTH_MAX_STALENESS = 24 hours;
+    uint256 constant PYTH_MAX_STALENESS = 72 hours;
 
     // L2 Sequencer Uptime Feed (address(0) for L1 mainnet)
     address constant SEQUENCER_UPTIME_FEED = address(0);
