@@ -28,7 +28,7 @@ contract MorphoOracle is IMorphoOracle {
     bool public immutable IS_INVERSE;
 
     /// @notice Maximum age for valid oracle price.
-    uint256 public constant STALENESS_TIMEOUT = 8 hours;
+    uint256 public constant STALENESS_TIMEOUT = 24 hours;
 
     /// @notice Thrown when source oracle returns zero or negative price.
     error MorphoOracle__InvalidPrice();

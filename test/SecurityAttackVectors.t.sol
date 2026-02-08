@@ -335,8 +335,8 @@ contract SecurityAttackVectorsTest is Test {
         MockOracle basket = new MockOracle(100_000_000, "Basket");
         MorphoOracle bearOracle = new MorphoOracle(address(basket), CAP, false);
 
-        // Set timestamp to 9 hours ago (beyond 8-hour threshold)
-        basket.setUpdatedAt(block.timestamp - 9 hours);
+        // Set timestamp to 25 hours ago (beyond 24-hour threshold)
+        basket.setUpdatedAt(block.timestamp - 25 hours);
 
         // EXPECTED: Should revert with staleness error
         // CURRENT BUG: Accepts stale price without checking
