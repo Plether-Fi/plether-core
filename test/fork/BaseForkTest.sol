@@ -80,16 +80,13 @@ abstract contract BaseForkTest is Test {
 
     // ==========================================
     // CURVE POOL PARAMETERS
-    // Single source of truth for all fork tests
-    // Optimized for low-volatility plDXY pair
-    // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 40M
-    // ==========================================
-    uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
-    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15
-    uint256 constant CURVE_MID_FEE = 2_500_000; // 0.025% (1e10 = 100%)
-    uint256 constant CURVE_OUT_FEE = 30_000_000; // 0.3% (1e10 = 100%)
-    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
+    // Curve Pool Parameters — must match DeployToMainnet.s.sol
+    uint256 constant CURVE_A = 320_000;
+    uint256 constant CURVE_GAMMA = 2_000_000_000_000_000; // 2e15 (0.002)
+    uint256 constant CURVE_MID_FEE = 4_000_000; // 0.04%
+    uint256 constant CURVE_OUT_FEE = 20_000_000; // 0.2%
     uint256 constant CURVE_FEE_GAMMA = 1_000_000_000_000_000; // 1e15
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
     uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
     uint256 constant CURVE_MA_HALF_TIME = 600;
 

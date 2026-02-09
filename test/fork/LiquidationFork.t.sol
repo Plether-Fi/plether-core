@@ -49,8 +49,8 @@ contract LiquidationForkTest is BaseForkTest {
         stBear = new StakedToken(IERC20(bearToken), "Staked Bear", "stBEAR");
         stBull = new StakedToken(IERC20(bullToken), "Staked Bull", "stBULL");
 
-        _mintInitialTokens(1_000_000e18);
-        _deployCurvePool(800_000e18);
+        _mintInitialTokens(2_000_000e18);
+        _deployCurvePool(1_500_000e18);
 
         bearMorphoOracle = new MorphoOracle(address(basketOracle), 2e8, false);
         bullMorphoOracle = new MorphoOracle(address(basketOracle), 2e8, true);
@@ -263,7 +263,7 @@ contract LiquidationForkTest is BaseForkTest {
     }
 
     function test_BullLiquidation_InterestAccrual() public {
-        uint256 principal = 10_000e6;
+        uint256 principal = 5000e6;
         uint256 leverage = 2e18;
 
         vm.startPrank(alice);

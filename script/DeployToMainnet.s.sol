@@ -105,13 +105,13 @@ contract DeployToMainnet is Script {
 
     // Curve Pool Parameters (optimized for low slippage)
     uint256 constant CURVE_A = 320_000;
-    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15 (0.001)
-    uint256 constant CURVE_MID_FEE = 26_000_000;
-    uint256 constant CURVE_OUT_FEE = 45_000_000;
-    uint256 constant CURVE_FEE_GAMMA = 230_000_000_000_000;
+    uint256 constant CURVE_GAMMA = 2_000_000_000_000_000; // 2e15 (0.002)
+    uint256 constant CURVE_MID_FEE = 4_000_000; // 0.04%
+    uint256 constant CURVE_OUT_FEE = 20_000_000; // 0.2%
+    uint256 constant CURVE_FEE_GAMMA = 1_000_000_000_000_000; // 1e15
     uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
     uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
-    uint256 constant CURVE_MA_EXP_TIME = 866;
+    uint256 constant CURVE_MA_EXP_TIME = 600;
     uint256 constant CURVE_INITIAL_PRICE = 1e18;
 
     // ==========================================

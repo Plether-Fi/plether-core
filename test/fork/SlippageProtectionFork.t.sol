@@ -42,8 +42,8 @@ contract SlippageProtectionForkTest is BaseForkTest {
         stBear = new StakedToken(IERC20(bearToken), "Staked Bear", "stBEAR");
         stBull = new StakedToken(IERC20(bullToken), "Staked Bull", "stBULL");
 
-        _mintInitialTokens(1_000_000e18);
-        _deployCurvePool(800_000e18);
+        _mintInitialTokens(2_000_000e18);
+        _deployCurvePool(1_500_000e18);
 
         zapRouter = new ZapRouter(address(splitter), bearToken, bullToken, USDC, curvePool);
 

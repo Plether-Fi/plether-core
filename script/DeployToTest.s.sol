@@ -179,17 +179,15 @@ contract DeployToTest is Script {
     uint256 constant MAX_DEVIATION_BPS = 200; // 2% max deviation
     uint256 constant MORPHO_LIQUIDITY = 100_000 * 1e6; // 100k USDC per market
 
-    // Curve Pool Parameters (optimized for low-volatility plDXY pair)
-    // Must match test/fork/BaseForkTest.sol for consistent behavior
-    // MAX_A for twocrypto-ng = N_COINS^2 * A_MULTIPLIER * 1000 = 4 * 10000 * 1000 = 40M
-    uint256 constant CURVE_A = 20_000_000; // High amplification for tight concentration
-    uint256 constant CURVE_GAMMA = 1_000_000_000_000_000; // 1e15
-    uint256 constant CURVE_MID_FEE = 2_500_000; // 0.025% (1e10 = 100%)
-    uint256 constant CURVE_OUT_FEE = 30_000_000; // 0.3% (1e10 = 100%)
+    // Curve Pool Parameters — must match DeployToMainnet.s.sol
+    uint256 constant CURVE_A = 320_000;
+    uint256 constant CURVE_GAMMA = 2_000_000_000_000_000; // 2e15 (0.002)
+    uint256 constant CURVE_MID_FEE = 4_000_000; // 0.04%
+    uint256 constant CURVE_OUT_FEE = 20_000_000; // 0.2%
     uint256 constant CURVE_FEE_GAMMA = 1_000_000_000_000_000; // 1e15
-    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000; // 2e12
-    uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000; // 1.46e14
-    uint256 constant CURVE_MA_HALF_TIME = 600; // 10 minutes (matches fork test)
+    uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
+    uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
+    uint256 constant CURVE_MA_HALF_TIME = 600;
 
     // CAP scaled to 18 decimals for Curve price calculations
     // CAP = 2e8 (8 decimals) -> 2e18 (18 decimals)
