@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IMorpho, MarketParams} from "./interfaces/IMorpho.sol";
+import {IYieldAdapter} from "./interfaces/IYieldAdapter.sol";
 import {MorphoBalancesLib} from "./libraries/MorphoBalancesLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -25,7 +26,7 @@ interface IUniversalRewardsDistributor {
 /// @custom:security-contact contact@plether.com
 /// @notice ERC4626-compliant wrapper for Morpho Blue lending.
 /// @dev Interchangeable with other yield adapters. Only accepts deposits from SyntheticSplitter.
-contract MorphoAdapter is ERC4626, Ownable2Step {
+contract MorphoAdapter is ERC4626, Ownable2Step, IYieldAdapter {
 
     using SafeERC20 for IERC20;
 
