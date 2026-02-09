@@ -15,6 +15,7 @@ contract PythAdapter is AggregatorV3Interface {
     IPyth public immutable PYTH;
     bytes32 public immutable PRICE_ID;
     uint256 public immutable MAX_STALENESS;
+    uint256 public immutable MAX_CONFIDENCE_BPS;
     bool public immutable INVERSE;
 
     uint8 public constant DECIMALS = 8;
@@ -22,6 +23,7 @@ contract PythAdapter is AggregatorV3Interface {
 
     error PythAdapter__StalePrice(uint256 publishTime, uint256 maxAge);
     error PythAdapter__InvalidPrice();
+    error PythAdapter__ConfidenceTooWide(uint64 conf, int64 price);
     error PythAdapter__InvalidRoundId();
 
     /// @param pyth_ Pyth contract address on this chain.
@@ -29,16 +31,19 @@ contract PythAdapter is AggregatorV3Interface {
     /// @param maxStaleness_ Maximum age of price in seconds before considered stale.
     /// @param description_ Human-readable description (e.g., "SEK / USD").
     /// @param inverse_ If true, inverts the price (e.g., USD/SEK → SEK/USD).
+    /// @param maxConfidenceBps_ Maximum confidence interval as basis points of price (e.g., 500 = 5%).
     constructor(
         address pyth_,
         bytes32 priceId_,
         uint256 maxStaleness_,
         string memory description_,
-        bool inverse_
+        bool inverse_,
+        uint256 maxConfidenceBps_
     ) {
         PYTH = IPyth(pyth_);
         PRICE_ID = priceId_;
         MAX_STALENESS = maxStaleness_;
+        MAX_CONFIDENCE_BPS = maxConfidenceBps_;
         DESCRIPTION = description_;
         INVERSE = inverse_;
     }
@@ -64,6 +69,10 @@ contract PythAdapter is AggregatorV3Interface {
 
         if (price.price <= 0) {
             revert PythAdapter__InvalidPrice();
+        }
+
+        if (uint256(price.conf) * 10_000 > uint256(uint64(price.price)) * MAX_CONFIDENCE_BPS) {
+            revert PythAdapter__ConfidenceTooWide(price.conf, price.price);
         }
 
         int256 answer;

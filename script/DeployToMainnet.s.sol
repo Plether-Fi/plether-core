@@ -151,7 +151,7 @@ contract DeployToMainnet is Script {
         // ==========================================
         // STEP 0: Deploy PythAdapter for SEK/USD (inverts USD/SEK from Pyth)
         // ==========================================
-        deployed.sekPythAdapter = new PythAdapter(PYTH, USD_SEK_PRICE_ID, PYTH_MAX_STALENESS, "SEK / USD", true);
+        deployed.sekPythAdapter = new PythAdapter(PYTH, USD_SEK_PRICE_ID, PYTH_MAX_STALENESS, "SEK / USD", true, 500);
         console.log("PythAdapter (SEK/USD) deployed:", address(deployed.sekPythAdapter));
 
         // ==========================================

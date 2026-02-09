@@ -62,9 +62,12 @@ contract PythAdapterTest is Test {
     uint256 constant MAX_STALENESS = 1 hours;
     int64 constant SEK_PRICE = 10_860_000; // $0.1086 in 8 decimals
 
+    uint256 constant MAX_CONFIDENCE_BPS = 500; // 5%
+
     function setUp() public {
         mockPyth = new MockPyth();
-        adapter = new PythAdapter(address(mockPyth), SEK_USD_PRICE_ID, MAX_STALENESS, "SEK / USD", false);
+        adapter =
+            new PythAdapter(address(mockPyth), SEK_USD_PRICE_ID, MAX_STALENESS, "SEK / USD", false, MAX_CONFIDENCE_BPS);
 
         // Set initial price with -8 exponent (already 8 decimals)
         mockPyth.setPrice(SEK_USD_PRICE_ID, SEK_PRICE, 100_000, -8, block.timestamp);
@@ -103,7 +106,7 @@ contract PythAdapterTest is Test {
 
     function test_LatestRoundData_ConvertsExpoMinus6To8Decimals() public {
         // Price with -6 exponent (6 decimals): 108600 = $0.1086
-        mockPyth.setPrice(SEK_USD_PRICE_ID, 108_600, 100_000, -6, block.timestamp);
+        mockPyth.setPrice(SEK_USD_PRICE_ID, 108_600, 1000, -6, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
         // Should be converted to 8 decimals: 108600 * 10^2 = 10860000
@@ -146,6 +149,36 @@ contract PythAdapterTest is Test {
 
         vm.expectRevert(PythAdapter.PythAdapter__InvalidPrice.selector);
         adapter.latestRoundData();
+    }
+
+    function test_LatestRoundData_RevertsOnWideConfidence() public {
+        // conf = 10% of price → exceeds 5% threshold
+        mockPyth.setPrice(SEK_USD_PRICE_ID, SEK_PRICE, uint64(uint64(SEK_PRICE) / 10), -8, block.timestamp);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PythAdapter.PythAdapter__ConfidenceTooWide.selector, uint64(uint64(SEK_PRICE) / 10), SEK_PRICE
+            )
+        );
+        adapter.latestRoundData();
+    }
+
+    function test_LatestRoundData_AcceptsNarrowConfidence() public {
+        // conf = 1% of price → well within 5% threshold
+        uint64 conf = uint64(uint64(SEK_PRICE) / 100);
+        mockPyth.setPrice(SEK_USD_PRICE_ID, SEK_PRICE, conf, -8, block.timestamp);
+
+        (, int256 answer,,,) = adapter.latestRoundData();
+        assertEq(answer, SEK_PRICE);
+    }
+
+    function test_LatestRoundData_AcceptsConfidenceAtExactLimit() public {
+        // conf = exactly 5% of price → at threshold boundary
+        uint64 conf = uint64(uint64(SEK_PRICE) * 500 / 10_000);
+        mockPyth.setPrice(SEK_USD_PRICE_ID, SEK_PRICE, conf, -8, block.timestamp);
+
+        (, int256 answer,,,) = adapter.latestRoundData();
+        assertEq(answer, SEK_PRICE);
     }
 
     function test_GetRoundData_SucceedsForRoundId1() public view {
@@ -220,7 +253,7 @@ contract PythAdapterInverseTest is Test {
 
     function setUp() public {
         mockPyth = new MockPyth();
-        adapter = new PythAdapter(address(mockPyth), USD_SEK_PRICE_ID, MAX_STALENESS, "SEK / USD", true);
+        adapter = new PythAdapter(address(mockPyth), USD_SEK_PRICE_ID, MAX_STALENESS, "SEK / USD", true, 500);
     }
 
     function test_Constructor_SetsInverseTrue() public view {
@@ -230,7 +263,7 @@ contract PythAdapterInverseTest is Test {
     function test_LatestRoundData_InvertsPrice() public {
         // USD/SEK = 8.94849 (894849 with expo -5)
         // SEK/USD = 1 / 8.94849 ≈ 0.1118
-        mockPyth.setPrice(USD_SEK_PRICE_ID, 894_849, 100_000, -5, block.timestamp);
+        mockPyth.setPrice(USD_SEK_PRICE_ID, 894_849, 1000, -5, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
 
@@ -240,7 +273,7 @@ contract PythAdapterInverseTest is Test {
 
     function test_LatestRoundData_InvertsPrice_DifferentExponent() public {
         // USD/SEK = 8.94849 (89484900 with expo -7)
-        mockPyth.setPrice(USD_SEK_PRICE_ID, 89_484_900, 100_000, -7, block.timestamp);
+        mockPyth.setPrice(USD_SEK_PRICE_ID, 89_484_900, 1000, -7, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
 
@@ -250,7 +283,7 @@ contract PythAdapterInverseTest is Test {
 
     function test_LatestRoundData_InvertsPrice_RealWorldValue() public {
         // USD/SEK = 10.50 (1050000 with expo -5) → SEK/USD = 0.0952
-        mockPyth.setPrice(USD_SEK_PRICE_ID, 1_050_000, 100_000, -5, block.timestamp);
+        mockPyth.setPrice(USD_SEK_PRICE_ID, 1_050_000, 1000, -5, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
 
@@ -260,7 +293,7 @@ contract PythAdapterInverseTest is Test {
 
     function test_LatestRoundData_InvertsPrice_StrongSEK() public {
         // USD/SEK = 8.00 (800000 with expo -5) → SEK/USD = 0.125
-        mockPyth.setPrice(USD_SEK_PRICE_ID, 800_000, 100_000, -5, block.timestamp);
+        mockPyth.setPrice(USD_SEK_PRICE_ID, 800_000, 1000, -5, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
 
@@ -270,7 +303,7 @@ contract PythAdapterInverseTest is Test {
 
     function test_LatestRoundData_InvertsPrice_WeakSEK() public {
         // USD/SEK = 12.00 (1200000 with expo -5) → SEK/USD = 0.0833
-        mockPyth.setPrice(USD_SEK_PRICE_ID, 1_200_000, 100_000, -5, block.timestamp);
+        mockPyth.setPrice(USD_SEK_PRICE_ID, 1_200_000, 1000, -5, block.timestamp);
 
         (, int256 answer,,,) = adapter.latestRoundData();
 

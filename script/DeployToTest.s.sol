@@ -526,7 +526,7 @@ contract DeployToTest is Script {
         } else {
             console.log("Using real Pyth:", pythAddress);
         }
-        d.pythAdapter = new PythAdapter(pythAddress, usdSekPriceId, 24 hours, "SEK / USD", true);
+        d.pythAdapter = new PythAdapter(pythAddress, usdSekPriceId, 24 hours, "SEK / USD", true, 500);
         console.log("PythAdapter (SEK/USD):", address(d.pythAdapter));
 
         // Deploy RewardDistributor with PythAdapter
