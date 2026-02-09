@@ -12,20 +12,20 @@ const classes = `
     classDef desc fill:#fafafa,stroke:#d4d4d4,color:#737373,stroke-width:0.75px`;
 
 const howItWorks = `graph TD
-    A([Deposit USDC]) --> B[SyntheticSplitter]
+    U([💳 User]) -->|Deposit USDC| B[SyntheticSplitter]
     B --> C(plDXY-BEAR)
     B --> D(plDXY-BULL)
     C -.- E>gains when USD weakens]
     D -.- F>gains when USD strengthens]
 
-    class A user
+    class U user
     class B contract
     class C,D token
     class E,F desc
 ${classes}`;
 
 const tokenFlow = `graph TD
-    U([Users]) -->|Deposit ⇄ Redeem USDC| SP[SyntheticSplitter]
+    U([💳 User]) -->|Deposit ⇄ Redeem USDC| SP[SyntheticSplitter]
     CL{{Chainlink}} -->|5 Price Feeds| SP
     PY{{Pyth Network}} -->|SEK/USD Feed| SP
     SP --> BEAR(plDXY-BEAR)
@@ -42,7 +42,7 @@ const tokenFlow = `graph TD
 ${classes}`;
 
 const bearLeverage = `graph TD
-    U([Users]) -->|USDC Principal| LR[LeverageRouter]
+    U([💳 User]) -->|USDC Principal| LR[LeverageRouter]
     LR -->|Swap USDC → BEAR on Curve| BEAR(plDXY-BEAR)
     BEAR -->|Stake| SB(splDXY-BEAR)
     SB -->|Deposit Collateral| MO{{Morpho Blue}}
@@ -57,7 +57,7 @@ const bearLeverage = `graph TD
 ${classes}`;
 
 const bullLeverage = `graph TD
-    U([Users]) -->|USDC Principal| BLR[BullLeverageRouter]
+    U([💳 User]) -->|USDC Principal| BLR[BullLeverageRouter]
     BLR -->|Mint BEAR + BULL| SP[SyntheticSplitter]
     SP -->|Sell BEAR → USDC on Curve · Keep BULL| BULL(plDXY-BULL)
     BULL -->|Stake| SBU(splDXY-BULL)
@@ -73,7 +73,7 @@ const bullLeverage = `graph TD
 ${classes}`;
 
 const staking = `graph TD
-    U([Users]) -->|Deposit USDC| SP[SyntheticSplitter]
+    U([💳 User]) -->|Deposit USDC| SP[SyntheticSplitter]
     SP --> BEAR(plDXY-BEAR)
     SP -->|USDC Yield| RD[RewardDistributor]
     SP --> BULL(plDXY-BULL)
@@ -88,13 +88,11 @@ const staking = `graph TD
 ${classes}`;
 
 const burn = `graph TD
-    B([Send plDXY-BEAR]) --> SP[SyntheticSplitter]
-    BU([Send plDXY-BULL]) --> SP
+    U([💳 User]) -->|Burn BEAR + BULL| SP[SyntheticSplitter]
     MA[MorphoAdapter] -->|Withdraw if buffer insufficient| SP
-    SP -->|Refund at $2.00 CAP rate| USDC(USDC)
-    USDC --> R([Receive USDC])
+    SP -->|USDC at $2.00 CAP rate| USDC(USDC)
 
-    class B,BU,R user
+    class U user
     class SP,MA contract
     class USDC token
 ${classes}`;
