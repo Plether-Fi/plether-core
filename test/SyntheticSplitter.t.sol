@@ -1736,4 +1736,234 @@ contract SyntheticSplitterTest is Test {
         splitter.rescueToken(address(randomToken), alice);
     }
 
+    // ==========================================
+    // 11. COVERAGE GAP TESTS
+    // ==========================================
+
+    function test_Pause_SetsState() public {
+        assertFalse(splitter.paused());
+        splitter.pause();
+        assertTrue(splitter.paused());
+    }
+
+    function test_Unpause_SetsStateAndCooldown() public {
+        splitter.pause();
+        assertTrue(splitter.paused());
+
+        uint256 ts = block.timestamp;
+        splitter.unpause();
+
+        assertFalse(splitter.paused());
+        assertEq(splitter.lastUnpauseTime(), ts);
+    }
+
+    function test_FinalizeFeeReceivers_AfterCooldown() public {
+        address newTreasury = makeAddr("t2");
+        address newStaking = makeAddr("s2");
+
+        splitter.proposeFeeReceivers(newTreasury, newStaking);
+
+        // Warp past 7-day timelock
+        vm.warp(block.timestamp + 7 days + 1);
+
+        // Liveness check: lastUnpauseTime is 0 (never paused/unpaused),
+        // so block.timestamp > 0 + 7 days passes. Finalize should succeed.
+        splitter.finalizeFeeReceivers();
+
+        assertEq(splitter.treasury(), newTreasury);
+        assertEq(splitter.staking(), newStaking);
+    }
+
+    function test_FinalizeAdapter_AfterCooldown() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        MockYieldAdapter newAdapter = new MockYieldAdapter(IERC20(address(usdc)), address(this), address(splitter));
+        splitter.proposeAdapter(address(newAdapter));
+
+        // Warp past 7-day timelock (liveness check passes since lastUnpauseTime is 0)
+        vm.warp(block.timestamp + 7 days + 1);
+
+        splitter.finalizeAdapter();
+
+        assertEq(address(splitter.yieldAdapter()), address(newAdapter));
+        assertEq(adapter.balanceOf(address(splitter)), 0);
+        assertGt(newAdapter.balanceOf(address(splitter)), 0);
+    }
+
+    function test_HarvestYield_AdapterExceedsSurplus() public {
+        // Mint a large position so adapter holds plenty of assets
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 2000 * 1e6);
+        splitter.mint(1000 * 1e18);
+        vm.stopPrank();
+
+        // Setup fee receivers
+        splitter.proposeFeeReceivers(treasury, staking);
+        vm.warp(block.timestamp + 8 days);
+        splitter.finalizeFeeReceivers();
+
+        // Add yield ($100) — surplus < adapterAssets ($1800), takes withdraw path (line 535)
+        usdc.mint(address(adapter), 100 * 1e6);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        splitter.harvestYield();
+        assertGt(usdc.balanceOf(treasury), treasuryBefore);
+    }
+
+    function test_GetSystemStatus_OracleReverts() public {
+        // Deploy a reverting oracle
+        RevertingOracle revOracle = new RevertingOracle();
+        SyntheticSplitter s =
+            new SyntheticSplitter(address(revOracle), address(usdc), address(adapter), CAP, treasury, address(0));
+
+        SyntheticSplitter.SystemStatus memory status = s.getSystemStatus();
+        assertEq(status.currentPrice, 0);
+        assertEq(status.capPrice, CAP);
+    }
+
+    function test_GetSystemStatus_OracleReturnsZero() public {
+        oracle.updatePrice(0);
+
+        SyntheticSplitter.SystemStatus memory status = splitter.getSystemStatus();
+        assertEq(status.currentPrice, 0);
+    }
+
+    function test_GetSystemStatus_OracleReturnsNegative() public {
+        oracle.updatePrice(-100);
+
+        SyntheticSplitter.SystemStatus memory status = splitter.getSystemStatus();
+        assertEq(status.currentPrice, 0);
+    }
+
+    function test_PreviewBurn_ZeroAmount() public {
+        (uint256 usdcRefund, uint256 withdrawnFromAdapter) = splitter.previewBurn(0);
+        assertEq(usdcRefund, 0);
+        assertEq(withdrawnFromAdapter, 0);
+    }
+
+    function test_Mint_AmountRoundsToZeroUsdc() public {
+        // amount * CAP / USDC_MULTIPLIER rounds to 0 for very small amounts
+        // CAP = 2e8, USDC_MULTIPLIER = 1e20
+        // amount = 1 → ceil(1 * 2e8 / 1e20) = ceil(2e-12) = 1 (still 1 wei USDC)
+        // We need amount such that amount * CAP < USDC_MULTIPLIER, i.e. amount < 5e11
+        // But Math.mulDiv with Ceil rounds UP, so ceil(anything > 0) = at least 1
+        // For ZeroAmount revert we need usdcNeeded == 0, which requires amount * CAP == 0
+        // Since CAP > 0, we need amount == 0 (already tested) — line 223 is only reachable
+        // if mulDiv rounds to 0, which requires amount * CAP < USDC_MULTIPLIER with Ceil.
+        // Actually: Ceil(1 * 2e8 / 1e20) = Ceil(2e-12) ... but mulDiv works in integers.
+        // mulDiv(1, 2e8, 1e20, Ceil) = ceil(2e8 / 1e20) = ceil(0.000000000002) = 1.
+        // So the smallest non-zero amount always gives usdcNeeded >= 1.
+        // Line 223 is unreachable through normal code paths (amount>0 always gives usdcNeeded>0 with Ceil).
+        // Verify this is the case:
+        (uint256 usdcRequired,,) = splitter.previewMint(1);
+        assertGe(usdcRequired, 1);
+    }
+
+    function test_PreviewBurn_RevertsWhenPausedAndInsolvent() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        splitter.pause();
+
+        // Mock adapter to report loss
+        vm.mockCall(
+            address(adapter),
+            abi.encodeWithSelector(IERC4626.convertToAssets.selector),
+            abi.encode(170 * 1e6) // Lost $10 → assets $190 < liabilities $200
+        );
+
+        vm.expectRevert(SyntheticSplitter.Splitter__Insolvent.selector);
+        splitter.previewBurn(50 * 1e18);
+    }
+
+    function test_Burn_RevertsWhenPausedAndInsolvent() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        splitter.pause();
+
+        // Mock adapter to report loss
+        vm.mockCall(address(adapter), abi.encodeWithSelector(IERC4626.convertToAssets.selector), abi.encode(170 * 1e6));
+
+        vm.startPrank(alice);
+        vm.expectRevert(SyntheticSplitter.Splitter__Insolvent.selector);
+        splitter.burn(50 * 1e18);
+        vm.stopPrank();
+    }
+
+    function test_EjectLiquidity_PausesProtocol() public {
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        assertFalse(splitter.paused());
+        splitter.ejectLiquidity();
+        assertTrue(splitter.paused());
+
+        // Minting blocked
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        vm.expectRevert(abi.encodeWithSelector(Pausable.EnforcedPause.selector));
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+    }
+
+    function test_EjectLiquidity_WithZeroShares() public {
+        // No minting — adapter has zero shares
+        assertEq(adapter.balanceOf(address(splitter)), 0);
+
+        splitter.ejectLiquidity();
+
+        assertTrue(splitter.paused());
+        assertEq(usdc.balanceOf(address(splitter)), 0);
+    }
+
+    function test_HarvestYield_RedeemPathWhenSurplusExceedsAdapter() public {
+        // Mint small position
+        vm.startPrank(alice);
+        usdc.approve(address(splitter), 200 * 1e6);
+        splitter.mint(100 * 1e18);
+        vm.stopPrank();
+
+        // Setup fee receivers
+        splitter.proposeFeeReceivers(treasury, staking);
+        vm.warp(block.timestamp + 8 days);
+        splitter.finalizeFeeReceivers();
+
+        // Inject surplus directly into splitter's local buffer (not adapter)
+        // This makes surplus > adapterAssets, triggering the redeem path (line 538)
+        usdc.mint(address(splitter), 200 * 1e6);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        splitter.harvestYield();
+        assertGt(usdc.balanceOf(treasury), treasuryBefore);
+    }
+
+    function test_PreviewMint_ZeroAmount() public view {
+        (uint256 usdcRequired, uint256 depositToAdapter, uint256 keptInBuffer) = splitter.previewMint(0);
+        assertEq(usdcRequired, 0);
+        assertEq(depositToAdapter, 0);
+        assertEq(keptInBuffer, 0);
+    }
+
+}
+
+contract RevertingOracle {
+
+    function latestRoundData() external pure returns (uint80, int256, uint256, uint256, uint80) {
+        revert("oracle down");
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 8;
+    }
+
 }
