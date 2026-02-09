@@ -30,8 +30,10 @@ ENCODED=$(cast abi-encode "f(bytes[])" "[$(echo "$VAU_DATA" | sed 's/^/0x/' | pa
 export PYTH_UPDATE_DATA="$ENCODED"
 echo "PYTH_UPDATE_DATA set (${#ENCODED} chars)"
 
-# Load .env for RPC URL and private key
-source .env
+# Load .env if present (CI provides secrets via environment)
+if [ -f .env ]; then
+  source .env
+fi
 
 echo "Broadcasting Pyth price update to Sepolia..."
 forge script script/PythKeeper.s.sol \
