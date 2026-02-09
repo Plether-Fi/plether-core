@@ -479,6 +479,12 @@ contract DeployToTest is Script {
         _createMorphoMarkets(bearMarketParams, bullMarketParams);
         _seedMorphoMarkets(d, deployer, bearMarketParams, bullMarketParams);
 
+        // Log market IDs for deployments JSON
+        console.log("Morpho BEAR market ID:");
+        console.logBytes32(keccak256(abi.encode(bearMarketParams)));
+        console.log("Morpho BULL market ID:");
+        console.logBytes32(keccak256(abi.encode(bullMarketParams)));
+
         // Deploy ZapRouter
         d.zapRouter = new ZapRouter(
             address(d.splitter), address(d.plDxyBear), address(d.plDxyBull), address(d.usdc), d.curvePool

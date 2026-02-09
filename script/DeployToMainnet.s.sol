@@ -265,6 +265,12 @@ contract DeployToMainnet is Script {
             SEQUENCER_UPTIME_FEED
         );
 
+        // Log market IDs for deployments JSON
+        console.log("Morpho BEAR market ID:");
+        console.logBytes32(keccak256(abi.encode(bearMarketParams)));
+        console.log("Morpho BULL market ID:");
+        console.logBytes32(keccak256(abi.encode(bullMarketParams)));
+
         vm.stopBroadcast();
 
         // ==========================================
