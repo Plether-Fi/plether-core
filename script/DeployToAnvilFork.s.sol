@@ -34,7 +34,7 @@ contract DeployToAnvilFork is DeployToTest {
         returns (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices)
     {
         // Deploy PythAdapter for SEK first
-        sekAdapter = new PythAdapter(PYTH_MAINNET, USD_SEK_PRICE_ID, 24 hours, "SEK / USD", true, 500);
+        sekAdapter = new PythAdapter(PYTH_MAINNET, USD_SEK_PRICE_ID, 72 hours, "SEK / USD", true, 500);
         console.log("PythAdapter (SEK/USD):", address(sekAdapter));
 
         feeds = new address[](6);

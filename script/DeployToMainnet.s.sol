@@ -9,6 +9,7 @@ import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
+import {IPyth} from "../src/interfaces/IPyth.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
 import {PythAdapter} from "../src/oracles/PythAdapter.sol";
@@ -50,19 +51,15 @@ interface ICurveTwocryptoPool {
 /**
  * @title DeployToMainnet
  * @notice Production deployment script for Plether protocol on Ethereum mainnet
- * @dev Deploys all 12 contracts in correct dependency order:
+ * @dev Deploys all contracts in correct dependency order:
+ *      0. PythAdapter (SEK/USD)
  *      1. BasketOracle
- *      2. MorphoAdapter (with predicted Splitter address)
- *      3. SyntheticSplitter (creates plDXY-BEAR and plDXY-BULL)
- *      4. MorphoOracle (BEAR variant)
- *      5. MorphoOracle (BULL variant)
- *      6. StakedToken (BEAR)
- *      7. StakedToken (BULL)
- *      8. StakedOracle (BEAR)
- *      9. StakedOracle (BULL)
- *      10. ZapRouter
- *      11. LeverageRouter (BEAR leverage)
- *      12. BullLeverageRouter (BULL leverage)
+ *      2. MorphoAdapter + SyntheticSplitter
+ *      3. Push Pyth price update (SEK/USD is pull-based)
+ *      4. Query oracle for BEAR price
+ *      5. Curve pool (initialized at live oracle price)
+ *      6. Configure BasketOracle with Curve pool
+ *      7-12. MorphoOracles, StakedTokens, StakedOracles, Routers
  */
 contract DeployToMainnet is Script {
 
@@ -112,7 +109,6 @@ contract DeployToMainnet is Script {
     uint256 constant CURVE_ALLOWED_EXTRA_PROFIT = 2_000_000_000_000;
     uint256 constant CURVE_ADJUSTMENT_STEP = 146_000_000_000_000;
     uint256 constant CURVE_MA_EXP_TIME = 600;
-    uint256 constant CURVE_INITIAL_PRICE = 1e18;
 
     // ==========================================
     // DEPLOYMENT STATE
@@ -140,7 +136,7 @@ contract DeployToMainnet is Script {
     function run() external returns (DeployedContracts memory deployed) {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
-        address treasury = vm.envOr("TREASURY", deployer);
+        address treasury = vm.envAddress("TREASURY");
 
         console.log("Deployer:", deployer);
         console.log("Treasury:", treasury);
@@ -173,19 +169,40 @@ contract DeployToMainnet is Script {
         console.log("plDXY-BULL deployed:", address(deployed.plDxyBull));
 
         // ==========================================
-        // STEP 3: Deploy Curve pool via factory
+        // STEP 3: Push fresh Pyth price (SEK/USD feed is pull-based)
         // ==========================================
-        deployed.curvePool = _deployCurvePool(address(deployed.plDxyBear));
+        // Advance timestamp so Pyth's publishTime < block.timestamp in simulation.
+        // No-op in real broadcast — vm.warp is a foundry cheat code only.
+        vm.stopBroadcast();
+        vm.warp(block.timestamp + 600);
+        vm.startBroadcast(privateKey);
+        bytes memory rawUpdateData = vm.envBytes("PYTH_UPDATE_DATA");
+        bytes[] memory updateData = abi.decode(rawUpdateData, (bytes[]));
+        uint256 pythFee = IPyth(PYTH).getUpdateFee(updateData);
+        IPyth(PYTH).updatePriceFeeds{value: pythFee}(updateData);
+        console.log("Pyth prices updated (fee: %s wei)", pythFee);
+
+        // ==========================================
+        // STEP 4: Get basket price from oracle for Curve initial price
+        // ==========================================
+        (, int256 answer,,,) = deployed.basketOracle.latestRoundData();
+        uint256 bearPrice = uint256(answer) * 1e10;
+        console.log("BEAR price (18 decimals):", bearPrice);
+
+        // ==========================================
+        // STEP 5: Deploy Curve pool via factory
+        // ==========================================
+        deployed.curvePool = _deployCurvePool(address(deployed.plDxyBear), bearPrice);
         console.log("Curve Pool deployed:", deployed.curvePool);
 
         // ==========================================
-        // STEP 4: Configure BasketOracle with Curve pool
+        // STEP 6: Configure BasketOracle with Curve pool
         // ==========================================
         deployed.basketOracle.setCurvePool(deployed.curvePool);
         console.log("BasketOracle configured with Curve pool");
 
         // ==========================================
-        // STEP 5: Deploy Morpho Oracles
+        // STEP 7: Deploy Morpho Oracles
         // ==========================================
         deployed.morphoOracleBear = new MorphoOracle(
             address(deployed.basketOracle),
@@ -200,19 +217,19 @@ contract DeployToMainnet is Script {
         );
 
         // ==========================================
-        // STEP 6: Deploy Staked Tokens
+        // STEP 8: Deploy Staked Tokens
         // ==========================================
         deployed.stakedBear = new StakedToken(IERC20(address(deployed.plDxyBear)), "Staked plDXY-BEAR", "splDXY-BEAR");
         deployed.stakedBull = new StakedToken(IERC20(address(deployed.plDxyBull)), "Staked plDXY-BULL", "splDXY-BULL");
 
         // ==========================================
-        // STEP 7: Deploy Staked Oracles
+        // STEP 9: Deploy Staked Oracles
         // ==========================================
         deployed.stakedOracleBear = new StakedOracle(address(deployed.stakedBear), address(deployed.morphoOracleBear));
         deployed.stakedOracleBull = new StakedOracle(address(deployed.stakedBull), address(deployed.morphoOracleBull));
 
         // ==========================================
-        // STEP 8: Deploy ZapRouter
+        // STEP 10: Deploy ZapRouter
         // ==========================================
         deployed.zapRouter = new ZapRouter(
             address(deployed.splitter),
@@ -223,7 +240,7 @@ contract DeployToMainnet is Script {
         );
 
         // ==========================================
-        // STEP 9: Deploy LeverageRouter (BEAR leverage)
+        // STEP 11: Deploy LeverageRouter (BEAR leverage)
         // ==========================================
         MarketParams memory bearMarketParams = MarketParams({
             loanToken: USDC,
@@ -243,7 +260,7 @@ contract DeployToMainnet is Script {
         );
 
         // ==========================================
-        // STEP 10: Deploy BullLeverageRouter
+        // STEP 12: Deploy BullLeverageRouter
         // ==========================================
         MarketParams memory bullMarketParams = MarketParams({
             loanToken: USDC,
@@ -323,7 +340,8 @@ contract DeployToMainnet is Script {
     }
 
     function _deployCurvePool(
-        address plDxyBear
+        address plDxyBear,
+        uint256 initialPrice
     ) internal returns (address) {
         return ITwocryptoFactory(TWOCRYPTO_FACTORY)
             .deploy_pool(
@@ -339,7 +357,7 @@ contract DeployToMainnet is Script {
                 CURVE_ALLOWED_EXTRA_PROFIT,
                 CURVE_ADJUSTMENT_STEP,
                 CURVE_MA_EXP_TIME,
-                CURVE_INITIAL_PRICE
+                initialPrice
             );
     }
 
