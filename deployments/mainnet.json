@@ -1,0 +1,63 @@
+{
+  "network": "mainnet",
+  "chainId": 1,
+  "deployedAt": "2026-02-10",
+  "commit": "b14efa7",
+  "contracts": {
+    "core": {
+      "SyntheticSplitter": "0xc73F06D6e16209e992017974C988126d75112C23",
+      "plDXY-BEAR": "0xc8Fc385a01393053C764204D398f79FeBf8dAF91",
+      "plDXY-BULL": "0x043418626F7830a50BcaF5Fc29c8E3D8a20FD859"
+    },
+    "staking": {
+      "StakedBear": "0x0416978814CF0a8A783EfA542C465ffC987f9dE7",
+      "StakedBull": "0xD2153F5Eeb05ba79DaE41fBAB67A8cA72e795BCA"
+    },
+    "oracles": {
+      "BasketOracle": "0x1503797315e8c8ad3a1519afE1A2494e308CF060",
+      "MorphoOracleBear": "0x244310535D4E029435d10e669569cf467F74925F",
+      "MorphoOracleBull": "0xdAe52ECfef30895d7B9Fe85C361399e61f8E353B",
+      "StakedOracleBear": "0xb7664Fb217303cec873cd0AC0b66F909889CD6f3",
+      "StakedOracleBull": "0x55E007D79906572cCCA8e75B1Beb302787348D6E",
+      "PythAdapterSEK": "0x4e649ec237BEDefF7Ec50557eb1FD5eb8106a64C",
+      "ChainlinkEUR": "0xb49f677943BC038e9857d61E7d053CaA2C1734C1",
+      "ChainlinkJPY": "0xBcE206caE7f0ec07b545EddE332A47C2F75bbeb3",
+      "ChainlinkGBP": "0x5c0Ab2d9b5a7ed9f470386e82BB36A3613cDd4b5",
+      "ChainlinkCAD": "0xa34317DB73e77d453b1B8d04550c44D10e981C8e",
+      "ChainlinkCHF": "0x449d117117838fFA61263B61dA6301AA2a88B13A"
+    },
+    "routers": {
+      "ZapRouter": "0x00B89B6e696A43129DA7Ec8a814bb61C9A6189b8",
+      "LeverageRouter": "0x128f195B92b50db1eEBCbBd249d5C5e946DCd786",
+      "BullLeverageRouter": "0xD9EE316806F230DC687c97908844A1E765C58236"
+    },
+    "external": {
+      "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "Morpho": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
+      "MorphoIRM": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
+      "MorphoAdapter": "0xCBeF6F6eB74474e59e73c26F10066E7EeaC1E951",
+      "CurvePool": "0x10579Ec16FF6852481ef9072bC0c657056dfD45B",
+      "Pyth": "0x4305FB66699C3B2702D4d05CF36551390A4c69C6",
+      "MorphoMarketBear": "0xaf67f0b340328b4e9800e8b00559882cd0e5bffa029faf63c58c022a434ccfb6",
+      "MorphoMarketBull": "0xad2b9d839be29ac606933b2d029bb8d555326480517f6bc9d48ef9d2db742a2f"
+    }
+  },
+  "etherscan": {
+    "SyntheticSplitter": "https://etherscan.io/address/0xc73F06D6e16209e992017974C988126d75112C23",
+    "plDXY-BEAR": "https://etherscan.io/address/0xc8Fc385a01393053C764204D398f79FeBf8dAF91",
+    "plDXY-BULL": "https://etherscan.io/address/0x043418626F7830a50BcaF5Fc29c8E3D8a20FD859",
+    "StakedBear": "https://etherscan.io/address/0x0416978814CF0a8A783EfA542C465ffC987f9dE7",
+    "StakedBull": "https://etherscan.io/address/0xD2153F5Eeb05ba79DaE41fBAB67A8cA72e795BCA",
+    "BasketOracle": "https://etherscan.io/address/0x1503797315e8c8ad3a1519afE1A2494e308CF060",
+    "MorphoOracleBear": "https://etherscan.io/address/0x244310535D4E029435d10e669569cf467F74925F",
+    "MorphoOracleBull": "https://etherscan.io/address/0xdAe52ECfef30895d7B9Fe85C361399e61f8E353B",
+    "StakedOracleBear": "https://etherscan.io/address/0xb7664Fb217303cec873cd0AC0b66F909889CD6f3",
+    "StakedOracleBull": "https://etherscan.io/address/0x55E007D79906572cCCA8e75B1Beb302787348D6E",
+    "PythAdapterSEK": "https://etherscan.io/address/0x4e649ec237BEDefF7Ec50557eb1FD5eb8106a64C",
+    "MorphoAdapter": "https://etherscan.io/address/0xCBeF6F6eB74474e59e73c26F10066E7EeaC1E951",
+    "ZapRouter": "https://etherscan.io/address/0x00B89B6e696A43129DA7Ec8a814bb61C9A6189b8",
+    "LeverageRouter": "https://etherscan.io/address/0x128f195B92b50db1eEBCbBd249d5C5e946DCd786",
+    "BullLeverageRouter": "https://etherscan.io/address/0xD9EE316806F230DC687c97908844A1E765C58236",
+    "CurvePool": "https://etherscan.io/address/0x10579Ec16FF6852481ef9072bC0c657056dfD45B"
+  }
+}
