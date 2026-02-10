@@ -3,10 +3,10 @@ pragma solidity ^0.8.30;
 
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
-import {MorphoAdapter} from "../src/MorphoAdapter.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
+import {VaultAdapter} from "../src/VaultAdapter.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {MarketParams} from "../src/interfaces/IMorpho.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
@@ -94,6 +94,9 @@ contract DeployToMainnet is Script {
     address constant MORPHO_BLUE = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
     address constant MORPHO_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC; // AdaptiveCurveIrm
 
+    // MetaMorpho Vault (Gauntlet USDC Frontier)
+    address constant METAMORPHO_VAULT = 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e;
+
     // Protocol Parameters
     uint256 constant CAP = 2 * 10 ** 8; // $2.00 cap (8 decimals)
     uint256 constant LLTV_BEAR = 0.915e18; // 91.5% LLTV for BEAR market (allows up to ~11.7x leverage)
@@ -117,7 +120,7 @@ contract DeployToMainnet is Script {
     struct DeployedContracts {
         PythAdapter sekPythAdapter;
         BasketOracle basketOracle;
-        MorphoAdapter morphoAdapter;
+        VaultAdapter vaultAdapter;
         SyntheticSplitter splitter;
         SyntheticToken plDxyBear;
         SyntheticToken plDxyBull;
@@ -157,9 +160,9 @@ contract DeployToMainnet is Script {
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // ==========================================
-        // STEP 2: Deploy MorphoAdapter + SyntheticSplitter
+        // STEP 2: Deploy VaultAdapter + SyntheticSplitter
         // ==========================================
-        (deployed.morphoAdapter, deployed.splitter) =
+        (deployed.vaultAdapter, deployed.splitter) =
             _deploySplitterWithAdapter(address(deployed.basketOracle), treasury, deployer);
 
         // Get token addresses from Splitter
@@ -365,22 +368,13 @@ contract DeployToMainnet is Script {
         address oracle,
         address treasury,
         address deployer
-    ) internal returns (MorphoAdapter adapter, SyntheticSplitter splitter) {
+    ) internal returns (VaultAdapter adapter, SyntheticSplitter splitter) {
         // Predict Splitter address (deployed 1 nonce after adapter)
         uint64 nonce = vm.getNonce(deployer);
         address predictedSplitter = vm.computeCreateAddress(deployer, nonce + 1);
 
-        // Create market params for adapter
-        MarketParams memory adapterMarketParams = MarketParams({
-            loanToken: USDC,
-            collateralToken: USDC, // Same-asset lending for adapter
-            oracle: address(0), // No oracle needed for same-asset
-            irm: MORPHO_IRM,
-            lltv: 0.945e18 // 94.5% for stablecoin market
-        });
-
         // Deploy adapter with predicted splitter address
-        adapter = new MorphoAdapter(IERC20(USDC), MORPHO_BLUE, adapterMarketParams, deployer, predictedSplitter);
+        adapter = new VaultAdapter(IERC20(USDC), METAMORPHO_VAULT, deployer, predictedSplitter);
 
         // Deploy splitter
         splitter = new SyntheticSplitter(oracle, USDC, address(adapter), CAP, treasury, SEQUENCER_UPTIME_FEED);
@@ -399,7 +393,7 @@ contract DeployToMainnet is Script {
         console.log("Core Contracts:");
         console.log("  PythAdapter (SEK):   ", address(d.sekPythAdapter));
         console.log("  BasketOracle:        ", address(d.basketOracle));
-        console.log("  MorphoAdapter:       ", address(d.morphoAdapter));
+        console.log("  VaultAdapter:        ", address(d.vaultAdapter));
         console.log("  SyntheticSplitter:   ", address(d.splitter));
         console.log("  plDXY-BEAR:          ", address(d.plDxyBear));
         console.log("  plDXY-BULL:          ", address(d.plDxyBull));
