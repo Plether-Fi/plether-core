@@ -1675,6 +1675,14 @@ contract MockSplitter is ISyntheticSplitter {
         uint256
     ) external override {}
 
+    function mintWithPermit(
+        uint256,
+        uint256,
+        uint8,
+        bytes32,
+        bytes32
+    ) external override {}
+
     function currentStatus() external view override returns (Status) {
         return _status;
     }

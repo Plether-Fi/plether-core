@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {LeverageRouterBase} from "./base/LeverageRouterBase.sol";
@@ -100,6 +101,36 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
+        _openLeverageCore(principal, leverage, maxSlippageBps, deadline);
+    }
+
+    /// @notice Open a leveraged position with a USDC permit signature (gasless approval).
+    /// @param principal Amount of USDC user sends.
+    /// @param leverage Multiplier (e.g. 3x = 3e18).
+    /// @param maxSlippageBps Maximum slippage tolerance in basis points.
+    /// @param deadline Unix timestamp after which the permit and transaction revert.
+    /// @param v Signature recovery byte.
+    /// @param r Signature r component.
+    /// @param s Signature s component.
+    function openLeverageWithPermit(
+        uint256 principal,
+        uint256 leverage,
+        uint256 maxSlippageBps,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        IERC20Permit(address(USDC)).permit(msg.sender, address(this), principal, deadline, v, r, s);
+        _openLeverageCore(principal, leverage, maxSlippageBps, deadline);
+    }
+
+    function _openLeverageCore(
+        uint256 principal,
+        uint256 leverage,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) internal {
         if (principal == 0) {
             revert LeverageRouterBase__ZeroPrincipal();
         }
@@ -203,6 +234,33 @@ contract LeverageRouter is LeverageRouterBase {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
+        _addCollateralCore(usdcAmount, maxSlippageBps, deadline);
+    }
+
+    /// @notice Add collateral with a USDC permit signature (gasless approval).
+    /// @param usdcAmount Amount of USDC to add as collateral.
+    /// @param maxSlippageBps Maximum slippage tolerance in basis points.
+    /// @param deadline Unix timestamp after which the permit and transaction revert.
+    /// @param v Signature recovery byte.
+    /// @param r Signature r component.
+    /// @param s Signature s component.
+    function addCollateralWithPermit(
+        uint256 usdcAmount,
+        uint256 maxSlippageBps,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s);
+        _addCollateralCore(usdcAmount, maxSlippageBps, deadline);
+    }
+
+    function _addCollateralCore(
+        uint256 usdcAmount,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) internal {
         if (usdcAmount == 0) {
             revert LeverageRouterBase__ZeroAmount();
         }

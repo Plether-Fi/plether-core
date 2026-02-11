@@ -38,6 +38,22 @@ interface ISyntheticSplitter {
     ) external;
 
     /**
+     * @notice Deposits collateral to mint tokens with a USDC permit signature (gasless approval).
+     * @param amount The amount of token pairs to mint.
+     * @param deadline Unix timestamp after which the permit and transaction revert.
+     * @param v Signature recovery byte.
+     * @param r Signature r component.
+     * @param s Signature s component.
+     */
+    function mintWithPermit(
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
+
+    /**
      * @notice Burns equal amounts of plDXY-BEAR and plDXY-BULL tokens to retrieve collateral.
      * @dev Works when not liquidated. May be restricted when paused and insolvent.
      * @param amount The amount of token pairs to burn.

@@ -6,6 +6,7 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -202,6 +203,30 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     function mint(
         uint256 amount
     ) external nonReentrant whenNotPaused {
+        _mintCore(amount);
+    }
+
+    /// @notice Mint plDXY-BEAR and plDXY-BULL tokens with a USDC permit signature (gasless approval).
+    /// @param amount The amount of token pairs to mint (18 decimals).
+    /// @param deadline Unix timestamp after which the permit and transaction revert.
+    /// @param v Signature recovery byte.
+    /// @param r Signature r component.
+    /// @param s Signature s component.
+    function mintWithPermit(
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
+        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcNeeded, deadline, v, r, s);
+        _mintCore(amount);
+    }
+
+    function _mintCore(
+        uint256 amount
+    ) internal {
         if (amount == 0) {
             revert Splitter__ZeroAmount();
         }

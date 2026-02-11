@@ -725,6 +725,14 @@ contract InvariantMockSplitter is ISyntheticSplitter {
         usdc.transfer(msg.sender, usdcReturn);
     }
 
+    function mintWithPermit(
+        uint256,
+        uint256,
+        uint8,
+        bytes32,
+        bytes32
+    ) external override {}
+
 }
 
 /// @notice Mock Morpho that supports both splDXY-BEAR and splDXY-BULL as collateral

@@ -141,6 +141,36 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 maxSlippageBps,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
+        _zapMintCore(usdcAmount, minAmountOut, maxSlippageBps, deadline);
+    }
+
+    /// @notice Buy plDXY-BULL using USDC with a permit signature (gasless approval).
+    /// @param usdcAmount The amount of USDC the user is sending.
+    /// @param minAmountOut Minimum amount of plDXY-BULL tokens to receive.
+    /// @param maxSlippageBps Maximum slippage tolerance in basis points.
+    /// @param deadline Unix timestamp after which the permit and transaction revert.
+    /// @param v Signature recovery byte.
+    /// @param r Signature r component.
+    /// @param s Signature s component.
+    function zapMintWithPermit(
+        uint256 usdcAmount,
+        uint256 minAmountOut,
+        uint256 maxSlippageBps,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant whenNotPaused {
+        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s);
+        _zapMintCore(usdcAmount, minAmountOut, maxSlippageBps, deadline);
+    }
+
+    function _zapMintCore(
+        uint256 usdcAmount,
+        uint256 minAmountOut,
+        uint256 maxSlippageBps,
+        uint256 deadline
+    ) internal {
         if (usdcAmount == 0) {
             revert ZapRouter__ZeroAmount();
         }
