@@ -317,7 +317,7 @@ contract SyntheticSplitterFullTest is Test {
         assertEq(actualWithdrawal, fromAdapter, "Incorrect adapter usage");
     }
 
-    function test_PreviewBurn_RevertsWhenAdapterInsufficientLiquidity() public {
+    function test_PreviewBurn_CapsAtAdapterLiquidity() public {
         vm.prank(user);
         splitter.mint(100e18);
 
@@ -331,9 +331,10 @@ contract SyntheticSplitterFullTest is Test {
         vm.prank(address(adapter));
         usdc.transfer(address(0xdead), adapterBalance - 1e6);
 
-        // previewBurn needs more than adapter can provide
-        vm.expectRevert(SyntheticSplitter.Splitter__AdapterInsufficientLiquidity.selector);
-        splitter.previewBurn(100e18);
+        // previewBurn returns capped refund instead of reverting
+        (uint256 usdcRefund, uint256 fromAdapter) = splitter.previewBurn(100e18);
+        assertEq(fromAdapter, 1e6, "Should cap at adapter liquidity");
+        assertEq(usdcRefund, 1e6, "Refund = buffer (0) + adapter (1e6)");
     }
 
     function test_PreviewBurn_LowBuffer() public {

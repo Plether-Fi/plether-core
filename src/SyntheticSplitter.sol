@@ -94,7 +94,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     error Splitter__ZeroAmount();
     error Splitter__ZeroRefund();
     error Splitter__AdapterNotSet();
-    error Splitter__AdapterInsufficientLiquidity();
     error Splitter__LiquidationActive();
     error Splitter__NotLiquidated();
     error Splitter__TimelockActive();
@@ -271,11 +270,10 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (localBalance < usdcRefund) {
             withdrawnFromAdapter = usdcRefund - localBalance;
 
-            // Optional: Check if adapter actually has this liquidity
-            // logical constraint to warn frontend if withdrawal will fail
-            uint256 maxWithdraw = yieldAdapter.maxWithdraw(address(this));
-            if (maxWithdraw < withdrawnFromAdapter) {
-                revert Splitter__AdapterInsufficientLiquidity();
+            uint256 maxW = yieldAdapter.maxWithdraw(address(this));
+            if (maxW < withdrawnFromAdapter) {
+                withdrawnFromAdapter = maxW;
+                usdcRefund = localBalance + withdrawnFromAdapter;
             }
         } else {
             withdrawnFromAdapter = 0;
