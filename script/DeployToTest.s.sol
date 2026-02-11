@@ -19,6 +19,7 @@ import {StakedOracle} from "../src/oracles/StakedOracle.sol";
 import {MockYieldAdapter} from "../test/utils/MockYieldAdapter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "forge-std/Script.sol";
 
 // Curve Twocrypto-NG Factory interface
@@ -54,9 +55,9 @@ interface ICurveTwocryptoPool {
 }
 
 // Mock USDC with 6 decimals and public mint for testnet
-contract MockUSDC is ERC20 {
+contract MockUSDC is ERC20Permit {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
+    constructor() ERC20("Mock USDC", "USDC") ERC20Permit("Mock USDC") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;
