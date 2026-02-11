@@ -60,6 +60,9 @@ contract MorphoOracle is IMorphoOracle {
     }
 
     /// @notice Returns collateral price scaled to 1e36.
+    /// @dev BEAR (IS_INVERSE=false): basketPrice * CHAINLINK_TO_MORPHO_SCALE.
+    ///      BULL (IS_INVERSE=true): (CAP - basketPrice) * CHAINLINK_TO_MORPHO_SCALE.
+    ///      Returns 1 (not 0) when BULL price would be zero to avoid Morpho division errors.
     /// @return Price of 1 plDXY token in USDC terms (1e36 scale).
     function price() external view override returns (uint256) {
         (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();

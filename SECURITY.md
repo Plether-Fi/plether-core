@@ -50,7 +50,7 @@ These properties must always hold. Violation indicates a critical bug.
 #### Chainlink Oracles
 - **Assumption**: Chainlink price feeds provide accurate, timely data for EUR/USD, JPY/USD, GBP/USD, CAD/USD, and CHF/USD
 - **Mitigation**: Staleness timeouts reject stale data (24 hours for all consumers: SyntheticSplitter, RewardDistributor, BullLeverageRouter, MorphoOracle); sequencer uptime check on L2s
-- **Risk**: If Chainlink is compromised or all 5 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed
+- **Risk**: If Chainlink is compromised or all 5 feeds fail simultaneously, minting is blocked but existing positions can still be redeemed. Note: the basket also depends on SEK/USD via Pyth (see below), so a Pyth failure also blocks minting.
 
 #### Pyth Network (SEK/USD)
 - **Assumption**: Pyth Network provides accurate SEK/USD price data via PythAdapter
@@ -118,6 +118,8 @@ The owner **cannot**:
 Anyone can call:
 - `triggerLiquidation()` - settles protocol if oracle price >= CAP
 - `harvestYield()` - collects and distributes yield from adapter
+- `deployToAdapter()` - pushes excess USDC to yield adapter (10% buffer retained)
+- `distributeRewards()` - converts RewardDistributor's USDC into staker rewards (1-hour cooldown)
 
 #### Timelock Protection
 Critical operations require a 7-day timelock:
@@ -239,16 +241,20 @@ When `harvestYield()` is called, surplus yield is distributed:
 
 #### Morpho Token Rewards
 
-Morpho may distribute token rewards (e.g., MORPHO) to vault depositors via their Universal Rewards Distributor (URD). With VaultAdapter, reward claiming is handled by the Morpho vault curator, not by the protocol:
+Morpho may distribute token rewards (e.g., MORPHO) to vault depositors via their Universal Rewards Distributor (URD). Rewards are claimed at two levels:
 
-| Aspect | Details |
-|--------|---------|
-| Distribution | Merkle-based claims managed by the vault curator |
-| Claiming | Vault curator claims on behalf of the vault; rewards accrue to vault share price |
-| Impact | Increases VaultAdapter's `totalAssets()`, harvested as yield by `harvestYield()` |
+| Level | Mechanism | Details |
+|-------|-----------|---------|
+| Morpho Vault → Morpho markets | Vault curator claims | Curator claims on behalf of the vault; rewards accrue to vault share price, increasing VaultAdapter's `totalAssets()` |
+| VaultAdapter → external distributors | `claimRewards(target, data)` | Owner calls arbitrary reward distributor contracts (Merkl, URD, etc.) to claim tokens sent directly to the adapter |
 
-- Protocol does not claim Morpho rewards directly — the Morpho vault handles this internally
-- Reward timing depends on the vault curator's claim schedule
+**`claimRewards()` security model:**
+- Owner-only (`onlyOwner` modifier)
+- Target address is validated: cannot be the underlying asset (USDC), the Morpho Vault, or the adapter itself
+- Claimed reward tokens land in the adapter; use `rescueToken()` to extract them
+- Cannot affect deposited USDC or vault shares (forbidden targets)
+
+Reward timing depends on the vault curator's claim schedule and external distributor epochs.
 
 ### Flash Mint Capability
 
@@ -407,6 +413,13 @@ Users never grant token approvals to the routers. Instead:
 - **LeverageRouter / BullLeverageRouter**: Users authorize the router in Morpho via `morpho.setAuthorization(router, true)`. This grants position management rights, not token spending.
 - **ZapRouter**: Users call the router directly with USDC. No prior approval needed — USDC is transferred via `transferFrom` with the exact mint amount.
 
+#### EIP-2612 Permit Support
+
+All USDC entry points offer `*WithPermit()` variants (`mintWithPermit`, `zapMintWithPermit`, `openLeverageWithPermit`, `addCollateralWithPermit`) that accept EIP-2612 signatures for gasless approvals. Security properties:
+- Signatures are single-use (nonce-based replay protection via USDC's permit implementation)
+- Deadline parameter prevents stale signatures from being submitted
+- Permits are executed atomically with the operation — no window for front-running between approval and spend
+
 ## Emergency Procedures
 
 ### Protocol Pause
@@ -493,6 +506,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-11 | Added VaultAdapter.claimRewards() security model, EIP-2612 permit support documentation, deployToAdapter()/distributeRewards() as permissionless operations; clarified Chainlink+Pyth dependency |
 | 2026-02-11 | Replaced MorphoAdapter with VaultAdapter (Morpho Vault) for yield; updated trust assumptions, rescue docs, and liquidity risk sections |
 | 2026-02-08 | PythAdapter: Updated staleness from 24h to 72h for weekend forex closures; documented self-attestation model and staleness tradeoff |
 | 2026-02-07 | Added Token Approval Model section under Router Architecture: documents stateless router approval pattern and user authorization model |

@@ -166,8 +166,8 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @notice Returns the aggregated basket price from all component feeds.
     /// @return roundId Mock round ID (always 1).
     /// @return answer The calculated basket price in 8 decimals.
-    /// @return startedAt Timestamp of oldest component update.
-    /// @return updatedAt Timestamp of oldest component update (weakest link).
+    /// @return startedAt Oldest component updatedAt (no separate round start; same as updatedAt).
+    /// @return updatedAt Oldest component updatedAt (weakest link for staleness checks).
     /// @return answeredInRound Mock answered round (always 1).
     function latestRoundData() public view returns (uint80, int256, uint256, uint256, uint80) {
         int256 totalPrice = 0;

@@ -24,7 +24,7 @@ These tokens are always minted and burned in pairs, maintaining a zero-sum relat
 
 | Contract | Description |
 |----------|-------------|
-| [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs, manages yield deployment |
+| [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint/burn. |
 | [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
 
 ### Staking Layer
@@ -74,15 +74,15 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 | Contract | Description |
 |----------|-------------|
-| [`ZapRouter`](src/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints |
-| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans (fee-free) |
-| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints |
+| [`ZapRouter`](src/ZapRouter.sol) | Single-sided plDXY-BULL minting and burning using flash mints. Permit support. |
+| [`LeverageRouter`](src/LeverageRouter.sol) | Leveraged plDXY-BEAR positions via Morpho Blue flash loans. Open/close/add/remove collateral. Permit support. |
+| [`BullLeverageRouter`](src/BullLeverageRouter.sol) | Leveraged plDXY-BULL positions via Morpho + plDXY-BEAR flash mints. Open/close/add/remove collateral. Permit support. |
 
 ### Yield Adapters (ERC-4626)
 
 | Contract | Description |
 |----------|-------------|
-| [`VaultAdapter`](src/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield |
+| [`VaultAdapter`](src/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield. Owner can `claimRewards()` from external distributors (Merkl, URD). |
 
 
 ## Ecosystem Integrations
@@ -115,13 +115,13 @@ Both routers use fee-free Morpho flash loans and a fixed debt model: `debt = pri
 ![Staking & Rewards](assets/diagrams/staking.svg)
 
 - **StakedToken** - ERC-4626 vaults (splDXY-BEAR, splDXY-BULL) that receive streaming USDC rewards
-- **RewardDistributor** - Allocates yield from SyntheticSplitter, favoring the underperforming token's stakers to incentivize price convergence
+- **RewardDistributor** - Permissionless `distributeRewards()` allocates yield from SyntheticSplitter, favoring the underperforming token's stakers to incentivize price convergence
 
 ## Protocol Mechanics
 
 ### Liquidity Management
 
-The SyntheticSplitter maintains a 10% local buffer of USDC for redemptions, with 90% deployed to yield adapters. This generates yield while ensuring liquidity for normal operations.
+The SyntheticSplitter maintains a 10% local buffer of USDC for redemptions. Anyone can call `deployToAdapter()` to push excess USDC to yield adapters, targeting 90% deployment. This generates yield while ensuring liquidity for normal operations.
 
 If adapter liquidity is constrained (e.g., high Morpho utilization), the owner can pause the protocol and use `withdrawFromAdapter()` for gradual extraction as liquidity becomes available.
 
@@ -136,7 +136,9 @@ Both routers use a fixed debt model: `debt = principal × (leverage - 1)`. For 2
 
 Morpho Blue provides fee-free flash loans, making leveraged positions more capital-efficient.
 
-Both routers include MEV protection via user-defined slippage caps (max 1%).
+After opening, users can adjust positions with `addCollateral()` and `removeCollateral()` without closing.
+
+Both routers include MEV protection via user-defined slippage caps (max 1%). All USDC entry points support EIP-2612 permits for gasless approvals.
 
 ### Reward Distribution
 
@@ -203,6 +205,7 @@ source .env && forge test --match-path "test/fork/*.sol" --fork-url $MAINNET_RPC
 | `LiquidationFork.t.sol` | Interest accrual and liquidation mechanics |
 | `BasketOracleFork.t.sol` | Full 6-feed plDXY basket oracle validation |
 | `RewardDistributorFork.t.sol` | Reward distribution with real oracle prices |
+| `YieldIntegrationFork.t.sol` | E2E yield pipeline: Morpho vault → harvest → distribute → staker share price |
 | `PermitFork.t.sol` | EIP-2612 permit-based deposits |
 | `SlippageReport.t.sol` | Slippage analysis across trade sizes |
 
