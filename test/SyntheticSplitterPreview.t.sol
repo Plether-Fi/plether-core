@@ -277,16 +277,17 @@ contract SyntheticSplitterFullTest is Test {
 
         (uint256 required, uint256 toAdapter, uint256 toBuffer) = splitter.previewMint(amount);
 
+        assertEq(toAdapter, 0, "toAdapter should always be 0");
+        assertEq(toBuffer, required, "toBuffer should equal required");
+
         uint256 userBalBefore = usdc.balanceOf(user);
-        uint256 adapterBalBefore = usdc.balanceOf(address(adapter));
         uint256 splitterBalBefore = usdc.balanceOf(address(splitter));
 
         vm.prank(user);
         splitter.mint(amount);
 
         assertEq(userBalBefore - usdc.balanceOf(user), required, "Incorrect USDC required");
-        assertEq(usdc.balanceOf(address(adapter)) - adapterBalBefore, toAdapter, "Incorrect adapter deposit");
-        assertApproxEqAbs(usdc.balanceOf(address(splitter)) - splitterBalBefore, toBuffer, 1, "Incorrect buffer");
+        assertEq(usdc.balanceOf(address(splitter)) - splitterBalBefore, required, "All USDC stays local");
     }
 
     function testFuzz_PreviewBurn_Standard(
@@ -320,6 +321,7 @@ contract SyntheticSplitterFullTest is Test {
     function test_PreviewBurn_CapsAtAdapterLiquidity() public {
         vm.prank(user);
         splitter.mint(100e18);
+        splitter.deployToAdapter();
 
         // Drain local buffer completely
         uint256 buffer = usdc.balanceOf(address(splitter));
@@ -341,6 +343,7 @@ contract SyntheticSplitterFullTest is Test {
         uint256 mintAmount = 100e18;
         vm.prank(user);
         splitter.mint(mintAmount);
+        splitter.deployToAdapter();
 
         uint256 buffer = usdc.balanceOf(address(splitter));
         vm.prank(address(splitter));
@@ -361,6 +364,7 @@ contract SyntheticSplitterFullTest is Test {
         uint256 mintAmount = 1000e18;
         vm.prank(user);
         splitter.mint(mintAmount);
+        splitter.deployToAdapter();
 
         uint256 yieldAmount = 500e6;
         usdc.mint(address(adapter), yieldAmount);
@@ -422,6 +426,7 @@ contract SyntheticSplitterFullTest is Test {
     function test_PreviewBurn_RevertsWhenPausedAndInsolvent() public {
         vm.prank(user);
         splitter.mint(10e18);
+        splitter.deployToAdapter();
 
         // Drain the local buffer completely
         uint256 buffer = usdc.balanceOf(address(splitter));
@@ -430,7 +435,7 @@ contract SyntheticSplitterFullTest is Test {
 
         // Remove enough from adapter to break solvency
         // For 10e18 mint: ~2000 USDC total backing needed
-        // Buffer was ~200 USDC, adapter ~1800 USDC
+        // After deploy: buffer ~200 USDC, adapter ~1800 USDC
         // Remove e.g. 500 USDC (500e6) from adapter → totalAssets ~1500 USDC < 2000 needed
         vm.prank(address(adapter));
         usdc.transfer(address(0xdead), 500e6);
@@ -469,6 +474,7 @@ contract SyntheticSplitterFullTest is Test {
     function test_GetSystemStatus_AfterMintAndYield() public {
         vm.prank(user);
         splitter.mint(10e18);
+        splitter.deployToAdapter();
         usdc.mint(address(adapter), 1000e6); // simulate yield
 
         SyntheticSplitter.SystemStatus memory s = splitter.getSystemStatus();

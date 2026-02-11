@@ -22,8 +22,8 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 /// @custom:security-contact contact@plether.com
 /// @notice Core protocol contract for minting/burning synthetic plDXY tokens.
 /// @dev Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL tokens.
-///      Maintains 10% liquidity buffer locally, 90% deployed to yield adapters.
-///      Three lifecycle states: ACTIVE → PAUSED → SETTLED (liquidated).
+///      Minted USDC stays local; a permissionless deployToAdapter() pushes excess above the
+///      10% buffer into the yield adapter. Three lifecycle states: ACTIVE → PAUSED → SETTLED.
 contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
@@ -68,6 +68,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
     uint256 public constant HARVEST_REWARD_BPS = 10;
     uint256 public constant MIN_SURPLUS_THRESHOLD = 50 * 10 ** USDC_DECIMALS;
+    uint256 public constant MIN_DEPLOY_AMOUNT = 100 * 10 ** USDC_DECIMALS;
 
     // Liquidation State
     bool public isLiquidated;
@@ -87,6 +88,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     event FeesProposed(address indexed treasury, address indexed staking, uint256 activationTime);
     event FeesUpdated(address indexed treasury, address indexed staking);
     event EmergencyEjected(uint256 amountRecovered);
+    event DeployedToAdapter(address indexed caller, uint256 amount);
     event AdapterWithdrawn(uint256 requested, uint256 withdrawn);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
 
@@ -171,8 +173,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
      * @notice Simulates a mint to see required USDC input
      * @param mintAmount The amount of TokenA/B the user wants to mint
      * @return usdcRequired Total USDC needed from user
-     * @return depositToAdapter Amount that will be sent to Yield Source
-     * @return keptInBuffer Amount that will stay in Splitter contract
+     * @return depositToAdapter Always 0 (deployment is separate via deployToAdapter())
+     * @return keptInBuffer Amount that will stay in Splitter contract (equals usdcRequired)
      */
     function previewMint(
         uint256 mintAmount
@@ -184,18 +186,14 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             revert Splitter__LiquidationActive();
         }
 
-        // Check Oracle Price to fail fast if over CAP
         uint256 price = _getOraclePrice();
         if (price >= CAP) {
             revert Splitter__LiquidationActive();
         }
 
-        // Calculate USDC required (round UP to favor protocol)
         usdcRequired = Math.mulDiv(mintAmount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
-
-        // Calculate Buffer Split
-        keptInBuffer = (usdcRequired * BUFFER_PERCENT) / 100;
-        depositToAdapter = usdcRequired - keptInBuffer;
+        depositToAdapter = 0;
+        keptInBuffer = usdcRequired;
     }
 
     /// @notice Mint plDXY-BEAR and plDXY-BULL tokens by depositing USDC collateral.
@@ -233,9 +231,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         if (isLiquidated) {
             revert Splitter__LiquidationActive();
         }
-        if (address(yieldAdapter) == address(0)) {
-            revert Splitter__AdapterNotSet();
-        }
 
         uint256 price = _getOraclePrice();
         if (price >= CAP) {
@@ -248,14 +243,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcNeeded);
-
-        uint256 keepAmount = (usdcNeeded * BUFFER_PERCENT) / 100;
-        uint256 depositAmount = usdcNeeded - keepAmount;
-
-        if (depositAmount > 0) {
-            USDC.forceApprove(address(yieldAdapter), depositAmount);
-            yieldAdapter.deposit(depositAmount, address(this));
-        }
 
         BEAR.mint(msg.sender, amount);
         BULL.mint(msg.sender, amount);
@@ -471,6 +458,40 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         emit AdapterWithdrawn(amount, toWithdraw);
     }
 
+    /// @notice Deploys excess local USDC to the yield adapter.
+    /// @dev Permissionless keeper function. Pushes USDC above the 10% buffer target
+    ///      into the adapter. Returns 0 silently when nothing to deploy (keeper-friendly).
+    /// @return deployed Amount of USDC deployed to the adapter.
+    function deployToAdapter() external nonReentrant whenNotPaused returns (uint256 deployed) {
+        if (address(yieldAdapter) == address(0)) {
+            revert Splitter__AdapterNotSet();
+        }
+
+        uint256 before = USDC.balanceOf(address(this));
+        _deployExcess();
+        deployed = before - USDC.balanceOf(address(this));
+    }
+
+    /// @dev Pushes local USDC above the 10% buffer target into the yield adapter.
+    function _deployExcess() internal {
+        uint256 localBalance = USDC.balanceOf(address(this));
+        uint256 targetBuffer = (_getTotalLiabilities() * BUFFER_PERCENT) / 100;
+
+        if (localBalance <= targetBuffer) {
+            return;
+        }
+
+        uint256 excess = localBalance - targetBuffer;
+        if (excess < MIN_DEPLOY_AMOUNT) {
+            return;
+        }
+
+        USDC.forceApprove(address(yieldAdapter), excess);
+        yieldAdapter.deposit(excess, address(this));
+
+        emit DeployedToAdapter(msg.sender, excess);
+    }
+
     // ==========================================
     // 4. HARVEST (Permissionless)
     // ==========================================
@@ -516,9 +537,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             return (false, totalSurplus, 0, 0, 0);
         }
 
-        // 4. Calculate Splits
-        // Note: The actual harvest logic limits withdrawal to `adapterAssets` if surplus > adapterAssets.
-        uint256 harvestableAmount = (adapterAssets > totalSurplus) ? totalSurplus : adapterAssets;
+        // 4. Calculate Splits (local buffer + adapter both contribute)
+        uint256 harvestableAmount = totalSurplus;
 
         callerReward = (harvestableAmount * HARVEST_REWARD_BPS) / 10_000;
         uint256 remaining = harvestableAmount - callerReward;
@@ -528,46 +548,47 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         canHarvest = true;
     }
 
-    /// @notice Permissionless yield harvesting from the adapter.
-    /// @dev Distributes surplus: 0.1% to caller, 20% to treasury, 79.9% to staking.
+    /// @notice Permissionless yield harvesting with automatic redeployment.
+    /// @dev Pays surplus from local buffer first, only hits adapter for the remainder.
+    ///      After distribution, deploys any remaining excess to the adapter.
+    ///      Distributes: 0.1% to caller, 20% to treasury, 79.9% to staking.
     function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) {
             revert Splitter__AdapterNotSet();
         }
 
-        // Poke adapter to accrue pending interest before calculating surplus
-        // This ensures totalAssets() returns actual (not expected) values
         try IYieldAdapter(address(yieldAdapter)).accrueInterest() {} catch {}
 
         uint256 myShares = yieldAdapter.balanceOf(address(this));
         uint256 adapterAssets = yieldAdapter.convertToAssets(myShares);
-        uint256 localBuffer = USDC.balanceOf(address(this));
-        uint256 totalHoldings = adapterAssets + localBuffer;
+        uint256 localBalance = USDC.balanceOf(address(this));
+        uint256 totalHoldings = adapterAssets + localBalance;
 
-        uint256 requiredBacking = (BEAR.totalSupply() * CAP) / USDC_MULTIPLIER;
-
+        uint256 requiredBacking = _getTotalLiabilities();
         if (totalHoldings <= requiredBacking + MIN_SURPLUS_THRESHOLD) {
             revert Splitter__NoSurplus();
         }
 
         uint256 surplus = totalHoldings - requiredBacking;
 
-        // Withdraw from adapter
-        uint256 expectedPull = adapterAssets > surplus ? surplus : adapterAssets;
-        uint256 balanceBefore = USDC.balanceOf(address(this));
-        if (adapterAssets > surplus) {
-            yieldAdapter.withdraw(surplus, address(this), address(this));
+        uint256 targetBuffer = (requiredBacking * BUFFER_PERCENT) / 100;
+        uint256 localExcess = localBalance > targetBuffer ? localBalance - targetBuffer : 0;
+        uint256 localContribution = surplus > localExcess ? localExcess : surplus;
+        uint256 adapterContribution = surplus - localContribution;
+        uint256 harvested;
+
+        if (adapterContribution > 0) {
+            uint256 balBefore = USDC.balanceOf(address(this));
+            _withdrawFromAdapter(adapterContribution);
+            uint256 pulled = USDC.balanceOf(address(this)) - balBefore;
+            if (pulled < (adapterContribution * 90) / 100) {
+                revert Splitter__InsufficientHarvest();
+            }
+            harvested = localContribution + pulled;
         } else {
-            yieldAdapter.redeem(myShares, address(this), address(this));
-        }
-        uint256 harvested = USDC.balanceOf(address(this)) - balanceBefore;
-
-        // Safety check: Ensure we got at least 90% of expected (adjust threshold as needed)
-        if (harvested < (expectedPull * 90) / 100) {
-            revert Splitter__InsufficientHarvest();
+            harvested = localContribution;
         }
 
-        // Distribute based on actual harvested
         uint256 callerCut = (harvested * HARVEST_REWARD_BPS) / 10_000;
         uint256 remaining = harvested - callerCut;
         uint256 treasuryShare = (remaining * 20) / 100;
@@ -575,7 +596,6 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
         emit YieldHarvested(harvested, treasuryShare, stakingShare);
 
-        // Transfers (CEI: All calcs done before interactions)
         if (callerCut > 0) {
             USDC.safeTransfer(msg.sender, callerCut);
         }
@@ -585,6 +605,8 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         } else {
             USDC.safeTransfer(treasury, stakingShare);
         }
+
+        _deployExcess();
     }
 
     // ==========================================

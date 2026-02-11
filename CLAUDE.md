@@ -42,7 +42,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 **SyntheticSplitter** - Central protocol contract
 - Accepts USDC collateral to mint equal amounts of plDXY-BEAR + plDXY-BULL
-- Maintains 10% liquidity buffer locally, 90% deployed to yield adapters
+- Mint keeps all USDC local; permissionless `deployToAdapter()` pushes excess to yield adapters (10% buffer / 90% adapter)
 - Three lifecycle states: ACTIVE → PAUSED → SETTLED
 - Liquidates when oracle price >= CAP (protocol end-of-life)
 

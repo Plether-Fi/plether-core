@@ -392,7 +392,7 @@ contract IntegrationTest is Test {
     // ADAPTER INTERACTION TESTS
     // ==========================================
 
-    function test_BufferManagement_LargeMint() public {
+    function test_BufferManagement_MintThenDeploy() public {
         uint256 largeAmount = 100_000 ether;
 
         vm.startPrank(alice);
@@ -400,7 +400,14 @@ contract IntegrationTest is Test {
         splitter.mint(largeAmount);
         vm.stopPrank();
 
-        // Check buffer (10% should stay in splitter)
+        // After mint, all USDC stays local
+        uint256 allLocal = usdc.balanceOf(address(splitter));
+        assertGt(allLocal, 0, "Should have local USDC");
+        assertEq(adapter.balanceOf(address(splitter)), 0, "Adapter should be empty before deploy");
+
+        // Deploy pushes excess to adapter (90/10 split)
+        splitter.deployToAdapter();
+
         uint256 localBuffer = usdc.balanceOf(address(splitter));
         uint256 adapterBalance = adapter.balanceOf(address(splitter));
 
@@ -411,18 +418,19 @@ contract IntegrationTest is Test {
     }
 
     function test_BufferDepletion_RecoveryFromAdapter() public {
-        // First, mint to create buffer
+        // First, mint to create buffer then deploy to adapter
         vm.startPrank(alice);
         usdc.approve(address(splitter), type(uint256).max);
         splitter.mint(1000 ether);
         vm.stopPrank();
+        splitter.deployToAdapter();
 
         uint256 initialBuffer = usdc.balanceOf(address(splitter));
 
         // Burn more than buffer to force adapter withdrawal
-        // 1000 tokens * $2 CAP = $2000 USDC needed
-        // 10% buffer = $200 USDC local
-        // Burning 500 tokens needs $1000 USDC -> more than buffer
+        // 1000 tokens * $2 CAP = $2000 USDC backing
+        // After deploy: 10% buffer = $200 USDC local, 90% = $1800 in adapter
+        // Burning 500 tokens needs $1000 USDC -> more than $200 buffer
         vm.prank(alice);
         splitter.burn(500 ether);
 

@@ -412,6 +412,7 @@ contract SecurityAttackVectorsTest is Test {
         usdc.approve(address(splitter), 1000 * 1e6);
         splitter.mint(500 * 1e18);
         vm.stopPrank();
+        splitter.deployToAdapter();
 
         // Deploy evil adapter that steals 50% on deposit
         EvilYieldAdapter evilAdapter = new EvilYieldAdapter(IERC20(address(usdc)));

@@ -343,6 +343,8 @@ contract SyntheticSplitterConcurrentTest is Test {
         vm.prank(carol);
         splitter.mint(mintAmount);
 
+        splitter.deployToAdapter();
+
         // Mock BOTH withdraw and redeem to fail (simulates completely broken adapter)
         vm.mockCallRevert(
             address(unlimitedAdapter), abi.encodeWithSelector(IERC4626.withdraw.selector), abi.encode("ADAPTER_BROKEN")
@@ -498,6 +500,7 @@ contract SyntheticSplitterConcurrentTest is Test {
         usdc.approve(address(splitter), type(uint256).max);
         vm.prank(alice);
         splitter.mint(largeAmount);
+        splitter.deployToAdapter();
 
         // Check initial buffer state
         uint256 initialBuffer = usdc.balanceOf(address(splitter));
