@@ -52,6 +52,8 @@ contract FullCycleForkTest is BaseForkTest {
             splitter.mint(mintAmount);
             vm.stopPrank();
 
+            splitter.deployToAdapter();
+
             assertEq(IERC20(bullToken).balanceOf(alice), mintAmount, "Alice should have BULL tokens");
             assertEq(IERC20(bearToken).balanceOf(alice), mintAmount, "Alice should have BEAR tokens");
         }
@@ -109,6 +111,8 @@ contract FullCycleForkTest is BaseForkTest {
             IERC20(USDC).approve(address(splitter), bobUsdc);
             splitter.mint(bobMint);
             vm.stopPrank();
+
+            splitter.deployToAdapter();
         }
 
         // PHASE 2: YIELD ACCRUAL
@@ -168,6 +172,8 @@ contract FullCycleForkTest is BaseForkTest {
             IERC20(USDC).approve(address(splitter), usdcRequired);
             splitter.mint(mintAmount);
             vm.stopPrank();
+
+            splitter.deployToAdapter();
         }
 
         // PHASE 2: SIMULATE 4 QUARTERS OF YIELD

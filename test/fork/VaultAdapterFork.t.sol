@@ -83,6 +83,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
+        splitter.deployToAdapter();
+
         uint256 vaultShares = STEAKHOUSE_USDC.balanceOf(address(vaultAdapter));
         assertGt(vaultShares, 0, "Adapter should hold Morpho vault shares");
 
@@ -123,6 +125,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
+        splitter.deployToAdapter();
+
         uint256 initialAssets = vaultAdapter.totalAssets();
         assertGt(initialAssets, 0, "Should have assets after deposit");
 
@@ -146,6 +150,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
+        splitter.deployToAdapter();
+
         uint256 adapterMaxWithdraw = vaultAdapter.maxWithdraw(address(splitter));
         uint256 vaultMaxWithdraw = STEAKHOUSE_USDC.maxWithdraw(address(vaultAdapter));
         assertLe(adapterMaxWithdraw, vaultMaxWithdraw, "Adapter maxWithdraw capped by vault liquidity");
@@ -166,6 +172,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         IERC20(USDC).approve(address(splitter), usdcRequired);
         splitter.mint(mintAmount);
         vm.stopPrank();
+
+        splitter.deployToAdapter();
 
         assertGt(vaultAdapter.maxWithdraw(address(splitter)), 0, "Should have liquidity before drain");
 
@@ -257,6 +265,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         splitter.mint(mintAmount);
         vm.stopPrank();
 
+        splitter.deployToAdapter();
+
         assertEq(IERC20(bullToken).balanceOf(alice), mintAmount, "Should have BULL tokens");
         assertEq(IERC20(bearToken).balanceOf(alice), mintAmount, "Should have BEAR tokens");
 
@@ -282,6 +292,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         IERC20(USDC).approve(address(splitter), usdcRequired);
         splitter.mint(mintAmount);
         vm.stopPrank();
+
+        splitter.deployToAdapter();
 
         uint256 initialAdapterAssets = vaultAdapter.totalAssets();
         assertGt(initialAdapterAssets, 0, "Should have assets after deposit");
