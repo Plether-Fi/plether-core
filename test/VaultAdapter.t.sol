@@ -20,14 +20,39 @@ contract MockUSDC6 is MockERC20 {
 
 contract MockERC4626Vault is ERC4626 {
 
+    uint256 internal _liquidityCap;
+
     constructor(
         IERC20 _asset
-    ) ERC4626(_asset) ERC20("Mock Vault", "mVault") {}
+    ) ERC4626(_asset) ERC20("Mock Vault", "mVault") {
+        _liquidityCap = type(uint256).max;
+    }
 
     function simulateYield(
         uint256 amount
     ) external {
         MockERC20(asset()).mint(address(this), amount);
+    }
+
+    function setLiquidityCap(
+        uint256 cap
+    ) external {
+        _liquidityCap = cap;
+    }
+
+    function maxWithdraw(
+        address owner
+    ) public view override returns (uint256) {
+        uint256 ownerMax = super.maxWithdraw(owner);
+        return ownerMax < _liquidityCap ? ownerMax : _liquidityCap;
+    }
+
+    function maxRedeem(
+        address owner
+    ) public view override returns (uint256) {
+        uint256 ownerMax = super.maxRedeem(owner);
+        uint256 capShares = convertToShares(_liquidityCap);
+        return ownerMax < capShares ? ownerMax : capShares;
     }
 
 }
@@ -189,6 +214,66 @@ contract VaultAdapterTest is Test {
 
     function test_AccrueInterest_DoesNotRevert() public {
         adapter.accrueInterest();
+    }
+
+    // ==========================================
+    // 7. maxWithdraw / maxRedeem Liquidity Cap
+    // ==========================================
+
+    function test_MaxWithdraw_CappedByVaultLiquidity() public {
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, splitter);
+        vm.stopPrank();
+
+        assertEq(adapter.maxWithdraw(splitter), amount);
+
+        vault.setLiquidityCap(30 * 1e6);
+
+        assertEq(adapter.maxWithdraw(splitter), 30 * 1e6);
+    }
+
+    function test_MaxRedeem_CappedByVaultLiquidity() public {
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, splitter);
+        vm.stopPrank();
+
+        assertEq(adapter.maxRedeem(splitter), amount);
+
+        vault.setLiquidityCap(30 * 1e6);
+
+        assertEq(adapter.maxRedeem(splitter), 30 * 1e6);
+    }
+
+    function test_MaxWithdraw_ZeroWhenVaultIlliquid() public {
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, splitter);
+        vm.stopPrank();
+
+        vault.setLiquidityCap(0);
+
+        assertEq(adapter.maxWithdraw(splitter), 0);
+        assertEq(adapter.maxRedeem(splitter), 0);
+    }
+
+    function test_MaxWithdraw_UnlimitedVaultReturnsOwnerPosition() public {
+        uint256 amount = 100 * 1e6;
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), amount);
+        adapter.deposit(amount, splitter);
+        vm.stopPrank();
+
+        assertEq(adapter.maxWithdraw(splitter), amount);
+        assertEq(adapter.maxWithdraw(hacker), 0);
     }
 
 }

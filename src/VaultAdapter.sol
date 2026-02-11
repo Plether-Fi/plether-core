@@ -23,12 +23,22 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     /// @notice SyntheticSplitter authorized to deposit.
     address public immutable SPLITTER;
 
+    /// @notice Thrown when caller is not the SyntheticSplitter.
     error VaultAdapter__OnlySplitter();
+
+    /// @notice Thrown when a zero address is provided.
     error VaultAdapter__InvalidAddress();
+
+    /// @notice Thrown when vault's underlying asset doesn't match this adapter's asset.
     error VaultAdapter__InvalidVault();
+
+    /// @notice Thrown when attempting to rescue the underlying asset.
     error VaultAdapter__CannotRescueUnderlying();
+
+    /// @notice Thrown when attempting to rescue vault share tokens.
     error VaultAdapter__CannotRescueVaultShares();
 
+    /// @notice Deploys adapter targeting a MetaMorpho vault.
     /// @param _asset Underlying asset (USDC).
     /// @param _vault MetaMorpho vault address (must have same underlying asset).
     /// @param _owner Admin address for rescue operations.
@@ -59,7 +69,31 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     // ERC-4626 OVERRIDES
     // ==========================================
 
+    /// @notice Maximum USDC withdrawable, capped by MetaMorpho's available liquidity.
+    /// @param owner Owner of adapter shares.
+    /// @return Minimum of the owner's position value and what MetaMorpho can actually service.
+    function maxWithdraw(
+        address owner
+    ) public view override returns (uint256) {
+        uint256 ownerAssets = previewRedeem(balanceOf(owner));
+        uint256 vaultMax = VAULT.maxWithdraw(address(this));
+        return ownerAssets < vaultMax ? ownerAssets : vaultMax;
+    }
+
+    /// @notice Maximum adapter shares redeemable, capped by MetaMorpho's available liquidity.
+    /// @param owner Owner of adapter shares.
+    /// @return Minimum of the owner's share balance and what MetaMorpho liquidity supports.
+    function maxRedeem(
+        address owner
+    ) public view override returns (uint256) {
+        uint256 ownerShares = balanceOf(owner);
+        uint256 maxAssets = VAULT.maxWithdraw(address(this));
+        uint256 maxSharesByVault = convertToShares(maxAssets);
+        return ownerShares < maxSharesByVault ? ownerShares : maxSharesByVault;
+    }
+
     /// @notice Returns total USDC value of this adapter's vault position.
+    /// @return Total assets held in the MetaMorpho vault, converted from vault shares.
     function totalAssets() public view override returns (uint256) {
         uint256 shares = VAULT.balanceOf(address(this));
         if (shares == 0) {
@@ -69,6 +103,10 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     }
 
     /// @dev Deposits assets to MetaMorpho vault after ERC4626 share minting.
+    /// @param caller Must be SPLITTER.
+    /// @param receiver Receiver of adapter shares.
+    /// @param assets Amount of USDC to deposit.
+    /// @param shares Amount of adapter shares minted.
     function _deposit(
         address caller,
         address receiver,
@@ -85,6 +123,11 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     }
 
     /// @dev Withdraws assets from MetaMorpho vault before ERC4626 share burning.
+    /// @param caller Caller requesting withdrawal.
+    /// @param receiver Receiver of withdrawn USDC.
+    /// @param owner Owner of adapter shares being burned.
+    /// @param assets Amount of USDC to withdraw.
+    /// @param shares Amount of adapter shares burned.
     function _withdraw(
         address caller,
         address receiver,
@@ -101,7 +144,10 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     // YIELD ADAPTER INTERFACE
     // ==========================================
 
-    /// @notice No-op — MetaMorpho handles interest accrual internally.
+    /// @notice No-op — MetaMorpho accrues interest on underlying markets during deposit/withdraw.
+    /// @dev View functions (totalAssets, convertToAssets) may lag by a few blocks of unaccrued
+    ///      interest across the vault's markets. This is negligible for an actively-used vault
+    ///      and self-corrects on the next state-changing interaction.
     function accrueInterest() external {}
 
     // ==========================================
