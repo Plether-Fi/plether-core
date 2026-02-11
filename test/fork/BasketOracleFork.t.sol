@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import {MorphoAdapter} from "../../src/MorphoAdapter.sol";
 import {SyntheticSplitter} from "../../src/SyntheticSplitter.sol";
+import {VaultAdapter} from "../../src/VaultAdapter.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {OracleLib} from "../../src/libraries/OracleLib.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {ICurveCryptoFactory} from "./BaseForkTest.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 
@@ -51,15 +51,6 @@ contract MockSEKFeed is AggregatorV3Interface {
 
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (1, _price, _updatedAt, _updatedAt, 1);
-    }
-
-}
-
-/// @notice Mock Morpho oracle for yield market
-contract MockMorphoOracleForYieldBasket {
-
-    function price() external pure returns (uint256) {
-        return 3000e24;
     }
 
 }
@@ -114,9 +105,7 @@ contract BasketOracleForkTest is Test {
 
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant CURVE_CRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
-    address constant MORPHO = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
-    address constant ADAPTIVE_CURVE_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
-    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    IERC4626 constant STEAKHOUSE_USDC = IERC4626(0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB);
     uint256 constant FORK_BLOCK = 24_136_062;
 
     uint256 constant CAP = 2e8; // $2.00 cap (8 decimals)
@@ -136,7 +125,7 @@ contract BasketOracleForkTest is Test {
     address public curvePool;
 
     SyntheticSplitter public splitter;
-    MorphoAdapter public yieldAdapter;
+    VaultAdapter public yieldAdapter;
     address public bearToken;
     address public bullToken;
 
@@ -152,7 +141,11 @@ contract BasketOracleForkTest is Test {
         deal(USDC, address(this), 5_000_000e6);
 
         (, int256 eurPrice,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR_USD).latestRoundData();
-        vm.warp(updatedAt + 1 hours);
+        uint256 target = updatedAt + 1 hours;
+        if (target < block.timestamp) {
+            target = block.timestamp;
+        }
+        vm.warp(target);
 
         int256 sekPrice = 9_500_000;
         sekFeed = new MockSEKFeed(sekPrice);
@@ -440,21 +433,10 @@ contract BasketOracleForkTest is Test {
             return;
         }
 
-        address yieldOracle = address(new MockMorphoOracleForYieldBasket());
-        MarketParams memory yieldParams = MarketParams({
-            loanToken: USDC,
-            collateralToken: WETH,
-            oracle: yieldOracle,
-            irm: ADAPTIVE_CURVE_IRM,
-            lltv: 860_000_000_000_000_000
-        });
-
-        IMorpho(MORPHO).createMarket(yieldParams);
-
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
 
-        yieldAdapter = new MorphoAdapter(IERC20(USDC), MORPHO, yieldParams, address(this), predictedSplitter);
+        yieldAdapter = new VaultAdapter(IERC20(USDC), address(STEAKHOUSE_USDC), address(this), predictedSplitter);
         splitter =
             new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, address(this), address(0));
 
@@ -521,9 +503,7 @@ contract DeviationCheckForkTest is Test {
     address constant CL_EUR_USD = 0xb49f677943BC038e9857d61E7d053CaA2C1734C1;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant CURVE_CRYPTO_FACTORY = 0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F;
-    address constant MORPHO = 0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb;
-    address constant ADAPTIVE_CURVE_IRM = 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC;
-    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    IERC4626 constant STEAKHOUSE_USDC = IERC4626(0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB);
     uint256 constant FORK_BLOCK = 24_136_062;
 
     uint256 constant CURVE_A = 320_000;
@@ -542,7 +522,7 @@ contract DeviationCheckForkTest is Test {
 
     BasketOracle public basketOracle;
     SyntheticSplitter public splitter;
-    MorphoAdapter public yieldAdapter;
+    VaultAdapter public yieldAdapter;
     address public curvePool;
     address public bearToken;
 
@@ -559,7 +539,11 @@ contract DeviationCheckForkTest is Test {
         deal(USDC, address(this), 10_000_000e6);
 
         (, int256 eurPrice,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR_USD).latestRoundData();
-        vm.warp(updatedAt + 1 hours);
+        uint256 target = updatedAt + 1 hours;
+        if (target < block.timestamp) {
+            target = block.timestamp;
+        }
+        vm.warp(target);
 
         // Normalized formula: (price * quantity) / (basePrice * 1e10)
         // With quantity=1e18: result in 8 decimals = price / basePrice (normalized)
@@ -688,21 +672,10 @@ contract DeviationCheckForkTest is Test {
 
         basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, address(this));
 
-        address yieldOracle = address(new MockMorphoOracleForYieldBasket());
-        MarketParams memory yieldParams = MarketParams({
-            loanToken: USDC,
-            collateralToken: WETH,
-            oracle: yieldOracle,
-            irm: ADAPTIVE_CURVE_IRM,
-            lltv: 860_000_000_000_000_000
-        });
-
-        IMorpho(MORPHO).createMarket(yieldParams);
-
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);
 
-        yieldAdapter = new MorphoAdapter(IERC20(USDC), MORPHO, yieldParams, address(this), predictedSplitter);
+        yieldAdapter = new VaultAdapter(IERC20(USDC), address(STEAKHOUSE_USDC), address(this), predictedSplitter);
         splitter =
             new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, address(this), address(0));
 

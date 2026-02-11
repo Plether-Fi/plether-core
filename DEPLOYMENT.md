@@ -63,16 +63,17 @@ BasketOracle basketOracle = new BasketOracle(feeds, quantities, curvePool, maxDe
 - [ ] `latestRoundData()` returns valid price
 - [ ] Price within expected range ($0.90 - $1.40)
 
-### Step 2: Deploy MorphoAdapter
+### Step 2: Deploy VaultAdapter
 ```solidity
 // Predict Splitter address first
 address predictedSplitter = computeCreateAddress(deployer, nonce + 1);
-MorphoAdapter adapter = new MorphoAdapter(USDC, MORPHO_BLUE, marketParams, owner, predictedSplitter);
+VaultAdapter adapter = new VaultAdapter(USDC, STEAKHOUSE_USDC, owner, predictedSplitter);
 ```
 
 **Verification:**
 - [ ] `SPLITTER()` returns predicted address
 - [ ] `asset()` returns USDC address
+- [ ] `VAULT()` returns Morpho Vault vault address
 
 ### Step 3: Deploy SyntheticSplitter
 ```solidity
@@ -266,7 +267,7 @@ Update this section after deployment:
 | Contract | Address | Verified |
 |----------|---------|----------|
 | BasketOracle | `0x...` | [ ] |
-| MorphoAdapter | `0x...` | [ ] |
+| VaultAdapter | `0x...` | [ ] |
 | SyntheticSplitter | `0x...` | [ ] |
 | plDXY-BEAR | `0x...` | [ ] |
 | plDXY-BULL | `0x...` | [ ] |

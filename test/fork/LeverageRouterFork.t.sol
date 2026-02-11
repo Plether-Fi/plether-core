@@ -6,7 +6,7 @@ import {LeverageRouter} from "../../src/LeverageRouter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
 import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
-import {BaseForkTest, MockCurvePoolForOracle, MockMorphoOracleForYield} from "./BaseForkTest.sol";
+import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 

@@ -67,18 +67,23 @@ These properties must always hold. Violation indicates a critical bug.
 - **Mitigation**: `price_oracle()` deviation check (2% max) prevents price manipulation attacks
 - **Risk**: Curve pool manipulation could affect ZapRouter and LeverageRouter swap outcomes; user-provided slippage protects against this
 
-#### Morpho Blue
+#### Morpho Blue (Lending)
 - **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, liquidations, and flash loans
 - **Mitigation**: Router contracts validate authorization before operations; flash loan callbacks validate caller and initiator
 - **Risk (Bugs)**: Morpho protocol bugs could affect leveraged positions; users must monitor positions independently
-- **Risk (Liquidity)**: If Morpho market utilization is high (all supplied USDC is borrowed), adapter withdrawals revert. Burns exceeding the local buffer will fail until Morpho liquidity returns. The `ejectLiquidity()` emergency function is also affected—it cannot withdraw from an illiquid market. Users may be temporarily unable to redeem even if the protocol is solvent.
-- **Mitigation (Liquidity)**: Use `withdrawFromAdapter(amount)` for gradual liquidity extraction when the protocol is paused. This allows repeated partial withdrawals as Morpho liquidity becomes available, rather than requiring full withdrawal in a single transaction.
 - **Note**: Morpho Blue flash loans are fee-free, reducing leverage costs compared to other providers
+
+#### Morpho Vault (VaultAdapter)
+- **Assumption**: Morpho Vault vault correctly manages USDC deposits, yield accrual, and withdrawals
+- **Risk (Share Price)**: Morpho Vault share price could be manipulated via donation attacks, inflating or deflating the adapter's reported `totalAssets()`
+- **Risk (Liquidity)**: If Morpho Vault vault liquidity is constrained (all supplied USDC is lent out), adapter withdrawals revert. Burns exceeding the local buffer will fail until vault liquidity returns. The `ejectLiquidity()` emergency function is also affected. Users may be temporarily unable to redeem even if the protocol is solvent.
+- **Mitigation (Liquidity)**: Use `withdrawFromAdapter(amount)` for gradual liquidity extraction when the protocol is paused. This allows repeated partial withdrawals as vault liquidity becomes available.
+- **Risk (Rounding)**: Nested ERC4626 (VaultAdapter wrapping Morpho Vault) introduces double rounding on deposits and withdrawals, potentially losing a few wei per operation
 
 #### USDC (Circle)
 - **Assumption**: USDC maintains its $1 peg and operates as a standard ERC-20 token
 - **Risk (Depeg)**: If USDC depegs significantly, the protocol's collateral value diverges from its nominal value. Users holding plDXY tokens would receive fewer real dollars than expected on redemption.
-- **Risk (Blacklisting)**: Circle can blacklist addresses, freezing their USDC balances. If the SyntheticSplitter, MorphoAdapter, or Morpho market contracts are blacklisted, the protocol cannot process redemptions or yield withdrawals.
+- **Risk (Blacklisting)**: Circle can blacklist addresses, freezing their USDC balances. If the SyntheticSplitter, VaultAdapter, or Morpho Vault vault contracts are blacklisted, the protocol cannot process redemptions or yield withdrawals.
 - **Risk (Upgradeability)**: USDC is an upgradeable proxy contract. Circle could modify transfer logic, add fees, or change behavior in ways that break protocol assumptions.
 - **Risk (Regulatory)**: Circle operates under US regulatory oversight. Regulatory action could affect USDC availability or require compliance changes that impact the protocol.
 - **Mitigation**: None. These are fundamental risks of using USDC as collateral. Users should understand that the protocol inherits all USDC counterparty risks.
@@ -202,8 +207,8 @@ If migration fails the loss check, it reverts with `Splitter__MigrationLostFunds
 
 - **Local Buffer**: 10% of deposited USDC kept in Splitter for immediate redemptions
 - **Adapter Deployment**: 90% deployed to yield adapter
-- **Risk**: Burns exceeding the local buffer require adapter withdrawal. If Morpho market is illiquid, burns revert with `Splitter__AdapterWithdrawFailed`
-- **Mitigation**: 10% buffer absorbs normal withdrawal patterns; Morpho interest rates incentivize repayments when utilization is high
+- **Risk**: Burns exceeding the local buffer require adapter withdrawal. If Morpho Vault vault liquidity is constrained, burns revert with `Splitter__AdapterWithdrawFailed`
+- **Mitigation**: 10% buffer absorbs normal withdrawal patterns; Morpho Vault vault liquidity is typically deep
 - **Note**: Buffer ratio is enforced at mint time only; no automatic rebalancing occurs
 
 ### Protocol Fees
@@ -234,18 +239,16 @@ When `harvestYield()` is called, surplus yield is distributed:
 
 #### Morpho Token Rewards
 
-Morpho may distribute token rewards (e.g., MORPHO) to suppliers via their Universal Rewards Distributor (URD). These are separate from lending yield:
+Morpho may distribute token rewards (e.g., MORPHO) to vault depositors via their Universal Rewards Distributor (URD). With VaultAdapter, reward claiming is handled by the Morpho vault curator, not by the protocol:
 
 | Aspect | Details |
 |--------|---------|
-| Distribution | Merkle-based claims requiring off-chain proofs |
-| Claiming | Protocol owner calls `claimRewards()` on MorphoAdapter |
-| Recipient | Protocol owner specifies destination address |
-| Frequency | Dependent on Morpho's reward campaigns |
+| Distribution | Merkle-based claims managed by the vault curator |
+| Claiming | Vault curator claims on behalf of the vault; rewards accrue to vault share price |
+| Impact | Increases VaultAdapter's `totalAssets()`, harvested as yield by `harvestYield()` |
 
-- Rewards are **not** automatically distributed to stakers
-- Protocol owner (same admin role as SyntheticSplitter) has full discretion over reward token destination
-- Requires `setUrd()` to configure the URD contract address before claiming
+- Protocol does not claim Morpho rewards directly — the Morpho vault handles this internally
+- Reward timing depends on the vault curator's claim schedule
 
 ### Flash Mint Capability
 
@@ -447,7 +450,7 @@ If tokens are accidentally sent to contracts:
 
 Contracts supporting `rescueToken`:
 - **SyntheticSplitter**: Rescues any token except USDC, plDXY-BEAR, plDXY-BULL
-- **MorphoAdapter**: Rescues any token except USDC (the underlying asset)
+- **VaultAdapter**: Rescues any token except USDC (the underlying asset) and vault shares
 
 ### Adapter Migration (Emergency)
 
@@ -462,10 +465,10 @@ If yield adapter is compromised:
 
 ### Adapter Migration (Tight Liquidity)
 
-If adapter withdrawal fails due to high Morpho utilization:
+If adapter withdrawal fails due to constrained Morpho Vault vault liquidity:
 1. Pause the Splitter via `pause()`
 2. Call `withdrawFromAdapter(amount)` to extract available liquidity
-3. Repeat step 2 as liquidity frees up (borrowers repay or get liquidated)
+3. Repeat step 2 as vault liquidity frees up (borrowers repay or get liquidated)
 4. Once adapter is fully drained, propose new adapter via `proposeAdapter(newAdapter)`
 5. Wait 7-day timelock
 6. Execute migration via `finalizeAdapter()` (skips redemption if adapter has 0 shares)
@@ -490,6 +493,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-11 | Replaced MorphoAdapter with VaultAdapter (Morpho Vault) for yield; updated trust assumptions, rescue docs, and liquidity risk sections |
 | 2026-02-08 | PythAdapter: Updated staleness from 24h to 72h for weekend forex closures; documented self-attestation model and staleness tradeoff |
 | 2026-02-07 | Added Token Approval Model section under Router Architecture: documents stateless router approval pattern and user authorization model |
 | 2026-02-06 | StakedToken: Replaced permissionless donateYield acknowledgement with proportional stream extension fix; removed stale withdrawal delay references |

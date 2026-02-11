@@ -93,7 +93,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 ### Yield Adapters (ERC4626)
 
-**MorphoAdapter** - Morpho Blue wrapper for production yield
+**VaultAdapter** - ERC4626 wrapper for Morpho Vault vault yield
 **MockYieldAdapter** - Testnet mock (no yield, used in tests)
 
 ## Key Patterns
@@ -108,7 +108,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 - `SyntheticSplitter*.t.sol` - Core protocol tests (unit, concurrent, fuzzy, invariant, preview)
 - `ZapRouter.t.sol` / `LeverageRouter.t.sol` / `BullLeverageRouter.t.sol` - Router tests with MEV protection scenarios
-- `MorphoAdapter.t.sol` - Adapter tests for Morpho Blue integration
+- `VaultAdapterFork.t.sol` - VaultAdapter integration tests against real Morpho Vault vault
 - Mock contracts in `test/` files (MockToken, MockFlashLender, MockMorpho, MockSplitter, etc.)
 
 **Test Guidelines**:
@@ -124,7 +124,8 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 
 - **Chainlink**: AggregatorV3Interface for price feeds
 - **Curve**: ICurvePool for USDC/plDXY-BEAR swaps (indices: USDC=0, plDXY-BEAR=1)
-- **Morpho Blue**: IMorpho for lending with staked tokens (splDXY-BEAR, splDXY-BULL) as collateral, and yield via MorphoAdapter
+- **Morpho Blue**: IMorpho for lending with staked tokens (splDXY-BEAR, splDXY-BULL) as collateral
+- **Morpho Vault**: Yield generation on idle USDC reserves via VaultAdapter
 
 ## Diagram Guidelines
 

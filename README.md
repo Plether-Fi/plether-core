@@ -82,7 +82,7 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 | Contract | Description |
 |----------|-------------|
-| [`MorphoAdapter`](src/MorphoAdapter.sol) | ERC-4626 wrapper for Morpho Blue yield generation |
+| [`VaultAdapter`](src/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield |
 
 
 ## Ecosystem Integrations
@@ -94,7 +94,7 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 - **Chainlink** - Price feeds for EUR/USD, JPY/USD, GBP/USD, CAD/USD, CHF/USD
 - **Pyth Network** - Price feed for SEK/USD (via PythAdapter)
 - **Curve Finance** - AMM pools for USDC/plDXY-BEAR swaps
-- **Morpho Blue** - Yield generation on idle USDC reserves via MorphoAdapter
+- **Morpho Vault** - Yield generation on idle USDC reserves via VaultAdapter
 
 ### Bear Leverage
 
@@ -303,7 +303,7 @@ forge doc --build       # Build static site to ./docs/book
 - Oracle staleness checks (8–24 hour timeouts depending on context)
 - Oracle bound validation against Curve EMA to prevent price manipulation
 - Flash loan callback validation (initiator + lender checks)
-- Yield adapter uses Morpho's internal accounting (immune to donation attacks)
+- Yield adapter uses Morpho Vault vault accounting for yield generation
 
 For detailed security assumptions, trust model, and emergency procedures, see [SECURITY.md](SECURITY.md).
 

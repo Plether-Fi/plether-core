@@ -3,9 +3,9 @@ pragma solidity 0.8.33;
 
 import {BullLeverageRouter} from "../../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../../src/LeverageRouter.sol";
-import {MorphoAdapter} from "../../src/MorphoAdapter.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
 import {SyntheticSplitter} from "../../src/SyntheticSplitter.sol";
+import {VaultAdapter} from "../../src/VaultAdapter.sol";
 import {ZapRouter} from "../../src/ZapRouter.sol";
 import {LeverageRouterBase} from "../../src/base/LeverageRouterBase.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
@@ -14,6 +14,7 @@ import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../../src/oracles/MorphoOracle.sol";
 import {StakedOracle} from "../../src/oracles/StakedOracle.sol";
 import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 
@@ -75,8 +76,11 @@ abstract contract BaseForkTest is Test {
     uint256 constant LLTV_86 = 860_000_000_000_000_000; // 86%
     uint256 constant LLTV_945 = 945_000_000_000_000_000; // 94.5%
 
-    // WETH for yield market collateral (dummy collateral for USDC lending market)
+    // WETH for leverage market collateral
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
+    // Morpho vault for yield
+    IERC4626 constant STEAKHOUSE_USDC = IERC4626(0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB);
 
     // ==========================================
     // CURVE POOL PARAMETERS
@@ -102,8 +106,7 @@ abstract contract BaseForkTest is Test {
     // ==========================================
     SyntheticSplitter public splitter;
     BasketOracle public basketOracle;
-    MorphoAdapter public yieldAdapter;
-    MarketParams public yieldMarketParams;
+    VaultAdapter public yieldAdapter;
 
     address public curvePool;
     address public bullToken;
@@ -125,16 +128,17 @@ abstract contract BaseForkTest is Test {
         }
     }
 
-    /// @notice Fetch real oracle price and warp to valid timestamp
+    /// @notice Fetch real oracle price and warp to valid timestamp (never backward)
     function _fetchPriceAndWarp() internal {
         (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
-        // Normalized formula: (price * quantity) / (basePrice * 1e10)
-        // With quantity=1e18: result in 8 decimals = price / basePrice (normalized)
         uint256 normalizedPrice8 = (uint256(price) * 1e18) / (BASE_EUR * 1e10);
         realOraclePrice = normalizedPrice8 * 1e10;
-        // BEAR tracks basket directly (not CAP - basket)
         bearPrice = realOraclePrice;
-        vm.warp(updatedAt + 1 hours);
+        uint256 target = updatedAt + 1 hours;
+        if (target < block.timestamp) {
+            target = block.timestamp;
+        }
+        vm.warp(target);
     }
 
     /// @notice Deploy core protocol (adapter, oracle, splitter)
@@ -149,27 +153,14 @@ abstract contract BaseForkTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        // Mock Pool for Oracle Init (BEAR price = basket)
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
         basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, address(this));
         basketOracle.setCurvePool(tempCurvePool);
 
-        // Create a Morpho yield market for the adapter (USDC lending market)
-        // Use a simple mock oracle for the yield market (not critical since we're just supplying)
-        address yieldMarketOracle = address(new MockMorphoOracleForYield());
-
-        yieldMarketParams = MarketParams({
-            loanToken: USDC, collateralToken: WETH, oracle: yieldMarketOracle, irm: ADAPTIVE_CURVE_IRM, lltv: LLTV_86
-        });
-
-        // Create the yield market on Morpho
-        IMorpho(MORPHO).createMarket(yieldMarketParams);
-
-        // Predict splitter address (deployed after yieldAdapter)
         uint64 currentNonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), currentNonce + 1);
 
-        yieldAdapter = new MorphoAdapter(IERC20(USDC), MORPHO, yieldMarketParams, address(this), predictedSplitter);
+        yieldAdapter = new VaultAdapter(IERC20(USDC), address(STEAKHOUSE_USDC), address(this), predictedSplitter);
 
         splitter = new SyntheticSplitter(address(basketOracle), USDC, address(yieldAdapter), 2e8, treasury, address(0));
         require(address(splitter) == predictedSplitter, "Splitter address mismatch");
@@ -252,20 +243,6 @@ abstract contract BaseForkTest is Test {
 // ============================================================
 // MOCK CONTRACTS FOR FORK TEST
 // ============================================================
-
-/// @notice Mock Morpho oracle for yield market (returns ETH/USDC price in 36 decimals)
-/// @dev Morpho oracles return price as: collateralToken/loanToken * 1e36
-///      For WETH/USDC at ~$3000 ETH: 3000 * 1e6 * 1e36 / 1e18 = 3000e24
-contract MockMorphoOracleForYield {
-
-    function price() external pure returns (uint256) {
-        // ETH price ~$3000 in terms of USDC (6 decimals)
-        // Morpho expects: collateralPrice * 10^(36 + loanDecimals - collateralDecimals)
-        // = 3000 * 10^(36 + 6 - 18) = 3000 * 10^24 = 3e27
-        return 3000e24;
-    }
-
-}
 
 contract MockCurvePoolForOracle {
 

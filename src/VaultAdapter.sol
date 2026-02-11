@@ -11,13 +11,13 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 
 /// @title VaultAdapter
 /// @custom:security-contact contact@plether.com
-/// @notice ERC4626-compliant wrapper that deposits into a MetaMorpho vault for yield.
+/// @notice ERC4626-compliant wrapper that deposits into a Morpho vault for yield.
 /// @dev Interchangeable with other yield adapters. Only accepts deposits from SyntheticSplitter.
 contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
 
     using SafeERC20 for IERC20;
 
-    /// @notice MetaMorpho vault (ERC4626) that generates yield.
+    /// @notice Morpho vault (ERC4626) that generates yield.
     IERC4626 public immutable VAULT;
 
     /// @notice SyntheticSplitter authorized to deposit.
@@ -38,9 +38,9 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     /// @notice Thrown when attempting to rescue vault share tokens.
     error VaultAdapter__CannotRescueVaultShares();
 
-    /// @notice Deploys adapter targeting a MetaMorpho vault.
+    /// @notice Deploys adapter targeting a Morpho vault.
     /// @param _asset Underlying asset (USDC).
-    /// @param _vault MetaMorpho vault address (must have same underlying asset).
+    /// @param _vault Morpho vault address (must have same underlying asset).
     /// @param _owner Admin address for rescue operations.
     /// @param _splitter SyntheticSplitter authorized to deposit.
     constructor(
@@ -69,9 +69,9 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     // ERC-4626 OVERRIDES
     // ==========================================
 
-    /// @notice Maximum USDC withdrawable, capped by MetaMorpho's available liquidity.
+    /// @notice Maximum USDC withdrawable, capped by Morpho vault's available liquidity.
     /// @param owner Owner of adapter shares.
-    /// @return Minimum of the owner's position value and what MetaMorpho can actually service.
+    /// @return Minimum of the owner's position value and what Morpho vault can actually service.
     function maxWithdraw(
         address owner
     ) public view override returns (uint256) {
@@ -80,9 +80,9 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
         return ownerAssets < vaultMax ? ownerAssets : vaultMax;
     }
 
-    /// @notice Maximum adapter shares redeemable, capped by MetaMorpho's available liquidity.
+    /// @notice Maximum adapter shares redeemable, capped by Morpho vault's available liquidity.
     /// @param owner Owner of adapter shares.
-    /// @return Minimum of the owner's share balance and what MetaMorpho liquidity supports.
+    /// @return Minimum of the owner's share balance and what Morpho vault liquidity supports.
     function maxRedeem(
         address owner
     ) public view override returns (uint256) {
@@ -93,7 +93,7 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     }
 
     /// @notice Returns total USDC value of this adapter's vault position.
-    /// @return Total assets held in the MetaMorpho vault, converted from vault shares.
+    /// @return Total assets held in the Morpho vault, converted from vault shares.
     function totalAssets() public view override returns (uint256) {
         uint256 shares = VAULT.balanceOf(address(this));
         if (shares == 0) {
@@ -102,7 +102,7 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
         return VAULT.convertToAssets(shares);
     }
 
-    /// @dev Deposits assets to MetaMorpho vault after ERC4626 share minting.
+    /// @dev Deposits assets to Morpho vault after ERC4626 share minting.
     /// @param caller Must be SPLITTER.
     /// @param receiver Receiver of adapter shares.
     /// @param assets Amount of USDC to deposit.
@@ -122,7 +122,7 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
         VAULT.deposit(assets, address(this));
     }
 
-    /// @dev Withdraws assets from MetaMorpho vault before ERC4626 share burning.
+    /// @dev Withdraws assets from Morpho vault before ERC4626 share burning.
     /// @param caller Caller requesting withdrawal.
     /// @param receiver Receiver of withdrawn USDC.
     /// @param owner Owner of adapter shares being burned.
@@ -144,7 +144,7 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     // YIELD ADAPTER INTERFACE
     // ==========================================
 
-    /// @notice No-op — MetaMorpho accrues interest on underlying markets during deposit/withdraw.
+    /// @notice No-op — Morpho vault accrues interest on underlying markets during deposit/withdraw.
     /// @dev View functions (totalAssets, convertToAssets) may lag by a few blocks of unaccrued
     ///      interest across the vault's markets. This is negligible for an actively-used vault
     ///      and self-corrects on the next state-changing interaction.

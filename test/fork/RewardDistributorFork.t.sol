@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {RewardDistributor} from "../../src/RewardDistributor.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
 import {ZapRouter} from "../../src/ZapRouter.sol";
+import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {IRewardDistributor} from "../../src/interfaces/IRewardDistributor.sol";
 import {OracleLib} from "../../src/libraries/OracleLib.sol";
 import {BaseForkTest, ICurvePoolExtended, MockCurvePoolForOracle} from "./BaseForkTest.sol";
@@ -399,11 +400,15 @@ contract RewardDistributorForkTest is BaseForkTest {
     }
 
     /// @notice Distribution succeeds within 24-hour timeout window
-    /// @dev setUp warps to updatedAt + 1 hour, so we have 23 hours remaining
+    /// @dev Forward-warp preserves block.timestamp, so remaining headroom
+    ///      depends on how stale the feed already was at the fork block.
     function test_OracleTimeout_SucceedsWithinWindow() public {
         deal(USDC, address(distributor), 10_000e6);
 
-        vm.warp(block.timestamp + 22 hours);
+        (,,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+        uint256 deadline = updatedAt + 24 hours;
+        uint256 safeWarp = deadline - block.timestamp - 2 hours;
+        vm.warp(block.timestamp + safeWarp);
 
         vm.prank(keeper);
         uint256 callerReward = distributor.distributeRewards();
@@ -411,11 +416,12 @@ contract RewardDistributorForkTest is BaseForkTest {
     }
 
     /// @notice Distribution fails after 24-hour timeout
-    /// @dev OracleLib uses `<` so we need to exceed timeout by at least 1 second
     function test_OracleTimeout_FailsAfterTimeout() public {
         deal(USDC, address(distributor), 10_000e6);
 
-        vm.warp(block.timestamp + 23 hours + 1);
+        (,,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+        uint256 deadline = updatedAt + 24 hours;
+        vm.warp(deadline + 1);
 
         vm.prank(keeper);
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);

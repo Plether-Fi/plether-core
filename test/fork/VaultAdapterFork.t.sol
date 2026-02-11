@@ -10,7 +10,7 @@ import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IMetaMorphoV1 {
+interface IMorphoVaultV1 {
 
     function withdrawQueueLength() external view returns (uint256);
     function withdrawQueue(
@@ -20,8 +20,6 @@ interface IMetaMorphoV1 {
 }
 
 contract VaultAdapterForkTest is BaseForkTest {
-
-    IERC4626 constant STEAKHOUSE_USDC = IERC4626(0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB);
 
     VaultAdapter public vaultAdapter;
     address treasury;
@@ -36,7 +34,7 @@ contract VaultAdapterForkTest is BaseForkTest {
         _deployWithVaultAdapter(treasury);
     }
 
-    /// @dev Like _fetchPriceAndWarp but never warps backward — MetaMorpho's
+    /// @dev Like _fetchPriceAndWarp but never warps backward — Morpho vault's
     ///      interest accrual underflows if block.timestamp < its lastUpdate.
     function _fetchPriceAndWarpForward() internal {
         (, int256 price,, uint256 updatedAt,) = AggregatorV3Interface(CL_EUR).latestRoundData();
@@ -86,7 +84,7 @@ contract VaultAdapterForkTest is BaseForkTest {
         vm.stopPrank();
 
         uint256 vaultShares = STEAKHOUSE_USDC.balanceOf(address(vaultAdapter));
-        assertGt(vaultShares, 0, "Adapter should hold MetaMorpho shares");
+        assertGt(vaultShares, 0, "Adapter should hold Morpho vault shares");
 
         uint256 adapterUsdcDust = IERC20(USDC).balanceOf(address(vaultAdapter));
         assertEq(adapterUsdcDust, 0, "Adapter should not hold USDC dust");
@@ -99,7 +97,7 @@ contract VaultAdapterForkTest is BaseForkTest {
         assertApproxEqRel(adapterAssets, expectedAdapterDeposit, 0.01e18, "totalAssets within 1% of expected");
         assertApproxEqRel(splitterAdapterValue, expectedAdapterDeposit, 0.01e18, "splitter value within 1%");
 
-        // Nested ERC4626 (VaultAdapter → MetaMorpho) loses a few wei to double
+        // Nested ERC4626 (VaultAdapter → Morpho vault) loses a few wei to double
         // rounding. Seed the splitter with dust so burn doesn't revert on the
         // micro-deficit. This mirrors production where ongoing mints keep the
         // buffer topped up.
@@ -131,7 +129,7 @@ contract VaultAdapterForkTest is BaseForkTest {
         vm.warp(block.timestamp + 30 days);
 
         uint256 assetsAfter = vaultAdapter.totalAssets();
-        assertGt(assetsAfter, initialAssets, "MetaMorpho should accrue yield over 30 days");
+        assertGt(assetsAfter, initialAssets, "Morpho vault should accrue yield over 30 days");
 
         uint256 treasuryBefore = IERC20(USDC).balanceOf(treasury);
         splitter.harvestYield();
@@ -209,9 +207,9 @@ contract VaultAdapterForkTest is BaseForkTest {
     }
 
     /// @dev Borrows all available USDC from every Morpho market in the
-    ///      MetaMorpho vault's withdraw queue, forcing 100% utilization.
+    ///      Morpho vault's withdraw queue, forcing 100% utilization.
     function _drainVaultLiquidity() internal {
-        IMetaMorphoV1 mmVault = IMetaMorphoV1(address(STEAKHOUSE_USDC));
+        IMorphoVaultV1 mmVault = IMorphoVaultV1(address(STEAKHOUSE_USDC));
         uint256 queueLen = mmVault.withdrawQueueLength();
         address drainer = makeAddr("drainer");
 
@@ -246,38 +244,6 @@ contract VaultAdapterForkTest is BaseForkTest {
             IMorpho(MORPHO).borrow(params, available, 0, drainer, drainer);
             vm.stopPrank();
         }
-    }
-
-    function test_Migration_MorphoToVault() public {
-        uint256 snapshot = vm.snapshotState();
-
-        address migrationTreasury = makeAddr("migrationTreasury");
-        _deployProtocol(migrationTreasury);
-
-        uint256 mintAmount = 20_000e18;
-        (uint256 usdcRequired,,) = splitter.previewMint(mintAmount);
-        IERC20(USDC).approve(address(splitter), usdcRequired);
-        splitter.mint(mintAmount);
-
-        uint256 assetsBefore = yieldAdapter.totalAssets() + IERC20(USDC).balanceOf(address(splitter));
-
-        VaultAdapter newVaultAdapter =
-            new VaultAdapter(IERC20(USDC), address(STEAKHOUSE_USDC), address(this), address(splitter));
-
-        splitter.proposeAdapter(address(newVaultAdapter));
-
-        vm.warp(block.timestamp + 7 days + 1);
-
-        splitter.finalizeAdapter();
-
-        assertEq(address(splitter.yieldAdapter()), address(newVaultAdapter), "Adapter should be VaultAdapter");
-
-        uint256 assetsAfter = newVaultAdapter.convertToAssets(newVaultAdapter.balanceOf(address(splitter)))
-            + IERC20(USDC).balanceOf(address(splitter));
-
-        assertApproxEqRel(assetsAfter, assetsBefore, 0.00001e18, "Migration should preserve assets within 0.001%");
-
-        vm.revertToState(snapshot);
     }
 
     function test_LargeDeposit_RealVault() public {
@@ -320,8 +286,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         uint256 initialAdapterAssets = vaultAdapter.totalAssets();
         assertGt(initialAdapterAssets, 0, "Should have assets after deposit");
 
-        // Whale donates 1M USDC to MetaMorpho by supplying to the idle Morpho
-        // market on behalf of the vault. This inflates MetaMorpho's share price
+        // Whale donates 1M USDC to Morpho vault by supplying to the idle Morpho
+        // market on behalf of the vault. This inflates Morpho vault's share price
         // without minting new vault shares — classic ERC4626 inflation vector.
         _donateToVault(1_000_000e6);
 
@@ -334,12 +300,12 @@ contract VaultAdapterForkTest is BaseForkTest {
         assertGt(treasuryGain, 0, "Treasury should receive donation windfall");
     }
 
-    /// @dev Supplies USDC to the idle Morpho market on behalf of MetaMorpho,
+    /// @dev Supplies USDC to the idle Morpho market on behalf of Morpho vault,
     ///      inflating the vault's share price for existing shareholders.
     function _donateToVault(
         uint256 amount
     ) internal {
-        IMetaMorphoV1 mmVault = IMetaMorphoV1(address(STEAKHOUSE_USDC));
+        IMorphoVaultV1 mmVault = IMorphoVaultV1(address(STEAKHOUSE_USDC));
         uint256 queueLen = mmVault.withdrawQueueLength();
 
         MarketParams memory idleParams;
