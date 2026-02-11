@@ -276,4 +276,68 @@ contract VaultAdapterTest is Test {
         assertEq(adapter.maxWithdraw(hacker), 0);
     }
 
+    // ==========================================
+    // 8. Claim Rewards
+    // ==========================================
+
+    function test_ClaimRewards_OnlyOwner() public {
+        vm.prank(hacker);
+        vm.expectRevert();
+        adapter.claimRewards(address(0xDEAD), "");
+    }
+
+    function test_ClaimRewards_BlocksForbiddenTargets() public {
+        vm.startPrank(owner);
+
+        vm.expectRevert(VaultAdapter.VaultAdapter__ForbiddenTarget.selector);
+        adapter.claimRewards(address(usdc), "");
+
+        vm.expectRevert(VaultAdapter.VaultAdapter__ForbiddenTarget.selector);
+        adapter.claimRewards(address(vault), "");
+
+        vm.expectRevert(VaultAdapter.VaultAdapter__ForbiddenTarget.selector);
+        adapter.claimRewards(address(adapter), "");
+
+        vm.stopPrank();
+    }
+
+    function test_ClaimRewards_SucceedsForExternalTarget() public {
+        MockDistributor distributor = new MockDistributor();
+        MockERC20 rewardToken = new MockERC20("Reward", "RWD");
+        rewardToken.mint(address(distributor), 100 ether);
+
+        bytes memory data = abi.encodeCall(MockDistributor.claim, (address(adapter), address(rewardToken), 100 ether));
+
+        vm.prank(owner);
+        adapter.claimRewards(address(distributor), data);
+
+        assertEq(rewardToken.balanceOf(address(adapter)), 100 ether);
+    }
+
+    function test_ClaimRewards_RevertsOnFailedCall() public {
+        MockDistributor distributor = new MockDistributor();
+
+        bytes memory data = abi.encodeCall(MockDistributor.failingClaim, ());
+
+        vm.prank(owner);
+        vm.expectRevert(VaultAdapter.VaultAdapter__CallFailed.selector);
+        adapter.claimRewards(address(distributor), data);
+    }
+
+}
+
+contract MockDistributor {
+
+    function claim(
+        address to,
+        address token,
+        uint256 amount
+    ) external {
+        IERC20(token).transfer(to, amount);
+    }
+
+    function failingClaim() external pure {
+        revert("claim failed");
+    }
+
 }

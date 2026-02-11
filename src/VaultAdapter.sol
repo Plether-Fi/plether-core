@@ -38,6 +38,12 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     /// @notice Thrown when attempting to rescue vault share tokens.
     error VaultAdapter__CannotRescueVaultShares();
 
+    /// @notice Thrown when a reward claim call fails.
+    error VaultAdapter__CallFailed();
+
+    /// @notice Thrown when claimRewards targets a forbidden address.
+    error VaultAdapter__ForbiddenTarget();
+
     /// @notice Deploys adapter targeting a Morpho vault.
     /// @param _asset Underlying asset (USDC).
     /// @param _vault Morpho vault address (must have same underlying asset).
@@ -168,6 +174,23 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
             revert VaultAdapter__CannotRescueVaultShares();
         }
         IERC20(token).safeTransfer(to, IERC20(token).balanceOf(address(this)));
+    }
+
+    /// @notice Claims rewards from an external distributor (Merkl, URD, etc.).
+    /// @dev Reward tokens land in this contract; use rescueToken() to extract them.
+    /// @param target Distributor contract to call.
+    /// @param data ABI-encoded call data for the claim function.
+    function claimRewards(
+        address target,
+        bytes calldata data
+    ) external onlyOwner {
+        if (target == asset() || target == address(VAULT) || target == address(this)) {
+            revert VaultAdapter__ForbiddenTarget();
+        }
+        (bool success,) = target.call(data);
+        if (!success) {
+            revert VaultAdapter__CallFailed();
+        }
     }
 
 }
