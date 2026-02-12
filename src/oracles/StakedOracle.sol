@@ -24,8 +24,8 @@ contract StakedOracle is IOracle {
     /// @notice Oracle for the underlying plDXY token.
     IOracle public immutable UNDERLYING_ORACLE;
 
-    /// @notice Decimal multiplier for the underlying asset.
-    uint256 public immutable UNDERLYING_DECIMALS;
+    /// @notice Decimal multiplier for vault shares (accounts for ERC4626 decimal offset).
+    uint256 public immutable SHARE_DECIMALS;
 
     /// @notice Thrown when underlying oracle returns zero price.
     error StakedOracle__InvalidPrice();
@@ -48,7 +48,7 @@ contract StakedOracle is IOracle {
         }
         VAULT = IERC4626(_vault);
         UNDERLYING_ORACLE = IOracle(_underlyingOracle);
-        UNDERLYING_DECIMALS = 10 ** IERC20Metadata(VAULT.asset()).decimals();
+        SHARE_DECIMALS = 10 ** IERC20Metadata(address(_vault)).decimals();
     }
 
     /// @notice Returns price of 1 vault share including accrued yield.
@@ -62,7 +62,7 @@ contract StakedOracle is IOracle {
         uint256 oneShare = 10 ** IERC20Metadata(address(VAULT)).decimals();
         uint256 assetsPerShare = VAULT.convertToAssets(oneShare);
 
-        return (rawPrice * assetsPerShare) / UNDERLYING_DECIMALS;
+        return (rawPrice * assetsPerShare) / SHARE_DECIMALS;
     }
 
 }

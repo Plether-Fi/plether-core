@@ -66,7 +66,7 @@ contract StakedOracleTest is Test {
     function test_Constructor_SetsImmutables() public view {
         assertEq(address(stakedOracle.VAULT()), address(vault));
         assertEq(address(stakedOracle.UNDERLYING_ORACLE()), address(underlyingOracle));
-        assertEq(stakedOracle.UNDERLYING_DECIMALS(), 1e18); // 18 decimal token
+        assertEq(stakedOracle.SHARE_DECIMALS(), 10 ** vault.decimals());
     }
 
     function test_Constructor_HandlesNonStandardDecimals() public {
@@ -75,21 +75,22 @@ contract StakedOracleTest is Test {
         StakedToken usdcVault = new StakedToken(IERC20(address(usdc)), "Staked USDC", "stUSDC");
         StakedOracle usdcOracle = new StakedOracle(address(usdcVault), address(underlyingOracle));
 
-        assertEq(usdcOracle.UNDERLYING_DECIMALS(), 1e6);
+        assertEq(usdcOracle.SHARE_DECIMALS(), 10 ** usdcVault.decimals());
     }
 
     // ==========================================
     // Price Calculation Tests
     // ==========================================
 
-    function test_Price_ReturnsUnderlyingPriceWhenNoYield() public {
-        // When vault has no deposits, exchange rate is 1:1
-        // Price should equal underlying oracle price
+    function test_Price_ReturnsCorrectPriceWhenNoYield() public {
+        // With 1:1 exchange rate, staked price adjusts for vault decimal offset
+        // Vault has 21 decimals (18 + 3 offset), so price is scaled down by 1e3
         uint256 price = stakedOracle.price();
 
-        // With no deposits, convertToAssets(1e18) returns 1e18 (1:1 ratio)
-        // So price = BASE_PRICE * 1e18 / 1e18 = BASE_PRICE
-        assertEq(price, BASE_PRICE);
+        uint256 oneShare = 10 ** vault.decimals();
+        uint256 assetsPerShare = vault.convertToAssets(oneShare);
+        uint256 expected = BASE_PRICE * assetsPerShare / oneShare;
+        assertEq(price, expected);
     }
 
     function test_Price_IncreasesWithYield() public {
@@ -119,22 +120,20 @@ contract StakedOracleTest is Test {
     }
 
     function test_Price_ScalesWithUnderlyingPrice() public {
-        // Test that staked price scales proportionally with underlying price
+        uint256 baseStakedPrice = stakedOracle.price();
 
         // Set underlying price to 2x
         underlyingOracle.setPrice(2 * BASE_PRICE);
-
-        uint256 price = stakedOracle.price();
-        assertEq(price, 2 * BASE_PRICE);
+        assertEq(stakedOracle.price(), 2 * baseStakedPrice);
 
         // Set underlying price to 0.5x
         underlyingOracle.setPrice(BASE_PRICE / 2);
-
-        price = stakedOracle.price();
-        assertEq(price, BASE_PRICE / 2);
+        assertEq(stakedOracle.price(), baseStakedPrice / 2);
     }
 
     function test_Price_CombinesYieldAndPriceChange() public {
+        uint256 baseStakedPrice = stakedOracle.price();
+
         // 1. Alice deposits
         vm.startPrank(alice);
         underlyingToken.approve(address(vault), 100 ether);
@@ -152,11 +151,11 @@ contract StakedOracleTest is Test {
         // 4. Underlying price increases 50%
         underlyingOracle.setPrice((BASE_PRICE * 150) / 100);
 
-        // Expected: 1.5 * 1.2 = 1.8x original price
+        // Expected: 1.5 (price) * 1.2 (yield) = 1.8x base staked price
         uint256 price = stakedOracle.price();
-        uint256 expectedPrice = (BASE_PRICE * 180) / 100;
+        uint256 expectedPrice = (baseStakedPrice * 180) / 100;
 
-        assertApproxEqRel(price, expectedPrice, 0.01e18); // within 1%
+        assertApproxEqRel(price, expectedPrice, 0.01e18);
     }
 
     // ==========================================
@@ -202,7 +201,8 @@ contract StakedOracleTest is Test {
     // ==========================================
 
     function test_Price_WorksWithLargeAmounts() public {
-        // Deposit large amount
+        uint256 priceEmpty = stakedOracle.price();
+
         underlyingToken.mint(alice, 1_000_000_000 ether);
 
         vm.startPrank(alice);
@@ -210,18 +210,18 @@ contract StakedOracleTest is Test {
         vault.deposit(1_000_000_000 ether, alice);
         vm.stopPrank();
 
-        uint256 price = stakedOracle.price();
-        assertEq(price, BASE_PRICE, "Price should equal base (1:1 exchange rate, no yield)");
+        assertEq(stakedOracle.price(), priceEmpty, "Price unchanged (1:1 exchange rate, no yield)");
     }
 
     function test_Price_WorksWithSmallAmounts() public {
+        uint256 priceEmpty = stakedOracle.price();
+
         vm.startPrank(alice);
         underlyingToken.approve(address(vault), 1);
         vault.deposit(1, alice);
         vm.stopPrank();
 
-        uint256 price = stakedOracle.price();
-        assertEq(price, BASE_PRICE, "Price should equal base (1:1 exchange rate, no yield)");
+        assertEq(stakedOracle.price(), priceEmpty, "Price unchanged (1:1 exchange rate, no yield)");
     }
 
     function test_Price_ConsistentAcrossMultipleDeposits() public {
