@@ -94,6 +94,7 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
 
     /// @notice Thrown when amount is too small after conversion.
     error LeverageRouterBase__AmountTooSmall();
+    error LeverageRouterBase__PermitFailed();
 
     /// @notice Initializes base router with core dependencies.
     /// @param _morpho Morpho Blue protocol address.

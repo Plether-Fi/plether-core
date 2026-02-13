@@ -79,6 +79,7 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
     error ZapRouter__InsufficientOutput();
     error ZapRouter__InvalidCurvePrice();
     error ZapRouter__SolvencyBreach();
+    error ZapRouter__PermitFailed();
 
     /// @notice Deploys ZapRouter with required protocol dependencies.
     /// @param _splitter SyntheticSplitter contract address.
@@ -161,7 +162,12 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         bytes32 r,
         bytes32 s
     ) external nonReentrant whenNotPaused {
-        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s);
+        try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s) {}
+        catch {
+            if (USDC.allowance(msg.sender, address(this)) < usdcAmount) {
+                revert ZapRouter__PermitFailed();
+            }
+        }
         _zapMintCore(usdcAmount, minAmountOut, maxSlippageBps, deadline);
     }
 
@@ -235,7 +241,12 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         bytes32 r,
         bytes32 s
     ) external nonReentrant whenNotPaused {
-        IERC20Permit(address(PLDXY_BULL)).permit(msg.sender, address(this), bullAmount, deadline, v, r, s);
+        try IERC20Permit(address(PLDXY_BULL)).permit(msg.sender, address(this), bullAmount, deadline, v, r, s) {}
+        catch {
+            if (IERC20(address(PLDXY_BULL)).allowance(msg.sender, address(this)) < bullAmount) {
+                revert ZapRouter__PermitFailed();
+            }
+        }
         _zapBurnCore(bullAmount, minUsdcOut, deadline);
     }
 

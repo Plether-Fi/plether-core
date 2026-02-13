@@ -121,7 +121,12 @@ contract LeverageRouter is LeverageRouterBase {
         bytes32 r,
         bytes32 s
     ) external nonReentrant whenNotPaused {
-        IERC20Permit(address(USDC)).permit(msg.sender, address(this), principal, deadline, v, r, s);
+        try IERC20Permit(address(USDC)).permit(msg.sender, address(this), principal, deadline, v, r, s) {}
+        catch {
+            if (USDC.allowance(msg.sender, address(this)) < principal) {
+                revert LeverageRouterBase__PermitFailed();
+            }
+        }
         _openLeverageCore(principal, leverage, maxSlippageBps, deadline);
     }
 
@@ -252,7 +257,12 @@ contract LeverageRouter is LeverageRouterBase {
         bytes32 r,
         bytes32 s
     ) external nonReentrant whenNotPaused {
-        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s);
+        try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s) {}
+        catch {
+            if (USDC.allowance(msg.sender, address(this)) < usdcAmount) {
+                revert LeverageRouterBase__PermitFailed();
+            }
+        }
         _addCollateralCore(usdcAmount, maxSlippageBps, deadline);
     }
 
