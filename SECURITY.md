@@ -496,16 +496,61 @@ contact@plether.com
 
 ## Audit Status
 
-| Component | Auditor | Date | Status |
-|-----------|---------|------|--------|
-| SyntheticSplitter | - | - | Pending |
-| Routers | - | - | Pending |
-| Oracles | - | - | Pending |
+### Cantina Managed Review (January 2026)
+
+**Auditor:** Cantina (Red-Swan, Security Researcher)
+**Review period:** January 25–28, 2026
+**Report date:** February 13, 2026
+**Commit:** `596b0179`
+**Report:** [`audits/report-cli-cantina-plether-0126.pdf`](audits/report-cli-cantina-plether-0126.pdf)
+
+**Scope:**
+- `src/SyntheticSplitter.sol`
+- `src/SyntheticToken.sol`
+- `src/MorphoAdapter.sol` (since replaced by VaultAdapter)
+- `src/oracles/BasketOracle.sol`
+
+**Findings:**
+
+| Severity | Count | Fixed | Acknowledged |
+|----------|-------|-------|--------------|
+| Critical | 0 | — | — |
+| High | 0 | — | — |
+| Medium | 2 | 2 | 0 |
+| Low | 5 | 4 | 1 |
+| Informational | 1 | 1 | 0 |
+| **Total** | **8** | **7** | **1** |
+
+**Medium findings (all fixed):**
+1. **Basket weights not constrained to unit value** — BasketOracle did not enforce weights summing to 1, which could cause deviation checks to fail or return zero prices. Fixed: added `require` enforcing unit sum.
+2. **Adapter asset doesn't account for accrued interest** — `MorphoAdapter.totalAssets` did not trigger interest accrual, causing stale values in `harvestYield` and `previewBurn`. Fixed: accruing interest before reading balances.
+
+**Acknowledged finding:**
+- **Duplicate event emissions** (Low) — `proposeCurvePool`, `setUrd`, and `proposeAdapter` emit events even when the new value equals the old. Acknowledged as harmless.
+
+**Not in scope:** Routers (ZapRouter, LeverageRouter, BullLeverageRouter), StakedToken, StakedOracle, MorphoOracle, RewardDistributor, VaultAdapter, PythAdapter.
+
+### Coverage Gaps
+
+| Component | Audit Status |
+|-----------|-------------|
+| SyntheticSplitter | Audited (Cantina, Jan 2026) |
+| SyntheticToken | Audited (Cantina, Jan 2026) |
+| BasketOracle | Audited (Cantina, Jan 2026) |
+| ZapRouter | Not yet audited |
+| LeverageRouter | Not yet audited |
+| BullLeverageRouter | Not yet audited |
+| StakedToken | Not yet audited |
+| RewardDistributor | Not yet audited |
+| VaultAdapter | Not yet audited |
+| MorphoOracle / StakedOracle | Not yet audited |
+| PythAdapter | Not yet audited |
 
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-02-13 | Added Cantina audit results (8 findings: 0 critical, 0 high, 2 medium, 5 low, 1 informational; 7 fixed, 1 acknowledged); added coverage gaps table |
 | 2026-02-11 | Added VaultAdapter.claimRewards() security model, EIP-2612 permit support documentation, deployToAdapter()/distributeRewards() as permissionless operations; clarified Chainlink+Pyth dependency |
 | 2026-02-11 | Replaced MorphoAdapter with VaultAdapter (Morpho Vault) for yield; updated trust assumptions, rescue docs, and liquidity risk sections |
 | 2026-02-08 | PythAdapter: Updated staleness from 24h to 72h for weekend forex closures; documented self-attestation model and staleness tradeoff |
