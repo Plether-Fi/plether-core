@@ -55,6 +55,35 @@ contract MorphoOracleTest is Test {
     // ==========================================
     // 4. Edge Cases
     // ==========================================
+    function test_BearOracle_ClampsToCap() public {
+        basket.updatePrice(250_000_000); // $2.50 — above CAP
+        uint256 price = bearOracle.price();
+        // Should clamp to CAP ($2.00), not report $2.50
+        assertEq(price, 2e24);
+    }
+
+    function test_BearOracle_ReturnsCapAtExactCap() public {
+        basket.updatePrice(200_000_000); // exactly CAP
+        uint256 price = bearOracle.price();
+        assertEq(price, 2e24);
+    }
+
+    function test_BearOracle_NeverExceedsRedemptionValue() public {
+        // Without the CAP clamp, an attacker could borrow against inflated
+        // collateral: oracle reports $2.50 but BEAR redeems for at most $2.00.
+        // This test fails without the fix (price would be 2.5e24 > capMorpho).
+        uint256 capMorpho = CAP * DecimalConstants.CHAINLINK_TO_MORPHO_SCALE;
+
+        basket.updatePrice(250_000_000); // $2.50
+        assertLe(bearOracle.price(), capMorpho);
+
+        basket.updatePrice(500_000_000); // $5.00
+        assertLe(bearOracle.price(), capMorpho);
+
+        basket.updatePrice(200_000_001); // $2.00 + 1 wei
+        assertLe(bearOracle.price(), capMorpho);
+    }
+
     function test_BullOracle_RevertsIfCapBreached() public {
         basket.updatePrice(210_000_000);
 

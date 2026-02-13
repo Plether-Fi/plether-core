@@ -86,7 +86,7 @@ contract MorphoOracle is IMorphoOracle {
                 return 1;
             }
         } else {
-            finalPrice = basketPrice;
+            finalPrice = basketPrice > CAP ? CAP : basketPrice;
         }
 
         return finalPrice * DecimalConstants.CHAINLINK_TO_MORPHO_SCALE;
