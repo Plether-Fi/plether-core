@@ -15,10 +15,10 @@
     },
     "oracles": {
       "BasketOracle": "0x4f798422388484F2139717A8cE0115De3B06b1DF",
-      "MorphoOracleBear": "0x7c5fa969E5583C39C1D40d537E57917d88Ef5884",
-      "MorphoOracleBull": "0x3Bc9C811089444ee82336678da04c38A1a9A61EC",
-      "StakedOracleBear": "0x6000671B89D9B75116242E5Cf3c3DD7eC0518C2e",
-      "StakedOracleBull": "0xDC1FD8aE5A5880cFdCbC673696812E6bd8C83bB5",
+      "MorphoOracleBear": "0x3c4183585277c5b5385C8e1EFf25Cb83E5374429",
+      "MorphoOracleBull": "0xeb3EF2ba579473d3eca87A91eFEe4B85076437d8",
+      "StakedOracleBear": "0xA4e55909A631ea8A4efF407108f9E6382e84A67C",
+      "StakedOracleBull": "0xCDF488746af18804d7446751D075Df7Fc27B53d0",
       "PythAdapterSEK": "0x5f4859A2aCcf3b6Ca9eeD9799676Cc7a77B7bEb5",
       "ChainlinkEUR": "0xb49f677943BC038e9857d61E7d053CaA2C1734C1",
       "ChainlinkJPY": "0xBcE206caE7f0ec07b545EddE332A47C2F75bbeb3",
@@ -27,9 +27,9 @@
       "ChainlinkCHF": "0x449d117117838fFA61263B61dA6301AA2a88B13A"
     },
     "routers": {
-      "ZapRouter": "0x2c95EDa29085C5ED3650AC1B0D16E0508E3A7DEf",
-      "LeverageRouter": "0x971Cf4216525247788BE4DE63C317b11141FbF27",
-      "BullLeverageRouter": "0xb10c221cb53fc9670DE2F69CF0B6954A02C37882"
+      "ZapRouter": "0xb0623D89ae73D177cf201bCA09C51d84502A8d80",
+      "LeverageRouter": "0x0b10642c85C1DedC2636a23F8B83e281e888086D",
+      "BullLeverageRouter": "0x778cd42C371f9A1dC98B69857fa3854FFa8ECBBf"
     },
     "external": {
       "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -39,8 +39,8 @@
       "VaultAdapter": "0x9Bc4D704975a067979512bcE24fB54479F415122",
       "CurvePool": "0x95D51D6F312DbE66BACC2ed677aD64790f48aa87",
       "Pyth": "0x4305FB66699C3B2702D4d05CF36551390A4c69C6",
-      "MorphoMarketBear": "0x8e43106df7e0363799313c9899df3fa83e6f5721ba80849642ac6912da666292",
-      "MorphoMarketBull": "0x811e0e5b937027b87b7b0c1bfa5db9d22109db4df0f445adc6124cd4ed577584"
+      "MorphoMarketBear": "0x2ded00f9b5591ac60f7df01f5776dec67f7d7f977885ad1a6c16aab6aed66131",
+      "MorphoMarketBull": "0x6bf042818eade8df169e915e9a496d1d8b53f41bf3459b5a72666fb18ed68266"
     }
   },
   "etherscan": {
@@ -50,15 +50,15 @@
     "StakedBear": "https://etherscan.io/address/0xDC7366b8BB83f9ABa2B4F989194D6c03D0A20DE9",
     "StakedBull": "https://etherscan.io/address/0x8dbcF452799f50D3382105a19FdBfA57B7f29C73",
     "BasketOracle": "https://etherscan.io/address/0x4f798422388484F2139717A8cE0115De3B06b1DF",
-    "MorphoOracleBear": "https://etherscan.io/address/0x7c5fa969E5583C39C1D40d537E57917d88Ef5884",
-    "MorphoOracleBull": "https://etherscan.io/address/0x3Bc9C811089444ee82336678da04c38A1a9A61EC",
-    "StakedOracleBear": "https://etherscan.io/address/0x6000671B89D9B75116242E5Cf3c3DD7eC0518C2e",
-    "StakedOracleBull": "https://etherscan.io/address/0xDC1FD8aE5A5880cFdCbC673696812E6bd8C83bB5",
+    "MorphoOracleBear": "https://etherscan.io/address/0x3c4183585277c5b5385C8e1EFf25Cb83E5374429",
+    "MorphoOracleBull": "https://etherscan.io/address/0xeb3EF2ba579473d3eca87A91eFEe4B85076437d8",
+    "StakedOracleBear": "https://etherscan.io/address/0xA4e55909A631ea8A4efF407108f9E6382e84A67C",
+    "StakedOracleBull": "https://etherscan.io/address/0xCDF488746af18804d7446751D075Df7Fc27B53d0",
     "PythAdapterSEK": "https://etherscan.io/address/0x5f4859A2aCcf3b6Ca9eeD9799676Cc7a77B7bEb5",
     "VaultAdapter": "https://etherscan.io/address/0x9Bc4D704975a067979512bcE24fB54479F415122",
-    "ZapRouter": "https://etherscan.io/address/0x2c95EDa29085C5ED3650AC1B0D16E0508E3A7DEf",
-    "LeverageRouter": "https://etherscan.io/address/0x971Cf4216525247788BE4DE63C317b11141FbF27",
-    "BullLeverageRouter": "https://etherscan.io/address/0xb10c221cb53fc9670DE2F69CF0B6954A02C37882",
+    "ZapRouter": "https://etherscan.io/address/0xb0623D89ae73D177cf201bCA09C51d84502A8d80",
+    "LeverageRouter": "https://etherscan.io/address/0x0b10642c85C1DedC2636a23F8B83e281e888086D",
+    "BullLeverageRouter": "https://etherscan.io/address/0x778cd42C371f9A1dC98B69857fa3854FFa8ECBBf",
     "CurvePool": "https://etherscan.io/address/0x95D51D6F312DbE66BACC2ed677aD64790f48aa87"
   }
 }
