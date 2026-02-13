@@ -25,6 +25,9 @@ interface IRewardDistributor {
     /// @notice Thrown when a constructor parameter is zero address.
     error RewardDistributor__ZeroAddress();
 
+    /// @notice Thrown when ETH refund to caller fails.
+    error RewardDistributor__RefundFailed();
+
     /// @notice Permissionless function to distribute accumulated USDC rewards.
     /// @dev Calculates price discrepancy, acquires tokens, and donates to vaults.
     /// @return callerReward Amount of USDC sent to caller as incentive.

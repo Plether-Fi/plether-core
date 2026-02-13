@@ -63,7 +63,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
         morpho.setAuthorization(address(router), true); // CRITICAL STEP
 
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Check Morpho State
@@ -83,7 +83,7 @@ contract LeverageRouterTest is Test {
 
         // 3x Leverage on $1000 = Borrow $2000. Total $3000 USDC.
         // $3000 USDC / $1.50 = 2000 BEAR.
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertEq(morpho.collateralBalance(alice), 2000 * 1e18, "Expensive: Collateral mismatch");
@@ -105,7 +105,7 @@ contract LeverageRouterTest is Test {
 
         // Now Close (router queries actual debt from Morpho)
         morpho.setAuthorization(address(router), true);
-        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertEq(morpho.collateralBalance(alice), 0, "Collateral not cleared");
@@ -136,7 +136,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         uint256 usdcBefore = usdc.balanceOf(alice);
 
-        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify: collateral withdrawn, USDC returned to Alice
@@ -160,7 +160,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Withdraw only 1000 of 3000 collateral (no debt to repay)
-        router.closeLeverage(1000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(1000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify: only partial collateral withdrawn
@@ -174,7 +174,7 @@ contract LeverageRouterTest is Test {
         // Forgot setAuthorization!
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -200,7 +200,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), principal);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify actual matches preview
@@ -235,7 +235,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), principal);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         uint256 collateral = morpho.collateralBalance(alice);
         uint256 debt = morpho.borrowBalance(alice);
@@ -247,7 +247,7 @@ contract LeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         // Close the position (router queries actual debt from Morpho)
-        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify actual matches preview
@@ -272,7 +272,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
-        router.openLeverage(0, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(0, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -283,7 +283,7 @@ contract LeverageRouterTest is Test {
 
         // Leverage = 1x exactly should revert
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
-        router.openLeverage(1000 * 1e6, 1e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -294,7 +294,7 @@ contract LeverageRouterTest is Test {
 
         // Leverage = 1.0001x with 1 USDC = 0.0001 USDC loan which rounds to 0
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
-        router.openLeverage(1e6, 1e18 + 100, 100, block.timestamp + 1 hours);
+        router.openLeverage(1e6, 1e18 + 100, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -304,7 +304,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp - 1);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -313,7 +313,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.closeLeverage(3000 * 1e18, 100, block.timestamp - 1);
+        router.closeLeverage(3000 * 1e18, 100, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -323,7 +323,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        router.openLeverage(1000 * 1e6, 3e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
+        router.openLeverage(1000 * 1e6, 3e18, 200, 0, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
 
@@ -332,7 +332,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        router.closeLeverage(3000 * 1e18, 200, block.timestamp + 1 hours); // 200 bps > 100 max
+        router.closeLeverage(3000 * 1e18, 200, 0, block.timestamp + 1 hours); // 200 bps > 100 max
         vm.stopPrank();
     }
 
@@ -348,7 +348,7 @@ contract LeverageRouterTest is Test {
 
         // Router calculates minOut based on get_dy - 1%, but actual swap gives 5% less
         vm.expectRevert("Too little received");
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -370,7 +370,7 @@ contract LeverageRouterTest is Test {
 
         morpho.setAuthorization(address(router), true);
         vm.expectRevert("Too little received");
-        router.closeLeverage(3000 * 1e18, 100, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -384,7 +384,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
 
         // Should succeed because actual slippage (0.5%) < tolerance (1%)
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position created (with slightly less collateral due to slippage)
@@ -405,7 +405,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), 1000 * 1e6);
 
-        router.openLeverage(1000 * 1e6, 100e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 100e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Should have $100,000 worth of collateral and $99,000 debt
@@ -420,7 +420,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000 * 1e6);
 
         // 1.1x leverage = borrow 10%
-        router.openLeverage(1000 * 1e6, 1_100_000_000_000_000_000, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 1_100_000_000_000_000_000, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Should have $1100 collateral and $100 debt
@@ -433,7 +433,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
         usdc.approve(address(router), 1);
 
-        router.openLeverage(1, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertGt(morpho.collateralBalance(alice), 0, "Should have tiny collateral");
@@ -447,7 +447,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 1000);
 
         // With 1000 wei USDC and 3x leverage, loan = 2000 wei
-        router.openLeverage(1000, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify tiny position created
@@ -462,7 +462,7 @@ contract LeverageRouterTest is Test {
         // Not authorized
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.openLeverage(1000 * 1e6, 3e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 3e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -498,7 +498,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Execute
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position was created
@@ -530,13 +530,13 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         // Get position state
         uint256 totalCollateral = morpho.collateralBalance(alice);
 
         // Close full position (router queries actual debt from Morpho)
-        router.closeLeverage(totalCollateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(totalCollateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify state after close
@@ -568,12 +568,12 @@ contract LeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         // Open position
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         // Immediately close entire position (router queries actual debt from Morpho)
         uint256 collateral = morpho.collateralBalance(alice);
 
-        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdcAfter = usdc.balanceOf(alice);
@@ -609,7 +609,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Open 2x position
-        router.openLeverage(principal, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, 2e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position exists
@@ -633,7 +633,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Should succeed with any valid slippage setting
-        router.openLeverage(principal, 3e18, slippageBps, block.timestamp + 1 hours);
+        router.openLeverage(principal, 3e18, slippageBps, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         assertGt(morpho.collateralBalance(alice), 0, "Position should be created");
@@ -648,14 +648,14 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000 * 1e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         uint256 collateralBefore = morpho.collateralBalance(alice);
 
         // Add more collateral
         usdc.mint(alice, 500 * 1e6);
         usdc.approve(address(router), 500 * 1e6);
-        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500 * 1e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 collateralAfter = morpho.collateralBalance(alice);
@@ -668,7 +668,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
-        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500 * 1e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -677,10 +677,10 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000 * 1e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
-        router.addCollateral(0, 100, block.timestamp + 1 hours);
+        router.addCollateral(0, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -689,7 +689,7 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000 * 1e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Revoke authorization
         morpho.setAuthorization(address(router), false);
@@ -698,7 +698,7 @@ contract LeverageRouterTest is Test {
         usdc.approve(address(router), 500 * 1e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.addCollateral(500 * 1e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500 * 1e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -707,13 +707,13 @@ contract LeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000 * 1e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000 * 1e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000 * 1e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         usdc.mint(alice, 500 * 1e6);
         usdc.approve(address(router), 500 * 1e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.addCollateral(500 * 1e6, 100, block.timestamp - 1);
+        router.addCollateral(500 * 1e6, 100, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -730,7 +730,7 @@ contract LeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         morpho.setAuthorization(address(router), true);
-        router.removeCollateral(1000 * 1e18, 100, block.timestamp + 1 hours);
+        router.removeCollateral(1000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 collateralAfter = morpho.collateralBalance(alice);
@@ -745,7 +745,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
-        router.removeCollateral(1000 * 1e18, 100, block.timestamp + 1 hours);
+        router.removeCollateral(1000 * 1e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -761,7 +761,7 @@ contract LeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
-        router.removeCollateral(0, 100, block.timestamp + 1 hours);
+        router.removeCollateral(0, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -1251,7 +1251,7 @@ contract LeverageRouterOffsetTest is Test {
 
         // Close leverage (router queries actual debt from Morpho)
         morpho.setAuthorization(address(router), true);
-        router.closeLeverage(shares, 100, block.timestamp + 1 hours);
+        router.closeLeverage(shares, 100, 0, block.timestamp + 1 hours);
 
         vm.stopPrank();
 
@@ -1548,7 +1548,7 @@ contract LeverageRouterInterestAccrualTest is Test {
         morpho.simulateInterestAccrual(100_000); // 0.1 USDC on 2000 USDC = 0.005%
 
         vm.prank(alice);
-        router.closeLeverage(shares, 100, block.timestamp + 1 hours);
+        router.closeLeverage(shares, 100, 0, block.timestamp + 1 hours);
 
         assertEq(morpho.collateralBalance(alice), 0, "Collateral should be cleared");
         assertEq(morpho.borrowShares(alice), 0, "Debt shares should be cleared");

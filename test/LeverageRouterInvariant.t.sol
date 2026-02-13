@@ -477,7 +477,7 @@ contract LeverageRouterHandler is Test {
             return;
         }
 
-        try router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours) {
+        try router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours) {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
             hasPosition[currentActor] = true;
@@ -503,7 +503,7 @@ contract LeverageRouterHandler is Test {
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
         // Router queries actual debt from Morpho
-        try router.closeLeverage(collateral, 100, block.timestamp + 1 hours) {
+        try router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
@@ -542,7 +542,7 @@ contract LeverageRouterHandler is Test {
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
         // Router queries actual debt from Morpho
-        try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
+        try router.closeLeverage(collateralToWithdraw, 100, 0, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
@@ -1007,7 +1007,7 @@ contract BullLeverageRouterHandler is Test {
             return;
         }
 
-        try router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours) {
+        try router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours) {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
         } catch (bytes memory reason) {
@@ -1032,7 +1032,7 @@ contract BullLeverageRouterHandler is Test {
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
         // Router queries actual debt from Morpho
-        try router.closeLeverage(collateral, 100, block.timestamp + 1 hours) {
+        try router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {
@@ -1070,7 +1070,7 @@ contract BullLeverageRouterHandler is Test {
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
         // Router queries actual debt from Morpho
-        try router.closeLeverage(collateralToWithdraw, 100, block.timestamp + 1 hours) {
+        try router.closeLeverage(collateralToWithdraw, 100, 0, block.timestamp + 1 hours) {
             ghost_totalCloseOperations++;
             ghost_totalUsdcReturned += usdc.balanceOf(currentActor) - usdcBefore;
             if (morpho.collateralBalance(currentActor) == 0) {

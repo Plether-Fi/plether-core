@@ -79,7 +79,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -111,7 +111,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -142,7 +142,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -156,7 +156,7 @@ contract LiquidationForkTest is BaseForkTest {
 
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Collateral should be 0");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
@@ -173,7 +173,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -214,7 +214,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -238,7 +238,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -252,7 +252,7 @@ contract LiquidationForkTest is BaseForkTest {
 
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Should be fully closed");
             assertEq(borrowSharesAfter, 0, "Debt should be 0");
@@ -269,7 +269,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(bullLeverageRouter), true);
         IERC20(USDC).approve(address(bullLeverageRouter), principal);
-        bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bullMarketParams));
@@ -283,7 +283,7 @@ contract LiquidationForkTest is BaseForkTest {
 
         vm.startPrank(alice);
         // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try bullLeverageRouter.closeLeverage(collateral, 100, vm.getBlockTimestamp() + 1 hours) {
+        try bullLeverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
             (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
             assertEq(collateralAfter, 0, "Position should be closed");
         } catch {

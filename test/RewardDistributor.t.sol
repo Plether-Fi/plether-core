@@ -1444,12 +1444,24 @@ contract MockPythAdapter {
 
     bool public updateCalled;
     uint256 public lastUpdateValue;
+    uint256 public fee = 1 wei;
+
+    function setFee(
+        uint256 _fee
+    ) external {
+        fee = _fee;
+    }
 
     function updatePrice(
         bytes[] calldata
     ) external payable {
         updateCalled = true;
         lastUpdateValue = msg.value;
+        uint256 refund = msg.value > fee ? msg.value - fee : 0;
+        if (refund > 0) {
+            (bool ok,) = msg.sender.call{value: refund}("");
+            require(ok, "refund failed");
+        }
     }
 
 }
@@ -1536,6 +1548,23 @@ contract RewardDistributorPythTest is Test {
 
     function test_PYTH_ADAPTER_Immutable() public view {
         assertEq(address(distributor.PYTH_ADAPTER()), address(pythAdapter));
+    }
+
+    function test_DistributeRewardsWithPriceUpdate_RefundsExcessETH() public {
+        usdc.mint(address(distributor), 100e6);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "test";
+
+        vm.deal(alice, 1 ether);
+
+        vm.prank(alice);
+        distributor.distributeRewardsWithPriceUpdate{value: 0.5 ether}(updateData);
+
+        // MockPythAdapter keeps 1 wei fee, refunds rest to distributor.
+        // Distributor sweeps remaining ETH back to caller.
+        assertEq(alice.balance, 1 ether - 1 wei, "Caller should get back all ETH minus Pyth fee");
+        assertEq(address(distributor).balance, 0, "Distributor should hold no ETH");
     }
 
 }

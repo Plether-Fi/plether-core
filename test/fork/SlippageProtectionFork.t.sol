@@ -172,7 +172,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
 
         (,, uint256 expectedBear,) = leverageRouter.previewOpenLeverage(principal, leverage);
 
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -197,7 +197,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
 
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
@@ -216,7 +216,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
 
         (,, uint256 expectedBull,) = bullLeverageRouter.previewOpenLeverage(principal, leverage);
 
-        bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         bytes32 marketId = keccak256(abi.encode(bullMarketParams));
@@ -242,12 +242,12 @@ contract SlippageProtectionForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(leverageRouter), true);
         IERC20(USDC).approve(address(leverageRouter), principal);
-        leverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         bytes32 marketId = keccak256(abi.encode(bearMarketParams));
         (,, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
 
-        leverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        leverageRouter.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 aliceUsdcEnd = IERC20(USDC).balanceOf(alice);
@@ -284,7 +284,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IERC20(USDC).approve(address(leverageRouter), 1000e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        leverageRouter.openLeverage(1000e6, 2e18, 100, block.timestamp - 1);
+        leverageRouter.openLeverage(1000e6, 2e18, 100, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -303,7 +303,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         IERC20(USDC).approve(address(leverageRouter), 1000e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        leverageRouter.openLeverage(1000e6, 2e18, 200, block.timestamp + 1 hours);
+        leverageRouter.openLeverage(1000e6, 2e18, 200, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -463,7 +463,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         vm.startPrank(alice);
         IMorpho(MORPHO).setAuthorization(address(bullLeverageRouter), true);
         IERC20(USDC).approve(address(bullLeverageRouter), principal);
-        bullLeverageRouter.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         bytes32 marketId = keccak256(abi.encode(bullMarketParams));
         (, uint128 borrowShares, uint128 collateral) = IMorpho(MORPHO).position(marketId, alice);
@@ -473,7 +473,7 @@ contract SlippageProtectionForkTest is BaseForkTest {
         (,, uint256 previewReturn) = bullLeverageRouter.previewCloseLeverage(debt, collateral);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(alice);
-        bullLeverageRouter.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        bullLeverageRouter.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         uint256 actualReturn = IERC20(USDC).balanceOf(alice) - usdcBefore;
         vm.stopPrank();
 

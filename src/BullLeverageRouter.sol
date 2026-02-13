@@ -215,9 +215,10 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        _openLeverageCore(principal, leverage, maxSlippageBps, deadline);
+        _openLeverageCore(principal, leverage, maxSlippageBps, minAmountOut, deadline);
     }
 
     /// @notice Open a leveraged plDXY-BULL position with a USDC permit signature (gasless approval).
@@ -232,6 +233,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 principal,
         uint256 leverage,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline,
         uint8 v,
         bytes32 r,
@@ -243,13 +245,14 @@ contract BullLeverageRouter is LeverageRouterBase {
                 revert LeverageRouterBase__PermitFailed();
             }
         }
-        _openLeverageCore(principal, leverage, maxSlippageBps, deadline);
+        _openLeverageCore(principal, leverage, maxSlippageBps, minAmountOut, deadline);
     }
 
     function _openLeverageCore(
         uint256 principal,
         uint256 leverage,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) internal {
         if (principal == 0) {
@@ -281,7 +284,15 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 minSwapOut = (params.expectedBearSale * (10_000 - maxSlippageBps)) / 10_000;
 
         bytes memory data = abi.encode(
-            OP_OPEN, msg.sender, deadline, principal, leverage, params.targetDebt, maxSlippageBps, minSwapOut
+            OP_OPEN,
+            msg.sender,
+            deadline,
+            principal,
+            leverage,
+            params.targetDebt,
+            maxSlippageBps,
+            minSwapOut,
+            minAmountOut
         );
 
         MORPHO.flashLoan(address(USDC), params.loanAmount, data);
@@ -301,6 +312,7 @@ contract BullLeverageRouter is LeverageRouterBase {
     function closeLeverage(
         uint256 collateralToWithdraw,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
         if (collateralToWithdraw == 0) {
@@ -329,16 +341,7 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Calculate extra BEAR needed to sell for debt repayment
         uint256 extraBearForDebt = 0;
         if (debtToRepay > 0) {
-            // Query: how much USDC do we get for 1 BEAR (DecimalConstants.ONE_WAD)?
-            uint256 usdcPerBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
-            if (usdcPerBear == 0) {
-                revert LeverageRouterBase__InvalidCurvePrice();
-            }
-
-            // Calculate BEAR needed to sell for debtToRepay USDC
-            // Formula: (debt * DecimalConstants.ONE_WAD) / usdcPerBear, with slippage buffer
-            extraBearForDebt = (debtToRepay * DecimalConstants.ONE_WAD) / usdcPerBear;
-            // Add slippage buffer (extra % to ensure we get enough USDC)
+            extraBearForDebt = _estimateBearForUsdcSale(debtToRepay);
             extraBearForDebt = extraBearForDebt + (extraBearForDebt * maxSlippageBps / 10_000);
         }
 
@@ -354,7 +357,8 @@ contract BullLeverageRouter is LeverageRouterBase {
             debtToRepay,
             borrowShares,
             extraBearForDebt,
-            maxSlippageBps
+            maxSlippageBps,
+            minAmountOut
         );
 
         // Single flash mint handles entire close operation
@@ -376,9 +380,10 @@ contract BullLeverageRouter is LeverageRouterBase {
     function addCollateral(
         uint256 usdcAmount,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        _addCollateralCore(usdcAmount, maxSlippageBps, deadline);
+        _addCollateralCore(usdcAmount, maxSlippageBps, minAmountOut, deadline);
     }
 
     /// @notice Add collateral with a USDC permit signature (gasless approval).
@@ -391,6 +396,7 @@ contract BullLeverageRouter is LeverageRouterBase {
     function addCollateralWithPermit(
         uint256 usdcAmount,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline,
         uint8 v,
         bytes32 r,
@@ -402,12 +408,13 @@ contract BullLeverageRouter is LeverageRouterBase {
                 revert LeverageRouterBase__PermitFailed();
             }
         }
-        _addCollateralCore(usdcAmount, maxSlippageBps, deadline);
+        _addCollateralCore(usdcAmount, maxSlippageBps, minAmountOut, deadline);
     }
 
     function _addCollateralCore(
         uint256 usdcAmount,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) internal {
         if (usdcAmount == 0) {
@@ -449,7 +456,8 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Allow slippage on Curve swap, but callback verifies we have enough to repay
         uint256 minSwapOut = (flashLoanAmount * (10_000 - maxSlippageBps)) / 10_000;
 
-        bytes memory data = abi.encode(OP_ADD_COLLATERAL, msg.sender, deadline, usdcAmount, maxSlippageBps, minSwapOut);
+        bytes memory data =
+            abi.encode(OP_ADD_COLLATERAL, msg.sender, deadline, usdcAmount, maxSlippageBps, minSwapOut, minAmountOut);
 
         MORPHO.flashLoan(address(USDC), flashLoanAmount, data);
     }
@@ -467,6 +475,7 @@ contract BullLeverageRouter is LeverageRouterBase {
     function removeCollateral(
         uint256 collateralToWithdraw,
         uint256 maxSlippageBps,
+        uint256 minAmountOut,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
         if (collateralToWithdraw == 0) {
@@ -494,7 +503,8 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 bufferedBullAmount = plDxyBullAmount + (plDxyBullAmount * EXCHANGE_RATE_BUFFER_BPS / 10_000);
 
         // Flash mint BEAR for pair redemption
-        bytes memory data = abi.encode(OP_REMOVE_COLLATERAL, msg.sender, deadline, collateralToWithdraw, maxSlippageBps);
+        bytes memory data =
+            abi.encode(OP_REMOVE_COLLATERAL, msg.sender, deadline, collateralToWithdraw, maxSlippageBps, minAmountOut);
 
         IERC3156FlashLender(address(PLDXY_BEAR)).flashLoan(this, address(PLDXY_BEAR), bufferedBullAmount, data);
     }
@@ -553,12 +563,11 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /// @dev Executes open leverage operation within Morpho flash loan callback.
     /// @param loanAmount Amount of USDC borrowed from Morpho.
-    /// @param data Encoded parameters (op, user, deadline, principal, leverage, targetDebt, maxSlippageBps, minSwapOut).
+    /// @param data Encoded parameters (op, user, deadline, principal, leverage, targetDebt, maxSlippageBps, minSwapOut, minAmountOut).
     function _executeOpen(
         uint256 loanAmount,
         bytes calldata data
     ) private {
-        // Decode: (op, user, deadline, principal, leverage, targetDebt, maxSlippageBps, minSwapOut)
         (
             ,
             address user,,
@@ -566,8 +575,9 @@ contract BullLeverageRouter is LeverageRouterBase {
             uint256 leverage,
             uint256 targetDebt,
             uint256 maxSlippageBps,
-            uint256 minSwapOut
-        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256, uint256));
+            uint256 minSwapOut,
+            uint256 minAmountOut
+        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256, uint256, uint256));
 
         // 1. Total USDC = Principal + Flash Loan
         uint256 totalUSDC = principal + loanAmount;
@@ -577,7 +587,10 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // 3. Sell ALL plDXY-BEAR for USDC via Curve
         uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
-        CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
+        uint256 bearSaleProceeds = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
+        if (bearSaleProceeds < minAmountOut) {
+            revert LeverageRouterBase__BelowMinAmountOut();
+        }
 
         // 4. Stake plDXY-BULL to get splDXY-BULL
         uint256 plDxyBullReceived = PLDXY_BULL.balanceOf(address(this));
@@ -607,14 +620,13 @@ contract BullLeverageRouter is LeverageRouterBase {
 
     /// @dev Executes add collateral operation within Morpho flash loan callback.
     /// @param flashLoanAmount Amount of USDC flash loaned.
-    /// @param data Encoded parameters (op, user, deadline, usdcAmount, maxSlippageBps, minSwapOut).
+    /// @param data Encoded parameters (op, user, deadline, usdcAmount, maxSlippageBps, minSwapOut, minAmountOut).
     function _executeAddCollateral(
         uint256 flashLoanAmount,
         bytes calldata data
     ) private {
-        // Decode: (op, user, deadline, usdcAmount, maxSlippageBps, minSwapOut)
-        (, address user,, uint256 usdcAmount, uint256 maxSlippageBps, uint256 minSwapOut) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256));
+        (, address user,, uint256 usdcAmount, uint256 maxSlippageBps, uint256 minSwapOut, uint256 minAmountOut) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256));
 
         // 1. Total USDC = user's USDC + flash loan
         uint256 totalUSDC = usdcAmount + flashLoanAmount;
@@ -625,7 +637,10 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // 3. Sell ALL BEAR for USDC (to repay flash loan)
         uint256 plDxyBearBalance = PLDXY_BEAR.balanceOf(address(this));
-        CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
+        uint256 bearSaleProceeds = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearBalance, minSwapOut);
+        if (bearSaleProceeds < minAmountOut) {
+            revert LeverageRouterBase__BelowMinAmountOut();
+        }
 
         // 4. Stake BULL → splDXY-BULL
         uint256 plDxyBullBalance = PLDXY_BULL.balanceOf(address(this));
@@ -653,22 +668,34 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @dev Executes close leverage operation within plDXY-BEAR flash mint callback.
     /// @param flashAmount Amount of plDXY-BEAR flash minted.
     /// @param flashFee Flash mint fee (always 0).
-    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, borrowShares, extraBearForDebt, maxSlippageBps).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, debtToRepay, borrowShares, extraBearForDebt, maxSlippageBps, minAmountOut).
     function _executeClose(
         uint256 flashAmount,
         uint256 flashFee,
         bytes calldata data
     ) private {
-        // Decode: (op, user, deadline, collateralToWithdraw, debtToRepay, borrowShares, extraBearForDebt, maxSlippageBps)
-        (
-            ,
-            address user,,
-            uint256 collateralToWithdraw,
-            uint256 debtToRepay,
-            uint256 borrowShares,
-            uint256 extraBearForDebt,
-            uint256 maxSlippageBps
-        ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256, uint256));
+        uint256 collateralToWithdraw;
+        uint256 debtToRepay;
+        uint256 borrowShares;
+        uint256 extraBearForDebt;
+        uint256 maxSlippageBps;
+        uint256 minAmountOut;
+        address user;
+        {
+            uint8 _op;
+            uint256 _deadline;
+            (
+                _op,
+                user,
+                _deadline,
+                collateralToWithdraw,
+                debtToRepay,
+                borrowShares,
+                extraBearForDebt,
+                maxSlippageBps,
+                minAmountOut
+            ) = abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256, uint256, uint256, uint256));
+        }
 
         // 1. If debt exists, sell extra BEAR for USDC to repay it
         if (debtToRepay > 0 && extraBearForDebt > 0) {
@@ -722,6 +749,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // 7. Transfer remaining USDC to user
         uint256 usdcToReturn = USDC.balanceOf(address(this));
+        if (usdcToReturn < minAmountOut) {
+            revert LeverageRouterBase__BelowMinAmountOut();
+        }
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
         }
@@ -742,15 +772,14 @@ contract BullLeverageRouter is LeverageRouterBase {
     /// @dev Executes remove collateral operation within plDXY-BEAR flash mint callback.
     /// @param flashAmount Amount of plDXY-BEAR flash minted.
     /// @param flashFee Flash mint fee (always 0).
-    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, maxSlippageBps).
+    /// @param data Encoded parameters (op, user, deadline, collateralToWithdraw, maxSlippageBps, minAmountOut).
     function _executeRemoveCollateral(
         uint256 flashAmount,
         uint256 flashFee,
         bytes calldata data
     ) private {
-        // Decode: (op, user, deadline, collateralToWithdraw, maxSlippageBps)
-        (, address user,, uint256 collateralToWithdraw, uint256 maxSlippageBps) =
-            abi.decode(data, (uint8, address, uint256, uint256, uint256));
+        (, address user,, uint256 collateralToWithdraw, uint256 maxSlippageBps, uint256 minAmountOut) =
+            abi.decode(data, (uint8, address, uint256, uint256, uint256, uint256));
 
         // 1. Withdraw splDXY-BULL from Morpho (will revert if unhealthy)
         MORPHO.withdrawCollateral(marketParams, collateralToWithdraw, user, address(this));
@@ -783,6 +812,9 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         // 5. Transfer remaining USDC to user
         uint256 usdcToReturn = USDC.balanceOf(address(this));
+        if (usdcToReturn < minAmountOut) {
+            revert LeverageRouterBase__BelowMinAmountOut();
+        }
         if (usdcToReturn > 0) {
             USDC.safeTransfer(user, usdcToReturn);
         }
@@ -852,13 +884,8 @@ contract BullLeverageRouter is LeverageRouterBase {
         uint256 extraBearForDebt = 0;
         uint256 usdcFromBearSale = 0;
         if (debtToRepay > 0) {
-            uint256 usdcPerBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
-            if (usdcPerBear > 0) {
-                // Calculate BEAR needed without slippage buffer (conservative estimate)
-                extraBearForDebt = (debtToRepay * DecimalConstants.ONE_WAD) / usdcPerBear;
-                // Estimate actual USDC from selling this BEAR
-                usdcFromBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
-            }
+            extraBearForDebt = _estimateBearForUsdcSale(debtToRepay);
+            usdcFromBearSale = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, extraBearForDebt);
         }
 
         // Total BEAR to buy back includes exchange rate buffer (mirrors closeLeverage logic)
@@ -970,9 +997,14 @@ contract BullLeverageRouter is LeverageRouterBase {
         bullPrice = CAP - bearPrice;
     }
 
+    /// @dev Estimates BEAR needed to sell for a target USDC amount using binary search on Curve.
+    function _estimateBearForUsdcSale(
+        uint256 targetUsdc
+    ) private view returns (uint256) {
+        return _binarySearchCurve(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD, targetUsdc);
+    }
+
     /// @dev Estimates USDC needed to buy BEAR using binary search on Curve.
-    /// @param bearAmount Target plDXY-BEAR amount to acquire.
-    /// @return Estimated USDC needed (with slippage margin).
     function _estimateUsdcForBearBuyback(
         uint256 bearAmount
     ) private view returns (uint256) {
@@ -980,33 +1012,49 @@ contract BullLeverageRouter is LeverageRouterBase {
             return 0;
         }
 
-        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-        if (bearPerUsdc == 0) {
+        uint256 unitOut = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
+        if (unitOut == 0) {
             return (bearAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         }
 
-        // Binary search for accurate USDC estimate
-        uint256 low = (bearAmount * DecimalConstants.ONE_USDC) / bearPerUsdc;
-        uint256 high = low + (low / 5); // Start with 20% buffer
+        return _binarySearchCurve(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC, bearAmount);
+    }
 
-        // Ensure high is sufficient
-        uint256 bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
-        while (bearAtHigh < bearAmount && high < type(uint128).max) {
-            high = high * 2;
-            bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
+    /// @dev Binary search for minimum input to Curve such that get_dy(i, j, input) >= targetOut.
+    /// @param i Curve pool input index.
+    /// @param j Curve pool output index.
+    /// @param oneUnit One unit of the input token (1e18 for BEAR, 1e6 for USDC).
+    /// @param targetOut Desired minimum output from the swap.
+    /// @return Minimum input amount that produces at least targetOut.
+    function _binarySearchCurve(
+        uint256 i,
+        uint256 j,
+        uint256 oneUnit,
+        uint256 targetOut
+    ) private view returns (uint256) {
+        uint256 outPerUnit = CURVE_POOL.get_dy(i, j, oneUnit);
+        if (outPerUnit == 0) {
+            revert LeverageRouterBase__InvalidCurvePrice();
         }
 
-        // Binary search to find minimum USDC
-        for (uint256 i = 0; i < 20; i++) {
+        uint256 low = (targetOut * oneUnit) / outPerUnit;
+        uint256 high = low + (low / 5);
+
+        uint256 outAtHigh = CURVE_POOL.get_dy(i, j, high);
+        for (uint256 k = 0; k < 10 && outAtHigh < targetOut && high < type(uint128).max; k++) {
+            high = high * 2;
+            outAtHigh = CURVE_POOL.get_dy(i, j, high);
+        }
+
+        for (uint256 k = 0; k < 20; k++) {
             uint256 mid = (low + high) / 2;
-            uint256 bearOut = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, mid);
-            if (bearOut >= bearAmount) {
+            uint256 midOut = CURVE_POOL.get_dy(i, j, mid);
+            if (midOut >= targetOut) {
                 high = mid;
             } else {
                 low = mid + 1;
             }
         }
-
         return high;
     }
 

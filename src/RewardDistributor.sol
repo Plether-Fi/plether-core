@@ -41,6 +41,10 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @notice Maximum slippage for Curve swaps (1% = 100 bps).
     uint256 public constant MAX_SWAP_SLIPPAGE_BPS = 100;
 
+    /// @notice Maximum slippage for oracle-based zap estimates (3% = 300 bps).
+    /// @dev Wider than MAX_SWAP_SLIPPAGE_BPS because ZapRouter's flash mint loop adds fees.
+    uint256 public constant MAX_ORACLE_ZAP_SLIPPAGE_BPS = 300;
+
     /// @notice Maximum age for oracle price data (24 hours to match Chainlink CHF/CAD heartbeat).
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
 
@@ -151,6 +155,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         IERC20(_plDxyBull).safeIncreaseAllowance(_stakedBull, type(uint256).max);
     }
 
+    receive() external payable {}
+
     /// @inheritdoc IRewardDistributor
     function distributeRewards() external nonReentrant returns (uint256 callerReward) {
         return _distributeRewardsInternal();
@@ -199,6 +205,13 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     ) external payable nonReentrant returns (uint256 callerReward) {
         if (address(PYTH_ADAPTER) != address(0) && pythUpdateData.length > 0) {
             PYTH_ADAPTER.updatePrice{value: msg.value}(pythUpdateData);
+        }
+        uint256 ethBalance = address(this).balance;
+        if (ethBalance > 0) {
+            (bool ok,) = msg.sender.call{value: ethBalance}("");
+            if (!ok) {
+                revert RewardDistributor__RefundFailed();
+            }
         }
         return _distributeRewardsInternal();
     }
@@ -260,6 +273,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         uint256 bearPct,
         uint256 bullPct
     ) internal returns (uint256 bearAmount, uint256 bullAmount) {
+        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
+        uint256 absBasketPrice = uint256(basketPrice);
+
         if (bearPct >= bullPct) {
             uint256 mintUsdc = (totalUsdc * bullPct * 2) / 10_000;
             uint256 swapUsdc = totalUsdc - mintUsdc;
@@ -270,8 +286,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             }
 
             if (swapUsdc > 0) {
-                uint256 expectedOut = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, swapUsdc);
-                uint256 minOut = (expectedOut * (10_000 - MAX_SWAP_SLIPPAGE_BPS)) / 10_000;
+                uint256 oracleExpectedBear = (swapUsdc * 1e20) / absBasketPrice;
+                uint256 minOut = (oracleExpectedBear * (10_000 - MAX_SWAP_SLIPPAGE_BPS)) / 10_000;
                 CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, swapUsdc, minOut);
             }
 
@@ -287,8 +303,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             }
 
             if (zapUsdc > 0) {
-                (,,, uint256 expectedBull,) = ZAP_ROUTER.previewZapMint(zapUsdc);
-                uint256 minBull = (expectedBull * (10_000 - MAX_SWAP_SLIPPAGE_BPS)) / 10_000;
+                uint256 bullPrice = CAP - absBasketPrice;
+                uint256 oracleExpectedBull = (zapUsdc * 1e20) / bullPrice;
+                uint256 minBull = (oracleExpectedBull * (10_000 - MAX_ORACLE_ZAP_SLIPPAGE_BPS)) / 10_000;
                 ZAP_ROUTER.zapMint(zapUsdc, minBull, MAX_SWAP_SLIPPAGE_BPS, block.timestamp);
             }
 

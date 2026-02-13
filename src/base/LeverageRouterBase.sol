@@ -96,6 +96,9 @@ abstract contract LeverageRouterBase is FlashLoanBase, Ownable2Step, Pausable, R
     error LeverageRouterBase__AmountTooSmall();
     error LeverageRouterBase__PermitFailed();
 
+    /// @notice Thrown when output is below user-specified minimum (MEV protection).
+    error LeverageRouterBase__BelowMinAmountOut();
+
     /// @notice Initializes base router with core dependencies.
     /// @param _morpho Morpho Blue protocol address.
     /// @param _curvePool Curve USDC/plDXY-BEAR pool address.

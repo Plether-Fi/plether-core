@@ -84,7 +84,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        router.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, maxSlippageBps, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // BULL leverage uses iterative Curve-based calculation with 0.1% buffer:
@@ -117,7 +117,7 @@ contract BullLeverageRouterTest is Test {
             alice, principal, leverage, expectedLoanAmount, expectedPlDxyBull, expectedDebt, maxSlippageBps
         );
 
-        router.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, maxSlippageBps, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -130,7 +130,7 @@ contract BullLeverageRouterTest is Test {
         // Skip auth
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 50, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -143,7 +143,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.openLeverage(principal, leverage, 50, block.timestamp - 1);
+        router.openLeverage(principal, leverage, 50, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -156,7 +156,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__LeverageTooLow.selector);
-        router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 50, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -169,7 +169,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        router.openLeverage(principal, leverage, 101, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 101, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -178,7 +178,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SlippageExceedsMax.selector);
-        router.closeLeverage(3000 * 1e18, 101, block.timestamp + 1 hours);
+        router.closeLeverage(3000 * 1e18, 101, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -196,7 +196,7 @@ contract BullLeverageRouterTest is Test {
 
         // The BEAR -> USDC swap during open will fail due to slippage
         vm.expectRevert("Too little received");
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -209,7 +209,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
@@ -218,7 +218,7 @@ contract BullLeverageRouterTest is Test {
 
         // The USDC -> BEAR swap during close (to repay flash mint) will fail
         vm.expectRevert("Too little received");
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -235,7 +235,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Should succeed because actual slippage (0.5%) < tolerance (1%)
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position was created
@@ -248,7 +248,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroPrincipal.selector);
-        router.openLeverage(0, 2e18, 50, block.timestamp + 1 hours);
+        router.openLeverage(0, 2e18, 50, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -263,7 +263,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector);
-        router.openLeverage(principal, leverage, 50, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 50, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -279,13 +279,13 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         // Get position state
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         // Close the position (router queries actual debt from Morpho)
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position is closed
@@ -309,7 +309,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
@@ -318,7 +318,7 @@ contract BullLeverageRouterTest is Test {
         curvePool.setRate(99, 100); // 99 output for 100 input -> BEAR slightly more expensive
 
         // 3. Close (router queries actual debt from Morpho)
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // 4. Verify Success
@@ -337,14 +337,14 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         splitter.setRedemptionRate(10);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector);
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -357,7 +357,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, maxSlippageBps, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, maxSlippageBps, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
@@ -369,7 +369,7 @@ contract BullLeverageRouterTest is Test {
         vm.expectEmit(true, false, false, false);
         emit BullLeverageRouter.LeverageClosed(alice, borrowed, supplied, 0, maxSlippageBps);
 
-        router.closeLeverage(supplied, maxSlippageBps, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, maxSlippageBps, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify position is closed (user may or may not receive USDC depending on economics)
@@ -385,7 +385,7 @@ contract BullLeverageRouterTest is Test {
         // Skip authorization
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.closeLeverage(collateralToWithdraw, 50, block.timestamp + 1 hours);
+        router.closeLeverage(collateralToWithdraw, 50, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -396,7 +396,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__Expired.selector);
-        router.closeLeverage(collateralToWithdraw, 50, block.timestamp - 1);
+        router.closeLeverage(collateralToWithdraw, 50, 0, block.timestamp - 1);
         vm.stopPrank();
     }
 
@@ -410,12 +410,12 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 suppliedBefore, uint256 borrowed) = morpho.positions(alice);
 
         // Close full position
-        router.closeLeverage(suppliedBefore, 100, block.timestamp + 1 hours);
+        router.closeLeverage(suppliedBefore, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify full close
@@ -442,7 +442,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        router.openLeverage(principal, leverageMultiplier, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverageMultiplier, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify invariants with fixed debt model
@@ -477,12 +477,12 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Open
-        router.openLeverage(principal, leverageMultiplier, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverageMultiplier, 100, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
 
         // Close (router queries actual debt from Morpho)
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Position should be fully closed
@@ -522,7 +522,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify actual matches preview
@@ -567,7 +567,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 collateral, uint256 debt) = morpho.positions(alice);
 
@@ -578,7 +578,7 @@ contract BullLeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         // Close the position (router queries actual debt from Morpho)
-        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify actual matches preview
@@ -629,7 +629,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // BULL leverage uses iterative Curve-based calculation with 0.1% buffer
@@ -649,7 +649,7 @@ contract BullLeverageRouterTest is Test {
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
 
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // BULL leverage uses iterative Curve-based calculation with 0.1% buffer
@@ -669,7 +669,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Loan = 200 wei
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
@@ -685,14 +685,14 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         (uint256 supplied, uint256 borrowed) = morpho.positions(alice);
         // Fixed debt model: 1.1x has $100 debt (same as BEAR router)
         assertEq(borrowed, 100 * 1e6, "Should have $100 debt at 1.1x (fixed debt model)");
 
         // Close position
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Position should be cleared
@@ -723,13 +723,13 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         // Get position state
         (uint256 totalCollateral,) = morpho.positions(alice);
 
         // Close full position (router queries actual debt from Morpho)
-        router.closeLeverage(totalCollateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(totalCollateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify state after close
@@ -761,12 +761,12 @@ contract BullLeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         // Open position
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
 
         // Immediately close entire position (router queries actual debt from Morpho)
         (uint256 collateral,) = morpho.positions(alice);
 
-        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdcAfter = usdc.balanceOf(alice);
@@ -798,7 +798,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         // Should succeed with any valid slippage setting (using 2x leverage)
-        router.openLeverage(principal, 2e18, slippageBps, block.timestamp + 1 hours);
+        router.openLeverage(principal, 2e18, slippageBps, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateral,) = morpho.positions(alice);
@@ -817,12 +817,12 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, 2e18, 100, 0, block.timestamp + 1 hours);
 
         (uint256 collateral,) = morpho.positions(alice);
 
         // Close with full collateral (router queries and repays full debt)
-        router.closeLeverage(collateral, 100, block.timestamp + 1 hours);
+        router.closeLeverage(collateral, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // Verify full close
@@ -844,13 +844,13 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         (uint256 collateralBefore,) = morpho.positions(alice);
 
         // Add more collateral
         usdc.approve(address(router), 500e6);
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -865,7 +865,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -878,10 +878,10 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
-        router.addCollateral(0, 100, block.timestamp + 1 hours);
+        router.addCollateral(0, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -894,14 +894,14 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Revoke authorization
         morpho.setAuthorization(address(router), false);
         usdc.approve(address(router), 500e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NotAuthorized.selector);
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -914,14 +914,14 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 1000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Pause splitter
         splitter.setStatus(ISyntheticSplitter.Status.PAUSED);
         usdc.approve(address(router), 500e6);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector);
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -936,7 +936,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         (uint256 collateralBefore,) = morpho.positions(alice);
         uint256 usdcBefore = usdc.balanceOf(alice);
@@ -944,7 +944,7 @@ contract BullLeverageRouterTest is Test {
         // Add collateral with 1% slippage tolerance (100 bps)
         // This should succeed even with Curve price impact
         uint256 addAmount = 500e6;
-        router.addCollateral(addAmount, 100, block.timestamp + 1 hours);
+        router.addCollateral(addAmount, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -969,12 +969,12 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 100_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(5000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(5000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         (uint256 collateralBefore,) = morpho.positions(alice);
 
         // Add large collateral amount - should handle price impact
-        router.addCollateral(10_000e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(10_000e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -992,7 +992,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Set slippage on Curve pool to simulate real-world conditions
         // The get_dy() quote won't include this, but exchange() will
@@ -1003,7 +1003,7 @@ contract BullLeverageRouterTest is Test {
 
         // Add collateral with 1% max slippage - should succeed
         // because flash loan buffer is subtracted (borrow less, easier to repay)
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -1024,7 +1024,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Set slippage close to max tolerance
         curvePool.setSlippage(90); // 0.9% slippage (just under 1% max)
@@ -1032,7 +1032,7 @@ contract BullLeverageRouterTest is Test {
         (uint256 collateralBefore,) = morpho.positions(alice);
 
         // Should still succeed with 1% max slippage tolerance
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -1050,13 +1050,13 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         // Set extreme slippage that exceeds what the buffer can handle
         curvePool.setSlippage(1500); // 15% slippage - way beyond 1% tolerance
 
         vm.expectRevert("Too little received"); // Curve min_dy check
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -1073,14 +1073,14 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         curvePool.setSlippage(slippageBps);
 
         (uint256 collateralBefore,) = morpho.positions(alice);
 
         // Should succeed with 1% max slippage tolerance
-        router.addCollateral(500e6, 100, block.timestamp + 1 hours);
+        router.addCollateral(500e6, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -1103,7 +1103,7 @@ contract BullLeverageRouterTest is Test {
         uint256 usdcBefore = usdc.balanceOf(alice);
 
         morpho.setAuthorization(address(router), true);
-        router.removeCollateral(1000e18, 100, block.timestamp + 1 hours);
+        router.removeCollateral(1000e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 collateralAfter,) = morpho.positions(alice);
@@ -1118,7 +1118,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__NoPosition.selector);
-        router.removeCollateral(1000e18, 100, block.timestamp + 1 hours);
+        router.removeCollateral(1000e18, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -1134,7 +1134,7 @@ contract BullLeverageRouterTest is Test {
         morpho.setAuthorization(address(router), true);
 
         vm.expectRevert(LeverageRouterBase.LeverageRouterBase__ZeroAmount.selector);
-        router.removeCollateral(0, 100, block.timestamp + 1 hours);
+        router.removeCollateral(0, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
@@ -1156,7 +1156,7 @@ contract BullLeverageRouterTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), 10_000e6);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(1000e6, 2e18, 100, block.timestamp + 1 hours);
+        router.openLeverage(1000e6, 2e18, 100, 0, block.timestamp + 1 hours);
 
         uint256 addAmount = 500e6;
 
@@ -1165,7 +1165,7 @@ contract BullLeverageRouterTest is Test {
 
         // Execute actual
         (uint256 collateralBefore,) = morpho.positions(alice);
-        router.addCollateral(addAmount, 100, block.timestamp + 1 hours);
+        router.addCollateral(addAmount, 100, 0, block.timestamp + 1 hours);
         (uint256 collateralAfter,) = morpho.positions(alice);
         vm.stopPrank();
 
@@ -1810,7 +1810,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(router), principal);
         morpho.setAuthorization(address(router), true);
-        router.openLeverage(principal, leverage, 100, block.timestamp + 1 hours);
+        router.openLeverage(principal, leverage, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (supplied, borrowed) = morpho.positions(alice);
@@ -1834,7 +1834,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
         // - SPLITTER.burn(1515e18) needs 1515e18 BEAR
         // - But we only have 1500e18 BEAR (flashAmount - extraBearForDebt)
         // - Not enough BEAR → revert
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         // If we reach here, the close succeeded
@@ -1855,7 +1855,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
 
         // Alice's transaction should succeed despite the rate change
         // Currently FAILS due to BEAR/BULL mismatch
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
 
         (uint256 suppliedAfter,) = morpho.positions(alice);
@@ -1888,7 +1888,7 @@ contract BullLeverageRouterExchangeRateDriftTest is Test {
                 2_001_239_999_490_000_000_000 // actual redeem with 2% boost
             )
         );
-        router.closeLeverage(supplied, 100, block.timestamp + 1 hours);
+        router.closeLeverage(supplied, 100, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
 
