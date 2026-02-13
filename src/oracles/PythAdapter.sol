@@ -25,6 +25,7 @@ contract PythAdapter is AggregatorV3Interface {
     error PythAdapter__InvalidPrice();
     error PythAdapter__ConfidenceTooWide(uint64 conf, int64 price);
     error PythAdapter__InvalidRoundId();
+    error PythAdapter__RefundFailed();
 
     /// @param pyth_ Pyth contract address on this chain.
     /// @param priceId_ Pyth price feed ID (e.g., USD/SEK).
@@ -119,6 +120,13 @@ contract PythAdapter is AggregatorV3Interface {
     ) external payable {
         uint256 fee = PYTH.getUpdateFee(updateData);
         PYTH.updatePriceFeeds{value: fee}(updateData);
+        uint256 refund = msg.value - fee;
+        if (refund > 0) {
+            (bool ok,) = msg.sender.call{value: refund}("");
+            if (!ok) {
+                revert PythAdapter__RefundFailed();
+            }
+        }
     }
 
     /// @notice Returns the fee required to update the price.

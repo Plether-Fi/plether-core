@@ -58,6 +58,8 @@ contract PythAdapterTest is Test {
     PythAdapter public adapter;
     MockPyth public mockPyth;
 
+    receive() external payable {}
+
     bytes32 constant SEK_USD_PRICE_ID = 0x1e26d4d9c56cb6a7e60d498b4ed4c21eb47e42f25c2b895bebe6c5a040ba129f;
     uint256 constant MAX_STALENESS = 1 hours;
     int64 constant SEK_PRICE = 10_860_000; // $0.1086 in 8 decimals
@@ -214,6 +216,45 @@ contract PythAdapterTest is Test {
         assertEq(answer, SEK_PRICE, "Price should be valid after update");
     }
 
+    function test_UpdatePrice_RefundsExcessETH() public {
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "test";
+
+        uint256 fee = adapter.getUpdateFee(updateData);
+        uint256 excess = 1 ether;
+        uint256 balBefore = address(this).balance;
+
+        adapter.updatePrice{value: fee + excess}(updateData);
+
+        assertEq(address(this).balance, balBefore - fee);
+        assertEq(address(adapter).balance, 0);
+    }
+
+    function test_UpdatePrice_NoRefundWhenExactFee() public {
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "test";
+
+        uint256 fee = adapter.getUpdateFee(updateData);
+        uint256 balBefore = address(this).balance;
+
+        adapter.updatePrice{value: fee}(updateData);
+
+        assertEq(address(this).balance, balBefore - fee);
+        assertEq(address(adapter).balance, 0);
+    }
+
+    function test_UpdatePrice_RevertsWhenRefundFails() public {
+        NoReceive caller = new NoReceive();
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "test";
+
+        uint256 fee = adapter.getUpdateFee(updateData);
+        vm.deal(address(caller), fee + 1 ether);
+
+        vm.expectRevert(PythAdapter.PythAdapter__RefundFailed.selector);
+        caller.callUpdate(adapter, updateData, fee + 1 ether);
+    }
+
     function test_UpdatePrice_RevertsOnInsufficientValue() public {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "test";
@@ -309,6 +350,18 @@ contract PythAdapterInverseTest is Test {
 
         // 10^13 / 1200000 = 8333333 (~$0.0833)
         assertEq(answer, 8_333_333);
+    }
+
+}
+
+contract NoReceive {
+
+    function callUpdate(
+        PythAdapter adapter,
+        bytes[] calldata updateData,
+        uint256 value
+    ) external {
+        adapter.updatePrice{value: value}(updateData);
     }
 
 }
