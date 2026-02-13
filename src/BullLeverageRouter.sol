@@ -316,9 +316,7 @@ contract BullLeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__NotAuthorized();
         }
 
-        // Query actual debt and borrow shares from Morpho
-        // We need debtToRepay for calculating BEAR to sell, and borrowShares for Morpho repayment
-        // Using shares-based repayment avoids Morpho edge case when repaying exact totalBorrowAssets
+        MORPHO.accrueInterest(marketParams);
         uint256 debtToRepay = _getActualDebt(msg.sender);
         uint256 borrowShares = _getBorrowShares(msg.sender);
 
