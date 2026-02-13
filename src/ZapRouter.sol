@@ -77,7 +77,6 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
     error ZapRouter__SplitterNotActive();
     error ZapRouter__BearPriceAboveCap();
     error ZapRouter__InsufficientOutput();
-    error ZapRouter__InvalidCurvePrice();
     error ZapRouter__SolvencyBreach();
     error ZapRouter__PermitFailed();
 
@@ -385,29 +384,14 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 debtBear = loanAmount + fee;
 
         // 3. Buy Debt Bear using USDC
-        uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-        if (bearFromOneUsdc == 0) {
-            revert ZapRouter__InvalidCurvePrice();
-        }
+        uint256 estimatedUsdcNeeded = _estimateUsdcForBearBuyback(debtBear);
+        uint256 usdcToSwap = (estimatedUsdcNeeded * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
-        // Linear estimate (first approximation)
-        uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;
-
-        // Correct for AMM price impact: check actual output at linear estimate
-        uint256 actualBearFromLinear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, usdcLinear);
-        uint256 usdcAdjusted =
-            actualBearFromLinear >= debtBear ? usdcLinear : (usdcLinear * debtBear) / actualBearFromLinear;
-
-        // Apply safety buffer for any remaining slippage
-        uint256 usdcToSwap = (usdcAdjusted * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
-
-        // Sanity Check: Do we have enough USDC?
         uint256 totalUsdc = USDC.balanceOf(address(this));
         if (usdcToSwap > totalUsdc) {
-            usdcToSwap = totalUsdc; // Cap at max available (hoping it's enough)
+            usdcToSwap = totalUsdc;
         }
 
-        // Execute Swap with MEV protection: require at least debtBear output
         CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, usdcToSwap, debtBear);
 
         // 4. Repay Loan
@@ -509,22 +493,8 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         // Calculate USDC needed to buy back BEAR for repayment
         uint256 debtBear = flashAmount + flashFee;
 
-        // Get price: how much BEAR do we get for 1 USDC?
-        uint256 bearFromOneUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-        if (bearFromOneUsdc == 0) {
-            return (expectedUsdcFromBurn, 0, 0, flashFee);
-        }
-
-        // Linear USDC requirement (first approximation)
-        uint256 usdcLinear = (debtBear * DecimalConstants.ONE_USDC) / bearFromOneUsdc;
-
-        // Correct for AMM price impact: check actual output at linear estimate
-        uint256 actualBearFromLinear = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, usdcLinear);
-        uint256 usdcAdjusted =
-            actualBearFromLinear >= debtBear ? usdcLinear : (usdcLinear * debtBear) / actualBearFromLinear;
-
-        // Apply safety buffer
-        usdcForBearBuyback = (usdcAdjusted * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
+        usdcForBearBuyback = _estimateUsdcForBearBuyback(debtBear);
+        usdcForBearBuyback = (usdcForBearBuyback * (10_000 + SAFETY_BUFFER_BPS)) / 10_000;
 
         // Net USDC out = burn proceeds - buyback cost
         if (expectedUsdcFromBurn > usdcForBearBuyback) {
@@ -532,6 +502,44 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         } else {
             expectedUsdcOut = 0;
         }
+    }
+
+    // ==========================================
+    // INTERNAL HELPERS
+    // ==========================================
+
+    function _estimateUsdcForBearBuyback(
+        uint256 bearAmount
+    ) private view returns (uint256) {
+        if (bearAmount == 0) {
+            return 0;
+        }
+
+        uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
+        if (bearPerUsdc == 0) {
+            return (bearAmount * CAP) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        }
+
+        uint256 low = (bearAmount * DecimalConstants.ONE_USDC) / bearPerUsdc;
+        uint256 high = low + (low / 5);
+
+        uint256 bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
+        while (bearAtHigh < bearAmount && high < type(uint128).max) {
+            high = high * 2;
+            bearAtHigh = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, high);
+        }
+
+        for (uint256 i = 0; i < 20; i++) {
+            uint256 mid = (low + high) / 2;
+            uint256 bearOut = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, mid);
+            if (bearOut >= bearAmount) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        return high;
     }
 
     // ==========================================

@@ -252,7 +252,6 @@ contract ZapRouterHandler is Test {
     // Expected error selectors
     bytes4 private constant ERR_INSUFFICIENT_OUTPUT = ZapRouter.ZapRouter__InsufficientOutput.selector;
     bytes4 private constant ERR_SOLVENCY_BREACH = ZapRouter.ZapRouter__SolvencyBreach.selector;
-    bytes4 private constant ERR_INVALID_CURVE_PRICE = ZapRouter.ZapRouter__InvalidCurvePrice.selector;
     bytes4 private constant ERR_BEAR_PRICE_ABOVE_CAP = ZapRouter.ZapRouter__BearPriceAboveCap.selector;
     bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = ZapRouter.ZapRouter__SplitterNotActive.selector;
     bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
@@ -332,13 +331,12 @@ contract ZapRouterHandler is Test {
             uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](6);
+            bytes4[] memory allowed = new bytes4[](5);
             allowed[0] = ERR_INSUFFICIENT_OUTPUT;
             allowed[1] = ERR_SOLVENCY_BREACH;
-            allowed[2] = ERR_INVALID_CURVE_PRICE;
-            allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
-            allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[5] = ERR_STRING;
+            allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
+            allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[4] = ERR_STRING;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -365,13 +363,12 @@ contract ZapRouterHandler is Test {
             uint256 usdcReceived = usdc.balanceOf(currentActor) - usdcBefore;
             ghost_totalUsdcReturned += usdcReceived;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](6);
+            bytes4[] memory allowed = new bytes4[](5);
             allowed[0] = ERR_INSUFFICIENT_OUTPUT;
             allowed[1] = ERR_SOLVENCY_BREACH;
-            allowed[2] = ERR_INVALID_CURVE_PRICE;
-            allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
-            allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[5] = ERR_STRING;
+            allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
+            allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
+            allowed[4] = ERR_STRING;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -390,13 +387,12 @@ contract ZapRouterHandler is Test {
         uint256 bullBefore = plDxyBull.balanceOf(currentActor);
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
-        bytes4[] memory allowed = new bytes4[](6);
+        bytes4[] memory allowed = new bytes4[](5);
         allowed[0] = ERR_INSUFFICIENT_OUTPUT;
         allowed[1] = ERR_SOLVENCY_BREACH;
-        allowed[2] = ERR_INVALID_CURVE_PRICE;
-        allowed[3] = ERR_BEAR_PRICE_ABOVE_CAP;
-        allowed[4] = ERR_SPLITTER_NOT_ACTIVE;
-        allowed[5] = ERR_STRING;
+        allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
+        allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
+        allowed[4] = ERR_STRING;
 
         // Mint
         try router.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours) {

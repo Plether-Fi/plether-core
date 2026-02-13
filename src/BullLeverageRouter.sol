@@ -708,27 +708,16 @@ contract BullLeverageRouter is LeverageRouterBase {
         // Need to buy: repayAmount - bearBalance
         if (repayAmount > bearBalance) {
             uint256 bearToBuy = repayAmount - bearBalance;
-
-            // Estimate USDC needed using Curve price discovery
-            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-            if (bearPerUsdc == 0) {
-                revert LeverageRouterBase__InvalidCurvePrice();
-            }
-
-            // Calculate USDC needed with slippage buffer
-            uint256 estimatedUsdcNeeded = (bearToBuy * DecimalConstants.ONE_USDC) / bearPerUsdc;
+            uint256 estimatedUsdcNeeded = _estimateUsdcForBearBuyback(bearToBuy);
             uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
 
-            // Use available balance, capped at maxUsdcToSpend
             uint256 usdcBalance = USDC.balanceOf(address(this));
             uint256 usdcToSpend = usdcBalance < maxUsdcToSpend ? usdcBalance : maxUsdcToSpend;
 
-            // Verify we have at least the base estimate (without buffer)
             if (usdcBalance < estimatedUsdcNeeded) {
                 revert LeverageRouterBase__InsufficientOutput();
             }
 
-            // Swap USDC → BEAR with slippage-tolerant min_dy
             uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
             CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, usdcToSpend, minBearOut);
         }
@@ -780,15 +769,7 @@ contract BullLeverageRouter is LeverageRouterBase {
 
         if (repayAmount > bearBalance) {
             uint256 bearToBuy = repayAmount - bearBalance;
-
-            // Estimate USDC needed using Curve price discovery
-            uint256 bearPerUsdc = CURVE_POOL.get_dy(USDC_INDEX, PLDXY_BEAR_INDEX, DecimalConstants.ONE_USDC);
-            if (bearPerUsdc == 0) {
-                revert LeverageRouterBase__InvalidCurvePrice();
-            }
-
-            // Calculate USDC needed with slippage buffer
-            uint256 estimatedUsdcNeeded = (bearToBuy * DecimalConstants.ONE_USDC) / bearPerUsdc;
+            uint256 estimatedUsdcNeeded = _estimateUsdcForBearBuyback(bearToBuy);
             uint256 maxUsdcToSpend = estimatedUsdcNeeded + (estimatedUsdcNeeded * maxSlippageBps / 10_000);
 
             uint256 usdcBalance = USDC.balanceOf(address(this));
@@ -798,7 +779,6 @@ contract BullLeverageRouter is LeverageRouterBase {
                 revert LeverageRouterBase__InsufficientOutput();
             }
 
-            // Swap USDC → BEAR with slippage-tolerant min_dy
             uint256 minBearOut = (bearToBuy * (10_000 - maxSlippageBps)) / 10_000;
             CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, usdcToSpend, minBearOut);
         }
