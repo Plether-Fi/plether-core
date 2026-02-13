@@ -87,7 +87,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - **BEAR price = basket price** (direct correlation)
 - **BULL price = CAP - basket price** (inverse correlation)
 
-**MorphoOracle** - Adapts BasketOracle to Morpho's 1e36 scale format
+**MorphoOracle** - Adapts BasketOracle to Morpho's oracle scale (24 decimals for USDC/plDXY)
 
 **StakedOracle**: Wrapper that calculates `Price(Asset) * ExchangeRate` to price splDXY collateral for Morpho
 
@@ -99,7 +99,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 ## Key Patterns
 
 - **Rounding**: Round UP for mint (favor protocol), DOWN for burn (favor user)
-- **Decimals**: USDC=6, Tokens=18, Oracle=8, Morpho=36
+- **Decimals**: USDC=6, Tokens=18, Oracle=8, Morpho oracle=24 (formula: 36+6-18)
 - **Timelock**: 7 days for critical governance changes (adapter/treasury migration)
 - **Oracle Safety**: 8-hour staleness timeout, sequencer uptime check on L2s
 - **Flash Loans**: Routers implement IERC3156FlashBorrower with initiator/lender validation

@@ -52,7 +52,7 @@ contract StakedOracle is IOracle {
     }
 
     /// @notice Returns price of 1 vault share including accrued yield.
-    /// @return Price scaled to 1e36 (underlying price * exchange rate).
+    /// @return Price in Morpho scale (24 decimals: underlying price * exchange rate).
     function price() external view override returns (uint256) {
         uint256 rawPrice = UNDERLYING_ORACLE.price();
         if (rawPrice == 0) {

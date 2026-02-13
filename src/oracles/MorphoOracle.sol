@@ -7,14 +7,14 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 /// @notice Interface for Morpho-compatible price oracles.
 interface IMorphoOracle {
 
-    /// @notice Returns price of 1 collateral unit in loan asset terms (1e36 scale).
+    /// @notice Returns price of 1 collateral unit in loan asset terms (Morpho scale: 36 + loanDec - colDec = 24 decimals).
     function price() external view returns (uint256);
 
 }
 
 /// @title MorphoOracle
 /// @custom:security-contact contact@plether.com
-/// @notice Adapts BasketOracle price to Morpho Blue's 1e36 scale format.
+/// @notice Adapts BasketOracle price to Morpho Blue's oracle scale (24 decimals for USDC/plDXY).
 /// @dev Supports both plDXY-BEAR (direct) and plDXY-BULL (inverse) pricing.
 contract MorphoOracle is IMorphoOracle {
 
@@ -59,11 +59,12 @@ contract MorphoOracle is IMorphoOracle {
         IS_INVERSE = _isInverse;
     }
 
-    /// @notice Returns collateral price scaled to 1e36.
-    /// @dev BEAR (IS_INVERSE=false): basketPrice * CHAINLINK_TO_MORPHO_SCALE.
+    /// @notice Returns collateral price in Morpho scale (24 decimals for USDC(6)/plDXY(18)).
+    /// @dev Morpho expects: 36 + loanDecimals - collateralDecimals = 36 + 6 - 18 = 24.
+    ///      BEAR (IS_INVERSE=false): min(basketPrice, CAP) * CHAINLINK_TO_MORPHO_SCALE.
     ///      BULL (IS_INVERSE=true): (CAP - basketPrice) * CHAINLINK_TO_MORPHO_SCALE.
     ///      Returns 1 (not 0) when BULL price would be zero to avoid Morpho division errors.
-    /// @return Price of 1 plDXY token in USDC terms (1e36 scale).
+    /// @return Price of 1 plDXY token in USDC terms (24 decimals).
     function price() external view override returns (uint256) {
         (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
 

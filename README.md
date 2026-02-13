@@ -24,7 +24,7 @@ These tokens are always minted and burned in pairs, maintaining a zero-sum relat
 
 | Contract | Description |
 |----------|-------------|
-| [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint/burn. |
+| [`SyntheticSplitter`](src/SyntheticSplitter.sol) | Central protocol contract. Accepts USDC, mints/burns token pairs. Permissionless `deployToAdapter()` pushes idle USDC to yield. EIP-2612 permit support on mint. |
 | [`SyntheticToken`](src/SyntheticToken.sol) | ERC20 + ERC20FlashMint implementation for plDXY-BEAR and plDXY-BULL |
 
 ### Staking Layer
@@ -40,7 +40,7 @@ These tokens are always minted and burned in pairs, maintaining a zero-sum relat
 |----------|-------------|
 | [`BasketOracle`](src/oracles/BasketOracle.sol) | Computes plDXY as weighted basket of 6 price feeds, with bound validation against Curve EMA price |
 | [`PythAdapter`](src/oracles/PythAdapter.sol) | Adapts Pyth Network feeds to Chainlink's AggregatorV3Interface (used for SEK/USD) |
-| [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's 36-decimal scale format |
+| [`MorphoOracle`](src/oracles/MorphoOracle.sol) | Adapts BasketOracle to Morpho Blue's oracle scale (24 decimals for USDC/plDXY) |
 | [`StakedOracle`](src/oracles/StakedOracle.sol) | Wraps underlying oracle to price ERC-4626 staked token shares |
 
 #### BasketOracle Design

@@ -501,7 +501,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     /// @return totalSurplus Available surplus (total assets - liabilities).
     /// @return callerReward Caller incentive (0.1% of harvest).
     /// @return treasuryShare Treasury allocation (20% of remaining).
-    /// @return stakingShare Staking allocation (79.9% of remaining).
+    /// @return stakingShare Staking allocation (80% of remaining).
     function previewHarvest()
         external
         view
@@ -551,7 +551,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     /// @notice Permissionless yield harvesting with automatic redeployment.
     /// @dev Pays surplus from local buffer first, only hits adapter for the remainder.
     ///      After distribution, deploys any remaining excess to the adapter.
-    ///      Distributes: 0.1% to caller, 20% to treasury, 79.9% to staking.
+    ///      Distributes: 0.1% to caller, 20% of remaining to treasury, 80% of remaining to staking.
     function harvestYield() external nonReentrant whenNotPaused {
         if (address(yieldAdapter) == address(0)) {
             revert Splitter__AdapterNotSet();

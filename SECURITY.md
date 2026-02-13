@@ -109,7 +109,7 @@ The protocol owner can:
 - Transfer ownership (via Ownable2Step two-step pattern)
 
 The owner **cannot**:
-- Freeze user funds permanently (burn always works, even when paused)
+- Freeze user funds permanently (burn works even when paused, provided the protocol remains solvent; if insolvent and paused, burns are blocked to prevent a race-to-exit)
 - Modify the CAP after deployment
 - Change oracle addresses after deployment
 - Mint or burn tokens directly
@@ -278,7 +278,7 @@ Critical decimal conversions throughout the protocol:
 | plDXY-BEAR / plDXY-BULL | 18 | Synthetic tokens |
 | Chainlink Price Feeds | 8 | EUR/USD, JPY/USD, etc. |
 | BasketOracle Output | 8 | Aggregated plDXY price |
-| Morpho Oracle | 36 | Internal Morpho scaling |
+| Morpho Oracle | 24 | Morpho scale: 36 + loanDec(6) - colDec(18) |
 | StakedToken Offset | 3 | 1000x inflation attack protection |
 
 Conversion formula in Splitter:
@@ -459,10 +459,10 @@ All USDC entry points offer `*WithPermit()` variants (`mintWithPermit`, `zapMint
 If tokens are accidentally sent to contracts:
 1. Identify the stuck token
 2. Call `rescueToken(token, recipient)` on the relevant contract
-3. Note: Cannot rescue core assets (USDC, plDXY-BEAR, plDXY-BULL)
+3. Note: Cannot rescue core assets (USDC, plDXY-BEAR, plDXY-BULL, yieldAdapter shares)
 
 Contracts supporting `rescueToken`:
-- **SyntheticSplitter**: Rescues any token except USDC, plDXY-BEAR, plDXY-BULL
+- **SyntheticSplitter**: Rescues any token except USDC, plDXY-BEAR, plDXY-BULL, and yieldAdapter shares
 - **VaultAdapter**: Rescues any token except USDC (the underlying asset) and vault shares
 
 ### Adapter Migration (Emergency)
@@ -523,7 +523,7 @@ contact@plether.com
 
 **Medium findings (all fixed):**
 1. **Basket weights not constrained to unit value** — BasketOracle did not enforce weights summing to 1, which could cause deviation checks to fail or return zero prices. Fixed: added `require` enforcing unit sum.
-2. **Adapter asset doesn't account for accrued interest** — `MorphoAdapter.totalAssets` did not trigger interest accrual, causing stale values in `harvestYield` and `previewBurn`. Fixed: accruing interest before reading balances.
+2. **Adapter asset doesn't account for accrued interest** — `MorphoAdapter.totalAssets` did not trigger interest accrual, causing stale values in `harvestYield` and `previewBurn`. Mitigated: the original MorphoAdapter was replaced by VaultAdapter (Morpho Vault), where `accrueInterest()` is a no-op because Morpho Vault handles accrual internally. Any lag is negligible (a few blocks).
 
 **Acknowledged finding:**
 - **Duplicate event emissions** (Low) — `proposeCurvePool`, `setUrd`, and `proposeAdapter` emit events even when the new value equals the old. Acknowledged as harmless.
