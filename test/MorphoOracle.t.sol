@@ -84,11 +84,10 @@ contract MorphoOracleTest is Test {
         assertLe(bearOracle.price(), capMorpho);
     }
 
-    function test_BullOracle_RevertsIfCapBreached() public {
+    function test_BullOracle_ReturnsDustIfCapBreached() public {
         basket.updatePrice(210_000_000);
 
-        vm.expectRevert(MorphoOracle.MorphoOracle__PriceExceedsCap.selector);
-        bullOracle.price();
+        assertEq(bullOracle.price(), 1);
     }
 
     function test_Revert_IfBasketIsBroken() public {

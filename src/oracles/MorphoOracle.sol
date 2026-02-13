@@ -36,9 +36,6 @@ contract MorphoOracle is IMorphoOracle {
     /// @notice Thrown when source oracle data is stale.
     error MorphoOracle__StalePrice();
 
-    /// @notice Thrown when basket price exceeds protocol CAP (liquidation state).
-    error MorphoOracle__PriceExceedsCap();
-
     /// @notice Thrown when zero address provided to constructor.
     error MorphoOracle__ZeroAddress();
 
@@ -79,10 +76,7 @@ contract MorphoOracle is IMorphoOracle {
         uint256 finalPrice;
 
         if (IS_INVERSE) {
-            if (basketPrice > CAP) {
-                revert MorphoOracle__PriceExceedsCap();
-            }
-            finalPrice = CAP - basketPrice;
+            finalPrice = basketPrice >= CAP ? 0 : CAP - basketPrice;
             if (finalPrice == 0) {
                 return 1;
             }
