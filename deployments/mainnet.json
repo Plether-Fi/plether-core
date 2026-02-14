@@ -31,6 +31,9 @@
       "LeverageRouter": "0x0b10642c85C1DedC2636a23F8B83e281e888086D",
       "BullLeverageRouter": "0x778cd42C371f9A1dC98B69857fa3854FFa8ECBBf"
     },
+    "rewards": {
+      "RewardDistributor": "0xbe0E9fad245F3A7d648C4f943dD51b0F822Ec48C"
+    },
     "external": {
       "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       "Morpho": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
@@ -59,6 +62,7 @@
     "ZapRouter": "https://etherscan.io/address/0xb0623D89ae73D177cf201bCA09C51d84502A8d80",
     "LeverageRouter": "https://etherscan.io/address/0x0b10642c85C1DedC2636a23F8B83e281e888086D",
     "BullLeverageRouter": "https://etherscan.io/address/0x778cd42C371f9A1dC98B69857fa3854FFa8ECBBf",
+    "RewardDistributor": "https://etherscan.io/address/0xbe0E9fad245F3A7d648C4f943dD51b0F822Ec48C",
     "CurvePool": "https://etherscan.io/address/0x95D51D6F312DbE66BACC2ed677aD64790f48aa87"
   }
 }
