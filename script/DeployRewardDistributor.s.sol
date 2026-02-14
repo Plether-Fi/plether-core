@@ -2,85 +2,74 @@
 pragma solidity ^0.8.30;
 
 import {RewardDistributor} from "../src/RewardDistributor.sol";
-import {StakedToken} from "../src/StakedToken.sol";
-import {ZapRouter} from "../src/ZapRouter.sol";
-import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
 
 /**
  * @title DeployRewardDistributor
- * @notice Deployment script for RewardDistributor contract
- * @dev Requires existing protocol deployment (Splitter, StakedTokens, ZapRouter, etc.)
+ * @notice Deploys RewardDistributor with mainnet addresses.
+ * @dev Run (dry):
+ *        source .env && forge script script/DeployRewardDistributor.s.sol --tc DeployRewardDistributor \
+ *          --rpc-url $MAINNET_RPC_URL
  *
- * Usage:
- *   # Dry run (simulation)
- *   (source .env && forge script script/DeployRewardDistributor.s.sol --tc DeployRewardDistributor --rpc-url $SEPOLIA_RPC_URL)
- *
- *   # Actual deployment
- *   (source .env && forge script script/DeployRewardDistributor.s.sol --tc DeployRewardDistributor --rpc-url $SEPOLIA_RPC_URL --broadcast)
- *
- * Required environment variables:
- *   TEST_PRIVATE_KEY - Deployer private key
- *
- * Required constructor addresses (update before deployment):
- *   SPLITTER, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BEAR, STAKED_BULL, CURVE_POOL, ZAP_ROUTER, ORACLE
+ *      Run (broadcast):
+ *        source .env && forge script script/DeployRewardDistributor.s.sol --tc DeployRewardDistributor \
+ *          --rpc-url $MAINNET_RPC_URL --broadcast
  */
 contract DeployRewardDistributor is Script {
 
-    // ==========================================
-    // DEPLOYMENT ADDRESSES (UPDATE BEFORE DEPLOY)
-    // ==========================================
+    address constant SPLITTER = 0x45c1135fab0A0532cC2945f6b0b31eA12B54A2f9;
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant PLDXY_BEAR = 0x5503FB45370a03909dFfEB207483a2832A9171aD;
+    address constant PLDXY_BULL = 0xf5aeecdF9778a5801C0873088d25E4d7E3Bf07Ab;
+    address constant STAKED_BEAR = 0xDC7366b8BB83f9ABa2B4F989194D6c03D0A20DE9;
+    address constant STAKED_BULL = 0x8dbcF452799f50D3382105a19FdBfA57B7f29C73;
+    address constant CURVE_POOL = 0x95D51D6F312DbE66BACC2ed677aD64790f48aa87;
+    address constant ZAP_ROUTER = 0xb0623D89ae73D177cf201bCA09C51d84502A8d80;
+    address constant BASKET_ORACLE = 0x4f798422388484F2139717A8cE0115De3B06b1DF;
+    address constant PYTH_ADAPTER = 0x5f4859A2aCcf3b6Ca9eeD9799676Cc7a77B7bEb5;
 
-    // These should be set to the actual deployed addresses from DeployToTest
-    address constant SPLITTER = address(0);
-    address constant USDC = address(0);
-    address constant PLDXY_BEAR = address(0);
-    address constant PLDXY_BULL = address(0);
-    address constant STAKED_BEAR = address(0);
-    address constant STAKED_BULL = address(0);
-    address constant CURVE_POOL = address(0);
-    address constant ZAP_ROUTER = address(0);
-    address constant ORACLE = address(0);
-
-    function run() external returns (RewardDistributor distributor) {
-        uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
+    function run() external {
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
         console.log("Deployer:", deployer);
         console.log("");
 
-        require(SPLITTER != address(0), "SPLITTER address not set");
-        require(USDC != address(0), "USDC address not set");
-        require(PLDXY_BEAR != address(0), "PLDXY_BEAR address not set");
-        require(PLDXY_BULL != address(0), "PLDXY_BULL address not set");
-        require(STAKED_BEAR != address(0), "STAKED_BEAR address not set");
-        require(STAKED_BULL != address(0), "STAKED_BULL address not set");
-        require(CURVE_POOL != address(0), "CURVE_POOL address not set");
-        require(ZAP_ROUTER != address(0), "ZAP_ROUTER address not set");
-        require(ORACLE != address(0), "ORACLE address not set");
-
         vm.startBroadcast(privateKey);
 
-        distributor = new RewardDistributor(
-            SPLITTER, USDC, PLDXY_BEAR, PLDXY_BULL, STAKED_BEAR, STAKED_BULL, CURVE_POOL, ZAP_ROUTER, ORACLE, address(0)
+        RewardDistributor distributor = new RewardDistributor(
+            SPLITTER,
+            USDC,
+            PLDXY_BEAR,
+            PLDXY_BULL,
+            STAKED_BEAR,
+            STAKED_BULL,
+            CURVE_POOL,
+            ZAP_ROUTER,
+            BASKET_ORACLE,
+            PYTH_ADAPTER
         );
+
+        console.log("RewardDistributor:", address(distributor));
 
         vm.stopBroadcast();
 
+        require(address(distributor.SPLITTER()) == SPLITTER, "SPLITTER mismatch");
+        require(address(distributor.ZAP_ROUTER()) == ZAP_ROUTER, "ZAP_ROUTER mismatch");
+        require(distributor.CAP() == 2e8, "CAP mismatch");
+
+        console.log("");
         console.log("========================================");
-        console.log("REWARD DISTRIBUTOR DEPLOYMENT COMPLETE");
+        console.log("DEPLOYMENT COMPLETE");
         console.log("========================================");
-        console.log("RewardDistributor:", address(distributor));
+        console.log("");
+        console.log("  RewardDistributor:", address(distributor));
         console.log("");
         console.log("Next steps:");
-        console.log("1. Configure SyntheticSplitter to send yield to RewardDistributor:");
-        console.log("   splitter.proposeFeeReceivers(treasury, address(distributor))");
-        console.log("2. Wait 7 days for timelock");
-        console.log("3. splitter.finalizeFeeReceivers()");
+        console.log("  1. Verify on Etherscan");
+        console.log("  2. Call splitter.proposeFees(treasury, rewardDistributor) to start 7-day timelock");
+        console.log("  3. After timelock: call splitter.acceptFees()");
         console.log("========================================");
-
-        return distributor;
     }
 
 }
