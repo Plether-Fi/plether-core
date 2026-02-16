@@ -30,13 +30,14 @@ contract InvarCoinHandler is Test {
 
     uint256 public depositCalls;
     uint256 public withdrawCalls;
-    uint256 public whaleExitCalls;
+    uint256 public lpWithdrawCalls;
     uint256 public deployToCurveCalls;
     uint256 public replenishBufferCalls;
     uint256 public harvestCalls;
     uint256 public simulateYieldCalls;
     uint256 public simulateCurveYieldCalls;
     uint256 public sendUsdcDustCalls;
+    uint256 public lpDepositCalls;
 
     address[] public actors;
     address internal currentActor;
@@ -162,7 +163,7 @@ contract InvarCoinHandler is Test {
         }
     }
 
-    function whaleExit(
+    function lpWithdraw(
         uint256 actorSeed,
         uint256 amount,
         uint256 slippageSeed
@@ -184,9 +185,9 @@ contract InvarCoinHandler is Test {
             }
         }
 
-        try ic.whaleExit(amount, minUsdc, minBear) {
+        try ic.lpWithdraw(amount, minUsdc, minBear) {
             ghost_totalInvarBurned += amount;
-            whaleExitCalls++;
+            lpWithdrawCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](2);
             allowed[0] = ERR_ZERO_AMOUNT;
@@ -279,6 +280,40 @@ contract InvarCoinHandler is Test {
         sendUsdcDustCalls++;
     }
 
+    function lpDeposit(
+        uint256 actorSeed,
+        uint256 usdcAmount,
+        uint256 bearAmount
+    ) external useActor(actorSeed) {
+        if (ic.paused()) {
+            return;
+        }
+        usdcAmount = bound(usdcAmount, 0, 50_000e6);
+        bearAmount = bound(bearAmount, 0, 50_000e18);
+        if (usdcAmount == 0 && bearAmount == 0) {
+            usdcAmount = 1e6;
+        }
+
+        if (usdcAmount > 0) {
+            usdc.mint(currentActor, usdcAmount);
+        }
+        if (bearAmount > 0) {
+            bear.mint(currentActor, bearAmount);
+            bear.approve(address(ic), bearAmount);
+        }
+
+        try ic.lpDeposit(usdcAmount, bearAmount, currentActor, 0) returns (uint256 minted) {
+            ghost_totalDeposited += usdcAmount + bearAmount / 1e12;
+            ghost_totalInvarMinted += minted;
+            lpDepositCalls++;
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](2);
+            allowed[0] = ERR_ZERO_AMOUNT;
+            allowed[1] = ERR_STALE_PRICE;
+            _assertExpectedError(reason, allowed);
+        }
+    }
+
 }
 
 contract InvarCoinInvariantTest is StdInvariant, Test {
@@ -345,13 +380,14 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         console.log("=== InvarCoin Invariant Summary ===");
         console.log("Deposits:", handler.depositCalls());
         console.log("Withdraws:", handler.withdrawCalls());
-        console.log("WhaleExits:", handler.whaleExitCalls());
+        console.log("LpWithdraws:", handler.lpWithdrawCalls());
         console.log("DeployToCurve:", handler.deployToCurveCalls());
         console.log("ReplenishBuffer:", handler.replenishBufferCalls());
         console.log("Harvest:", handler.harvestCalls());
         console.log("SimulateYield:", handler.simulateYieldCalls());
         console.log("SimulateCurveYield:", handler.simulateCurveYieldCalls());
         console.log("SendUsdcDust:", handler.sendUsdcDustCalls());
+        console.log("LpDeposit:", handler.lpDepositCalls());
         console.log("TotalSupply:", ic.totalSupply());
         console.log("TotalAssets:", ic.totalAssets());
         console.log("MorphoPrincipal:", ic.morphoPrincipal());

@@ -346,10 +346,10 @@ contract InvarCoinTest is Test {
     }
 
     // ==========================================
-    // WHALE EXIT
+    // LP WITHDRAWAL
     // ==========================================
 
-    function test_WhaleExit_ProRata() public {
+    function test_LpWithdraw_ProRata() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -357,18 +357,18 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.whaleExit(bal, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0);
 
         assertGt(usdcReturned, 0);
     }
 
-    function test_WhaleExit_RevertsOnZero() public {
+    function test_LpWithdraw_RevertsOnZero() public {
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAmount.selector);
         vm.prank(alice);
-        ic.whaleExit(0, 0, 0);
+        ic.lpWithdraw(0, 0, 0);
     }
 
-    function test_WhaleExit_SlippageProtection() public {
+    function test_LpWithdraw_SlippageProtection() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -377,7 +377,7 @@ contract InvarCoinTest is Test {
         uint256 bal = ic.balanceOf(alice);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
         vm.prank(alice);
-        ic.whaleExit(bal, type(uint256).max, 0);
+        ic.lpWithdraw(bal, type(uint256).max, 0);
     }
 
     // ==========================================
@@ -643,7 +643,7 @@ contract InvarCoinTest is Test {
     // FULL LIFECYCLE
     // ==========================================
 
-    function test_FullCycle_DepositDeployHarvestWhaleExit() public {
+    function test_FullCycle_DepositDeployHarvestLpWithdraw() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -663,12 +663,12 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0);
     }
 
-    function test_FullCycle_WhaleExitAfterDeploy() public {
+    function test_FullCycle_LpWithdrawAfterDeploy() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -676,10 +676,70 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0);
         assertEq(ic.balanceOf(alice), 0);
+    }
+
+    // ==========================================
+    // LP DEPOSIT
+    // ==========================================
+
+    function test_LpDeposit_Basic() public {
+        uint256 usdcIn = 10_000e6;
+        uint256 bearIn = 10_000e18;
+
+        usdc.mint(alice, usdcIn);
+        bearToken.mint(alice, bearIn);
+
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), bearIn);
+        uint256 minted = ic.lpDeposit(usdcIn, bearIn, alice, 0);
+        vm.stopPrank();
+
+        assertGt(minted, 0);
+        assertEq(ic.balanceOf(alice), minted);
+        assertGt(curveLp.balanceOf(address(ic)), 0);
+    }
+
+    function test_LpDeposit_RevertsOnZero() public {
+        vm.expectRevert(InvarCoin.InvarCoin__ZeroAmount.selector);
+        vm.prank(alice);
+        ic.lpDeposit(0, 0, alice, 0);
+    }
+
+    function test_LpDeposit_SlippageProtection() public {
+        usdc.mint(alice, 10_000e6);
+        bearToken.mint(alice, 10_000e18);
+
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), 10_000e18);
+        vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
+        ic.lpDeposit(10_000e6, 10_000e18, alice, type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function test_LpDeposit_TracksCostBasis() public {
+        assertEq(ic.curveLpCostUsdc(), 0);
+
+        usdc.mint(alice, 10_000e6);
+        bearToken.mint(alice, 10_000e18);
+
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), 10_000e18);
+        ic.lpDeposit(10_000e6, 10_000e18, alice, 0);
+        vm.stopPrank();
+
+        assertGt(ic.curveLpCostUsdc(), 0);
+    }
+
+    function test_LpDeposit_RevertsWhenPaused() public {
+        ic.pause();
+
+        vm.expectRevert();
+        vm.prank(alice);
+        ic.lpDeposit(1000e6, 0, alice, 0);
     }
 
     // ==========================================
@@ -731,7 +791,7 @@ contract InvarCoinTest is Test {
         assertApproxEqRel(aliceShares, bobShares, 0.01e18, "Equal deposits should get equal shares");
     }
 
-    function testFuzz_WhaleExitProRata(
+    function testFuzz_LpWithdrawProRata(
         uint256 depositAmount
     ) public {
         depositAmount = bound(depositAmount, 20_000e6, 500_000e6);
@@ -743,7 +803,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.whaleExit(bal, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0);
 
         uint256 bearValueUsdc = (bearReturned * ORACLE_PRICE) / 1e20;
         uint256 totalValueReturned = usdcReturned + bearValueUsdc;
@@ -828,7 +888,7 @@ contract InvarCoinTest is Test {
         assertApproxEqRel(costAfter, costBefore / 2, 0.01e18);
     }
 
-    function test_WhaleExit_ReducesCostBasis() public {
+    function test_LpWithdraw_ReducesCostBasis() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -839,7 +899,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.whaleExit(bal, 0, 0);
+        ic.lpWithdraw(bal, 0, 0);
 
         assertEq(ic.curveLpCostUsdc(), 0);
     }

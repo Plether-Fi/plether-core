@@ -210,10 +210,10 @@ contract InvarCoinForkTest is BaseForkTest {
     }
 
     // ==========================================
-    // PHASE 2: WHALE EXIT & CONVEXITY
+    // PHASE 2: LP WITHDRAWAL & CONVEXITY
     // ==========================================
 
-    function test_whaleExit_slippageAbsorption() public {
+    function test_lpWithdraw_slippageAbsorption() public {
         address[5] memory retailers = [makeAddr("r1"), makeAddr("r2"), makeAddr("r3"), makeAddr("r4"), makeAddr("r5")];
         for (uint256 i = 0; i < 5; i++) {
             deal(USDC, retailers[i], 100_000e6);
@@ -230,7 +230,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 whaleBearBefore = IERC20(bearToken).balanceOf(whale);
 
         vm.prank(whale);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.whaleExit(whaleShares, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(whaleShares, 0, 0);
 
         uint256 usdcFromWhale = IERC20(USDC).balanceOf(whale) - whaleUsdcBefore;
         uint256 bearFromWhale = IERC20(bearToken).balanceOf(whale) - whaleBearBefore;
@@ -246,7 +246,7 @@ contract InvarCoinForkTest is BaseForkTest {
         assertGt(totalValue, 950_000e6, "Whale loss should be bounded");
     }
 
-    function test_whaleExit_navIsolation() public {
+    function test_lpWithdraw_navIsolation() public {
         address[5] memory retailers = [makeAddr("r1"), makeAddr("r2"), makeAddr("r3"), makeAddr("r4"), makeAddr("r5")];
         for (uint256 i = 0; i < 5; i++) {
             deal(USDC, retailers[i], 100_000e6);
@@ -263,14 +263,14 @@ contract InvarCoinForkTest is BaseForkTest {
 
         uint256 whaleShares = ic.balanceOf(whale);
         vm.prank(whale);
-        ic.whaleExit(whaleShares, 0, 0);
+        ic.lpWithdraw(whaleShares, 0, 0);
 
         uint256 navAfter = (ic.totalAssets() * 1e18) / ic.totalSupply();
 
-        assertGe(navAfter, navBefore * 98 / 100, "Whale exit must not significantly reduce retail NAV");
+        assertGe(navAfter, navBefore * 98 / 100, "LP withdraw must not significantly reduce retail NAV");
     }
 
-    function test_whaleExit_mevProtection() public {
+    function test_lpWithdraw_mevProtection() public {
         _depositAs(whale, 1_000_000e6);
         ic.deployToCurve(0);
         uint256 whaleShares = ic.balanceOf(whale);
@@ -282,7 +282,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         vm.prank(whale);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
-        ic.whaleExit(whaleShares, 990_000e6, 0);
+        ic.lpWithdraw(whaleShares, 990_000e6, 0);
     }
 
     // ==========================================

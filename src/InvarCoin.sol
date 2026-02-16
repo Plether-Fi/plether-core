@@ -86,7 +86,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     event Deposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 glUsdOut);
     event Withdrawn(address indexed user, address indexed receiver, uint256 glUsdIn, uint256 usdcOut);
-    event WhaleExit(address indexed user, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned);
+    event LpWithdrawn(address indexed user, uint256 sharesBurned, uint256 usdcReturned, uint256 bearReturned);
+    event LpDeposited(address indexed user, address indexed receiver, uint256 usdcIn, uint256 bearIn, uint256 glUsdOut);
     event DeployedToCurve(address indexed caller, uint256 usdcDeployed, uint256 bearDeployed, uint256 lpMinted);
     event BufferReplenished(uint256 lpBurned, uint256 usdcRecovered);
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
@@ -129,6 +130,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         USDC.safeIncreaseAllowance(_morphoVault, type(uint256).max);
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
+        BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
     function setStakedInvarCoin(
@@ -245,12 +247,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     // ==========================================
-    // WHALE FLOW (Deep Liquidity Exit)
+    // LP WITHDRAWAL (Deep Liquidity Exit)
     // ==========================================
 
-    /// @notice Deep exit for whales. Bypasses buffer and forcibly unwinds Curve LP.
+    /// @notice LP withdrawal: bypasses buffer and unwinds Curve LP pro-rata.
     /// @dev User receives a mix of USDC and BEAR, paying AMM gas/slippage themselves.
-    function whaleExit(
+    function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
         uint256 minBearOut
@@ -298,7 +300,46 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransfer(msg.sender, bearReturned);
         }
 
-        emit WhaleExit(msg.sender, glUsdAmount, usdcReturned, bearReturned);
+        emit LpWithdrawn(msg.sender, glUsdAmount, usdcReturned, bearReturned);
+    }
+
+    /// @notice Direct LP deposit: provide USDC + BEAR, deploy to Curve, mint INVAR.
+    /// @dev Inverse of lpWithdraw. Curve slippage borne by the depositor, not existing holders.
+    function lpDeposit(
+        uint256 usdcAmount,
+        uint256 bearAmount,
+        address receiver,
+        uint256 minSharesOut
+    ) external nonReentrant whenNotPaused returns (uint256 glUsdMinted) {
+        if (usdcAmount == 0 && bearAmount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
+        OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+
+        uint256 assets = totalAssets();
+        uint256 supply = totalSupply();
+
+        if (usdcAmount > 0) {
+            USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+        }
+        if (bearAmount > 0) {
+            BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
+        }
+
+        uint256[2] memory amounts = [usdcAmount, bearAmount];
+        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, 0);
+
+        uint256 lpValue = (lpMinted * CURVE_POOL.lp_price()) / 1e30;
+        curveLpCostUsdc += lpValue;
+
+        glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
+
+        if (glUsdMinted < minSharesOut) {
+            revert InvarCoin__SlippageExceeded();
+        }
+
+        _mint(receiver, glUsdMinted);
+        emit LpDeposited(msg.sender, receiver, usdcAmount, bearAmount, glUsdMinted);
     }
 
     // ==========================================
