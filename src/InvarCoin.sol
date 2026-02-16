@@ -13,8 +13,8 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {StakedToken} from "./StakedToken.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
-import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 
 interface ICurveTwocrypto {
@@ -76,8 +76,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // STATE
     // ==========================================
 
-    address public rewardDistributor;
+    StakedToken public stakedInvarCoin;
     uint256 public morphoPrincipal;
+    uint256 public curveLpCostUsdc;
 
     // ==========================================
     // EVENTS & ERRORS
@@ -89,7 +90,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event DeployedToCurve(address indexed caller, uint256 usdcDeployed, uint256 bearDeployed, uint256 lpMinted);
     event BufferReplenished(uint256 lpBurned, uint256 usdcRecovered);
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
-    event BearYieldDonated(address indexed donor, uint256 bearAmount);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
     event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
     event EmergencyWithdrawMorpho(uint256 sharesBurned, uint256 usdcReceived);
@@ -101,7 +101,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__NothingToDeploy();
     error InvarCoin__NoYield();
     error InvarCoin__CannotRescueCoreAsset();
-    error InvarCoin__Unauthorized();
     error InvarCoin__PermitFailed();
 
     constructor(
@@ -130,13 +129,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         USDC.safeIncreaseAllowance(_morphoVault, type(uint256).max);
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
-        BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
-    function setRewardDistributor(
-        address _rewardDistributor
+    function setStakedInvarCoin(
+        address _stakedInvarCoin
     ) external onlyOwner {
-        rewardDistributor = _rewardDistributor;
+        stakedInvarCoin = StakedToken(_stakedInvarCoin);
     }
 
     // ==========================================
@@ -146,22 +144,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Total assets backing INVAR (USDC, 6 decimals).
     /// @dev Uses virtual_price to remain strictly flash-loan resistant.
     function totalAssets() public view returns (uint256) {
-        // 1. Morpho Buffer
+        // 1. Morpho Buffer (local USDC + Morpho vault shares)
         uint256 localUsdc = USDC.balanceOf(address(this));
         uint256 adapterShares = MORPHO_VAULT.balanceOf(address(this));
         uint256 bufferValue = localUsdc + (adapterShares > 0 ? MORPHO_VAULT.convertToAssets(adapterShares) : 0);
 
-        // 2. Pending Arbitrage BEAR
-        uint256 localBear = BEAR.balanceOf(address(this));
-        uint256 bearUsdcValue = 0;
-        if (localBear > 0) {
-            uint256 bearPrice8 = OracleLib.getValidatedPrice(
-                BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
-            );
-            bearUsdcValue = (localBear * bearPrice8) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        }
-
-        // 3. Curve LP Position
+        // 2. Curve LP Position
         // SAFE: lp_price() uses monotonic virtual_price + EMA price oracle, immune to flash loans
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 lpUsdcValue = 0;
@@ -169,7 +157,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             lpUsdcValue = (lpBal * CURVE_POOL.lp_price()) / 1e30;
         }
 
-        return bufferValue + bearUsdcValue + lpUsdcValue;
+        return bufferValue + lpUsdcValue;
     }
 
     // ==========================================
@@ -288,16 +276,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 localUsdcShare = Math.mulDiv(localUsdcBefore, glUsdAmount, supply);
         usdcReturned += localUsdcShare;
 
-        // 2. Pro-rata Local BEAR (pending deployment)
-        uint256 localBear = BEAR.balanceOf(address(this));
-        if (localBear > 0) {
-            bearReturned += Math.mulDiv(localBear, glUsdAmount, supply);
-        }
-
-        // 3. Pro-rata Curve LP
+        // 2. Pro-rata Curve LP
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
+            curveLpCostUsdc -= Math.mulDiv(curveLpCostUsdc, lpToBurn, lpBal);
             uint256[2] memory min_amounts = [uint256(0), uint256(0)];
             uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
             usdcReturned += withdrawn[0];
@@ -322,69 +305,54 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // KEEPER OPERATIONS & YIELD
     // ==========================================
 
-    /// @notice Hook for RewardDistributor to donate arbitrage yield.
-    function donateBearYield(
-        uint256 amount
-    ) external nonReentrant {
-        if (msg.sender != rewardDistributor) {
-            revert InvarCoin__Unauthorized();
-        }
-        if (amount == 0) {
-            return;
+    /// @notice Unified keeper harvest for both Morpho interest and Curve LP fee yield.
+    /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
+    function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
+        if (address(stakedInvarCoin) == address(0)) {
+            revert InvarCoin__ZeroAddress();
         }
 
-        BEAR.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 totalYieldUsdc = 0;
 
-        // Strip yield based on strict oracle price
-        uint256 bearPrice8 =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
-        uint256 yieldUsdcValue = (amount * bearPrice8) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        // 1. Morpho yield
+        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
+        uint256 currentMorphoUsdc = morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0;
+        if (currentMorphoUsdc > morphoPrincipal) {
+            totalYieldUsdc += currentMorphoUsdc - morphoPrincipal;
+            morphoPrincipal = currentMorphoUsdc;
+        }
 
-        if (yieldUsdcValue > 0 && rewardDistributor != address(0)) {
-            uint256 assetsBeforeYield = totalAssets() - yieldUsdcValue;
-            uint256 supply = totalSupply();
-            if (assetsBeforeYield > 0 && supply > 0) {
-                uint256 sharesToMint =
-                    Math.mulDiv(yieldUsdcValue, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
-                if (sharesToMint > 0) {
-                    _mint(rewardDistributor, sharesToMint);
-                }
+        // 2. Curve LP fee yield
+        uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        if (lpBal > 0) {
+            uint256 currentLpUsdc = (lpBal * CURVE_POOL.lp_price()) / 1e30;
+            if (currentLpUsdc > curveLpCostUsdc) {
+                totalYieldUsdc += currentLpUsdc - curveLpCostUsdc;
+                curveLpCostUsdc = currentLpUsdc;
             }
         }
 
-        emit BearYieldDonated(msg.sender, amount);
-    }
-
-    /// @notice Keeper function to harvest Morpho lending interest.
-    function harvestYield() external nonReentrant whenNotPaused returns (uint256 glUsdDonated) {
-        if (rewardDistributor == address(0)) {
-            revert InvarCoin__Unauthorized();
-        }
-
-        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 currentMorphoUsdc = morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0;
-
-        if (currentMorphoUsdc <= morphoPrincipal) {
+        if (totalYieldUsdc == 0) {
             revert InvarCoin__NoYield();
         }
-        uint256 morphoYieldUsdc = currentMorphoUsdc - morphoPrincipal;
 
-        uint256 assetsBeforeYield = totalAssets() - morphoYieldUsdc;
         uint256 supply = totalSupply();
+        uint256 assetsBeforeYield = totalAssets() - totalYieldUsdc;
 
-        uint256 glUsdToMint = Math.mulDiv(morphoYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
-        morphoPrincipal = currentMorphoUsdc;
+        uint256 glUsdToMint = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
         uint256 callerReward = (glUsdToMint * HARVEST_CALLER_REWARD_BPS) / BPS;
-        glUsdDonated = glUsdToMint - callerReward;
+        donated = glUsdToMint - callerReward;
 
-        _mint(rewardDistributor, glUsdDonated);
+        _mint(address(this), donated);
+        IERC20(this).approve(address(stakedInvarCoin), donated);
+        stakedInvarCoin.donateYield(donated);
 
         if (callerReward > 0) {
             _mint(msg.sender, callerReward);
         }
 
-        emit YieldHarvested(glUsdToMint, callerReward, glUsdDonated);
+        emit YieldHarvested(glUsdToMint, callerReward, donated);
     }
 
     /// @notice Keeper function: Deploys dual-sided liquidity into Curve
@@ -404,16 +372,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             morphoPrincipal = morphoPrincipal > usdcToDeploy ? morphoPrincipal - usdcToDeploy : 0;
         }
 
-        uint256 bearToDeploy = BEAR.balanceOf(address(this));
-        if (usdcToDeploy == 0 && bearToDeploy == 0) {
+        if (usdcToDeploy == 0) {
             revert InvarCoin__NothingToDeploy();
         }
 
-        // Two-Sided AMM deployment (Highly capital efficient, minimal slippage)
-        uint256[2] memory amounts = [usdcToDeploy, bearToDeploy];
+        uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
+        curveLpCostUsdc += (lpMinted * CURVE_POOL.lp_price()) / 1e30;
 
-        emit DeployedToCurve(msg.sender, usdcToDeploy, bearToDeploy, lpMinted);
+        emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP
@@ -421,8 +388,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpToBurn,
         uint256 minUsdcOut
     ) external nonReentrant {
+        uint256 lpBalBefore = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 usdcBefore = USDC.balanceOf(address(this));
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
+
+        curveLpCostUsdc -= Math.mulDiv(curveLpCostUsdc, lpToBurn, lpBalBefore);
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
         MORPHO_VAULT.deposit(usdcRecovered, address(this));
@@ -441,6 +411,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
+        curveLpCostUsdc = 0;
         _pause();
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
@@ -468,10 +439,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address token,
         address to
     ) external onlyOwner {
-        if (
-            token == address(USDC) || token == address(MORPHO_VAULT) || token == address(CURVE_LP_TOKEN)
-                || token == address(BEAR)
-        ) {
+        if (token == address(USDC) || token == address(MORPHO_VAULT) || token == address(CURVE_LP_TOKEN)) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
         uint256 balance = IERC20(token).balanceOf(address(this));

@@ -54,13 +54,12 @@ contract InvarCoinForkTest is BaseForkTest {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setRewardDistributor(rewardDist);
+        ic.setStakedInvarCoin(address(sInvar));
 
         deal(USDC, alice, 2_000_000e6);
         deal(USDC, bob, 100_000e6);
         deal(USDC, whale, 2_000_000e6);
         deal(USDC, attacker, 50_000_000e6);
-        deal(bearToken, rewardDist, 100_000e18);
 
         vm.prank(alice);
         IERC20(USDC).approve(address(ic), type(uint256).max);
@@ -70,8 +69,6 @@ contract InvarCoinForkTest is BaseForkTest {
         IERC20(USDC).approve(address(ic), type(uint256).max);
         vm.prank(attacker);
         IERC20(USDC).approve(address(ic), type(uint256).max);
-        vm.prank(rewardDist);
-        IERC20(bearToken).approve(address(ic), type(uint256).max);
     }
 
     // ==========================================
@@ -312,31 +309,36 @@ contract InvarCoinForkTest is BaseForkTest {
         assertApproxEqRel(ic.totalAssets(), 500_000e6, 0.02e18, "No value leaked during deploy");
     }
 
-    function test_deployToCurve_dualSided() public {
+    function test_deployToCurve_singleSidedUsdc() public {
         _depositAs(alice, 100_000e6);
+
+        uint256 lpBefore = IERC20(curvePool).balanceOf(address(ic));
         ic.deployToCurve(0);
 
-        deal(bearToken, address(ic), 10_000e18);
-
-        ic.deployToCurve(0);
-
-        assertEq(IERC20(bearToken).balanceOf(address(ic)), 0, "All pending BEAR should be deployed");
+        assertGt(IERC20(curvePool).balanceOf(address(ic)), lpBefore, "Should mint LP with USDC-only deposit");
     }
 
-    function test_harvestYield_morphoInterest() public {
+    function test_harvest_morphoInterest() public {
         _depositAs(alice, 1_000_000e6);
+
+        uint256 aliceShares = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
 
         _warpAndRefreshOracle(30 days);
         _accrueVaultInterest();
 
         uint256 supplyBefore = ic.totalSupply();
+        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
         uint256 keeperInvarBefore = ic.balanceOf(keeper);
 
         vm.prank(keeper);
-        ic.harvestYield();
+        ic.harvest();
 
         assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted");
-        assertGt(ic.balanceOf(rewardDist), 0, "RewardDistributor should receive yield");
+        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore, "sINVAR should receive yield");
         assertGt(ic.balanceOf(keeper), keeperInvarBefore, "Keeper should receive 0.1% reward");
     }
 
@@ -370,16 +372,28 @@ contract InvarCoinForkTest is BaseForkTest {
         assertGt(ic.morphoPrincipal(), morphoPrincipalBefore, "Principal tracking should update");
     }
 
-    function test_donateBearYield() public {
-        _depositAs(alice, 100_000e6);
+    function test_harvest_curveFeeYield() public {
+        _depositAs(alice, 500_000e6);
 
+        uint256 aliceShares = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+
+        _generateCurveFees(50_000e6, 10);
+        _warpAndRefreshOracle(1 days);
+
+        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
         uint256 supplyBefore = ic.totalSupply();
 
-        vm.prank(rewardDist);
-        ic.donateBearYield(1000e18);
+        vm.prank(keeper);
+        ic.harvest();
 
-        assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted to sINVAR");
-        assertGt(IERC20(bearToken).balanceOf(address(ic)), 0, "BEAR should sit locally pending deployToCurve");
+        assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted");
+        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore, "sINVAR should receive Curve fee yield");
     }
 
     // ==========================================

@@ -20,7 +20,6 @@ contract InvarCoinHandler is Test {
     MockCurvePool public curve;
     MockCurveLpToken public curveLp;
     MockOracle public oracle;
-    address public rewardDist;
 
     uint256 public ghost_totalInvarMinted;
     uint256 public ghost_totalInvarBurned;
@@ -34,8 +33,7 @@ contract InvarCoinHandler is Test {
     uint256 public whaleExitCalls;
     uint256 public deployToCurveCalls;
     uint256 public replenishBufferCalls;
-    uint256 public donateBearYieldCalls;
-    uint256 public harvestYieldCalls;
+    uint256 public harvestCalls;
     uint256 public simulateYieldCalls;
     uint256 public simulateCurveYieldCalls;
     uint256 public sendUsdcDustCalls;
@@ -48,7 +46,6 @@ contract InvarCoinHandler is Test {
     bytes4 constant ERR_INSUFFICIENT_BUFFER = InvarCoin.InvarCoin__InsufficientBuffer.selector;
     bytes4 constant ERR_NOTHING_TO_DEPLOY = InvarCoin.InvarCoin__NothingToDeploy.selector;
     bytes4 constant ERR_NO_YIELD = InvarCoin.InvarCoin__NoYield.selector;
-    bytes4 constant ERR_UNAUTHORIZED = InvarCoin.InvarCoin__Unauthorized.selector;
     bytes4 constant ERR_STALE_PRICE = OracleLib.OracleLib__StalePrice.selector;
 
     function _assertExpectedError(
@@ -86,8 +83,7 @@ contract InvarCoinHandler is Test {
         MockMorphoVault _morpho,
         MockCurvePool _curve,
         MockCurveLpToken _curveLp,
-        MockOracle _oracle,
-        address _rewardDist
+        MockOracle _oracle
     ) {
         ic = _ic;
         sInvar = _sInvar;
@@ -97,7 +93,6 @@ contract InvarCoinHandler is Test {
         curve = _curve;
         curveLp = _curveLp;
         oracle = _oracle;
-        rewardDist = _rewardDist;
 
         for (uint256 i = 1; i <= 5; i++) {
             address actor = address(uint160(i * 1000));
@@ -227,44 +222,20 @@ contract InvarCoinHandler is Test {
         replenishBufferCalls++;
     }
 
-    function donateBearYield(
-        uint256 amount
-    ) external {
-        amount = bound(amount, 1e18, 10_000e18);
-        if (bear.balanceOf(rewardDist) < amount) {
-            return;
-        }
-        if (ic.totalSupply() == 0) {
-            return;
-        }
-
-        uint256 supplyBefore = ic.totalSupply();
-        vm.prank(rewardDist);
-        try ic.donateBearYield(amount) {
-            uint256 supplyAfter = ic.totalSupply();
-            ghost_totalInvarMinted += supplyAfter - supplyBefore;
-            donateBearYieldCalls++;
-        } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](1);
-            allowed[0] = ERR_STALE_PRICE;
-            _assertExpectedError(reason, allowed);
-        }
-    }
-
-    function harvestYield() external {
+    function harvest() external {
         if (ic.paused()) {
             return;
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.harvestYield() {
+        try ic.harvest() {
             uint256 supplyAfter = ic.totalSupply();
             ghost_totalInvarMinted += supplyAfter - supplyBefore;
-            harvestYieldCalls++;
+            harvestCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](2);
             allowed[0] = ERR_NO_YIELD;
-            allowed[1] = ERR_UNAUTHORIZED;
+            allowed[1] = InvarCoin.InvarCoin__ZeroAddress.selector;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -322,8 +293,6 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
     MockOracle oracle;
     InvarCoinHandler handler;
 
-    address rewardDist = address(0xbeef);
-
     function setUp() public {
         vm.warp(100_000);
 
@@ -339,15 +308,11 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setRewardDistributor(rewardDist);
-
-        bear.mint(rewardDist, 10_000_000e18);
-        vm.prank(rewardDist);
-        bear.approve(address(ic), type(uint256).max);
+        ic.setStakedInvarCoin(address(sInvar));
 
         curve.setSwapFeeBps(30);
 
-        handler = new InvarCoinHandler(ic, sInvar, usdc, bear, morpho, curve, curveLp, oracle, rewardDist);
+        handler = new InvarCoinHandler(ic, sInvar, usdc, bear, morpho, curve, curveLp, oracle);
 
         targetContract(address(handler));
         vm.label(address(ic), "InvarCoin");
@@ -383,8 +348,7 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         console.log("WhaleExits:", handler.whaleExitCalls());
         console.log("DeployToCurve:", handler.deployToCurveCalls());
         console.log("ReplenishBuffer:", handler.replenishBufferCalls());
-        console.log("DonateBearYield:", handler.donateBearYieldCalls());
-        console.log("HarvestYield:", handler.harvestYieldCalls());
+        console.log("Harvest:", handler.harvestCalls());
         console.log("SimulateYield:", handler.simulateYieldCalls());
         console.log("SimulateCurveYield:", handler.simulateCurveYieldCalls());
         console.log("SendUsdcDust:", handler.sendUsdcDustCalls());

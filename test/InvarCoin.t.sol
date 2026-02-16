@@ -239,7 +239,7 @@ contract InvarCoinTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setRewardDistributor(rewardDist);
+        ic.setStakedInvarCoin(address(sInvar));
 
         usdc.mint(alice, 1_000_000e6);
         usdc.mint(bob, 1_000_000e6);
@@ -249,10 +249,6 @@ contract InvarCoinTest is Test {
         usdc.approve(address(ic), type(uint256).max);
         vm.prank(bob);
         usdc.approve(address(ic), type(uint256).max);
-
-        bearToken.mint(rewardDist, 1_000_000e18);
-        vm.prank(rewardDist);
-        bearToken.approve(address(ic), type(uint256).max);
     }
 
     // ==========================================
@@ -416,104 +412,96 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
     }
 
-    function test_DeployToCurve_TwoSided() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-
-        bearToken.mint(address(ic), 2000e18);
-        assertGt(bearToken.balanceOf(address(ic)), 0);
-
-        uint256 lpMinted = ic.deployToCurve(0);
-
-        assertGt(lpMinted, 0);
-        assertEq(bearToken.balanceOf(address(ic)), 0);
-    }
-
-    function test_DeployToCurve_BearOnlyDeploy() public {
-        vm.prank(alice);
-        ic.deposit(100e6, alice);
-
-        bearToken.mint(address(ic), 2000e18);
-
-        uint256 lpMinted = ic.deployToCurve(0);
-
-        assertGt(lpMinted, 0);
-        assertEq(bearToken.balanceOf(address(ic)), 0);
-    }
-
     // ==========================================
-    // HARVEST YIELD
+    // HARVEST
     // ==========================================
 
-    function test_HarvestYield_MorphoYield() public {
+    function test_Harvest_MorphoYield() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
 
         morpho.simulateYield(100e6);
 
-        uint256 donated = ic.harvestYield();
+        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
+        uint256 donated = ic.harvest();
 
         assertGt(donated, 0);
-        assertGt(ic.balanceOf(rewardDist), 0);
+        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore);
     }
 
-    function test_HarvestYield_CallerGetsReward() public {
+    function test_Harvest_CallerGetsReward() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
 
         morpho.simulateYield(100e6);
 
         uint256 keeperBalBefore = ic.balanceOf(keeper);
 
         vm.prank(keeper);
-        ic.harvestYield();
+        ic.harvest();
 
         uint256 keeperReward = ic.balanceOf(keeper) - keeperBalBefore;
         assertGt(keeperReward, 0);
     }
 
-    function test_HarvestYield_RevertsWithNoYield() public {
+    function test_Harvest_RevertsWithNoYield() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
 
         vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
-        ic.harvestYield();
+        ic.harvest();
     }
 
-    // ==========================================
-    // DONATE BEAR YIELD
-    // ==========================================
-
-    function test_DonateBearYield_StripsToStaked() public {
+    function test_Harvest_CurveYield() public {
         vm.prank(alice);
-        ic.deposit(10_000e6, alice);
+        ic.deposit(20_000e6, alice);
 
-        uint256 stakeAmount = ic.balanceOf(alice) / 2;
+        uint256 stakeAmount = ic.balanceOf(alice);
         vm.startPrank(alice);
         ic.approve(address(sInvar), stakeAmount);
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        uint256 rdBalBefore = ic.balanceOf(rewardDist);
+        ic.deployToCurve(0);
 
-        vm.prank(rewardDist);
-        ic.donateBearYield(1000e18);
+        curve.setVirtualPrice(1.05e18);
 
-        assertGt(ic.balanceOf(rewardDist), rdBalBefore);
+        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
+        uint256 donated = ic.harvest();
+
+        assertGt(donated, 0);
+        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore);
     }
 
-    function test_DonateBearYield_RevertsUnauthorized() public {
+    function test_Harvest_CombinedMorphoAndCurve() public {
         vm.prank(alice);
-        ic.deposit(10_000e6, alice);
+        ic.deposit(20_000e6, alice);
 
-        vm.expectRevert(InvarCoin.InvarCoin__Unauthorized.selector);
-        vm.prank(alice);
-        ic.donateBearYield(100e18);
-    }
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
 
-    function test_DonateBearYield_SilentOnZero() public {
-        vm.prank(rewardDist);
-        ic.donateBearYield(0);
+        ic.deployToCurve(0);
+
+        morpho.simulateYield(50e6);
+        curve.setVirtualPrice(1.02e18);
+
+        uint256 donated = ic.harvest();
+        assertGt(donated, 0);
     }
 
     // ==========================================
@@ -554,19 +542,6 @@ contract InvarCoinTest is Test {
 
         uint256 total = ic.totalAssets();
         assertApproxEqRel(total, 20_000e6, 0.02e18);
-    }
-
-    function test_TotalAssets_IncludesLocalBear() public {
-        vm.prank(alice);
-        ic.deposit(1000e6, alice);
-
-        uint256 assetsBefore = ic.totalAssets();
-
-        bearToken.mint(address(ic), 1000e18);
-
-        uint256 assetsAfter = ic.totalAssets();
-        uint256 expectedBearValue = (1000e18 * ORACLE_PRICE) / 1e20;
-        assertEq(assetsAfter, assetsBefore + expectedBearValue);
     }
 
     // ==========================================
@@ -611,20 +586,6 @@ contract InvarCoinTest is Test {
         assertEq(curveLp.balanceOf(address(ic)), 0);
     }
 
-    function test_EmergencyWithdrawFromCurve_DoesNotSellBear() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-
-        ic.deployToCurve(0);
-
-        bearToken.mint(address(ic), 1000e18);
-
-        ic.emergencyWithdrawFromCurve();
-
-        assertEq(bearToken.balanceOf(address(ic)), 1000e18);
-        assertTrue(ic.paused());
-    }
-
     function test_EmergencyWithdraw_OnlyOwner() public {
         vm.prank(alice);
         vm.expectRevert();
@@ -638,11 +599,6 @@ contract InvarCoinTest is Test {
     function test_RescueToken_CannotRescueCore() public {
         vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
         ic.rescueToken(address(usdc), alice);
-    }
-
-    function test_RescueToken_CannotRescueBear() public {
-        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
-        ic.rescueToken(address(bearToken), alice);
     }
 
     function test_RescueToken_CannotRescueCurveLp() public {
@@ -662,10 +618,10 @@ contract InvarCoinTest is Test {
     // SET INTEGRATIONS
     // ==========================================
 
-    function test_SetRewardDistributor() public {
-        address newRd = makeAddr("newRd");
-        ic.setRewardDistributor(newRd);
-        assertEq(ic.rewardDistributor(), newRd);
+    function test_SetStakedInvarCoin() public {
+        address newSInvar = makeAddr("newSInvar");
+        ic.setStakedInvarCoin(newSInvar);
+        assertEq(address(ic.stakedInvarCoin()), newSInvar);
     }
 
     // ==========================================
@@ -691,40 +647,19 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
-
-        morpho.simulateYield(50e6);
-
-        ic.harvestYield();
-
-        assertGt(ic.balanceOf(rewardDist), 0);
-
-        uint256 bal = ic.balanceOf(alice);
-        vm.prank(alice);
-        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
-
-        assertGt(usdcOut, 0);
-    }
-
-    function test_FullCycle_DonateDeployHarvestWhaleExit() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-
         uint256 stakeAmount = ic.balanceOf(alice) / 2;
         vm.startPrank(alice);
         ic.approve(address(sInvar), stakeAmount);
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        vm.prank(rewardDist);
-        ic.donateBearYield(2000e18);
-
         ic.deployToCurve(0);
 
-        assertEq(bearToken.balanceOf(address(ic)), 0);
-
         morpho.simulateYield(50e6);
-        ic.harvestYield();
+
+        ic.harvest();
+
+        assertGt(ic.balanceOf(address(sInvar)), stakeAmount);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -737,15 +672,13 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        bearToken.mint(address(ic), 2000e18);
         ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.whaleExit(bal, 0, 0);
+        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
 
         assertGt(usdcOut, 0);
-        assertGt(bearOut, 0);
         assertEq(ic.balanceOf(alice), 0);
     }
 
@@ -863,6 +796,64 @@ contract InvarCoinTest is Test {
         uint256 usdcOut = ic.withdraw(toWithdraw, alice, 0);
 
         assertLe(usdcOut, totalAssetsBefore, "Withdraw should never exceed total assets");
+    }
+
+    // ==========================================
+    // COST BASIS TRACKING
+    // ==========================================
+
+    function test_DeployToCurve_TracksCostBasis() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        assertEq(ic.curveLpCostUsdc(), 0);
+
+        ic.deployToCurve(0);
+
+        assertGt(ic.curveLpCostUsdc(), 0);
+    }
+
+    function test_ReplenishBuffer_ReducesCostBasis() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve(0);
+
+        uint256 costBefore = ic.curveLpCostUsdc();
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+
+        ic.replenishBuffer(lpBal / 2, 0);
+
+        uint256 costAfter = ic.curveLpCostUsdc();
+        assertApproxEqRel(costAfter, costBefore / 2, 0.01e18);
+    }
+
+    function test_WhaleExit_ReducesCostBasis() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve(0);
+
+        uint256 costBefore = ic.curveLpCostUsdc();
+        assertGt(costBefore, 0);
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.whaleExit(bal, 0, 0);
+
+        assertEq(ic.curveLpCostUsdc(), 0);
+    }
+
+    function test_EmergencyWithdrawFromCurve_ResetsCostBasis() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve(0);
+        assertGt(ic.curveLpCostUsdc(), 0);
+
+        ic.emergencyWithdrawFromCurve();
+
+        assertEq(ic.curveLpCostUsdc(), 0);
     }
 
 }
