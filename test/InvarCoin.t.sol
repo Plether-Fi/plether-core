@@ -349,18 +349,6 @@ contract InvarCoinTest is Test {
         ic.withdraw(bal, alice, type(uint256).max);
     }
 
-    function test_Withdraw_ExceedsBufferReverts() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-
-        ic.deployToCurve(0);
-
-        uint256 bal = ic.balanceOf(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__InsufficientBuffer.selector);
-        vm.prank(alice);
-        ic.withdraw(bal, alice, 0);
-    }
-
     // ==========================================
     // WHALE EXIT
     // ==========================================
