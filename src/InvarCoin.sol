@@ -34,6 +34,7 @@ interface ICurveTwocrypto {
         uint256[2] calldata min_amounts
     ) external returns (uint256[2] memory);
     function get_virtual_price() external view returns (uint256);
+    function lp_price() external view returns (uint256);
 
 }
 
@@ -165,11 +166,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         // 3. Curve LP Position
-        // SAFE: get_virtual_price() tracks invariant D, immune to flash loan spot manipulation
+        // SAFE: lp_price() uses monotonic virtual_price + EMA price oracle, immune to flash loans
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 lpUsdcValue = 0;
         if (lpBal > 0) {
-            lpUsdcValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e30;
+            lpUsdcValue = (lpBal * CURVE_POOL.lp_price()) / 1e30;
         }
 
         return bufferValue + bearUsdcValue + lpUsdcValue;

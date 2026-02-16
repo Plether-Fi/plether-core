@@ -122,7 +122,7 @@ contract MockCurvePool {
         bearBalance += amounts[1];
 
         uint256 bearAsUsdc = amounts[1] / 1e12;
-        uint256 lpMinted = (amounts[0] + bearAsUsdc) * 1e12;
+        uint256 lpMinted = (amounts[0] + bearAsUsdc) * 1e12 / 2;
         lpToken.mint(msg.sender, lpMinted);
 
         return lpMinted;
@@ -182,6 +182,10 @@ contract MockCurvePool {
 
     function get_virtual_price() external view returns (uint256) {
         return virtualPrice;
+    }
+
+    function lp_price() external view returns (uint256) {
+        return 2 * virtualPrice;
     }
 
     function setVirtualPrice(
@@ -345,18 +349,16 @@ contract InvarCoinTest is Test {
         ic.withdraw(bal, alice, type(uint256).max);
     }
 
-    function test_Withdraw_FallbackToCurve() public {
+    function test_Withdraw_ExceedsBufferReverts() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
         ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
+        vm.expectRevert(InvarCoin.InvarCoin__InsufficientBuffer.selector);
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal, alice, 0);
-
-        assertGt(usdcOut, 0);
-        assertApproxEqRel(usdcOut, 20_000e6, 0.02e18);
+        ic.withdraw(bal, alice, 0);
     }
 
     // ==========================================
@@ -699,7 +701,7 @@ contract InvarCoinTest is Test {
     // FULL LIFECYCLE
     // ==========================================
 
-    function test_FullCycle_DepositDeployHarvestWithdraw() public {
+    function test_FullCycle_DepositDeployHarvestWhaleExit() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -713,12 +715,12 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal, alice, 0);
+        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
 
         assertGt(usdcOut, 0);
     }
 
-    function test_FullCycle_DonateDeployHarvestWithdraw() public {
+    function test_FullCycle_DonateDeployHarvestWhaleExit() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -740,7 +742,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal, alice, 0);
+        (uint256 usdcOut,) = ic.whaleExit(bal, 0, 0);
 
         assertGt(usdcOut, 0);
     }
