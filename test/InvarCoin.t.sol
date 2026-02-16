@@ -239,7 +239,7 @@ contract InvarCoinTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setIntegrations(rewardDist, address(sInvar));
+        ic.setRewardDistributor(rewardDist);
 
         usdc.mint(alice, 1_000_000e6);
         usdc.mint(bob, 1_000_000e6);
@@ -454,7 +454,7 @@ contract InvarCoinTest is Test {
         uint256 donated = ic.harvestYield();
 
         assertGt(donated, 0);
-        assertGt(ic.balanceOf(address(sInvar)), 0);
+        assertGt(ic.balanceOf(rewardDist), 0);
     }
 
     function test_HarvestYield_CallerGetsReward() public {
@@ -494,12 +494,12 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        uint256 stakedBalBefore = ic.balanceOf(address(sInvar));
+        uint256 rdBalBefore = ic.balanceOf(rewardDist);
 
         vm.prank(rewardDist);
         ic.donateBearYield(1000e18);
 
-        assertGt(ic.balanceOf(address(sInvar)), stakedBalBefore);
+        assertGt(ic.balanceOf(rewardDist), rdBalBefore);
     }
 
     function test_DonateBearYield_RevertsUnauthorized() public {
@@ -662,12 +662,10 @@ contract InvarCoinTest is Test {
     // SET INTEGRATIONS
     // ==========================================
 
-    function test_SetIntegrations() public {
+    function test_SetRewardDistributor() public {
         address newRd = makeAddr("newRd");
-        address newStaked = makeAddr("newStaked");
-        ic.setIntegrations(newRd, newStaked);
+        ic.setRewardDistributor(newRd);
         assertEq(ic.rewardDistributor(), newRd);
-        assertEq(address(ic.stakedInvarCoin()), newStaked);
     }
 
     // ==========================================
@@ -699,7 +697,7 @@ contract InvarCoinTest is Test {
 
         ic.harvestYield();
 
-        assertGt(ic.balanceOf(address(sInvar)), 0);
+        assertGt(ic.balanceOf(rewardDist), 0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);

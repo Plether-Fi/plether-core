@@ -54,7 +54,7 @@ contract InvarCoinForkTest is BaseForkTest {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setIntegrations(rewardDist, address(sInvar));
+        ic.setRewardDistributor(rewardDist);
 
         deal(USDC, alice, 2_000_000e6);
         deal(USDC, bob, 100_000e6);
@@ -336,7 +336,7 @@ contract InvarCoinForkTest is BaseForkTest {
         ic.harvestYield();
 
         assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted");
-        assertGt(ic.balanceOf(address(sInvar)), 0, "sINVAR should receive yield");
+        assertGt(ic.balanceOf(rewardDist), 0, "RewardDistributor should receive yield");
         assertGt(ic.balanceOf(keeper), keeperInvarBefore, "Keeper should receive 0.1% reward");
     }
 

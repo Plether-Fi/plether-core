@@ -339,7 +339,7 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setIntegrations(rewardDist, address(sInvar));
+        ic.setRewardDistributor(rewardDist);
 
         bear.mint(rewardDist, 10_000_000e18);
         vm.prank(rewardDist);

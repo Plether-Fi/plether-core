@@ -13,7 +13,6 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {StakedToken} from "./StakedToken.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
@@ -78,7 +77,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     address public rewardDistributor;
-    StakedToken public stakedInvarCoin;
     uint256 public morphoPrincipal;
 
     // ==========================================
@@ -135,12 +133,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
-    function setIntegrations(
-        address _rewardDistributor,
-        address _stakedInvarCoin
+    function setRewardDistributor(
+        address _rewardDistributor
     ) external onlyOwner {
         rewardDistributor = _rewardDistributor;
-        stakedInvarCoin = StakedToken(_stakedInvarCoin);
     }
 
     // ==========================================
@@ -344,16 +340,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
         uint256 yieldUsdcValue = (amount * bearPrice8) / DecimalConstants.USDC_TO_TOKEN_SCALE;
 
-        if (yieldUsdcValue > 0 && address(stakedInvarCoin) != address(0)) {
+        if (yieldUsdcValue > 0 && rewardDistributor != address(0)) {
             uint256 assetsBeforeYield = totalAssets() - yieldUsdcValue;
             uint256 supply = totalSupply();
             if (assetsBeforeYield > 0 && supply > 0) {
                 uint256 sharesToMint =
                     Math.mulDiv(yieldUsdcValue, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
                 if (sharesToMint > 0) {
-                    _mint(address(this), sharesToMint);
-                    _approve(address(this), address(stakedInvarCoin), sharesToMint);
-                    stakedInvarCoin.donateYield(sharesToMint);
+                    _mint(rewardDistributor, sharesToMint);
                 }
             }
         }
@@ -363,7 +357,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function to harvest Morpho lending interest.
     function harvestYield() external nonReentrant whenNotPaused returns (uint256 glUsdDonated) {
-        if (address(stakedInvarCoin) == address(0)) {
+        if (rewardDistributor == address(0)) {
             revert InvarCoin__Unauthorized();
         }
 
@@ -384,9 +378,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 callerReward = (glUsdToMint * HARVEST_CALLER_REWARD_BPS) / BPS;
         glUsdDonated = glUsdToMint - callerReward;
 
-        _mint(address(this), glUsdDonated);
-        _approve(address(this), address(stakedInvarCoin), glUsdDonated);
-        stakedInvarCoin.donateYield(glUsdDonated);
+        _mint(rewardDistributor, glUsdDonated);
 
         if (callerReward > 0) {
             _mint(msg.sender, callerReward);
