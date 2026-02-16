@@ -93,7 +93,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
     event BearYieldDonated(address indexed donor, uint256 bearAmount);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
-    event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived);
+    event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
     event EmergencyWithdrawMorpho(uint256 sharesBurned, uint256 usdcReceived);
 
     error InvarCoin__ZeroAmount();
@@ -445,12 +445,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     function emergencyWithdrawFromCurve() external onlyOwner {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
-        uint256 usdcReceived = 0;
+        uint256[2] memory received;
         if (lpBal > 0) {
-            usdcReceived = CURVE_POOL.remove_liquidity_one_coin(lpBal, USDC_INDEX, 0);
+            received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
         _pause();
-        emit EmergencyWithdrawCurve(lpBal, usdcReceived);
+        emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
 
     function emergencyWithdrawFromMorpho() external onlyOwner {
