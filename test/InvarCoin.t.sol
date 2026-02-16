@@ -48,22 +48,9 @@ contract MockMorphoVault is ERC4626 {
 
     using SafeERC20 for IERC20;
 
-    uint256 private _yieldBps;
-
     constructor(
         IERC20 _asset
     ) ERC4626(_asset) ERC20("Mock Morpho Vault", "mvUSDC") {}
-
-    function totalAssets() public view override returns (uint256) {
-        uint256 bal = IERC20(asset()).balanceOf(address(this));
-        return bal + (bal * _yieldBps) / 10_000;
-    }
-
-    function generateYield(
-        uint256 bps
-    ) external {
-        _yieldBps = bps;
-    }
 
     function simulateYield(
         uint256 amount
@@ -102,6 +89,7 @@ contract MockCurvePool {
     uint256 public usdcBalance;
     uint256 public bearBalance;
     uint256 public virtualPrice = 1e18;
+    uint256 public swapFeeBps;
 
     constructor(
         address _usdc,
@@ -111,6 +99,12 @@ contract MockCurvePool {
         usdc = IERC20(_usdc);
         bear = IERC20(_bear);
         lpToken = MockCurveLpToken(_lpToken);
+    }
+
+    function setSwapFeeBps(
+        uint256 _feeBps
+    ) external {
+        swapFeeBps = _feeBps;
     }
 
     function add_liquidity(
@@ -147,6 +141,9 @@ contract MockCurvePool {
             uint256 usdcShare = (usdcBalance * shareRatio) / 1e18;
             uint256 bearShare = (bearBalance * shareRatio) / 1e18;
             uint256 bearAsUsdc = bearShare / 1e12;
+            if (swapFeeBps > 0 && bearAsUsdc > 0) {
+                bearAsUsdc -= (bearAsUsdc * swapFeeBps) / 10_000;
+            }
             usdcOut = usdcShare + bearAsUsdc;
 
             usdcBalance -= usdcShare;
@@ -779,6 +776,105 @@ contract InvarCoinTest is Test {
             address(oracle),
             address(0)
         );
+    }
+
+    // ==========================================
+    // FUZZ TESTS
+    // ==========================================
+
+    function testFuzz_DepositWithdrawRoundTrip(
+        uint256 amount
+    ) public {
+        amount = bound(amount, 1e6, 500_000e6);
+
+        vm.prank(alice);
+        uint256 minted = ic.deposit(amount, alice);
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(minted, alice, 0);
+
+        assertGe(usdcOut, amount * 99 / 100, "Round trip lost more than 1%");
+    }
+
+    function testFuzz_EqualDepositsEqualShares(
+        uint256 amount
+    ) public {
+        amount = bound(amount, 1e6, 100_000e6);
+
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(amount, alice);
+
+        vm.prank(bob);
+        uint256 bobShares = ic.deposit(amount, bob);
+
+        assertApproxEqRel(aliceShares, bobShares, 0.01e18, "Equal deposits should get equal shares");
+    }
+
+    function testFuzz_WhaleExitProRata(
+        uint256 depositAmount
+    ) public {
+        depositAmount = bound(depositAmount, 20_000e6, 500_000e6);
+
+        vm.prank(alice);
+        ic.deposit(depositAmount, alice);
+
+        ic.deployToCurve(0);
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.whaleExit(bal, 0, 0);
+
+        uint256 bearValueUsdc = (bearReturned * ORACLE_PRICE) / 1e20;
+        uint256 totalValueReturned = usdcReturned + bearValueUsdc;
+
+        assertGe(totalValueReturned, depositAmount * 95 / 100, "Whale exit returned less than 95%");
+    }
+
+    function testFuzz_DeployToCurve_PreservesNAV(
+        uint256 amount
+    ) public {
+        amount = bound(amount, 20_000e6, 500_000e6);
+
+        vm.prank(alice);
+        ic.deposit(amount, alice);
+
+        uint256 navBefore = ic.totalAssets();
+        ic.deployToCurve(0);
+        uint256 navAfter = ic.totalAssets();
+
+        assertApproxEqRel(navAfter, navBefore, 0.01e18, "Deploy should preserve NAV within 1%");
+    }
+
+    function testFuzz_DepositProducesPositiveShares(
+        uint256 amount
+    ) public {
+        amount = bound(amount, 1e6, 1_000_000e6);
+
+        vm.prank(alice);
+        uint256 shares = ic.deposit(amount, alice);
+
+        assertGt(shares, 0, "Deposit should produce positive shares");
+    }
+
+    function testFuzz_WithdrawNeverExceedsTotalAssets(
+        uint256 fraction
+    ) public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+
+        fraction = bound(fraction, 1, 1e18);
+        uint256 bal = ic.balanceOf(alice);
+        uint256 toWithdraw = (bal * fraction) / 1e18;
+        if (toWithdraw == 0) {
+            return;
+        }
+
+        uint256 totalAssetsBefore = ic.totalAssets();
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(toWithdraw, alice, 0);
+
+        assertLe(usdcOut, totalAssetsBefore, "Withdraw should never exceed total assets");
     }
 
 }

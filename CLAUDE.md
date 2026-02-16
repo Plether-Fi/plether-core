@@ -119,6 +119,7 @@ Plether is a DeFi protocol for synthetic dollar-denominated tokens with inverse 
 - **Mocks must return realistic values**: Mock functions like `position()` and `market()` must return meaningful state. Returning all zeros silently breaks dependent logic (e.g., division by zero → try/catch swallows the error).
 - **Flash loan buffer dust**: LeverageRouter's `closeLeverage` adds a 1 bps buffer to flash loans for interest protection. In mock environments (no interest accrual), this buffer accumulates in the router. Invariant tests should use `assertLe` with a proportional bound, not `assertEq(balance, 0)`.
 - **Integer precision in comparisons**: When comparing computed ratios (LTV, percentages), integer division can mask real changes. Compare raw values (debt amounts) when detecting small deltas like interest accrual.
+- **Never work around bugs in tests**: If a test fails because of a contract bug, leave it failing. Do not add workarounds (e.g., extra setup steps, avoiding certain code paths) to make the test green. Failing tests are valuable signal.
 
 ## External Integrations
 
