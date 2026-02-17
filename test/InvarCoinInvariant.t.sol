@@ -263,12 +263,21 @@ contract InvarCoinHandler is Test {
     }
 
     function simulateCurveYield(
-        uint256 bpsDelta
+        uint256 bpsDelta,
+        uint256 priceBpsDelta
     ) external {
         uint256 currentVp = curve.virtualPrice();
         bpsDelta = bound(bpsDelta, 1, 50);
         uint256 newVp = currentVp + (currentVp * bpsDelta) / 10_000;
         curve.setVirtualPrice(newVp);
+
+        priceBpsDelta = bound(priceBpsDelta, 0, 500);
+        if (priceBpsDelta > 0) {
+            uint256 currentPm = curve.priceMultiplier();
+            uint256 newPm = currentPm + (currentPm * priceBpsDelta) / 10_000;
+            curve.setPriceMultiplier(newPm);
+        }
+
         simulateCurveYieldCalls++;
     }
 

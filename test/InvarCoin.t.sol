@@ -89,6 +89,7 @@ contract MockCurvePool {
     uint256 public usdcBalance;
     uint256 public bearBalance;
     uint256 public virtualPrice = 1e18;
+    uint256 public priceMultiplier = 1e18;
     uint256 public swapFeeBps;
 
     constructor(
@@ -185,13 +186,19 @@ contract MockCurvePool {
     }
 
     function lp_price() external view returns (uint256) {
-        return 2 * virtualPrice;
+        return 2 * virtualPrice * priceMultiplier / 1e18;
     }
 
     function setVirtualPrice(
         uint256 _vp
     ) external {
         virtualPrice = _vp;
+    }
+
+    function setPriceMultiplier(
+        uint256 _pm
+    ) external {
+        priceMultiplier = _pm;
     }
 
 }
@@ -542,6 +549,56 @@ contract InvarCoinTest is Test {
         assertGt(donated, 0);
     }
 
+    function test_Harvest_IgnoresPriceAppreciation() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve();
+
+        // BEAR price rises 20% — lp_price goes up but virtual_price unchanged
+        curve.setPriceMultiplier(1.2e18);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
+    function test_Harvest_CapturesFeeYieldOnly() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve();
+
+        // 5% fee yield (VP up) + 20% price appreciation (multiplier up)
+        curve.setVirtualPrice(1.05e18);
+        curve.setPriceMultiplier(1.2e18);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 fullLpUsdc = (lpBal * curve.lp_price()) / 1e30;
+
+        uint256 donated = ic.harvest();
+
+        // Yield minted should reflect ~5% fee fraction of LP value, not the full 26% (1.05*1.2)
+        uint256 supply = ic.totalSupply();
+        uint256 assets = ic.totalAssets();
+        uint256 yieldValue = (donated * assets) / supply;
+
+        // Fee-only yield ≈ 5/105 of LP value. Allow 20% tolerance for virtual-share rounding.
+        uint256 expectedFeeYield = (fullLpUsdc * 5) / 105;
+        assertApproxEqRel(yieldValue, expectedFeeYield, 0.2e18, "Yield should reflect fees only, not price moves");
+    }
+
     // ==========================================
     // REPLENISH BUFFER
     // ==========================================
@@ -760,7 +817,7 @@ contract InvarCoinTest is Test {
     }
 
     function test_LpDeposit_TracksCostBasis() public {
-        assertEq(ic.curveLpCostUsdc(), 0);
+        assertEq(ic.curveLpCostVp(), 0);
 
         usdc.mint(alice, 10_000e6);
         bearToken.mint(alice, 10_000e18);
@@ -770,7 +827,7 @@ contract InvarCoinTest is Test {
         ic.lpDeposit(10_000e6, 10_000e18, alice, 0);
         vm.stopPrank();
 
-        assertGt(ic.curveLpCostUsdc(), 0);
+        assertGt(ic.curveLpCostVp(), 0);
     }
 
     function test_LpDeposit_RevertsWhenPaused() public {
@@ -905,11 +962,11 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        assertEq(ic.curveLpCostUsdc(), 0);
+        assertEq(ic.curveLpCostVp(), 0);
 
         ic.deployToCurve();
 
-        assertGt(ic.curveLpCostUsdc(), 0);
+        assertGt(ic.curveLpCostVp(), 0);
     }
 
     function test_ReplenishBuffer_ReducesCostBasis() public {
@@ -922,10 +979,10 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
 
-        uint256 costBefore = ic.curveLpCostUsdc();
+        uint256 costBefore = ic.curveLpCostVp();
         ic.replenishBuffer();
 
-        assertLt(ic.curveLpCostUsdc(), costBefore);
+        assertLt(ic.curveLpCostVp(), costBefore);
     }
 
     function test_LpWithdraw_ReducesCostBasis() public {
@@ -934,14 +991,14 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 costBefore = ic.curveLpCostUsdc();
+        uint256 costBefore = ic.curveLpCostVp();
         assertGt(costBefore, 0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
         ic.lpWithdraw(bal, 0, 0);
 
-        assertEq(ic.curveLpCostUsdc(), 0);
+        assertEq(ic.curveLpCostVp(), 0);
     }
 
     function test_EmergencyWithdrawFromCurve_ResetsCostBasis() public {
@@ -949,11 +1006,11 @@ contract InvarCoinTest is Test {
         ic.deposit(20_000e6, alice);
 
         ic.deployToCurve();
-        assertGt(ic.curveLpCostUsdc(), 0);
+        assertGt(ic.curveLpCostVp(), 0);
 
         ic.emergencyWithdrawFromCurve();
 
-        assertEq(ic.curveLpCostUsdc(), 0);
+        assertEq(ic.curveLpCostVp(), 0);
     }
 
 }

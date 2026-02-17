@@ -78,7 +78,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     StakedToken public stakedInvarCoin;
     uint256 public morphoPrincipal;
-    uint256 public curveLpCostUsdc;
+    uint256 public curveLpCostVp;
 
     // ==========================================
     // EVENTS & ERRORS
@@ -284,7 +284,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
-            curveLpCostUsdc -= Math.mulDiv(curveLpCostUsdc, lpToBurn, lpBal);
+            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
             uint256[2] memory min_amounts = [uint256(0), uint256(0)];
             uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
             usdcReturned += withdrawn[0];
@@ -332,7 +332,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, 0);
 
         uint256 lpValue = (lpMinted * CURVE_POOL.lp_price()) / 1e30;
-        curveLpCostUsdc += lpValue;
+        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
 
@@ -365,13 +365,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             morphoPrincipal = currentMorphoUsdc;
         }
 
-        // 2. Curve LP fee yield
+        // 2. Curve LP fee yield (measured via virtual_price to isolate fees from price moves)
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
-            uint256 currentLpUsdc = (lpBal * CURVE_POOL.lp_price()) / 1e30;
-            if (currentLpUsdc > curveLpCostUsdc) {
-                totalYieldUsdc += currentLpUsdc - curveLpCostUsdc;
-                curveLpCostUsdc = currentLpUsdc;
+            uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
+            if (currentVpValue > curveLpCostVp) {
+                uint256 vpGrowth = currentVpValue - curveLpCostVp;
+                uint256 currentLpUsdc = (lpBal * CURVE_POOL.lp_price()) / 1e30;
+                totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
+                curveLpCostVp = currentVpValue;
             }
         }
 
@@ -421,7 +423,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
-        curveLpCostUsdc += (lpMinted * CURVE_POOL.lp_price()) / 1e30;
+        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
@@ -453,7 +455,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
 
-        curveLpCostUsdc -= Math.mulDiv(curveLpCostUsdc, lpToBurn, lpBalBefore);
+        curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
         MORPHO_VAULT.deposit(usdcRecovered, address(this));
@@ -472,7 +474,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
-        curveLpCostUsdc = 0;
+        curveLpCostVp = 0;
         _pause();
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
