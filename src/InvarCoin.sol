@@ -3,8 +3,10 @@ pragma solidity 0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20FlashMint} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20FlashMint.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -48,7 +50,7 @@ interface ICurveTwocrypto {
 /// @custom:security-contact contact@plether.com
 /// @notice Retail-friendly global purchasing power token backed 50/50 by USDC + plDXY-BEAR.
 /// @dev Combines asynchronous batching, exact yield stripping, and flash-loan resistant NAV.
-contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard {
+contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 
@@ -67,6 +69,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 200; // 2% max spot-vs-EMA deviation
+    uint256 public constant FLASH_FEE_BPS = 5; // 0.05%
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
@@ -601,6 +604,26 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 balance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(to, balance);
         emit TokenRescued(token, to, balance);
+    }
+
+    // ==========================================
+    // FLASH LOANS
+    // ==========================================
+
+    function flashLoan(
+        IERC3156FlashBorrower receiver,
+        address token,
+        uint256 value,
+        bytes calldata data
+    ) public override nonReentrant returns (bool) {
+        return super.flashLoan(receiver, token, value, data);
+    }
+
+    function _flashFee(
+        address,
+        uint256 value
+    ) internal pure override returns (uint256) {
+        return (value * FLASH_FEE_BPS) / BPS;
     }
 
 }
