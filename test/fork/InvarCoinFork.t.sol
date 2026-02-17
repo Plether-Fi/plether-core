@@ -362,12 +362,11 @@ contract InvarCoinForkTest is BaseForkTest {
         // New deposit creates deployable buffer
         _depositAs(whale, 1_000_000e6);
 
-        // Attacker skews pool before deployToCurve
-        deal(bearToken, attacker, 5_000_000e18);
+        // Attacker pumps BEAR (sells USDC) → pool becomes USDC-heavy → deployToCurve gets fewer LP
         vm.startPrank(attacker);
-        IERC20(bearToken).approve(curvePool, type(uint256).max);
+        IERC20(USDC).approve(curvePool, 40_000_000e6);
         (bool s,) =
-            curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, 5_000_000e18, 0));
+            curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 0, 1, 40_000_000e6, 0));
         require(s, "attacker swap failed");
         vm.stopPrank();
 
