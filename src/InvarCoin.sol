@@ -540,7 +540,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
         MORPHO_VAULT.deposit(usdcRecovered, address(this));
-        morphoPrincipal += usdcRecovered;
 
         emit BufferReplenished(lpToBurn, usdcRecovered);
     }

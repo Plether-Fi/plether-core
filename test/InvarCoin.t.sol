@@ -615,9 +615,12 @@ contract InvarCoinTest is Test {
         ic.withdraw(toWithdraw, alice, 0);
 
         uint256 morphoPrincipalBefore = ic.morphoPrincipal();
+        uint256 morphoValueBefore = morpho.convertToAssets(morpho.balanceOf(address(ic)));
         ic.replenishBuffer();
+        uint256 morphoValueAfter = morpho.convertToAssets(morpho.balanceOf(address(ic)));
 
-        assertGt(ic.morphoPrincipal(), morphoPrincipalBefore);
+        assertEq(ic.morphoPrincipal(), morphoPrincipalBefore, "replenish should not inflate morphoPrincipal");
+        assertGt(morphoValueAfter, morphoValueBefore, "Morpho balance should increase after replenish");
     }
 
     // ==========================================
