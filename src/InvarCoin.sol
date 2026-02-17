@@ -419,9 +419,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
         }
 
+        uint256 totalInputUsdc = usdcAmount + (bearAmount > 0 ? (bearAmount * oraclePrice) / 1e20 : 0);
         uint256[2] memory amounts = [usdcAmount, bearAmount];
-        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 minLpOut = (expectedLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 emaFloor =
+            (totalInputUsdc * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (_optimisticLpPrice(oraclePrice) * BPS);
+        uint256 calcFloor = (CURVE_POOL.calc_token_amount(amounts, true) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 minLpOut = emaFloor > calcFloor ? emaFloor : calcFloor;
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
@@ -544,8 +547,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
-        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 minLpOut = (expectedLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 emaFloor = (usdcToDeploy * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (CURVE_POOL.lp_price() * BPS);
+        uint256 calcFloor = (CURVE_POOL.calc_token_amount(amounts, true) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 minLpOut = emaFloor > calcFloor ? emaFloor : calcFloor;
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
