@@ -240,7 +240,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(true);
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -287,7 +287,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (emergencyActive) {
             revert InvarCoin__UseLpWithdraw();
         }
-        _harvest();
+        _harvest(true);
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -326,7 +326,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(false);
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -376,7 +376,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(true);
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -415,13 +415,16 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Keeper harvest for Curve LP fee yield.
     /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
-        donated = _harvest();
+        donated = _harvest(true);
         if (donated == 0) {
             revert InvarCoin__NoYield();
         }
     }
 
-    function _harvest() internal returns (uint256 donated) {
+    /// @param requireOracle If false, silently skip yield when oracle is unavailable.
+    function _harvest(
+        bool requireOracle
+    ) internal returns (uint256 donated) {
         if (address(stakedInvarCoin) == address(0)) {
             return 0;
         }
@@ -433,12 +436,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
                 uint256 vpGrowth = currentVpValue - curveLpCostVp;
-                uint256 oraclePrice = OracleLib.getValidatedPrice(
-                    BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
-                );
-                uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
-                totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
-                curveLpCostVp = currentVpValue;
+
+                if (requireOracle) {
+                    uint256 oraclePrice = OracleLib.getValidatedPrice(
+                        BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
+                    );
+                    uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
+                    totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
+                    curveLpCostVp = currentVpValue;
+                }
             }
         }
 
@@ -463,7 +469,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
     function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        _harvest();
+        _harvest(true);
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -491,7 +497,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
     function replenishBuffer() external nonReentrant whenNotPaused {
-        _harvest();
+        _harvest(true);
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
