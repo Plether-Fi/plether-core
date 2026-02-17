@@ -291,7 +291,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (emergencyActive) {
             revert InvarCoin__UseLpWithdraw();
         }
-        _harvest();
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -327,7 +326,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         uint256 minUsdcOut,
         uint256 minBearOut
     ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
-        _harvest();
         (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
     }
 
@@ -486,7 +484,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
     /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
     function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -513,7 +510,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
     function replenishBuffer() external nonReentrant whenNotPaused {
-        _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -574,15 +570,16 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
     }
 
-    function emergencyWithdrawFromCurve() external onlyOwner {
+    function emergencyWithdrawFromCurve() external onlyOwner nonReentrant {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        curveLpCostVp = 0;
+        emergencyActive = true;
+        _pause();
+
         uint256[2] memory received;
         if (lpBal > 0) {
             received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
-        curveLpCostVp = 0;
-        emergencyActive = true;
-        _pause();
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
 

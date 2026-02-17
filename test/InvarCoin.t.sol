@@ -1271,24 +1271,14 @@ contract InvarCoinTest is Test {
         }
         uint256 totalCaptured = ic.balanceOf(address(sInvar)) - sInvarBal;
 
-        assertGe(totalCaptured, yieldStandalone, "yield must not be lost across withdraw + replenish");
+        assertLe(
+            yieldStandalone - totalCaptured,
+            yieldStandalone / 50 + 1,
+            "yield leakage bounded by withdrawn share fraction"
+        );
     }
 
-    function test_LpWithdraw_SurvivesStaleOracle() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
-
-        oracle.setUpdatedAt(block.timestamp - 25 hours);
-
-        uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
-
-        assertGt(usdcOut + bearOut, 0, "lpWithdraw should succeed despite stale oracle");
-    }
-
-    function test_Withdraw_RevertsOnStaleOracle() public {
+    function test_LpWithdraw_SurvivesStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
         ic.deployToCurve();
@@ -1298,8 +1288,34 @@ contract InvarCoinTest is Test {
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
-        ic.withdraw(shares, alice, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+
+        assertGt(usdcOut + bearOut, 0, "lpWithdraw should succeed despite stale oracle + pending yield");
+    }
+
+    function test_Withdraw_SucceedsWithStaleOracleAndPendingYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve();
+
+        curve.setVirtualPrice(1.05e18);
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+
+        assertGt(usdcOut, 0, "withdraw should succeed despite stale oracle + pending yield");
+    }
+
+    function test_DeployToCurve_SucceedsWithStaleOracle() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        ic.deployToCurve();
+        assertGt(curveLp.balanceOf(address(ic)), 0, "deployToCurve should succeed with stale oracle");
     }
 
     function test_Harvest_RevertsOnStaleOracle() public {
