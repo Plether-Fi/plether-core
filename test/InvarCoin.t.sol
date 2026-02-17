@@ -98,6 +98,12 @@ contract MockCurvePool {
         spotDiscountBps = _discountBps;
     }
 
+    function setBearBalance(
+        uint256 _bearBalance
+    ) external {
+        bearBalance = _bearBalance;
+    }
+
     function add_liquidity(
         uint256[2] calldata amounts,
         uint256
@@ -360,6 +366,59 @@ contract InvarCoinTest is Test {
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAmount.selector);
         vm.prank(alice);
         ic.withdraw(0, alice, 0);
+    }
+
+    function test_Withdraw_RevertsAfterEmergency() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        assertTrue(ic.emergencyActive());
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.expectRevert(InvarCoin.InvarCoin__UseLpWithdraw.selector);
+        vm.prank(alice);
+        ic.withdraw(bal, alice, 0);
+    }
+
+    function test_Withdraw_WorksAfterEmergencyCleared() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        ic.emergencyWithdrawFromCurve();
+        assertTrue(ic.emergencyActive());
+
+        ic.unpause();
+
+        // Re-deposit and deploy clears the flag
+        vm.prank(bob);
+        ic.deposit(10_000e6, bob);
+        ic.deployToCurve();
+
+        assertFalse(ic.emergencyActive());
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(bal, alice, 0);
+        assertGt(usdcOut, 0);
+    }
+
+    function test_LpWithdraw_WorksDuringEmergency() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        ic.emergencyWithdrawFromCurve();
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+
+        assertGt(usdcOut, 0, "Should receive USDC during emergency");
     }
 
     function test_Withdraw_RevertsWhenPaused() public {

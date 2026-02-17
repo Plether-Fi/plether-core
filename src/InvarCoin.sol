@@ -84,6 +84,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     StakedToken public stakedInvarCoin;
     uint256 public curveLpCostVp;
+    bool public emergencyActive;
 
     // ==========================================
     // EVENTS & ERRORS
@@ -108,6 +109,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__PermitFailed();
     error InvarCoin__AlreadySet();
     error InvarCoin__SpotDeviationTooHigh();
+    error InvarCoin__UseLpWithdraw();
 
     constructor(
         address _usdc,
@@ -281,6 +283,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     ) external nonReentrant whenNotPaused returns (uint256 usdcOut) {
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
+        }
+        if (emergencyActive) {
+            revert InvarCoin__UseLpWithdraw();
         }
         _harvest();
 
@@ -479,6 +484,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
+        emergencyActive = false;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
@@ -532,6 +538,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
         curveLpCostVp = 0;
+        emergencyActive = true;
         _pause();
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
