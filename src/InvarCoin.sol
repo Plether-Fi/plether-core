@@ -61,6 +61,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
     uint256 public constant HARVEST_CALLER_REWARD_BPS = 10; // 0.1% caller reward
+    uint256 public constant MIN_HARVEST_BPS = 1; // 0.01% of NAV — skip harvest below this
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
@@ -244,7 +245,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(false);
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -291,7 +292,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(false);
         OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
         uint256 assets = totalAssets();
@@ -335,7 +336,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(false);
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -396,7 +397,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest();
+        _harvest(false);
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -436,27 +437,35 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Unified keeper harvest for both Morpho interest and Curve LP fee yield.
     /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
+    ///      Always processes yield regardless of MIN_HARVEST_BPS threshold.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
-        donated = _harvest();
+        donated = _harvest(true);
         if (donated == 0) {
             revert InvarCoin__NoYield();
         }
     }
 
-    function _harvest() internal returns (uint256 donated) {
+    /// @param force If true, bypass MIN_HARVEST_BPS threshold (used by explicit harvest()).
+    ///              If false, skip when yield < 0.01% of NAV to save gas on user txns.
+    function _harvest(
+        bool force
+    ) internal returns (uint256 donated) {
         if (address(stakedInvarCoin) == address(0)) {
             return 0;
         }
 
-        uint256 totalYieldUsdc = 0;
-
+        // --- Phase 1: Detect yield (read-only) ---
+        uint256 morphoYield;
+        uint256 newMorphoPrincipal = morphoPrincipal;
         uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
         uint256 currentMorphoUsdc = morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0;
         if (currentMorphoUsdc > morphoPrincipal) {
-            totalYieldUsdc += currentMorphoUsdc - morphoPrincipal;
-            morphoPrincipal = currentMorphoUsdc;
+            morphoYield = currentMorphoUsdc - morphoPrincipal;
+            newMorphoPrincipal = currentMorphoUsdc;
         }
 
+        uint256 curveYield;
+        uint256 newCurveLpCostVp = curveLpCostVp;
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -466,14 +475,27 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
                     BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
                 );
                 uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
-                totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
-                curveLpCostVp = currentVpValue;
+                curveYield = Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
+                newCurveLpCostVp = currentVpValue;
             }
         }
 
+        uint256 totalYieldUsdc = morphoYield + curveYield;
         if (totalYieldUsdc == 0) {
             return 0;
         }
+
+        // --- Phase 2: Threshold gate (skip small yields on user txns) ---
+        if (!force) {
+            uint256 nav = totalAssets();
+            if (totalYieldUsdc * BPS < nav * MIN_HARVEST_BPS) {
+                return 0;
+            }
+        }
+
+        // --- Phase 3: Commit state + mint + donate ---
+        morphoPrincipal = newMorphoPrincipal;
+        curveLpCostVp = newCurveLpCostVp;
 
         uint256 supply = totalSupply();
         uint256 currentAssets = totalAssets();
@@ -497,7 +519,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Deploys dual-sided liquidity into Curve
     function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        _harvest();
+        _harvest(true);
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -526,7 +548,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP, capped at 10% of NAV.
     function replenishBuffer() external nonReentrant whenNotPaused {
-        _harvest();
+        _harvest(true);
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
