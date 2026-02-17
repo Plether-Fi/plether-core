@@ -214,7 +214,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp < lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev max(Curve EMA, oracle-derived) — protects deposits from stale-low EMA dilution.
+    /// @dev max(Curve EMA, oracle-derived) — used for vault NAV to prevent deposit dilution.
     function _optimisticLpPrice(
         uint256 oraclePrice
     ) private view returns (uint256) {
@@ -403,7 +403,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256[2] memory amounts = [usdcAmount, bearAmount];
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, 0);
 
-        uint256 lpValue = (lpMinted * _optimisticLpPrice(oraclePrice)) / 1e30;
+        uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);

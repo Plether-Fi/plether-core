@@ -945,6 +945,34 @@ contract InvarCoinTest is Test {
         ic.lpDeposit(1000e6, 0, alice, 0);
     }
 
+    function test_LpDeposit_PessimisticPricing_BlocksArbitrage() public {
+        // Alice seeds the vault with USDC (all stays in Morpho as buffer)
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+
+        // Oracle crashes to $0.50 while Curve EMA stays stale-high
+        // pessimistic LP price = min(oracle, EMA) = oracle ≈ 1.414 * vp
+        // optimistic LP price  = max(oracle, EMA) = EMA = 2 * vp
+        oracle.updatePrice(50_000_000);
+
+        uint256 bobUsdc = 10_000e6;
+        uint256 bobBear = 10_000e18;
+        usdc.mint(bob, bobUsdc);
+        bearToken.mint(bob, bobBear);
+
+        vm.startPrank(bob);
+        bearToken.approve(address(ic), bobBear);
+        ic.lpDeposit(bobUsdc, bobBear, bob, 0);
+
+        uint256 bobShares = ic.balanceOf(bob);
+        uint256 usdcOut = ic.withdraw(bobShares, bob, 0);
+        vm.stopPrank();
+
+        // At $0.50, 10k BEAR ≈ $5k. Total input ≈ $15k.
+        // With pessimistic incoming LP pricing, Bob must not profit.
+        assertLe(usdcOut, bobUsdc + 10_000e6 / 2, "lpDeposit must not enable risk-free arbitrage");
+    }
+
     // ==========================================
     // CONSTRUCTOR VALIDATION
     // ==========================================
