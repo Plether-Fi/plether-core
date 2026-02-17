@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {InvarCoin} from "../src/InvarCoin.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
-import {MockBEAR, MockCurveLpToken, MockCurvePool, MockMorphoVault, MockUSDC6} from "./InvarCoin.t.sol";
+import {MockBEAR, MockCurveLpToken, MockCurvePool, MockUSDC6} from "./InvarCoin.t.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
@@ -16,7 +16,6 @@ contract InvarCoinHandler is Test {
     StakedToken public sInvar;
     MockUSDC6 public usdc;
     MockBEAR public bear;
-    MockMorphoVault public morpho;
     MockCurvePool public curve;
     MockCurveLpToken public curveLp;
     MockOracle public oracle;
@@ -25,7 +24,6 @@ contract InvarCoinHandler is Test {
     uint256 public ghost_totalInvarBurned;
     uint256 public ghost_totalDeposited;
     uint256 public ghost_totalWithdrawn;
-    uint256 public ghost_totalYieldSimulated;
     uint256 public ghost_totalDustSent;
 
     uint256 public depositCalls;
@@ -34,7 +32,6 @@ contract InvarCoinHandler is Test {
     uint256 public deployToCurveCalls;
     uint256 public replenishBufferCalls;
     uint256 public harvestCalls;
-    uint256 public simulateYieldCalls;
     uint256 public simulateCurveYieldCalls;
     uint256 public sendUsdcDustCalls;
     uint256 public lpDepositCalls;
@@ -81,7 +78,6 @@ contract InvarCoinHandler is Test {
         StakedToken _sInvar,
         MockUSDC6 _usdc,
         MockBEAR _bear,
-        MockMorphoVault _morpho,
         MockCurvePool _curve,
         MockCurveLpToken _curveLp,
         MockOracle _oracle
@@ -90,7 +86,6 @@ contract InvarCoinHandler is Test {
         sInvar = _sInvar;
         usdc = _usdc;
         bear = _bear;
-        morpho = _morpho;
         curve = _curve;
         curveLp = _curveLp;
         oracle = _oracle;
@@ -251,26 +246,6 @@ contract InvarCoinHandler is Test {
         }
     }
 
-    function simulateYield(
-        uint256 amount
-    ) external {
-        uint256 morphoShares = morpho.balanceOf(address(ic));
-        if (morphoShares == 0) {
-            return;
-        }
-
-        uint256 currentAssets = morpho.convertToAssets(morphoShares);
-        uint256 maxYield = currentAssets / 10;
-        if (maxYield == 0) {
-            return;
-        }
-
-        amount = bound(amount, 1e4, maxYield);
-        morpho.simulateYield(amount);
-        ghost_totalYieldSimulated += amount;
-        simulateYieldCalls++;
-    }
-
     function simulateCurveYield(
         uint256 bpsDelta,
         uint256 priceBpsDelta
@@ -342,7 +317,6 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
     StakedToken sInvar;
     MockUSDC6 usdc;
     MockBEAR bear;
-    MockMorphoVault morpho;
     MockCurvePool curve;
     MockCurveLpToken curveLp;
     MockOracle oracle;
@@ -356,22 +330,18 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         bear = new MockBEAR();
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bear), address(curveLp));
-        morpho = new MockMorphoVault(IERC20(address(usdc)));
 
-        ic = new InvarCoin(
-            address(usdc), address(bear), address(curveLp), address(morpho), address(curve), address(oracle), address(0)
-        );
+        ic = new InvarCoin(address(usdc), address(bear), address(curveLp), address(curve), address(oracle), address(0));
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
         ic.setStakedInvarCoin(address(sInvar));
 
         curve.setSwapFeeBps(30);
 
-        handler = new InvarCoinHandler(ic, sInvar, usdc, bear, morpho, curve, curveLp, oracle);
+        handler = new InvarCoinHandler(ic, sInvar, usdc, bear, curve, curveLp, oracle);
 
         targetContract(address(handler));
         vm.label(address(ic), "InvarCoin");
-        vm.label(address(morpho), "MorphoVault");
         vm.label(address(handler), "Handler");
     }
 
@@ -384,8 +354,7 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
     /// @notice Withdrawal output must never exceed total assets (no value creation from thin air).
     /// Checked indirectly: ghost_totalWithdrawn should never exceed ghost_totalDeposited + yield.
     function invariant_NoValueCreation() public view {
-        uint256 totalIn =
-            handler.ghost_totalDeposited() + handler.ghost_totalYieldSimulated() + handler.ghost_totalDustSent();
+        uint256 totalIn = handler.ghost_totalDeposited() + handler.ghost_totalDustSent();
         uint256 totalWithdrawn = handler.ghost_totalWithdrawn();
         uint256 tolerance = 1000 + (totalIn * 100) / 1e6;
         assertLe(totalWithdrawn, totalIn + tolerance, "INVARIANT: More withdrawn than total value in");
@@ -404,13 +373,11 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         console.log("DeployToCurve:", handler.deployToCurveCalls());
         console.log("ReplenishBuffer:", handler.replenishBufferCalls());
         console.log("Harvest:", handler.harvestCalls());
-        console.log("SimulateYield:", handler.simulateYieldCalls());
         console.log("SimulateCurveYield:", handler.simulateCurveYieldCalls());
         console.log("SendUsdcDust:", handler.sendUsdcDustCalls());
         console.log("LpDeposit:", handler.lpDepositCalls());
         console.log("TotalSupply:", ic.totalSupply());
         console.log("TotalAssets:", ic.totalAssets());
-        console.log("MorphoPrincipal:", ic.morphoPrincipal());
     }
 
 }

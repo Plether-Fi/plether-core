@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
@@ -60,7 +59,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     IERC20 public immutable USDC;
     IERC20 public immutable BEAR;
     IERC20 public immutable CURVE_LP_TOKEN;
-    IERC4626 public immutable MORPHO_VAULT;
     ICurveTwocrypto public immutable CURVE_POOL;
     AggregatorV3Interface public immutable BASKET_ORACLE;
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
@@ -84,7 +82,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     StakedToken public stakedInvarCoin;
-    uint256 public morphoPrincipal;
     uint256 public curveLpCostVp;
 
     // ==========================================
@@ -100,7 +97,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
     event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
-    event EmergencyWithdrawMorpho(uint256 sharesBurned, uint256 usdcReceived);
 
     error InvarCoin__ZeroAmount();
     error InvarCoin__ZeroAddress();
@@ -116,14 +112,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address _usdc,
         address _bear,
         address _curveLpToken,
-        address _morphoVault,
         address _curvePool,
         address _oracle,
         address _sequencerUptimeFeed
     ) ERC20("InvarCoin", "INVAR") ERC20Permit("InvarCoin") Ownable(msg.sender) {
         if (
-            _usdc == address(0) || _bear == address(0) || _curveLpToken == address(0) || _morphoVault == address(0)
-                || _curvePool == address(0) || _oracle == address(0)
+            _usdc == address(0) || _bear == address(0) || _curveLpToken == address(0) || _curvePool == address(0)
+                || _oracle == address(0)
         ) {
             revert InvarCoin__ZeroAddress();
         }
@@ -131,12 +126,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         USDC = IERC20(_usdc);
         BEAR = IERC20(_bear);
         CURVE_LP_TOKEN = IERC20(_curveLpToken);
-        MORPHO_VAULT = IERC4626(_morphoVault);
         CURVE_POOL = ICurveTwocrypto(_curvePool);
         BASKET_ORACLE = AggregatorV3Interface(_oracle);
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
-        USDC.safeIncreaseAllowance(_morphoVault, type(uint256).max);
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
         BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
@@ -160,29 +153,24 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Total assets backing INVAR (USDC, 6 decimals).
     /// @dev Uses pessimistic LP pricing: min(Curve EMA, oracle-derived) to prevent stale-EMA exploitation.
     function totalAssets() public view returns (uint256) {
-        // 1. Morpho Buffer (local USDC + Morpho vault shares)
         uint256 localUsdc = USDC.balanceOf(address(this));
-        uint256 adapterShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 bufferValue = localUsdc + (adapterShares > 0 ? MORPHO_VAULT.convertToAssets(adapterShares) : 0);
 
         (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
         uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
 
-        // 2. Curve LP — pessimistic: min(EMA, oracle-derived) bounds stale-EMA drain
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 lpUsdcValue = 0;
         if (lpBal > 0) {
             lpUsdcValue = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
         }
 
-        // 3. Raw BEAR (present after emergencyWithdrawFromCurve)
         uint256 bearBal = BEAR.balanceOf(address(this));
         uint256 bearUsdcValue = 0;
         if (bearBal > 0 && oraclePrice > 0) {
             bearUsdcValue = (bearBal * oraclePrice) / 1e20;
         }
 
-        return bufferValue + lpUsdcValue + bearUsdcValue;
+        return localUsdc + lpUsdcValue + bearUsdcValue;
     }
 
     /// @dev Total assets using optimistic LP pricing — max(EMA, oracle) to prevent deposit dilution.
@@ -190,8 +178,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 oraclePrice
     ) private view returns (uint256) {
         uint256 localUsdc = USDC.balanceOf(address(this));
-        uint256 adapterShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 bufferValue = localUsdc + (adapterShares > 0 ? MORPHO_VAULT.convertToAssets(adapterShares) : 0);
 
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 lpUsdcValue = 0;
@@ -205,7 +191,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             bearUsdcValue = (bearBal * oraclePrice) / 1e20;
         }
 
-        return bufferValue + lpUsdcValue + bearUsdcValue;
+        return localUsdc + lpUsdcValue + bearUsdcValue;
     }
 
     /// @dev Oracle-derived LP price: mirrors twocrypto-ng formula 2 * vp * sqrt(bearPrice_18dec).
@@ -263,10 +249,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
-        // Sweep directly into Morpho to earn baseline yield
-        MORPHO_VAULT.deposit(usdcAmount, address(this));
-        morphoPrincipal += usdcAmount;
-
         _mint(receiver, glUsdMinted);
         emit Deposited(msg.sender, receiver, usdcAmount, glUsdMinted);
     }
@@ -310,19 +292,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256 localUsdc = USDC.balanceOf(address(this));
-        uint256 morphoAssets = MORPHO_VAULT.maxWithdraw(address(this));
 
-        if (usdcOut > localUsdc + morphoAssets) {
+        if (usdcOut > localUsdc) {
             revert InvarCoin__InsufficientBuffer();
         }
 
         _burn(msg.sender, glUsdAmount);
-
-        if (usdcOut > localUsdc) {
-            uint256 morphoWithdrawn = usdcOut - localUsdc;
-            morphoPrincipal -= morphoWithdrawn;
-            MORPHO_VAULT.withdraw(morphoWithdrawn, address(this), address(this));
-        }
 
         USDC.safeTransfer(receiver, usdcOut);
         emit Withdrawn(msg.sender, receiver, glUsdAmount, usdcOut);
@@ -347,18 +322,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
 
-        // 1. Pro-rata local USDC / Morpho
-        uint256 localUsdcBefore = USDC.balanceOf(address(this));
-
-        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
-        if (morphoShares > 0) {
-            uint256 sharesToBurn = Math.mulDiv(morphoShares, glUsdAmount, supply);
-            uint256 withdrawn = MORPHO_VAULT.redeem(sharesToBurn, address(this), address(this));
-            usdcReturned += withdrawn;
-            morphoPrincipal = morphoPrincipal > withdrawn ? morphoPrincipal - withdrawn : 0;
-        }
-
-        uint256 localUsdcShare = Math.mulDiv(localUsdcBefore, glUsdAmount, supply);
+        uint256 localUsdcShare = Math.mulDiv(USDC.balanceOf(address(this)), glUsdAmount, supply);
         usdcReturned += localUsdcShare;
 
         // 2. Pro-rata raw BEAR (present after emergencyWithdrawFromCurve)
@@ -442,7 +406,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // KEEPER OPERATIONS & YIELD
     // ==========================================
 
-    /// @notice Unified keeper harvest for both Morpho interest and Curve LP fee yield.
+    /// @notice Keeper harvest for Curve LP fee yield.
     /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
         donated = _harvest();
@@ -457,13 +421,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256 totalYieldUsdc = 0;
-
-        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 currentMorphoUsdc = morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0;
-        if (currentMorphoUsdc > morphoPrincipal) {
-            totalYieldUsdc += currentMorphoUsdc - morphoPrincipal;
-            morphoPrincipal = currentMorphoUsdc;
-        }
 
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
@@ -498,25 +455,19 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit YieldHarvested(glUsdToMint, 0, donated);
     }
 
-    /// @notice Keeper function: Deploys dual-sided liquidity into Curve
+    /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
     function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
         _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
-        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 currentMorphoUsdc = morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0;
+        uint256 localUsdc = USDC.balanceOf(address(this));
 
-        uint256 usdcToDeploy = 0;
-        if (currentMorphoUsdc > bufferTarget && currentMorphoUsdc - bufferTarget >= DEPLOY_THRESHOLD) {
-            usdcToDeploy = currentMorphoUsdc - bufferTarget;
-            MORPHO_VAULT.withdraw(usdcToDeploy, address(this), address(this));
-            morphoPrincipal = morphoPrincipal > usdcToDeploy ? morphoPrincipal - usdcToDeploy : 0; // symmetric with += in replenishBuffer
-        }
-
-        if (usdcToDeploy == 0) {
+        if (localUsdc <= bufferTarget || localUsdc - bufferTarget < DEPLOY_THRESHOLD) {
             revert InvarCoin__NothingToDeploy();
         }
+
+        uint256 usdcToDeploy = localUsdc - bufferTarget;
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 emaFloor = (usdcToDeploy * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (CURVE_POOL.lp_price() * BPS);
@@ -528,22 +479,20 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
 
-    /// @notice Keeper function: Restores USDC buffer by burning Curve LP, capped at 10% of NAV.
+    /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
     function replenishBuffer() external nonReentrant whenNotPaused {
         _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
-        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 currentBuffer =
-            USDC.balanceOf(address(this)) + (morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0);
+        uint256 currentBuffer = USDC.balanceOf(address(this));
 
         if (currentBuffer >= bufferTarget) {
             revert InvarCoin__NothingToDeploy();
         }
 
         uint256 lpBalBefore = CURVE_LP_TOKEN.balanceOf(address(this));
-        uint256 usdcBefore = USDC.balanceOf(address(this));
+        uint256 usdcBefore = currentBuffer;
 
         uint256 maxReplenish = bufferTarget - currentBuffer;
         uint256 lpPrice = CURVE_POOL.lp_price();
@@ -562,8 +511,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
-        MORPHO_VAULT.deposit(usdcRecovered, address(this));
-        morphoPrincipal += usdcRecovered; // symmetric with -= in deployToCurve
 
         emit BufferReplenished(lpToBurn, usdcRecovered);
     }
@@ -583,17 +530,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
     }
 
-    function emergencyWithdrawFromMorpho() external onlyOwner {
-        uint256 shares = MORPHO_VAULT.balanceOf(address(this));
-        uint256 usdcReceived = 0;
-        if (shares > 0) {
-            usdcReceived = MORPHO_VAULT.redeem(shares, address(this), address(this));
-        }
-        morphoPrincipal = 0;
-        _pause();
-        emit EmergencyWithdrawMorpho(shares, usdcReceived);
-    }
-
     function pause() external onlyOwner {
         _pause();
     }
@@ -606,10 +542,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address token,
         address to
     ) external onlyOwner {
-        if (
-            token == address(USDC) || token == address(BEAR) || token == address(MORPHO_VAULT)
-                || token == address(CURVE_LP_TOKEN)
-        ) {
+        if (token == address(USDC) || token == address(BEAR) || token == address(CURVE_LP_TOKEN)) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
         uint256 balance = IERC20(token).balanceOf(address(this));

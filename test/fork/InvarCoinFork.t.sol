@@ -4,19 +4,8 @@ pragma solidity 0.8.33;
 import {ICurveTwocrypto, InvarCoin} from "../../src/InvarCoin.sol";
 import {StakedToken} from "../../src/StakedToken.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
-import {IMorpho, MarketParams} from "../../src/interfaces/IMorpho.sol";
 import {BaseForkTest, ICurvePoolExtended} from "./BaseForkTest.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-interface IMorphoVaultV1 {
-
-    function withdrawQueueLength() external view returns (uint256);
-    function withdrawQueue(
-        uint256 index
-    ) external view returns (bytes32);
-
-}
 
 contract InvarCoinForkTest is BaseForkTest {
 
@@ -49,9 +38,7 @@ contract InvarCoinForkTest is BaseForkTest {
         _mintInitialTokens(10_000_000e18);
         _deployCurvePool(10_000_000e18);
 
-        ic = new InvarCoin(
-            USDC, bearToken, curvePool, address(STEAKHOUSE_USDC), curvePool, address(basketOracle), address(0)
-        );
+        ic = new InvarCoin(USDC, bearToken, curvePool, curvePool, address(basketOracle), address(0));
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
         ic.setStakedInvarCoin(address(sInvar));
@@ -95,16 +82,6 @@ contract InvarCoinForkTest is BaseForkTest {
         shares = ic.deposit(usdcAmount, user);
     }
 
-    function _accrueVaultInterest() internal {
-        IMorphoVaultV1 vault = IMorphoVaultV1(address(STEAKHOUSE_USDC));
-        uint256 queueLen = vault.withdrawQueueLength();
-        for (uint256 i = 0; i < queueLen; i++) {
-            bytes32 marketId = vault.withdrawQueue(i);
-            MarketParams memory params = IMorpho(MORPHO).idToMarketParams(marketId);
-            IMorpho(MORPHO).accrueInterest(params);
-        }
-    }
-
     function _generateCurveFees(
         uint256 swapAmount,
         uint256 rounds
@@ -129,42 +106,6 @@ contract InvarCoinForkTest is BaseForkTest {
         }
     }
 
-    function _drainVaultLiquidity() internal {
-        IMorphoVaultV1 mmVault = IMorphoVaultV1(address(STEAKHOUSE_USDC));
-        uint256 queueLen = mmVault.withdrawQueueLength();
-        address drainer = makeAddr("drainer");
-
-        for (uint256 i = 0; i < queueLen; i++) {
-            bytes32 marketId = mmVault.withdrawQueue(i);
-            (uint128 totalSupplyAssets,, uint128 totalBorrowAssets,,,) = IMorpho(MORPHO).market(marketId);
-            uint256 available = totalSupplyAssets > totalBorrowAssets ? totalSupplyAssets - totalBorrowAssets : 0;
-            if (available == 0) {
-                continue;
-            }
-
-            MarketParams memory params = IMorpho(MORPHO).idToMarketParams(marketId);
-
-            if (params.collateralToken == address(0)) {
-                (uint256 vaultShares,,) = IMorpho(MORPHO).position(marketId, address(STEAKHOUSE_USDC));
-                if (vaultShares == 0) {
-                    continue;
-                }
-                vm.prank(address(STEAKHOUSE_USDC));
-                IMorpho(MORPHO).withdraw(params, 0, vaultShares, address(STEAKHOUSE_USDC), address(drainer));
-                continue;
-            }
-
-            uint256 collateralAmount = 10_000 ether;
-            deal(params.collateralToken, drainer, collateralAmount);
-
-            vm.startPrank(drainer);
-            IERC20(params.collateralToken).approve(MORPHO, type(uint256).max);
-            IMorpho(MORPHO).supplyCollateral(params, collateralAmount, drainer, "");
-            IMorpho(MORPHO).borrow(params, available, 0, drainer, drainer);
-            vm.stopPrank();
-        }
-    }
-
     // ==========================================
     // PHASE 1: RETAIL OPERATIONS
     // ==========================================
@@ -175,7 +116,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 shares = ic.deposit(10_000e6, alice);
         uint256 gasUsed = gasBefore - gasleft();
 
-        assertLt(gasUsed, 500_000, "Deposit gas too high for pure Morpho path");
+        assertLt(gasUsed, 500_000, "Deposit gas too high");
         assertGt(shares, 0, "Should receive shares");
     }
 
@@ -198,8 +139,8 @@ contract InvarCoinForkTest is BaseForkTest {
 
         ic.deployToCurve();
 
-        uint256 morphoAvail = STEAKHOUSE_USDC.maxWithdraw(address(ic));
-        assertLe(morphoAvail, 200_000e6, "Only buffer should remain in Morpho");
+        uint256 localUsdc = IERC20(USDC).balanceOf(address(ic));
+        assertLe(localUsdc, 100_000e6, "Only ~5% buffer should remain as local USDC");
 
         uint256 aliceShares = ic.balanceOf(alice);
         uint256 bigWithdrawShares = (aliceShares * 30) / 100;
@@ -303,8 +244,8 @@ contract InvarCoinForkTest is BaseForkTest {
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "Should hold LP tokens");
 
-        uint256 morphoVal = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
-        assertApproxEqRel(morphoVal, ic.totalAssets() / 50, 0.05e18, "Buffer ~2% of totalAssets");
+        uint256 localUsdc = IERC20(USDC).balanceOf(address(ic));
+        assertApproxEqRel(localUsdc, ic.totalAssets() / 50, 0.05e18, "Buffer ~2% of totalAssets");
 
         assertApproxEqRel(ic.totalAssets(), 500_000e6, 0.02e18, "No value leaked during deploy");
     }
@@ -316,28 +257,6 @@ contract InvarCoinForkTest is BaseForkTest {
         ic.deployToCurve();
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), lpBefore, "Should mint LP with USDC-only deposit");
-    }
-
-    function test_harvest_morphoInterest() public {
-        _depositAs(alice, 1_000_000e6);
-
-        uint256 aliceShares = ic.balanceOf(alice);
-        vm.startPrank(alice);
-        ic.approve(address(sInvar), aliceShares);
-        sInvar.deposit(aliceShares, alice);
-        vm.stopPrank();
-
-        _warpAndRefreshOracle(30 days);
-        _accrueVaultInterest();
-
-        uint256 supplyBefore = ic.totalSupply();
-        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
-
-        vm.prank(keeper);
-        ic.harvest();
-
-        assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted");
-        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore, "sINVAR should receive yield");
     }
 
     function test_harvestYield_curveFeeGrowth() public {
@@ -361,17 +280,11 @@ contract InvarCoinForkTest is BaseForkTest {
         vm.prank(alice);
         ic.withdraw(shares / 25, alice, 0);
 
-        uint256 morphoPrincipalBefore = ic.morphoPrincipal();
-        uint256 morphoBefore = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
+        uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
 
         ic.replenishBuffer();
 
-        assertGt(
-            STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic))),
-            morphoBefore,
-            "Morpho buffer should increase"
-        );
-        assertGt(ic.morphoPrincipal(), morphoPrincipalBefore, "Principal tracking should update");
+        assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Local USDC buffer should increase");
     }
 
     function test_harvest_curveFeeYield() public {
@@ -443,19 +356,6 @@ contract InvarCoinForkTest is BaseForkTest {
 
         vm.expectRevert();
         ic.replenishBuffer();
-    }
-
-    function test_morphoIlliquidity() public {
-        _depositAs(alice, 100_000e6);
-
-        _drainVaultLiquidity();
-
-        assertEq(STEAKHOUSE_USDC.maxWithdraw(address(ic)), 0, "Vault should be frozen");
-
-        uint256 aliceShares = ic.balanceOf(alice);
-        vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__InsufficientBuffer.selector);
-        ic.withdraw(aliceShares, alice, 0);
     }
 
 }

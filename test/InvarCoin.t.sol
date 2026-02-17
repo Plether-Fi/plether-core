@@ -7,8 +7,6 @@ import {OracleLib} from "../src/libraries/OracleLib.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
 // ==========================================
@@ -41,22 +39,6 @@ contract MockBEAR is ERC20 {
         uint256 amount
     ) external {
         _mint(to, amount);
-    }
-
-}
-
-contract MockMorphoVault is ERC4626 {
-
-    using SafeERC20 for IERC20;
-
-    constructor(
-        IERC20 _asset
-    ) ERC4626(_asset) ERC20("Mock Morpho Vault", "mvUSDC") {}
-
-    function simulateYield(
-        uint256 amount
-    ) external {
-        MockUSDC6(asset()).mint(address(this), amount);
     }
 
 }
@@ -240,7 +222,6 @@ contract InvarCoinTest is Test {
     StakedToken public sInvar;
     MockUSDC6 public usdc;
     MockBEAR public bearToken;
-    MockMorphoVault public morpho;
     MockCurvePool public curve;
     MockCurveLpToken public curveLp;
     MockOracle public oracle;
@@ -260,16 +241,9 @@ contract InvarCoinTest is Test {
         bearToken = new MockBEAR();
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
-        morpho = new MockMorphoVault(IERC20(address(usdc)));
 
         ic = new InvarCoin(
-            address(usdc),
-            address(bearToken),
-            address(curveLp),
-            address(morpho),
-            address(curve),
-            address(oracle),
-            address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
@@ -336,7 +310,7 @@ contract InvarCoinTest is Test {
     // WITHDRAW TESTS
     // ==========================================
 
-    function test_Withdraw_FullFromMorphoBuffer() public {
+    function test_Withdraw_FullFromBuffer() public {
         vm.prank(alice);
         ic.deposit(1000e6, alice);
 
@@ -377,44 +351,6 @@ contract InvarCoinTest is Test {
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
         vm.prank(alice);
         ic.withdraw(bal, alice, type(uint256).max);
-    }
-
-    function test_Withdraw_MorphoPrincipalUnchangedWhenServedFromDust() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-
-        uint256 principalBefore = ic.morphoPrincipal();
-
-        // Send dust USDC directly to contract
-        usdc.mint(address(ic), 100e6);
-
-        // Withdraw a small amount — should be served entirely from dust
-        uint256 sharesToWithdraw = ic.balanceOf(alice) / 200; // ~50 USDC worth
-        vm.prank(alice);
-        ic.withdraw(sharesToWithdraw, alice, 0);
-
-        assertEq(ic.morphoPrincipal(), principalBefore, "morphoPrincipal should not change when served from dust");
-    }
-
-    function test_Harvest_NoPhantomYieldFromDust() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-
-        uint256 stakeAmount = ic.balanceOf(alice) / 2;
-        vm.startPrank(alice);
-        ic.approve(address(sInvar), stakeAmount);
-        sInvar.deposit(stakeAmount, alice);
-        vm.stopPrank();
-
-        // Send dust and withdraw from it
-        usdc.mint(address(ic), 100e6);
-        uint256 sharesToWithdraw = ic.balanceOf(alice) / 200;
-        vm.prank(alice);
-        ic.withdraw(sharesToWithdraw, alice, 0);
-
-        // No real yield exists — harvest should revert
-        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
-        ic.harvest();
     }
 
     // ==========================================
@@ -488,25 +424,6 @@ contract InvarCoinTest is Test {
     // HARVEST
     // ==========================================
 
-    function test_Harvest_MorphoYield() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-
-        uint256 stakeAmount = ic.balanceOf(alice);
-        vm.startPrank(alice);
-        ic.approve(address(sInvar), stakeAmount);
-        sInvar.deposit(stakeAmount, alice);
-        vm.stopPrank();
-
-        morpho.simulateYield(100e6);
-
-        uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
-        uint256 donated = ic.harvest();
-
-        assertGt(donated, 0);
-        assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore);
-    }
-
     function test_Harvest_RevertsWithNoYield() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
@@ -536,7 +453,7 @@ contract InvarCoinTest is Test {
         assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore);
     }
 
-    function test_Harvest_CombinedMorphoAndCurve() public {
+    function test_Harvest_CurveYieldDonated() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -548,7 +465,6 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        morpho.simulateYield(50e6);
         curve.setVirtualPrice(1.02e18);
 
         uint256 donated = ic.harvest();
@@ -619,24 +535,24 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
 
-        uint256 morphoPrincipalBefore = ic.morphoPrincipal();
+        uint256 usdcBefore = usdc.balanceOf(address(ic));
         ic.replenishBuffer();
 
-        assertGt(ic.morphoPrincipal(), morphoPrincipalBefore);
+        assertGt(usdc.balanceOf(address(ic)), usdcBefore);
     }
 
     // ==========================================
     // NAV: totalAssets
     // ==========================================
 
-    function test_TotalAssets_MorphoOnly() public {
+    function test_TotalAssets_LocalUsdcOnly() public {
         vm.prank(alice);
         ic.deposit(1000e6, alice);
 
         assertEq(ic.totalAssets(), 1000e6);
     }
 
-    function test_TotalAssets_WithCurveAndMorpho() public {
+    function test_TotalAssets_WithCurveAndLocalUsdc() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -665,16 +581,6 @@ contract InvarCoinTest is Test {
     // ==========================================
     // EMERGENCY
     // ==========================================
-
-    function test_EmergencyWithdrawFromMorpho() public {
-        vm.prank(alice);
-        ic.deposit(1000e6, alice);
-
-        ic.emergencyWithdrawFromMorpho();
-
-        assertTrue(ic.paused());
-        assertEq(ic.morphoPrincipal(), 0);
-    }
 
     function test_EmergencyWithdrawFromCurve() public {
         vm.prank(alice);
@@ -734,7 +640,7 @@ contract InvarCoinTest is Test {
     function test_EmergencyWithdraw_OnlyOwner() public {
         vm.prank(alice);
         vm.expectRevert();
-        ic.emergencyWithdrawFromMorpho();
+        ic.emergencyWithdrawFromCurve();
     }
 
     // ==========================================
@@ -775,13 +681,7 @@ contract InvarCoinTest is Test {
 
     function test_SetStakedInvarCoin_RevertsOnZeroAddress() public {
         InvarCoin fresh = new InvarCoin(
-            address(usdc),
-            address(bearToken),
-            address(curveLp),
-            address(morpho),
-            address(curve),
-            address(oracle),
-            address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
         );
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
         fresh.setStakedInvarCoin(address(0));
@@ -877,7 +777,7 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        morpho.simulateYield(50e6);
+        curve.setVirtualPrice(1.05e18);
 
         ic.harvest();
 
@@ -965,7 +865,7 @@ contract InvarCoinTest is Test {
     }
 
     function test_LpDeposit_PessimisticPricing_BlocksArbitrage() public {
-        // Alice seeds the vault with USDC (all stays in Morpho as buffer)
+        // Alice seeds the vault with USDC (all stays as local buffer)
         vm.prank(alice);
         ic.deposit(100_000e6, alice);
 
@@ -998,15 +898,7 @@ contract InvarCoinTest is Test {
 
     function test_Constructor_RevertsOnZeroAddress() public {
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
-        new InvarCoin(
-            address(0),
-            address(bearToken),
-            address(curveLp),
-            address(morpho),
-            address(curve),
-            address(oracle),
-            address(0)
-        );
+        new InvarCoin(address(0), address(bearToken), address(curveLp), address(curve), address(oracle), address(0));
     }
 
     // ==========================================
@@ -1214,85 +1106,6 @@ contract InvarCoinTest is Test {
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
         ic.harvest();
-    }
-
-    function test_Withdraw_NoPhantomYieldOnMixedSourceWithdrawal() public {
-        // Exploit scenario: vault has local USDC buffer + Morpho with unharvested yield.
-        // A withdrawal that drains the local buffer first, then pulls from Morpho,
-        // must not under-deduct morphoPrincipal (which would create phantom yield).
-        //
-        // Uses a fresh InvarCoin without stakedInvarCoin so _harvest() is a no-op,
-        // isolating the deduction formula. The old proportional formula
-        //   morphoPrincipal -= mulDiv(morphoPrincipal, morphoWithdrawn, morphoAssets)
-        // would shrink the yield gap, reclassifying principal as phantom yield.
-        // The direct subtraction preserves it exactly.
-
-        InvarCoin fresh = new InvarCoin(
-            address(usdc),
-            address(bearToken),
-            address(curveLp),
-            address(morpho),
-            address(curve),
-            address(oracle),
-            address(0)
-        );
-
-        vm.prank(alice);
-        usdc.approve(address(fresh), type(uint256).max);
-        vm.prank(bob);
-        usdc.approve(address(fresh), type(uint256).max);
-
-        vm.prank(alice);
-        fresh.deposit(100e6, alice);
-        vm.prank(bob);
-        fresh.deposit(100e6, bob);
-        // morphoPrincipal = 200e6, Morpho has 200e6
-
-        uint256 yield = 50e6;
-        morpho.simulateYield(yield);
-        // Morpho: 250e6, morphoPrincipal: 200e6
-
-        usdc.mint(address(fresh), 50e6);
-        // State: 50 local + 250 Morpho = 300 total
-
-        uint256 yieldGapBefore = morpho.convertToAssets(morpho.balanceOf(address(fresh))) - fresh.morphoPrincipal();
-
-        uint256 aliceShares = fresh.balanceOf(alice);
-        vm.prank(alice);
-        fresh.withdraw(aliceShares, alice, 0);
-
-        uint256 remainingMorpho = morpho.convertToAssets(morpho.balanceOf(address(fresh)));
-        uint256 yieldGapAfter = remainingMorpho - fresh.morphoPrincipal();
-
-        // Direct subtraction preserves the yield gap exactly.
-        // The old proportional formula would shrink it, creating phantom yield.
-        assertEq(yieldGapAfter, yieldGapBefore, "yield gap must be preserved across mixed-source withdrawal");
-    }
-
-    function test_Withdraw_DoesNotDoubleCountMorphoYield() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-        vm.prank(bob);
-        ic.deposit(10_000e6, bob);
-
-        uint256 stakeAmount = ic.balanceOf(bob);
-        vm.startPrank(bob);
-        ic.approve(address(sInvar), stakeAmount);
-        sInvar.deposit(stakeAmount, bob);
-        vm.stopPrank();
-
-        morpho.simulateYield(1000e6);
-
-        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
-        uint256 aliceBal = ic.balanceOf(alice);
-        vm.prank(alice);
-        ic.withdraw(aliceBal, alice, 0);
-        try ic.harvest() {} catch {}
-        uint256 totalDonated = ic.balanceOf(address(sInvar)) - sInvarBefore;
-
-        uint256 morphoBalance = morpho.convertToAssets(morpho.balanceOf(address(ic)));
-        assertGe(morphoBalance, ic.morphoPrincipal(), "Morpho balance must cover principal after harvest");
-        assertGt(totalDonated, 0, "yield should have been captured via withdraw's implicit harvest");
     }
 
 }
