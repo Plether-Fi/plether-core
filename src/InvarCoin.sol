@@ -103,6 +103,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__NoYield();
     error InvarCoin__CannotRescueCoreAsset();
     error InvarCoin__PermitFailed();
+    error InvarCoin__AlreadySet();
 
     constructor(
         address _usdc,
@@ -136,6 +137,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function setStakedInvarCoin(
         address _stakedInvarCoin
     ) external onlyOwner {
+        if (_stakedInvarCoin == address(0)) {
+            revert InvarCoin__ZeroAddress();
+        }
+        if (address(stakedInvarCoin) != address(0)) {
+            revert InvarCoin__AlreadySet();
+        }
         stakedInvarCoin = StakedToken(_stakedInvarCoin);
     }
 
@@ -399,8 +406,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
         }
 
+        uint256 totalInputUsdc = usdcAmount + (bearAmount > 0 ? (bearAmount * oraclePrice) / 1e20 : 0);
+        uint256 minLpOut =
+            (totalInputUsdc * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (_optimisticLpPrice(oraclePrice) * BPS);
+
         uint256[2] memory amounts = [usdcAmount, bearAmount];
-        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, 0);
+        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -461,7 +472,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256 supply = totalSupply();
-        uint256 assetsBeforeYield = totalAssets() - totalYieldUsdc;
+        uint256 currentAssets = totalAssets();
+        uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
         uint256 glUsdToMint = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 

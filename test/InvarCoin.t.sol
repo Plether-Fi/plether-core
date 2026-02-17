@@ -766,10 +766,23 @@ contract InvarCoinTest is Test {
     // SET INTEGRATIONS
     // ==========================================
 
-    function test_SetStakedInvarCoin() public {
-        address newSInvar = makeAddr("newSInvar");
-        ic.setStakedInvarCoin(newSInvar);
-        assertEq(address(ic.stakedInvarCoin()), newSInvar);
+    function test_SetStakedInvarCoin_RevertsOnSecondCall() public {
+        vm.expectRevert(InvarCoin.InvarCoin__AlreadySet.selector);
+        ic.setStakedInvarCoin(makeAddr("newSInvar"));
+    }
+
+    function test_SetStakedInvarCoin_RevertsOnZeroAddress() public {
+        InvarCoin fresh = new InvarCoin(
+            address(usdc),
+            address(bearToken),
+            address(curveLp),
+            address(morpho),
+            address(curve),
+            address(oracle),
+            address(0)
+        );
+        vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
+        fresh.setStakedInvarCoin(address(0));
     }
 
     // ==========================================
