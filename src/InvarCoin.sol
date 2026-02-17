@@ -57,7 +57,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     AggregatorV3Interface public immutable BASKET_ORACLE;
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
 
-    uint256 public constant BUFFER_TARGET_BPS = 1000; // 10% target buffer
+    uint256 public constant BUFFER_TARGET_BPS = 500; // 5% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
     uint256 public constant HARVEST_CALLER_REWARD_BPS = 10; // 0.1% caller reward

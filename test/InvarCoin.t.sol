@@ -609,7 +609,7 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 toWithdraw = ic.balanceOf(alice) / 10;
+        uint256 toWithdraw = ic.balanceOf(alice) / 50;
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
 
@@ -1082,7 +1082,7 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 toWithdraw = ic.balanceOf(alice) / 10;
+        uint256 toWithdraw = ic.balanceOf(alice) / 50;
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
 
