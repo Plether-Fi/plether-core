@@ -190,6 +190,26 @@ contract MockCurvePool {
         return 2 * virtualPrice * priceMultiplier / 1e18;
     }
 
+    function calc_token_amount(uint256[2] calldata amounts, bool) external pure returns (uint256) {
+        uint256 bearAsUsdc = amounts[1] / 1e12;
+        return (amounts[0] + bearAsUsdc) * 1e12 / 2;
+    }
+
+    function calc_withdraw_one_coin(uint256 token_amount, uint256 i) external view returns (uint256) {
+        uint256 totalLp = lpToken.totalSupply();
+        uint256 shareRatio = (token_amount * 1e18) / totalLp;
+        if (i == 0) {
+            uint256 usdcShare = (usdcBalance * shareRatio) / 1e18;
+            uint256 bearShare = (bearBalance * shareRatio) / 1e18;
+            uint256 bearAsUsdc = bearShare / 1e12;
+            if (swapFeeBps > 0 && bearAsUsdc > 0) {
+                bearAsUsdc -= (bearAsUsdc * swapFeeBps) / 10_000;
+            }
+            return usdcShare + bearAsUsdc;
+        }
+        return 0;
+    }
+
     function setVirtualPrice(
         uint256 _vp
     ) external {

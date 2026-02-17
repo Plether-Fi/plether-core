@@ -358,9 +358,10 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
+        // Drain buffer below 5% target via withdrawal (4% of shares)
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.withdraw(shares / 10, alice, 0);
+        ic.withdraw(shares / 25, alice, 0);
 
         uint256 morphoPrincipalBefore = ic.morphoPrincipal();
         uint256 morphoBefore = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
@@ -429,10 +430,10 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer so replenishBuffer is callable
+        // Drain buffer so replenishBuffer is callable (4% of shares)
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.withdraw(shares / 10, alice, 0);
+        ic.withdraw(shares / 25, alice, 0);
 
         deal(bearToken, attacker, 5_000_000e18);
         vm.startPrank(attacker);
