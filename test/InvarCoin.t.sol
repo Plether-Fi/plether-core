@@ -329,17 +329,30 @@ contract InvarCoinTest is Test {
         ic.withdraw(0, alice, 0);
     }
 
-    function test_Withdraw_AllowedWhenPaused() public {
+    function test_Withdraw_RevertsWhenPaused() public {
         vm.prank(alice);
         ic.deposit(1000e6, alice);
 
         ic.pause();
 
         uint256 bal = ic.balanceOf(alice);
+        vm.expectRevert();
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal, alice, 0);
+        ic.withdraw(bal, alice, 0);
+    }
 
-        assertGt(usdcOut, 0);
+    function test_LpWithdraw_AllowedWhenPaused() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        ic.pause();
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+
+        assertGt(usdcOut + bearOut, 0);
     }
 
     function test_Withdraw_SlippageProtection() public {

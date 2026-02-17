@@ -275,10 +275,10 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer below 2% target via withdrawal
+        // Drain buffer below 2% target via small withdrawal
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.withdraw(shares / 25, alice, 0);
+        ic.withdraw(shares / 100, alice, 0);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
 
@@ -341,10 +341,10 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer so replenishBuffer is callable (4% of shares)
+        // Drain buffer so replenishBuffer is callable
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.withdraw(shares / 25, alice, 0);
+        ic.withdraw(shares / 100, alice, 0);
 
         deal(bearToken, attacker, 5_000_000e18);
         vm.startPrank(attacker);

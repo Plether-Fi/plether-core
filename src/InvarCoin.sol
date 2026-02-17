@@ -66,6 +66,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
+    uint256 public constant MAX_SPOT_DEVIATION_BPS = 500; // 5% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
@@ -107,6 +108,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__CannotRescueCoreAsset();
     error InvarCoin__PermitFailed();
     error InvarCoin__AlreadySet();
+    error InvarCoin__SpotDeviationTooHigh();
 
     constructor(
         address _usdc,
@@ -276,7 +278,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 glUsdAmount,
         address receiver,
         uint256 minUsdcOut
-    ) external nonReentrant returns (uint256 usdcOut) {
+    ) external nonReentrant whenNotPaused returns (uint256 usdcOut) {
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
@@ -381,12 +383,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
         }
 
-        uint256 totalInputUsdc = usdcAmount + (bearAmount > 0 ? (bearAmount * oraclePrice) / 1e20 : 0);
         uint256[2] memory amounts = [usdcAmount, bearAmount];
-        uint256 emaFloor =
-            (totalInputUsdc * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (_optimisticLpPrice(oraclePrice) * BPS);
-        uint256 calcFloor = (CURVE_POOL.calc_token_amount(amounts, true) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-        uint256 minLpOut = emaFloor > calcFloor ? emaFloor : calcFloor;
+        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 minLpOut = (expectedLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
@@ -470,9 +469,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 usdcToDeploy = localUsdc - bufferTarget;
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
-        uint256 emaFloor = (usdcToDeploy * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (CURVE_POOL.lp_price() * BPS);
-        uint256 calcFloor = (CURVE_POOL.calc_token_amount(amounts, true) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-        uint256 minLpOut = emaFloor > calcFloor ? emaFloor : calcFloor;
+        uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 emaExpectedLp = (usdcToDeploy * 1e30) / (CURVE_POOL.lp_price() * 2);
+        if (calcLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
+            revert InvarCoin__SpotDeviationTooHigh();
+        }
+        uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
@@ -501,10 +503,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             lpToBurn = lpBalBefore;
         }
 
-        uint256 emaFloor = (lpToBurn * lpPrice * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (1e30 * BPS);
-        uint256 calcFloor =
-            (CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-        uint256 minUsdcOut = emaFloor > calcFloor ? emaFloor : calcFloor;
+        uint256 calcOut = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);
+        uint256 emaExpectedUsdc = (lpToBurn * lpPrice) / 1e30;
+        if (calcOut * BPS < emaExpectedUsdc * (BPS - MAX_SPOT_DEVIATION_BPS)) {
+            revert InvarCoin__SpotDeviationTooHigh();
+        }
+        uint256 minUsdcOut = (calcOut * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
 
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
 
