@@ -337,7 +337,7 @@ contract InvarCoinForkTest is BaseForkTest {
         assertApproxEqRel(ic.totalAssets(), navBefore, 0.01e18, "NAV should be restored after manipulation");
     }
 
-    function test_keeperSandwichProtection() public {
+    function test_replenishBuffer_sandwichProtection() public {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
@@ -356,6 +356,26 @@ contract InvarCoinForkTest is BaseForkTest {
 
         vm.expectRevert();
         ic.replenishBuffer();
+    }
+
+    function test_deployToCurve_sandwichProtection() public {
+        _depositAs(alice, 500_000e6);
+        ic.deployToCurve();
+
+        // New deposit creates deployable buffer
+        _depositAs(whale, 1_000_000e6);
+
+        // Attacker skews pool before deployToCurve
+        deal(bearToken, attacker, 5_000_000e18);
+        vm.startPrank(attacker);
+        IERC20(bearToken).approve(curvePool, type(uint256).max);
+        (bool s,) =
+            curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, 5_000_000e18, 0));
+        require(s, "attacker swap failed");
+        vm.stopPrank();
+
+        vm.expectRevert();
+        ic.deployToCurve();
     }
 
 }

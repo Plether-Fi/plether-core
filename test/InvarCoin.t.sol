@@ -74,6 +74,7 @@ contract MockCurvePool {
     uint256 public virtualPrice = 1e18;
     uint256 public priceMultiplier = 1e18;
     uint256 public swapFeeBps;
+    uint256 public spotDiscountBps;
 
     constructor(
         address _usdc,
@@ -89,6 +90,12 @@ contract MockCurvePool {
         uint256 _feeBps
     ) external {
         swapFeeBps = _feeBps;
+    }
+
+    function setSpotDiscountBps(
+        uint256 _discountBps
+    ) external {
+        spotDiscountBps = _discountBps;
     }
 
     function add_liquidity(
@@ -175,9 +182,13 @@ contract MockCurvePool {
     function calc_token_amount(
         uint256[2] calldata amounts,
         bool
-    ) external pure returns (uint256) {
+    ) external view returns (uint256) {
         uint256 bearAsUsdc = amounts[1] / 1e12;
-        return (amounts[0] + bearAsUsdc) * 1e12 / 2;
+        uint256 lp = (amounts[0] + bearAsUsdc) * 1e12 / 2;
+        if (spotDiscountBps > 0) {
+            lp = lp * (10_000 - spotDiscountBps) / 10_000;
+        }
+        return lp;
     }
 
     function calc_withdraw_one_coin(
@@ -193,7 +204,11 @@ contract MockCurvePool {
             if (swapFeeBps > 0 && bearAsUsdc > 0) {
                 bearAsUsdc -= (bearAsUsdc * swapFeeBps) / 10_000;
             }
-            return usdcShare + bearAsUsdc;
+            uint256 out = usdcShare + bearAsUsdc;
+            if (spotDiscountBps > 0) {
+                out = out * (10_000 - spotDiscountBps) / 10_000;
+            }
+            return out;
         }
         return 0;
     }
@@ -433,6 +448,25 @@ contract InvarCoinTest is Test {
         ic.deployToCurve();
     }
 
+    function test_DeployToCurve_RevertsOnSpotManipulation() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        curve.setSpotDiscountBps(600);
+
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.deployToCurve();
+    }
+
+    function test_DeployToCurve_AllowsNormalSpotDrift() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        curve.setSpotDiscountBps(300);
+
+        ic.deployToCurve();
+    }
+
     // ==========================================
     // HARVEST
     // ==========================================
@@ -552,6 +586,22 @@ contract InvarCoinTest is Test {
         ic.replenishBuffer();
 
         assertGt(usdc.balanceOf(address(ic)), usdcBefore);
+    }
+
+    function test_ReplenishBuffer_RevertsOnSpotManipulation() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve();
+
+        uint256 toWithdraw = ic.balanceOf(alice) / 50;
+        vm.prank(alice);
+        ic.withdraw(toWithdraw, alice, 0);
+
+        curve.setSpotDiscountBps(600);
+
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.replenishBuffer();
     }
 
     // ==========================================

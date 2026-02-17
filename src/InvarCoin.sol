@@ -470,7 +470,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 emaExpectedLp = (usdcToDeploy * 1e30) / (CURVE_POOL.lp_price() * 2);
+        uint256 emaExpectedLp = (usdcToDeploy * 1e30) / CURVE_POOL.lp_price();
         if (calcLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
