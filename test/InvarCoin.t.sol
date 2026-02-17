@@ -399,7 +399,7 @@ contract InvarCoinTest is Test {
 
         ic.unpause();
 
-        ic.redeployToCurve();
+        ic.redeployToCurve(0);
         assertFalse(ic.emergencyActive());
 
         uint256 bal = ic.balanceOf(alice);
@@ -423,7 +423,7 @@ contract InvarCoinTest is Test {
         uint256 lpBefore = curveLp.balanceOf(address(ic));
         uint256 assetsBefore = ic.totalAssets();
 
-        ic.redeployToCurve();
+        ic.redeployToCurve(0);
 
         assertEq(bearToken.balanceOf(address(ic)), 0, "All BEAR should be deployed");
         assertGt(curveLp.balanceOf(address(ic)), lpBefore, "Should hold LP tokens");
@@ -436,13 +436,13 @@ contract InvarCoinTest is Test {
         ic.deposit(10_000e6, alice);
 
         vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
-        ic.redeployToCurve();
+        ic.redeployToCurve(0);
     }
 
     function test_RedeployToCurve_OnlyOwner() public {
         vm.prank(alice);
         vm.expectRevert();
-        ic.redeployToCurve();
+        ic.redeployToCurve(0);
     }
 
     function test_EmergencyLpWithdraw_WorksDuringEmergency() public {

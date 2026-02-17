@@ -432,7 +432,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     /// @notice Keeper harvest for Curve LP fee yield.
-    /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
+    /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
         donated = _harvest();
         if (donated == 0) {
@@ -550,7 +550,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // EMERGENCY & ADMIN
     // ==========================================
 
-    function redeployToCurve() external onlyOwner nonReentrant whenNotPaused {
+    function redeployToCurve(
+        uint256 minLpOut
+    ) external onlyOwner nonReentrant whenNotPaused {
         uint256 bearBal = BEAR.balanceOf(address(this));
         if (bearBal == 0) {
             revert InvarCoin__NothingToDeploy();
@@ -562,8 +564,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 usdcToDeploy = localUsdc > bufferTarget ? localUsdc - bufferTarget : 0;
 
         uint256[2] memory amounts = [usdcToDeploy, bearBal];
-        uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
         emergencyActive = false;
