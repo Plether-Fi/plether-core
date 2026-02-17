@@ -408,7 +408,44 @@ contract InvarCoinTest is Test {
         assertGt(usdcOut, 0);
     }
 
-    function test_LpWithdraw_WorksDuringEmergency() public {
+    function test_RedeployToCurve_DeploysBothTokens() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        uint256 bearBefore = bearToken.balanceOf(address(ic));
+        uint256 lpBefore = curveLp.balanceOf(address(ic));
+        uint256 assetsBefore = ic.totalAssets();
+
+        ic.redeployToCurve();
+
+        assertEq(bearToken.balanceOf(address(ic)), 0, "All BEAR should be deployed");
+        assertGt(curveLp.balanceOf(address(ic)), lpBefore, "Should hold LP tokens");
+        assertFalse(ic.emergencyActive(), "Emergency flag should be cleared");
+        assertApproxEqRel(ic.totalAssets(), assetsBefore, 0.1e18, "Total assets should be preserved");
+    }
+
+    function test_RedeployToCurve_RevertsWithoutBear() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
+        ic.redeployToCurve();
+    }
+
+    function test_RedeployToCurve_OnlyOwner() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.redeployToCurve();
+    }
+
+    function test_EmergencyLpWithdraw_WorksDuringEmergency() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
         ic.deployToCurve();
@@ -417,9 +454,19 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.emergencyLpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0, "Should receive USDC during emergency");
+    }
+
+    function test_EmergencyLpWithdraw_RevertsWhenNotEmergency() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.expectRevert(InvarCoin.InvarCoin__NotEmergency.selector);
+        vm.prank(alice);
+        ic.emergencyLpWithdraw(bal, 0, 0);
     }
 
     function test_Withdraw_RevertsWhenPaused() public {
@@ -770,7 +817,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.emergencyLpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0, "Should return USDC");
         assertGt(bearOut, 0, "Should return raw BEAR post-emergency");
@@ -1222,20 +1269,6 @@ contract InvarCoinTest is Test {
         uint256 totalCaptured = ic.balanceOf(address(sInvar)) - sInvarBal;
 
         assertGe(totalCaptured, yieldStandalone, "yield must not be lost across withdraw + replenish");
-    }
-
-    function test_LpWithdraw_SurvivesStaleOracle() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
-
-        curve.setVirtualPrice(1.05e18);
-        oracle.setUpdatedAt(block.timestamp - 25 hours);
-
-        uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
-        assertGt(usdcOut + bearOut, 0, "lpWithdraw should succeed with stale oracle");
     }
 
     function test_Withdraw_RevertsOnStaleOracle() public {

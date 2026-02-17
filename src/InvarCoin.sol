@@ -110,6 +110,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__AlreadySet();
     error InvarCoin__SpotDeviationTooHigh();
     error InvarCoin__UseLpWithdraw();
+    error InvarCoin__NotEmergency();
 
     constructor(
         address _usdc,
@@ -240,7 +241,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest(true);
+        _harvest();
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -287,7 +288,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (emergencyActive) {
             revert InvarCoin__UseLpWithdraw();
         }
-        _harvest(true);
+        _harvest();
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -323,10 +324,30 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 minUsdcOut,
         uint256 minBearOut
     ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
+        _harvest();
+        (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
+    }
+
+    /// @notice Emergency LP withdrawal: oracle-free exit, only available after emergencyWithdrawFromCurve.
+    function emergencyLpWithdraw(
+        uint256 glUsdAmount,
+        uint256 minUsdcOut,
+        uint256 minBearOut
+    ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
+        if (!emergencyActive) {
+            revert InvarCoin__NotEmergency();
+        }
+        (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
+    }
+
+    function _lpWithdraw(
+        uint256 glUsdAmount,
+        uint256 minUsdcOut,
+        uint256 minBearOut
+    ) internal returns (uint256 usdcReturned, uint256 bearReturned) {
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest(false);
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -334,13 +355,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 localUsdcShare = Math.mulDiv(USDC.balanceOf(address(this)), glUsdAmount, supply);
         usdcReturned += localUsdcShare;
 
-        // 2. Pro-rata raw BEAR (present after emergencyWithdrawFromCurve)
         uint256 bearBal = BEAR.balanceOf(address(this));
         if (bearBal > 0) {
             bearReturned += Math.mulDiv(bearBal, glUsdAmount, supply);
         }
 
-        // 3. Pro-rata Curve LP
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
@@ -376,7 +395,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        _harvest(true);
+        _harvest();
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -415,16 +434,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Keeper harvest for Curve LP fee yield.
     /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers, tips caller 0.1%.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
-        donated = _harvest(true);
+        donated = _harvest();
         if (donated == 0) {
             revert InvarCoin__NoYield();
         }
     }
 
-    /// @param requireOracle If false, silently skip yield when oracle is unavailable.
-    function _harvest(
-        bool requireOracle
-    ) internal returns (uint256 donated) {
+    function _harvest() internal returns (uint256 donated) {
         if (address(stakedInvarCoin) == address(0)) {
             return 0;
         }
@@ -437,14 +453,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             if (currentVpValue > curveLpCostVp) {
                 uint256 vpGrowth = currentVpValue - curveLpCostVp;
 
-                if (requireOracle) {
-                    uint256 oraclePrice = OracleLib.getValidatedPrice(
-                        BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
-                    );
-                    uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
-                    totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
-                    curveLpCostVp = currentVpValue;
-                }
+                uint256 oraclePrice = OracleLib.getValidatedPrice(
+                    BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
+                );
+                uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
+                totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
+                curveLpCostVp = currentVpValue;
             }
         }
 
@@ -469,7 +483,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
     function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        _harvest(true);
+        _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -496,7 +510,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
     function replenishBuffer() external nonReentrant whenNotPaused {
-        _harvest(true);
+        _harvest();
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 

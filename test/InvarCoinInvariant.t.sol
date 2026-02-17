@@ -187,9 +187,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore2;
             lpWithdrawCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
+            bytes4[] memory allowed = new bytes4[](3);
             allowed[0] = ERR_ZERO_AMOUNT;
             allowed[1] = ERR_SLIPPAGE;
+            allowed[2] = ERR_STALE_PRICE;
             _assertExpectedError(reason, allowed);
         }
     }
