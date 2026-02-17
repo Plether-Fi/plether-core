@@ -34,8 +34,14 @@ interface ICurveTwocrypto {
     ) external returns (uint256[2] memory);
     function get_virtual_price() external view returns (uint256);
     function lp_price() external view returns (uint256);
-    function calc_token_amount(uint256[2] calldata amounts, bool deposit) external view returns (uint256);
-    function calc_withdraw_one_coin(uint256 token_amount, uint256 i) external view returns (uint256);
+    function calc_token_amount(
+        uint256[2] calldata amounts,
+        bool deposit
+    ) external view returns (uint256);
+    function calc_withdraw_one_coin(
+        uint256 token_amount,
+        uint256 i
+    ) external view returns (uint256);
 
 }
 
@@ -503,7 +509,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256 glUsdToMint = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
-        uint256 callerReward = (glUsdToMint * HARVEST_CALLER_REWARD_BPS) / BPS;
+        uint256 callerReward = force ? (glUsdToMint * HARVEST_CALLER_REWARD_BPS) / BPS : 0;
         donated = glUsdToMint - callerReward;
 
         _mint(address(this), donated);
@@ -570,8 +576,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             lpToBurn = lpBalBefore;
         }
 
-        uint256 expectedUsdc = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);
-        uint256 minUsdcOut = (expectedUsdc * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 emaFloor = (lpToBurn * lpPrice * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (1e30 * BPS);
+        uint256 calcFloor =
+            (CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX) * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 minUsdcOut = emaFloor > calcFloor ? emaFloor : calcFloor;
 
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
 

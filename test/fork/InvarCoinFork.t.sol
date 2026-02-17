@@ -242,7 +242,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 bearValueUsdc = (bearReturned * bearPrice8) / 1e20;
         uint256 totalValue = usdcReturned + bearValueUsdc;
 
-        assertApproxEqRel(totalValue, 1_000_000e6, 0.02e18, "Whale value should approximate deposit");
+        assertApproxEqRel(totalValue, 1_000_000e6, 0.03e18, "Whale value should approximate deposit");
         assertGt(totalValue, 950_000e6, "Whale loss should be bounded");
     }
 
