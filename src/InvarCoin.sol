@@ -314,7 +314,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         if (usdcOut > localUsdc) {
             uint256 morphoWithdrawn = usdcOut - localUsdc;
-            morphoPrincipal -= Math.mulDiv(morphoPrincipal, morphoWithdrawn, morphoAssets);
+            morphoPrincipal -= morphoWithdrawn;
             MORPHO_VAULT.withdraw(morphoWithdrawn, address(this), address(this));
         }
 

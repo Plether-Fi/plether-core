@@ -1211,6 +1211,59 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
+    function test_Withdraw_NoPhantomYieldOnMixedSourceWithdrawal() public {
+        // Exploit scenario: vault has local USDC buffer + Morpho with unharvested yield.
+        // A withdrawal that drains the local buffer first, then pulls from Morpho,
+        // must not under-deduct morphoPrincipal (which would create phantom yield).
+        //
+        // Uses a fresh InvarCoin without stakedInvarCoin so _harvest() is a no-op,
+        // isolating the deduction formula. The old proportional formula
+        //   morphoPrincipal -= mulDiv(morphoPrincipal, morphoWithdrawn, morphoAssets)
+        // would shrink the yield gap, reclassifying principal as phantom yield.
+        // The direct subtraction preserves it exactly.
+
+        InvarCoin fresh = new InvarCoin(
+            address(usdc),
+            address(bearToken),
+            address(curveLp),
+            address(morpho),
+            address(curve),
+            address(oracle),
+            address(0)
+        );
+
+        vm.prank(alice);
+        usdc.approve(address(fresh), type(uint256).max);
+        vm.prank(bob);
+        usdc.approve(address(fresh), type(uint256).max);
+
+        vm.prank(alice);
+        fresh.deposit(100e6, alice);
+        vm.prank(bob);
+        fresh.deposit(100e6, bob);
+        // morphoPrincipal = 200e6, Morpho has 200e6
+
+        uint256 yield = 50e6;
+        morpho.simulateYield(yield);
+        // Morpho: 250e6, morphoPrincipal: 200e6
+
+        usdc.mint(address(fresh), 50e6);
+        // State: 50 local + 250 Morpho = 300 total
+
+        uint256 yieldGapBefore = morpho.convertToAssets(morpho.balanceOf(address(fresh))) - fresh.morphoPrincipal();
+
+        uint256 aliceShares = fresh.balanceOf(alice);
+        vm.prank(alice);
+        fresh.withdraw(aliceShares, alice, 0);
+
+        uint256 remainingMorpho = morpho.convertToAssets(morpho.balanceOf(address(fresh)));
+        uint256 yieldGapAfter = remainingMorpho - fresh.morphoPrincipal();
+
+        // Direct subtraction preserves the yield gap exactly.
+        // The old proportional formula would shrink it, creating phantom yield.
+        assertEq(yieldGapAfter, yieldGapBefore, "yield gap must be preserved across mixed-source withdrawal");
+    }
+
     function test_Withdraw_DoesNotDoubleCountMorphoYield() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
