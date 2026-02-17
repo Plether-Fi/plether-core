@@ -345,6 +345,44 @@ contract InvarCoinTest is Test {
         ic.withdraw(bal, alice, type(uint256).max);
     }
 
+    function test_Withdraw_MorphoPrincipalUnchangedWhenServedFromDust() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+
+        uint256 principalBefore = ic.morphoPrincipal();
+
+        // Send dust USDC directly to contract
+        usdc.mint(address(ic), 100e6);
+
+        // Withdraw a small amount — should be served entirely from dust
+        uint256 sharesToWithdraw = ic.balanceOf(alice) / 200; // ~50 USDC worth
+        vm.prank(alice);
+        ic.withdraw(sharesToWithdraw, alice, 0);
+
+        assertEq(ic.morphoPrincipal(), principalBefore, "morphoPrincipal should not change when served from dust");
+    }
+
+    function test_Harvest_NoPhantomYieldFromDust() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice) / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        // Send dust and withdraw from it
+        usdc.mint(address(ic), 100e6);
+        uint256 sharesToWithdraw = ic.balanceOf(alice) / 200;
+        vm.prank(alice);
+        ic.withdraw(sharesToWithdraw, alice, 0);
+
+        // No real yield exists — harvest should revert
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
     // ==========================================
     // LP WITHDRAWAL
     // ==========================================
