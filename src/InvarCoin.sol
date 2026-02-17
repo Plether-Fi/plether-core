@@ -144,32 +144,86 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     /// @notice Total assets backing INVAR (USDC, 6 decimals).
-    /// @dev Uses virtual_price to remain strictly flash-loan resistant.
+    /// @dev Uses pessimistic LP pricing: min(Curve EMA, oracle-derived) to prevent stale-EMA exploitation.
     function totalAssets() public view returns (uint256) {
         // 1. Morpho Buffer (local USDC + Morpho vault shares)
         uint256 localUsdc = USDC.balanceOf(address(this));
         uint256 adapterShares = MORPHO_VAULT.balanceOf(address(this));
         uint256 bufferValue = localUsdc + (adapterShares > 0 ? MORPHO_VAULT.convertToAssets(adapterShares) : 0);
 
-        // 2. Curve LP Position
-        // SAFE: lp_price() uses monotonic virtual_price + EMA price oracle, immune to flash loans
+        (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
+        uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
+
+        // 2. Curve LP — pessimistic: min(EMA, oracle-derived) bounds stale-EMA drain
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 lpUsdcValue = 0;
         if (lpBal > 0) {
-            lpUsdcValue = (lpBal * CURVE_POOL.lp_price()) / 1e30;
+            lpUsdcValue = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
         }
 
         // 3. Raw BEAR (present after emergencyWithdrawFromCurve)
         uint256 bearBal = BEAR.balanceOf(address(this));
         uint256 bearUsdcValue = 0;
-        if (bearBal > 0) {
-            (, int256 price,,,) = BASKET_ORACLE.latestRoundData();
-            if (price > 0) {
-                bearUsdcValue = (bearBal * uint256(price)) / 1e20;
-            }
+        if (bearBal > 0 && oraclePrice > 0) {
+            bearUsdcValue = (bearBal * oraclePrice) / 1e20;
         }
 
         return bufferValue + lpUsdcValue + bearUsdcValue;
+    }
+
+    /// @dev Total assets using optimistic LP pricing — max(EMA, oracle) to prevent deposit dilution.
+    function _totalAssetsOptimistic(
+        uint256 oraclePrice
+    ) private view returns (uint256) {
+        uint256 localUsdc = USDC.balanceOf(address(this));
+        uint256 adapterShares = MORPHO_VAULT.balanceOf(address(this));
+        uint256 bufferValue = localUsdc + (adapterShares > 0 ? MORPHO_VAULT.convertToAssets(adapterShares) : 0);
+
+        uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        uint256 lpUsdcValue = 0;
+        if (lpBal > 0) {
+            lpUsdcValue = (lpBal * _optimisticLpPrice(oraclePrice)) / 1e30;
+        }
+
+        uint256 bearBal = BEAR.balanceOf(address(this));
+        uint256 bearUsdcValue = 0;
+        if (bearBal > 0 && oraclePrice > 0) {
+            bearUsdcValue = (bearBal * oraclePrice) / 1e20;
+        }
+
+        return bufferValue + lpUsdcValue + bearUsdcValue;
+    }
+
+    /// @dev Oracle-derived LP price: mirrors twocrypto-ng formula 2 * vp * sqrt(bearPrice_18dec).
+    function _oracleLpPrice(
+        uint256 oraclePrice
+    ) private view returns (uint256) {
+        uint256 vp = CURVE_POOL.get_virtual_price();
+        return 2 * vp * Math.sqrt(oraclePrice * 1e28) / 1e18;
+    }
+
+    /// @dev min(Curve EMA, oracle-derived) — protects withdrawals from stale-high EMA.
+    function _pessimisticLpPrice(
+        uint256 oraclePrice
+    ) private view returns (uint256) {
+        uint256 lpPrice = CURVE_POOL.lp_price();
+        if (oraclePrice == 0) {
+            return lpPrice;
+        }
+        uint256 oracleLp = _oracleLpPrice(oraclePrice);
+        return oracleLp < lpPrice ? oracleLp : lpPrice;
+    }
+
+    /// @dev max(Curve EMA, oracle-derived) — protects deposits from stale-low EMA dilution.
+    function _optimisticLpPrice(
+        uint256 oraclePrice
+    ) private view returns (uint256) {
+        uint256 lpPrice = CURVE_POOL.lp_price();
+        if (oraclePrice == 0) {
+            return lpPrice;
+        }
+        uint256 oracleLp = _oracleLpPrice(oraclePrice);
+        return oracleLp > lpPrice ? oracleLp : lpPrice;
     }
 
     // ==========================================
@@ -183,9 +237,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
-        uint256 assets = totalAssets();
+        uint256 assets = _totalAssetsOptimistic(oraclePrice);
         uint256 supply = totalSupply();
 
         // Virtual shares math against inflation attacks
@@ -332,9 +387,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
-        uint256 assets = totalAssets();
+        uint256 assets = _totalAssetsOptimistic(oraclePrice);
         uint256 supply = totalSupply();
 
         if (usdcAmount > 0) {
@@ -347,7 +403,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256[2] memory amounts = [usdcAmount, bearAmount];
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, 0);
 
-        uint256 lpValue = (lpMinted * CURVE_POOL.lp_price()) / 1e30;
+        uint256 lpValue = (lpMinted * _optimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
@@ -387,7 +443,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
                 uint256 vpGrowth = currentVpValue - curveLpCostVp;
-                uint256 currentLpUsdc = (lpBal * CURVE_POOL.lp_price()) / 1e30;
+                (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
+                uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
+                uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
                 totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
                 curveLpCostVp = currentVpValue;
             }

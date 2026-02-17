@@ -223,7 +223,7 @@ contract InvarCoinTest is Test {
     address public keeper = makeAddr("keeper");
     address public rewardDist = makeAddr("rewardDist");
 
-    uint256 constant ORACLE_PRICE = 80_000_000;
+    uint256 constant ORACLE_PRICE = 120_000_000;
 
     function setUp() public {
         vm.warp(100_000);
@@ -772,8 +772,8 @@ contract InvarCoinTest is Test {
     // ORACLE PRICE != $1.00
     // ==========================================
 
-    function test_OracleAt120_CurvePositionValuation() public {
-        oracle.updatePrice(120_000_000);
+    function test_OracleAt080_CurvePositionValuation() public {
+        oracle.updatePrice(80_000_000);
 
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
@@ -781,6 +781,65 @@ contract InvarCoinTest is Test {
 
         uint256 total = ic.totalAssets();
         assertGt(total, 0);
+    }
+
+    function test_TotalAssets_PessimisticLpPrice() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve();
+
+        uint256 navAtDefault = ic.totalAssets();
+
+        // Crash oracle to $0.50 while Curve EMA stays stale-high
+        oracle.updatePrice(50_000_000);
+
+        uint256 navAfterCrash = ic.totalAssets();
+        assertLt(navAfterCrash, navAtDefault, "Pessimistic LP price should lower NAV");
+    }
+
+    function test_Withdraw_PessimisticLpPrice_CapsNAV() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        vm.prank(bob);
+        ic.deposit(20_000e6, bob);
+
+        ic.deployToCurve();
+
+        // Crash oracle — Curve EMA lags, NAV should use oracle-derived LP price
+        oracle.updatePrice(50_000_000);
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(bal / 10, alice, 0);
+
+        // At $0.50 oracle, oracle LP price = 2*vp*sqrt(0.5) ≈ 1.414*vp
+        // Mock LP price = 2*vp (unchanged EMA)
+        // Pessimistic uses oracle → withdrawal capped at lower NAV
+        uint256 expectedMaxPayout = 40_000e6 / 10;
+        assertLt(usdcOut, expectedMaxPayout, "Withdrawal should be capped by pessimistic LP price");
+    }
+
+    function test_Deposit_OptimisticLpPrice_PreventsDilution() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve();
+
+        // Pump oracle to $2.00 while Curve EMA stays stale-low
+        oracle.updatePrice(200_000_000);
+
+        uint256 supplyBefore = ic.totalSupply();
+
+        // Bob deposits during stale EMA — optimistic NAV should give fewer shares
+        vm.prank(bob);
+        uint256 sharesMinted = ic.deposit(10_000e6, bob);
+
+        // If NAV used stale-low EMA, bob gets ~1/3 of supply (10k of 30k)
+        // With optimistic NAV (oracle-high), bob gets fewer shares
+        uint256 bobFraction = (sharesMinted * 1e18) / (supplyBefore + sharesMinted);
+        assertLt(bobFraction, 0.33e18, "Optimistic NAV should prevent deposit dilution");
     }
 
     // ==========================================

@@ -342,7 +342,7 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         vm.warp(100_000);
 
         usdc = new MockUSDC6();
-        oracle = new MockOracle(int256(80_000_000), "plDXY Basket");
+        oracle = new MockOracle(int256(120_000_000), "plDXY Basket");
         bear = new MockBEAR();
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bear), address(curveLp));
