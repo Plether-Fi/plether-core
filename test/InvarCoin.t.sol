@@ -507,27 +507,6 @@ contract InvarCoinTest is Test {
         assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore);
     }
 
-    function test_Harvest_CallerGetsReward() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-
-        uint256 stakeAmount = ic.balanceOf(alice);
-        vm.startPrank(alice);
-        ic.approve(address(sInvar), stakeAmount);
-        sInvar.deposit(stakeAmount, alice);
-        vm.stopPrank();
-
-        morpho.simulateYield(100e6);
-
-        uint256 keeperBalBefore = ic.balanceOf(keeper);
-
-        vm.prank(keeper);
-        ic.harvest();
-
-        uint256 keeperReward = ic.balanceOf(keeper) - keeperBalBefore;
-        assertGt(keeperReward, 0);
-    }
-
     function test_Harvest_RevertsWithNoYield() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);

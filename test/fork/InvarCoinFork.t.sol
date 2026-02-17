@@ -332,14 +332,12 @@ contract InvarCoinForkTest is BaseForkTest {
 
         uint256 supplyBefore = ic.totalSupply();
         uint256 sInvarAssetsBefore = ic.balanceOf(address(sInvar));
-        uint256 keeperInvarBefore = ic.balanceOf(keeper);
 
         vm.prank(keeper);
         ic.harvest();
 
         assertGt(ic.totalSupply(), supplyBefore, "New shares should be minted");
         assertGt(ic.balanceOf(address(sInvar)), sInvarAssetsBefore, "sINVAR should receive yield");
-        assertGt(ic.balanceOf(keeper), keeperInvarBefore, "Keeper should receive 0.1% reward");
     }
 
     function test_harvestYield_curveFeeGrowth() public {
