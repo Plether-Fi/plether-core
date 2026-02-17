@@ -587,7 +587,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        curve.setSpotDiscountBps(300);
+        curve.setSpotDiscountBps(100);
 
         ic.deployToCurve();
     }
@@ -1253,7 +1253,7 @@ contract InvarCoinTest is Test {
         ic.deposit(20_000e6, alice);
 
         ic.deployToCurve();
-        curve.setVirtualPrice(1.05e18);
+        curve.setVirtualPrice(1.01e18);
 
         uint256 toWithdraw = ic.balanceOf(alice) / 50;
 

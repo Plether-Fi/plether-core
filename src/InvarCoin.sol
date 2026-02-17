@@ -66,7 +66,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
-    uint256 public constant MAX_SPOT_DEVIATION_BPS = 500; // 5% max spot-vs-EMA deviation
+    uint256 public constant MAX_SPOT_DEVIATION_BPS = 200; // 2% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
