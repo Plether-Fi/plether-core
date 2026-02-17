@@ -353,7 +353,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -372,7 +372,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 bal = ic.balanceOf(alice);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
@@ -388,7 +388,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        uint256 lpMinted = ic.deployToCurve(0);
+        uint256 lpMinted = ic.deployToCurve();
 
         assertGt(lpMinted, 0);
         assertGt(curveLp.balanceOf(address(ic)), 0);
@@ -399,7 +399,7 @@ contract InvarCoinTest is Test {
         ic.deposit(500e6, alice);
 
         vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
     }
 
     function test_DeployToCurve_RevertsWhenPaused() public {
@@ -409,7 +409,7 @@ contract InvarCoinTest is Test {
         ic.pause();
 
         vm.expectRevert();
-        ic.deployToCurve(0);
+        ic.deployToCurve();
     }
 
     // ==========================================
@@ -474,7 +474,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         curve.setVirtualPrice(1.05e18);
 
@@ -495,7 +495,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         morpho.simulateYield(50e6);
         curve.setVirtualPrice(1.02e18);
@@ -512,13 +512,14 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
-        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 toWithdraw = ic.balanceOf(alice) / 10;
+        vm.prank(alice);
+        ic.withdraw(toWithdraw, alice, 0);
+
         uint256 morphoPrincipalBefore = ic.morphoPrincipal();
-
-        uint256 lpToBurn = lpBal / 2;
-        ic.replenishBuffer(lpToBurn, 0);
+        ic.replenishBuffer();
 
         assertGt(ic.morphoPrincipal(), morphoPrincipalBefore);
     }
@@ -538,7 +539,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 total = ic.totalAssets();
         assertApproxEqRel(total, 20_000e6, 0.02e18);
@@ -578,7 +579,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         ic.emergencyWithdrawFromCurve();
 
@@ -633,7 +634,7 @@ contract InvarCoinTest is Test {
 
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 total = ic.totalAssets();
         assertGt(total, 0);
@@ -653,7 +654,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         morpho.simulateYield(50e6);
 
@@ -672,7 +673,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -799,7 +800,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(depositAmount, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -820,7 +821,7 @@ contract InvarCoinTest is Test {
         ic.deposit(amount, alice);
 
         uint256 navBefore = ic.totalAssets();
-        ic.deployToCurve(0);
+        ic.deployToCurve();
         uint256 navAfter = ic.totalAssets();
 
         assertApproxEqRel(navAfter, navBefore, 0.01e18, "Deploy should preserve NAV within 1%");
@@ -868,7 +869,7 @@ contract InvarCoinTest is Test {
 
         assertEq(ic.curveLpCostUsdc(), 0);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         assertGt(ic.curveLpCostUsdc(), 0);
     }
@@ -877,22 +878,23 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
+
+        uint256 toWithdraw = ic.balanceOf(alice) / 10;
+        vm.prank(alice);
+        ic.withdraw(toWithdraw, alice, 0);
 
         uint256 costBefore = ic.curveLpCostUsdc();
-        uint256 lpBal = curveLp.balanceOf(address(ic));
+        ic.replenishBuffer();
 
-        ic.replenishBuffer(lpBal / 2, 0);
-
-        uint256 costAfter = ic.curveLpCostUsdc();
-        assertApproxEqRel(costAfter, costBefore / 2, 0.01e18);
+        assertLt(ic.curveLpCostUsdc(), costBefore);
     }
 
     function test_LpWithdraw_ReducesCostBasis() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 costBefore = ic.curveLpCostUsdc();
         assertGt(costBefore, 0);
@@ -908,7 +910,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
         assertGt(ic.curveLpCostUsdc(), 0);
 
         ic.emergencyWithdrawFromCurve();

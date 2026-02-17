@@ -196,7 +196,7 @@ contract InvarCoinForkTest is BaseForkTest {
     function test_withdraw_insufficientBuffer() public {
         _depositAs(alice, 1_000_000e6);
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 morphoAvail = STEAKHOUSE_USDC.maxWithdraw(address(ic));
         assertLe(morphoAvail, 200_000e6, "Only buffer should remain in Morpho");
@@ -221,10 +221,10 @@ contract InvarCoinForkTest is BaseForkTest {
             IERC20(USDC).approve(address(ic), type(uint256).max);
             _depositAs(retailers[i], 100_000e6);
         }
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 whaleShares = _depositAs(whale, 1_000_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 whaleUsdcBefore = IERC20(USDC).balanceOf(whale);
         uint256 whaleBearBefore = IERC20(bearToken).balanceOf(whale);
@@ -254,12 +254,12 @@ contract InvarCoinForkTest is BaseForkTest {
             IERC20(USDC).approve(address(ic), type(uint256).max);
             _depositAs(retailers[i], 100_000e6);
         }
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 navBefore = (ic.totalAssets() * 1e18) / ic.totalSupply();
 
         _depositAs(whale, 500_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 whaleShares = ic.balanceOf(whale);
         vm.prank(whale);
@@ -272,7 +272,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_lpWithdraw_mevProtection() public {
         _depositAs(whale, 1_000_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
         uint256 whaleShares = ic.balanceOf(whale);
 
         vm.prank(attacker);
@@ -299,7 +299,7 @@ contract InvarCoinForkTest is BaseForkTest {
         }
 
         vm.prank(keeper);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "Should hold LP tokens");
 
@@ -313,7 +313,7 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 100_000e6);
 
         uint256 lpBefore = IERC20(curvePool).balanceOf(address(ic));
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         assertGt(IERC20(curvePool).balanceOf(address(ic)), lpBefore, "Should mint LP with USDC-only deposit");
     }
@@ -344,7 +344,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_harvestYield_curveFeeGrowth() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 assetsBefore = ic.totalAssets();
 
@@ -356,13 +356,17 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_replenishBuffer() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
+
+        // Drain buffer below 10% via withdrawal
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.withdraw(shares / 10, alice, 0);
 
         uint256 morphoPrincipalBefore = ic.morphoPrincipal();
         uint256 morphoBefore = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
-        uint256 lpBal = IERC20(curvePool).balanceOf(address(ic));
 
-        ic.replenishBuffer(lpBal / 2, 0);
+        ic.replenishBuffer();
 
         assertGt(
             STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic))),
@@ -381,7 +385,7 @@ contract InvarCoinForkTest is BaseForkTest {
         sInvar.deposit(aliceShares, alice);
         vm.stopPrank();
 
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         _generateCurveFees(50_000e6, 10);
         _warpAndRefreshOracle(1 days);
@@ -402,7 +406,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_flashLoanNavExploit() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
         uint256 navBefore = ic.totalAssets();
 
@@ -424,17 +428,12 @@ contract InvarCoinForkTest is BaseForkTest {
 
     function test_keeperSandwichProtection() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve(0);
+        ic.deployToCurve();
 
-        uint256 lpBal = IERC20(curvePool).balanceOf(address(ic));
-        uint256 lpToBurn = lpBal / 4;
-
-        (bool ok, bytes memory data) = curvePool.staticcall(
-            abi.encodeWithSignature("calc_withdraw_one_coin(uint256,uint256)", lpToBurn, uint256(0))
-        );
-        require(ok, "calc_withdraw_one_coin failed");
-        uint256 fairUsdcOut = abi.decode(data, (uint256));
-        uint256 strictMin = fairUsdcOut * 95 / 100;
+        // Drain buffer so replenishBuffer is callable
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.withdraw(shares / 10, alice, 0);
 
         deal(bearToken, attacker, 5_000_000e18);
         vm.startPrank(attacker);
@@ -445,7 +444,7 @@ contract InvarCoinForkTest is BaseForkTest {
         vm.stopPrank();
 
         vm.expectRevert();
-        ic.replenishBuffer(lpToBurn, strictMin);
+        ic.replenishBuffer();
     }
 
     function test_morphoIlliquidity() public {

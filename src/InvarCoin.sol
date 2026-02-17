@@ -397,9 +397,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Keeper function: Deploys dual-sided liquidity into Curve
-    function deployToCurve(
-        uint256 minLpOut
-    ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
+    function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -417,6 +415,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
+        uint256 minLpOut = (usdcToDeploy * 1e30 * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (CURVE_POOL.lp_price() * BPS);
+
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostUsdc += (lpMinted * CURVE_POOL.lp_price()) / 1e30;
@@ -424,13 +424,31 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
 
-    /// @notice Keeper function: Restores USDC buffer by burning Curve LP
-    function replenishBuffer(
-        uint256 lpToBurn,
-        uint256 minUsdcOut
-    ) external nonReentrant {
+    /// @notice Keeper function: Restores USDC buffer by burning Curve LP, capped at 10% of NAV.
+    function replenishBuffer() external nonReentrant whenNotPaused {
+        uint256 assets = totalAssets();
+        uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
+
+        uint256 morphoShares = MORPHO_VAULT.balanceOf(address(this));
+        uint256 currentBuffer =
+            USDC.balanceOf(address(this)) + (morphoShares > 0 ? MORPHO_VAULT.convertToAssets(morphoShares) : 0);
+
+        if (currentBuffer >= bufferTarget) {
+            revert InvarCoin__NothingToDeploy();
+        }
+
         uint256 lpBalBefore = CURVE_LP_TOKEN.balanceOf(address(this));
         uint256 usdcBefore = USDC.balanceOf(address(this));
+
+        uint256 maxReplenish = bufferTarget - currentBuffer;
+        uint256 lpPrice = CURVE_POOL.lp_price();
+        uint256 lpToBurn = (maxReplenish * 1e30) / lpPrice;
+        if (lpToBurn > lpBalBefore) {
+            lpToBurn = lpBalBefore;
+        }
+
+        uint256 minUsdcOut = (lpToBurn * lpPrice * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / (1e30 * BPS);
+
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
 
         curveLpCostUsdc -= Math.mulDiv(curveLpCostUsdc, lpToBurn, lpBalBefore);

@@ -201,7 +201,7 @@ contract InvarCoinHandler is Test {
             return;
         }
 
-        try ic.deployToCurve(0) {
+        try ic.deployToCurve() {
             deployToCurveCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](1);
@@ -210,17 +210,18 @@ contract InvarCoinHandler is Test {
         }
     }
 
-    function replenishBuffer(
-        uint256 lpAmount
-    ) external {
-        uint256 lpBal = curveLp.balanceOf(address(ic));
-        if (lpBal == 0) {
+    function replenishBuffer() external {
+        if (ic.paused()) {
             return;
         }
-        lpAmount = bound(lpAmount, 1, lpBal);
 
-        ic.replenishBuffer(lpAmount, 0);
-        replenishBufferCalls++;
+        try ic.replenishBuffer() {
+            replenishBufferCalls++;
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](1);
+            allowed[0] = ERR_NOTHING_TO_DEPLOY;
+            _assertExpectedError(reason, allowed);
+        }
     }
 
     function harvest() external {
