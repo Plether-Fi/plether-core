@@ -688,9 +688,9 @@ contract InvarCoinTest is Test {
         uint256 assets = ic.totalAssets();
         uint256 yieldValue = (donated * assets) / supply;
 
-        // Fee-only yield ≈ 5/105 of LP value. Allow 20% tolerance for virtual-share rounding.
+        // Fee-only yield ≈ 5/105 of LP value. Allow 10% tolerance (mock linear math introduces ~8.7% deviation).
         uint256 expectedFeeYield = (fullLpUsdc * 5) / 105;
-        assertApproxEqRel(yieldValue, expectedFeeYield, 0.2e18, "Yield should reflect fees only, not price moves");
+        assertApproxEqRel(yieldValue, expectedFeeYield, 0.1e18, "Yield should reflect fees only, not price moves");
     }
 
     // ==========================================
@@ -1101,7 +1101,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         uint256 usdcOut = ic.withdraw(minted, alice, 0);
 
-        assertGe(usdcOut, amount * 99 / 100, "Round trip lost more than 1%");
+        assertGe(usdcOut, amount - 1, "Round trip lost more than 1 wei");
     }
 
     function testFuzz_EqualDepositsEqualShares(
@@ -1135,7 +1135,7 @@ contract InvarCoinTest is Test {
         uint256 bearValueUsdc = (bearReturned * ORACLE_PRICE) / 1e20;
         uint256 totalValueReturned = usdcReturned + bearValueUsdc;
 
-        assertGe(totalValueReturned, depositAmount * 95 / 100, "Whale exit returned less than 95%");
+        assertGe(totalValueReturned, depositAmount * 99 / 100, "Whale exit returned less than 99%");
     }
 
     function testFuzz_DeployToCurve_PreservesNAV(
@@ -1265,10 +1265,27 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
         ic.replenishBuffer();
-        try ic.harvest() {} catch {}
+        try ic.harvest() {}
+        catch (bytes memory reason) {
+            require(bytes4(reason) == InvarCoin.InvarCoin__NoYield.selector, "Unexpected harvest error");
+        }
         uint256 totalCaptured = ic.balanceOf(address(sInvar)) - sInvarBal;
 
         assertGe(totalCaptured, yieldStandalone, "yield must not be lost across withdraw + replenish");
+    }
+
+    function test_LpWithdraw_SurvivesStaleOracle() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve();
+
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+
+        assertGt(usdcOut + bearOut, 0, "lpWithdraw should succeed despite stale oracle");
     }
 
     function test_Withdraw_RevertsOnStaleOracle() public {

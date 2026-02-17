@@ -238,9 +238,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += supplyAfter - supplyBefore;
             harvestCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
+            bytes4[] memory allowed = new bytes4[](3);
             allowed[0] = ERR_NO_YIELD;
             allowed[1] = InvarCoin.InvarCoin__ZeroAddress.selector;
+            allowed[2] = ERR_STALE_PRICE;
             _assertExpectedError(reason, allowed);
         }
     }

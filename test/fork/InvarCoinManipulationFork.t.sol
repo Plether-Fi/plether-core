@@ -83,7 +83,9 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         deal(bearToken, attacker, IERC20(bearToken).balanceOf(attacker) + bearAmount);
         vm.startPrank(attacker);
         IERC20(bearToken).approve(curvePool, bearAmount);
-        curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, bearAmount, 0));
+        (bool ok,) =
+            curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, bearAmount, 0));
+        require(ok, "swap failed");
         vm.stopPrank();
     }
 
@@ -94,7 +96,9 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         deal(USDC, attacker, IERC20(USDC).balanceOf(attacker) + usdcAmount);
         vm.startPrank(attacker);
         IERC20(USDC).approve(curvePool, usdcAmount);
-        curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 0, 1, usdcAmount, 0));
+        (bool ok,) =
+            curvePool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 0, 1, usdcAmount, 0));
+        require(ok, "swap failed");
         vm.stopPrank();
     }
 
@@ -128,8 +132,11 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         vm.prank(alice);
         ic.withdraw(shares / 100, alice, 0);
 
-        ReplenishBufferFlashAttacker flashAttacker = new ReplenishBufferFlashAttacker(bearToken, curvePool, address(ic));
+        ReplenishBufferFlashAttacker flashAttacker =
+            new ReplenishBufferFlashAttacker(bearToken, curvePool, address(ic), USDC);
 
+        // Generic expectRevert: the revert bubbles up from inside the flash loan callback,
+        // so the selector gets ABI-wrapped by the flash lender and is not predictable.
         vm.expectRevert();
         flashAttacker.attack(5_000_000e18);
     }
@@ -415,15 +422,18 @@ contract ReplenishBufferFlashAttacker is IERC3156FlashBorrower {
     address immutable bear;
     address immutable pool;
     address immutable invarCoin;
+    address immutable usdc;
 
     constructor(
         address _bear,
         address _pool,
-        address _invarCoin
+        address _invarCoin,
+        address _usdc
     ) {
         bear = _bear;
         pool = _pool;
         invarCoin = _invarCoin;
+        usdc = _usdc;
     }
 
     function attack(
@@ -450,8 +460,8 @@ contract ReplenishBufferFlashAttacker is IERC3156FlashBorrower {
 
         InvarCoin(invarCoin).replenishBuffer();
 
-        uint256 usdcBal = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48).balanceOf(address(this));
-        IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48).approve(pool, usdcBal);
+        uint256 usdcBal = IERC20(usdc).balanceOf(address(this));
+        IERC20(usdc).approve(pool, usdcBal);
         pool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 0, 1, usdcBal, 0));
 
         IERC20(token).approve(msg.sender, amount);
