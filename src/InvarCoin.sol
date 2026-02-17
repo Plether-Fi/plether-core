@@ -244,6 +244,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
+        _harvest();
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
@@ -290,6 +291,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
+        _harvest();
         OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
         uint256 assets = totalAssets();
@@ -333,6 +335,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
+        _harvest();
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -393,6 +396,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
+        _harvest();
         uint256 oraclePrice =
             OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 

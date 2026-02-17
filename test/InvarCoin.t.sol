@@ -1162,7 +1162,7 @@ contract InvarCoinTest is Test {
         assertEq(ic.curveLpCostVp(), 0);
     }
 
-    function test_ReplenishBuffer_DestroysUnharvestedCurveYield() public {
+    function test_ReplenishBuffer_PreservesCurveYield() public {
         vm.startPrank(bob);
         ic.deposit(1000e6, bob);
         ic.approve(address(sInvar), ic.balanceOf(bob));
@@ -1176,19 +1176,19 @@ contract InvarCoinTest is Test {
         curve.setVirtualPrice(1.05e18);
 
         uint256 toWithdraw = ic.balanceOf(alice) / 50;
-        vm.prank(alice);
-        ic.withdraw(toWithdraw, alice, 0);
 
         uint256 snap = vm.snapshot();
-        uint256 yieldBefore = ic.harvest();
+        uint256 yieldStandalone = ic.harvest();
         vm.revertTo(snap);
 
         uint256 sInvarBal = ic.balanceOf(address(sInvar));
+        vm.prank(alice);
+        ic.withdraw(toWithdraw, alice, 0);
         ic.replenishBuffer();
         try ic.harvest() {} catch {}
         uint256 totalCaptured = ic.balanceOf(address(sInvar)) - sInvarBal;
 
-        assertGe(totalCaptured, yieldBefore, "replenish destroyed unharvested Curve fee yield");
+        assertGe(totalCaptured, yieldStandalone, "yield must not be lost across withdraw + replenish");
     }
 
     function test_Harvest_RevertsOnStaleOracle() public {
@@ -1225,17 +1225,16 @@ contract InvarCoinTest is Test {
 
         morpho.simulateYield(1000e6);
 
-        uint256 snap = vm.snapshot();
-        uint256 fullYield = ic.harvest();
-        vm.revertTo(snap);
-
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
         uint256 aliceBal = ic.balanceOf(alice);
         vm.prank(alice);
         ic.withdraw(aliceBal, alice, 0);
+        try ic.harvest() {} catch {}
+        uint256 totalDonated = ic.balanceOf(address(sInvar)) - sInvarBefore;
 
-        uint256 remainingYield = ic.harvest();
-
-        assertApproxEqRel(remainingYield, fullYield / 2, 0.02e18, "yield should halve after 50% withdrawal");
+        uint256 morphoBalance = morpho.convertToAssets(morpho.balanceOf(address(ic)));
+        assertGe(morphoBalance, ic.morphoPrincipal(), "Morpho balance must cover principal after harvest");
+        assertGt(totalDonated, 0, "yield should have been captured via withdraw's implicit harvest");
     }
 
 }

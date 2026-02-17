@@ -116,9 +116,10 @@ contract InvarCoinHandler is Test {
             return;
         }
 
+        uint256 supplyBefore = ic.totalSupply();
         try ic.deposit(amount, currentActor) returns (uint256 minted) {
             ghost_totalDeposited += amount;
-            ghost_totalInvarMinted += minted;
+            ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             depositCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](2);
@@ -149,9 +150,11 @@ contract InvarCoinHandler is Test {
             }
         }
 
+        uint256 supplyBefore = ic.totalSupply();
         try ic.withdraw(amount, currentActor, minOut) returns (uint256 usdcOut) {
             ghost_totalWithdrawn += usdcOut;
             ghost_totalInvarBurned += amount;
+            ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore;
             withdrawCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](4);
@@ -185,8 +188,10 @@ contract InvarCoinHandler is Test {
             }
         }
 
+        uint256 supplyBefore2 = ic.totalSupply();
         try ic.lpWithdraw(amount, minUsdc, minBear) {
             ghost_totalInvarBurned += amount;
+            ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore2;
             lpWithdrawCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](2);
@@ -316,9 +321,10 @@ contract InvarCoinHandler is Test {
             bear.approve(address(ic), bearAmount);
         }
 
+        uint256 supplyBefore3 = ic.totalSupply();
         try ic.lpDeposit(usdcAmount, bearAmount, currentActor, 0) returns (uint256 minted) {
             ghost_totalDeposited += usdcAmount + bearAmount / 1e12;
-            ghost_totalInvarMinted += minted;
+            ghost_totalInvarMinted += ic.totalSupply() - supplyBefore3;
             lpDepositCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](2);
