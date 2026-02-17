@@ -134,20 +134,20 @@ contract InvarCoinForkTest is BaseForkTest {
         assertEq(ic.balanceOf(alice), 0, "Should have no INVAR left");
     }
 
-    function test_withdraw_insufficientBuffer() public {
+    function test_withdraw_jitLpBurn() public {
         _depositAs(alice, 1_000_000e6);
 
         ic.deployToCurve();
 
-        uint256 localUsdc = IERC20(USDC).balanceOf(address(ic));
-        assertLe(localUsdc, 100_000e6, "Only ~5% buffer should remain as local USDC");
-
         uint256 aliceShares = ic.balanceOf(alice);
         uint256 bigWithdrawShares = (aliceShares * 30) / 100;
 
+        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__InsufficientBuffer.selector);
-        ic.withdraw(bigWithdrawShares, alice, 0);
+        uint256 usdcOut = ic.withdraw(bigWithdrawShares, alice, 0);
+
+        assertGt(usdcOut, 250_000e6, "Should receive substantial USDC via JIT LP burn");
+        assertEq(IERC20(USDC).balanceOf(alice) - aliceUsdcBefore, usdcOut, "Transfer should match return value");
     }
 
     // ==========================================
@@ -275,10 +275,9 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer below 2% target via small withdrawal
-        uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        ic.withdraw(shares / 100, alice, 0);
+        // Simulate buffer drain below 2% target
+        uint256 localUsdc = IERC20(USDC).balanceOf(address(ic));
+        deal(USDC, address(ic), localUsdc / 10);
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
 
@@ -341,10 +340,8 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer so replenishBuffer is callable
-        uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        ic.withdraw(shares / 100, alice, 0);
+        // Simulate buffer drain so replenishBuffer is callable
+        deal(USDC, address(ic), 0);
 
         deal(bearToken, attacker, 5_000_000e18);
         vm.startPrank(attacker);

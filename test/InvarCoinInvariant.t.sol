@@ -41,7 +41,6 @@ contract InvarCoinHandler is Test {
 
     bytes4 constant ERR_ZERO_AMOUNT = InvarCoin.InvarCoin__ZeroAmount.selector;
     bytes4 constant ERR_SLIPPAGE = InvarCoin.InvarCoin__SlippageExceeded.selector;
-    bytes4 constant ERR_INSUFFICIENT_BUFFER = InvarCoin.InvarCoin__InsufficientBuffer.selector;
     bytes4 constant ERR_NOTHING_TO_DEPLOY = InvarCoin.InvarCoin__NothingToDeploy.selector;
     bytes4 constant ERR_NO_YIELD = InvarCoin.InvarCoin__NoYield.selector;
     bytes4 constant ERR_STALE_PRICE = OracleLib.OracleLib__StalePrice.selector;
@@ -152,11 +151,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore;
             withdrawCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
+            bytes4[] memory allowed = new bytes4[](3);
             allowed[0] = ERR_ZERO_AMOUNT;
             allowed[1] = ERR_SLIPPAGE;
-            allowed[2] = ERR_INSUFFICIENT_BUFFER;
-            allowed[3] = ERR_STALE_PRICE;
+            allowed[2] = ERR_STALE_PRICE;
             _assertExpectedError(reason, allowed);
         }
     }

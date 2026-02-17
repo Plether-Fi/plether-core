@@ -325,7 +325,7 @@ contract InvarCoinTest is Test {
     // WITHDRAW TESTS
     // ==========================================
 
-    function test_Withdraw_FullFromBuffer() public {
+    function test_Withdraw_BufferOnly() public {
         vm.prank(alice);
         ic.deposit(1000e6, alice);
 
@@ -336,6 +336,24 @@ contract InvarCoinTest is Test {
 
         assertApproxEqRel(usdcOut, 1000e6, 0.01e18);
         assertEq(ic.balanceOf(alice), 0);
+    }
+
+    function test_Withdraw_JIT_BurnsLPWhenBufferInsufficient() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve();
+
+        uint256 aliceShares = ic.balanceOf(alice);
+        uint256 bigWithdraw = (aliceShares * 30) / 100;
+
+        uint256 lpBefore = curveLp.totalSupply();
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(bigWithdraw, alice, 0);
+
+        assertGt(usdcOut, 0, "Should receive USDC via JIT LP burn");
+        assertLt(curveLp.totalSupply(), lpBefore, "LP should be burned");
     }
 
     function test_Withdraw_RevertsOnZero() public {
@@ -578,9 +596,9 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 toWithdraw = ic.balanceOf(alice) / 50;
-        vm.prank(alice);
-        ic.withdraw(toWithdraw, alice, 0);
+        // Simulate buffer drain (e.g., external event that depletes USDC)
+        uint256 localUsdc = usdc.balanceOf(address(ic));
+        deal(address(usdc), address(ic), localUsdc / 10);
 
         uint256 usdcBefore = usdc.balanceOf(address(ic));
         ic.replenishBuffer();
@@ -594,9 +612,7 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 toWithdraw = ic.balanceOf(alice) / 50;
-        vm.prank(alice);
-        ic.withdraw(toWithdraw, alice, 0);
+        deal(address(usdc), address(ic), 0);
 
         curve.setSpotDiscountBps(600);
 
@@ -780,7 +796,7 @@ contract InvarCoinTest is Test {
         assertLt(navAfterCrash, navAtDefault, "Pessimistic LP price should lower NAV");
     }
 
-    function test_Withdraw_PessimisticLpPrice_CapsNAV() public {
+    function test_Withdraw_ProRataDistribution() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
@@ -789,18 +805,17 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        // Crash oracle — Curve EMA lags, NAV should use oracle-derived LP price
-        oracle.updatePrice(50_000_000);
+        uint256 aliceBal = ic.balanceOf(alice);
+        uint256 bobBal = ic.balanceOf(bob);
 
-        uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal / 100, alice, 0);
+        uint256 aliceUsdc = ic.withdraw(aliceBal, alice, 0);
 
-        // At $0.50 oracle, oracle LP price = 2*vp*sqrt(0.5) ≈ 1.414*vp
-        // Mock LP price = 2*vp (unchanged EMA)
-        // Pessimistic uses oracle → withdrawal capped at lower NAV
-        uint256 expectedMaxPayout = 40_000e6 / 100;
-        assertLt(usdcOut, expectedMaxPayout, "Withdrawal should be capped by pessimistic LP price");
+        vm.prank(bob);
+        uint256 bobUsdc = ic.withdraw(bobBal, bob, 0);
+
+        assertApproxEqRel(aliceUsdc, bobUsdc, 0.01e18, "Equal depositors should get equal withdrawals");
+        assertApproxEqRel(aliceUsdc + bobUsdc, 40_000e6, 0.02e18, "Total withdrawn should approximate total deposited");
     }
 
     function test_Deposit_OptimisticLpPrice_PreventsDilution() public {
@@ -1084,9 +1099,7 @@ contract InvarCoinTest is Test {
 
         ic.deployToCurve();
 
-        uint256 toWithdraw = ic.balanceOf(alice) / 50;
-        vm.prank(alice);
-        ic.withdraw(toWithdraw, alice, 0);
+        deal(address(usdc), address(ic), 0);
 
         uint256 costBefore = ic.curveLpCostVp();
         ic.replenishBuffer();

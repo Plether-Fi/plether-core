@@ -102,7 +102,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__ZeroAmount();
     error InvarCoin__ZeroAddress();
     error InvarCoin__SlippageExceeded();
-    error InvarCoin__InsufficientBuffer();
     error InvarCoin__NothingToDeploy();
     error InvarCoin__NoYield();
     error InvarCoin__CannotRescueCoreAsset();
@@ -273,7 +272,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return deposit(usdcAmount, receiver);
     }
 
-    /// @notice Retail withdrawal exclusively using the safe local buffer.
+    /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
+    /// @dev User pays any AMM single-sided penalty; minUsdcOut is their protection.
     function withdraw(
         uint256 glUsdAmount,
         address receiver,
@@ -283,23 +283,24 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__ZeroAmount();
         }
         _harvest();
-        OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
-        uint256 assets = totalAssets();
         uint256 supply = totalSupply();
-        usdcOut = Math.mulDiv(glUsdAmount, assets + VIRTUAL_ASSETS, supply + VIRTUAL_SHARES);
+        _burn(msg.sender, glUsdAmount);
+
+        usdcOut = Math.mulDiv(USDC.balanceOf(address(this)), glUsdAmount, supply);
+
+        uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        if (lpBal > 0) {
+            uint256 lpShare = Math.mulDiv(lpBal, glUsdAmount, supply);
+            if (lpShare > 0) {
+                usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, 0);
+                curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
+            }
+        }
 
         if (usdcOut < minUsdcOut) {
             revert InvarCoin__SlippageExceeded();
         }
-
-        uint256 localUsdc = USDC.balanceOf(address(this));
-
-        if (usdcOut > localUsdc) {
-            revert InvarCoin__InsufficientBuffer();
-        }
-
-        _burn(msg.sender, glUsdAmount);
 
         USDC.safeTransfer(receiver, usdcOut);
         emit Withdrawn(msg.sender, receiver, glUsdAmount, usdcOut);
