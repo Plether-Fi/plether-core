@@ -42,12 +42,12 @@ contract InvarCoinForkTest is BaseForkTest {
         rewardDist = makeAddr("rewardDist");
         attacker = makeAddr("attacker");
 
-        deal(USDC, address(this), 20_000_000e6);
+        deal(USDC, address(this), 40_000_000e6);
 
         _fetchPriceAndWarp();
         _deployProtocol(treasury);
-        _mintInitialTokens(5_000_000e18);
-        _deployCurvePool(5_000_000e18);
+        _mintInitialTokens(10_000_000e18);
+        _deployCurvePool(10_000_000e18);
 
         ic = new InvarCoin(
             USDC, bearToken, curvePool, address(STEAKHOUSE_USDC), curvePool, address(basketOracle), address(0)
@@ -304,7 +304,7 @@ contract InvarCoinForkTest is BaseForkTest {
         assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "Should hold LP tokens");
 
         uint256 morphoVal = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
-        assertApproxEqRel(morphoVal, ic.totalAssets() / 10, 0.05e18, "Buffer ~10% of totalAssets");
+        assertApproxEqRel(morphoVal, ic.totalAssets() / 20, 0.05e18, "Buffer ~5% of totalAssets");
 
         assertApproxEqRel(ic.totalAssets(), 500_000e6, 0.02e18, "No value leaked during deploy");
     }
@@ -358,7 +358,6 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer below 10% via withdrawal
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
         ic.withdraw(shares / 10, alice, 0);

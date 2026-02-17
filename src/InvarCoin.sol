@@ -504,7 +504,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (currentMorphoUsdc > bufferTarget && currentMorphoUsdc - bufferTarget >= DEPLOY_THRESHOLD) {
             usdcToDeploy = currentMorphoUsdc - bufferTarget;
             MORPHO_VAULT.withdraw(usdcToDeploy, address(this), address(this));
-            morphoPrincipal = morphoPrincipal > usdcToDeploy ? morphoPrincipal - usdcToDeploy : 0;
+            morphoPrincipal = morphoPrincipal > usdcToDeploy ? morphoPrincipal - usdcToDeploy : 0; // symmetric with += in replenishBuffer
         }
 
         if (usdcToDeploy == 0) {
@@ -552,6 +552,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
         MORPHO_VAULT.deposit(usdcRecovered, address(this));
+        morphoPrincipal += usdcRecovered; // symmetric with -= in deployToCurve
 
         emit BufferReplenished(lpToBurn, usdcRecovered);
     }
