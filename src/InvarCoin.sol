@@ -302,12 +302,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         _burn(msg.sender, glUsdAmount);
 
-        uint256 morphoWithdrawn = 0;
         if (usdcOut > localUsdc) {
-            morphoWithdrawn = usdcOut - localUsdc;
+            uint256 morphoWithdrawn = usdcOut - localUsdc;
+            morphoPrincipal -= Math.mulDiv(morphoPrincipal, morphoWithdrawn, morphoAssets);
             MORPHO_VAULT.withdraw(morphoWithdrawn, address(this), address(this));
         }
-        morphoPrincipal = morphoPrincipal > morphoWithdrawn ? morphoPrincipal - morphoWithdrawn : 0;
 
         USDC.safeTransfer(receiver, usdcOut);
         emit Withdrawn(msg.sender, receiver, glUsdAmount, usdcOut);
