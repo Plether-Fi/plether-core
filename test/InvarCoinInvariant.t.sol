@@ -201,7 +201,9 @@ contract InvarCoinHandler is Test {
             return;
         }
 
+        uint256 supplyBefore = ic.totalSupply();
         try ic.deployToCurve() {
+            ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             deployToCurveCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](1);
@@ -215,7 +217,9 @@ contract InvarCoinHandler is Test {
             return;
         }
 
+        uint256 supplyBefore = ic.totalSupply();
         try ic.replenishBuffer() {
+            ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             replenishBufferCalls++;
         } catch (bytes memory reason) {
             bytes4[] memory allowed = new bytes4[](1);
