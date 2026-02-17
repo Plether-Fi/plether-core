@@ -682,6 +682,49 @@ contract InvarCoinTest is Test {
         assertEq(curveLp.balanceOf(address(ic)), 0);
     }
 
+    function test_EmergencyWithdrawFromCurve_NAVPreserved() public {
+        uint256 usdcIn = 10_000e6;
+        uint256 bearIn = 10_000e18;
+        usdc.mint(alice, usdcIn);
+        bearToken.mint(alice, bearIn);
+
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), bearIn);
+        ic.lpDeposit(usdcIn, bearIn, alice, 0);
+        vm.stopPrank();
+
+        uint256 navBefore = ic.totalAssets();
+
+        ic.emergencyWithdrawFromCurve();
+
+        uint256 navAfter = ic.totalAssets();
+        // Mock Curve values BEAR at 1:1 with USDC, but oracle prices at $0.80.
+        // The important property: BEAR is counted, NAV doesn't collapse.
+        assertApproxEqRel(navAfter, navBefore, 0.15e18, "NAV should be preserved after emergency");
+    }
+
+    function test_EmergencyWithdrawFromCurve_LpWithdrawReturnsBear() public {
+        uint256 usdcIn = 10_000e6;
+        uint256 bearIn = 10_000e18;
+        usdc.mint(alice, usdcIn);
+        bearToken.mint(alice, bearIn);
+
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), bearIn);
+        ic.lpDeposit(usdcIn, bearIn, alice, 0);
+        vm.stopPrank();
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+
+        assertGt(usdcOut, 0, "Should return USDC");
+        assertGt(bearOut, 0, "Should return raw BEAR post-emergency");
+    }
+
     function test_EmergencyWithdraw_OnlyOwner() public {
         vm.prank(alice);
         vm.expectRevert();
@@ -700,6 +743,11 @@ contract InvarCoinTest is Test {
     function test_RescueToken_CannotRescueCurveLp() public {
         vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
         ic.rescueToken(address(curveLp), alice);
+    }
+
+    function test_RescueToken_CannotRescueBear() public {
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.rescueToken(address(bearToken), alice);
     }
 
     function test_RescueToken_CanRescueRandom() public {

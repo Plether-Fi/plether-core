@@ -159,7 +159,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             lpUsdcValue = (lpBal * CURVE_POOL.lp_price()) / 1e30;
         }
 
-        return bufferValue + lpUsdcValue;
+        // 3. Raw BEAR (present after emergencyWithdrawFromCurve)
+        uint256 bearBal = BEAR.balanceOf(address(this));
+        uint256 bearUsdcValue = 0;
+        if (bearBal > 0) {
+            (, int256 price,,,) = BASKET_ORACLE.latestRoundData();
+            if (price > 0) {
+                bearUsdcValue = (bearBal * uint256(price)) / 1e20;
+            }
+        }
+
+        return bufferValue + lpUsdcValue + bearUsdcValue;
     }
 
     // ==========================================
@@ -280,7 +290,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 localUsdcShare = Math.mulDiv(localUsdcBefore, glUsdAmount, supply);
         usdcReturned += localUsdcShare;
 
-        // 2. Pro-rata Curve LP
+        // 2. Pro-rata raw BEAR (present after emergencyWithdrawFromCurve)
+        uint256 bearBal = BEAR.balanceOf(address(this));
+        if (bearBal > 0) {
+            bearReturned += Math.mulDiv(bearBal, glUsdAmount, supply);
+        }
+
+        // 3. Pro-rata Curve LP
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
@@ -502,7 +518,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address token,
         address to
     ) external onlyOwner {
-        if (token == address(USDC) || token == address(MORPHO_VAULT) || token == address(CURVE_LP_TOKEN)) {
+        if (
+            token == address(USDC) || token == address(BEAR) || token == address(MORPHO_VAULT)
+                || token == address(CURVE_LP_TOKEN)
+        ) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
         uint256 balance = IERC20(token).balanceOf(address(this));
