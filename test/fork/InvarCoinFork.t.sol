@@ -304,7 +304,7 @@ contract InvarCoinForkTest is BaseForkTest {
         assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "Should hold LP tokens");
 
         uint256 morphoVal = STEAKHOUSE_USDC.convertToAssets(STEAKHOUSE_USDC.balanceOf(address(ic)));
-        assertApproxEqRel(morphoVal, ic.totalAssets() / 20, 0.05e18, "Buffer ~5% of totalAssets");
+        assertApproxEqRel(morphoVal, ic.totalAssets() / 50, 0.05e18, "Buffer ~2% of totalAssets");
 
         assertApproxEqRel(ic.totalAssets(), 500_000e6, 0.02e18, "No value leaked during deploy");
     }
@@ -356,7 +356,7 @@ contract InvarCoinForkTest is BaseForkTest {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
 
-        // Drain buffer below 5% target via withdrawal (4% of shares)
+        // Drain buffer below 2% target via withdrawal
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
         ic.withdraw(shares / 25, alice, 0);

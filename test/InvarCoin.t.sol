@@ -831,12 +831,12 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(bal / 10, alice, 0);
+        uint256 usdcOut = ic.withdraw(bal / 100, alice, 0);
 
         // At $0.50 oracle, oracle LP price = 2*vp*sqrt(0.5) ≈ 1.414*vp
         // Mock LP price = 2*vp (unchanged EMA)
         // Pessimistic uses oracle → withdrawal capped at lower NAV
-        uint256 expectedMaxPayout = 40_000e6 / 10;
+        uint256 expectedMaxPayout = 40_000e6 / 100;
         assertLt(usdcOut, expectedMaxPayout, "Withdrawal should be capped by pessimistic LP price");
     }
 
