@@ -293,7 +293,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             uint256 lpShare = Math.mulDiv(lpBal, glUsdAmount, supply);
             if (lpShare > 0) {
-                usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, 0);
+                uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
+                usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
                 curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
             }
         }
