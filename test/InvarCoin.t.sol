@@ -389,16 +389,17 @@ contract InvarCoinTest is Test {
         ic.deposit(10_000e6, alice);
         ic.deployToCurve();
 
+        // Seed pool with BEAR so remove_liquidity returns both tokens
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
         ic.emergencyWithdrawFromCurve();
         assertTrue(ic.emergencyActive());
+        assertGt(bearToken.balanceOf(address(ic)), 0, "IC should hold BEAR after emergency");
 
         ic.unpause();
 
-        // Re-deposit and deploy clears the flag
-        vm.prank(bob);
-        ic.deposit(10_000e6, bob);
-        ic.deployToCurve();
-
+        ic.redeployToCurve();
         assertFalse(ic.emergencyActive());
 
         uint256 bal = ic.balanceOf(alice);

@@ -490,7 +490,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
         lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
-        emergencyActive = false;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
@@ -536,6 +535,27 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
     // EMERGENCY & ADMIN
     // ==========================================
+
+    function redeployToCurve() external onlyOwner nonReentrant whenNotPaused {
+        uint256 bearBal = BEAR.balanceOf(address(this));
+        if (bearBal == 0) {
+            revert InvarCoin__NothingToDeploy();
+        }
+
+        uint256 assets = totalAssets();
+        uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
+        uint256 localUsdc = USDC.balanceOf(address(this));
+        uint256 usdcToDeploy = localUsdc > bufferTarget ? localUsdc - bufferTarget : 0;
+
+        uint256[2] memory amounts = [usdcToDeploy, bearBal];
+        uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
+        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
+        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
+        emergencyActive = false;
+
+        emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
+    }
 
     function emergencyWithdrawFromCurve() external onlyOwner {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
