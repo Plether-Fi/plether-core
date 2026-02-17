@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {InvarCoin} from "../src/InvarCoin.sol";
 import {StakedToken} from "../src/StakedToken.sol";
+import {OracleLib} from "../src/libraries/OracleLib.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -1146,6 +1147,55 @@ contract InvarCoinTest is Test {
         ic.emergencyWithdrawFromCurve();
 
         assertEq(ic.curveLpCostVp(), 0);
+    }
+
+    function test_ReplenishBuffer_DestroysUnharvestedCurveYield() public {
+        vm.startPrank(bob);
+        ic.deposit(1000e6, bob);
+        ic.approve(address(sInvar), ic.balanceOf(bob));
+        sInvar.deposit(ic.balanceOf(bob), bob);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        ic.deployToCurve();
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 toWithdraw = ic.balanceOf(alice) / 50;
+        vm.prank(alice);
+        ic.withdraw(toWithdraw, alice, 0);
+
+        uint256 snap = vm.snapshot();
+        uint256 yieldBefore = ic.harvest();
+        vm.revertTo(snap);
+
+        uint256 sInvarBal = ic.balanceOf(address(sInvar));
+        ic.replenishBuffer();
+        try ic.harvest() {} catch {}
+        uint256 totalCaptured = ic.balanceOf(address(sInvar)) - sInvarBal;
+
+        assertGe(totalCaptured, yieldBefore, "replenish destroyed unharvested Curve fee yield");
+    }
+
+    function test_Harvest_RevertsOnStaleOracle() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve();
+
+        curve.setVirtualPrice(1.05e18);
+
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
+        ic.harvest();
     }
 
 }
