@@ -1347,4 +1347,141 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
+    // ==========================================
+    // DECIMAL PRECISION TESTS
+    // Uses prices with exact integer square roots
+    // to verify conversion constants (1e20, 1e28, 1e30)
+    // ==========================================
+
+    function test_Precision_BearToUsdc_AtPointEightyOne() public {
+        // 1000 BEAR at $0.81 each = exactly $810
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        bearToken.mint(address(ic), 1000e18);
+
+        assertEq(ic.totalAssets(), 810e6, "1000 BEAR @ $0.81 = $810");
+    }
+
+    function test_Precision_BearToUsdc_AtOneFortyFour() public {
+        // 500 BEAR at $1.44 each = exactly $720
+        oracle.updatePrice(144_000_000);
+        curve.setPriceMultiplier(1.44e18);
+        bearToken.mint(address(ic), 500e18);
+
+        assertEq(ic.totalAssets(), 720e6, "500 BEAR @ $1.44 = $720");
+    }
+
+    function test_Precision_BearToUsdc_DustRoundsToZero() public {
+        // 1 wei BEAR at $1.20: 1 * 120_000_000 / 1e20 = 0
+        bearToken.mint(address(ic), 1);
+
+        assertEq(ic.totalAssets(), 0, "1 wei BEAR rounds to 0 USDC");
+    }
+
+    function test_Precision_BearToUsdc_MinimumNonZero() public {
+        // At $1.20: bearBal * 120_000_000 / 1e20 >= 1
+        // Threshold: ceil(1e20 / 1.2e8) = 833_333_333_334 wei
+        bearToken.mint(address(ic), 833_333_333_333);
+        assertEq(ic.totalAssets(), 0, "Below threshold = 0");
+
+        bearToken.mint(address(ic), 1);
+        assertEq(ic.totalAssets(), 1, "At threshold = 1 USDC wei");
+    }
+
+    function test_Precision_OracleLpPrice_ExactSqrt() public {
+        // $0.81: sqrt(81_000_000 * 1e28) = sqrt(81e34) = 9e17
+        // oracleLpPrice = 2 * 1e18 * 9e17 / 1e18 = 1.8e18
+        // 1000 LP at $1.80 = $1800
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        curveLp.mint(address(ic), 1000e18);
+
+        assertEq(ic.totalAssets(), 1800e6, "1000 LP @ $1.80 = $1800");
+    }
+
+    function test_Precision_OracleLpPrice_WithVpGrowth() public {
+        // $0.81 with vp=1.05: lpPrice = 2 * 1.05 * 0.9 = $1.89
+        // 1000 LP at $1.89 = $1890
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        curve.setVirtualPrice(1.05e18);
+        curveLp.mint(address(ic), 1000e18);
+
+        assertEq(ic.totalAssets(), 1890e6, "1000 LP @ vp=1.05, price=$0.81 = $1890");
+    }
+
+    function test_Precision_OracleLpPrice_HigherPrice() public {
+        // $1.44: sqrt(144_000_000 * 1e28) = sqrt(144e34) = 12e17 = 1.2e18
+        // oracleLpPrice = 2 * 1e18 * 1.2e18 / 1e18 = 2.4e18
+        // 500 LP at $2.40 = $1200
+        oracle.updatePrice(144_000_000);
+        curve.setPriceMultiplier(1.44e18);
+        curveLp.mint(address(ic), 500e18);
+
+        assertEq(ic.totalAssets(), 1200e6, "500 LP @ $2.40 = $1200");
+    }
+
+    function test_Precision_LpToUsdc_DustRoundsToZero() public {
+        // 1 wei LP at $1.80: 1 * 1.8e18 / 1e30 = 0
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        curveLp.mint(address(ic), 1);
+
+        assertEq(ic.totalAssets(), 0, "1 wei LP rounds to 0 USDC");
+    }
+
+    function test_Precision_MixedAssets() public {
+        // 500 USDC + 1000 BEAR @ $0.81 + 500 LP @ $1.80
+        // = 500 + 810 + 900 = $2210
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        usdc.mint(address(ic), 500e6);
+        bearToken.mint(address(ic), 1000e18);
+        curveLp.mint(address(ic), 500e18);
+
+        assertEq(ic.totalAssets(), 2210e6, "Mixed USDC+BEAR+LP = $2210");
+    }
+
+    function test_Precision_LpDeposit_FullDecimalChain() public {
+        // lpDeposit 1000 BEAR at $0.81, no USDC
+        // BEAR→USDC: 1000e18 * 81_000_000 / 1e20 = 810e6
+        // LP minted: 810e6 * 1e30 / 1.8e18 = 450e18
+        // LP value (pessimistic): 450e18 * 1.8e18 / 1e30 = 810e6
+        // Shares (first deposit): 810e6 * (0 + 1e18) / (0 + 1e6) = 810e18
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        bearToken.mint(alice, 1000e18);
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), 1000e18);
+        uint256 shares = ic.lpDeposit(0, 1000e18, alice, 0);
+        vm.stopPrank();
+
+        assertEq(shares, 810e18, "lpDeposit 1000 BEAR @ $0.81 = 810e18 shares");
+    }
+
+    function test_Precision_LpDeposit_MixedInputs() public {
+        // lpDeposit 500 USDC + 500 BEAR at $1.44
+        // BEAR→USDC: 500e18 * 144_000_000 / 1e20 = 720e6
+        // Total USDC value: 500e6 + 720e6 = 1220e6
+        // lpPrice = 2 * sqrt(1.44) = 2 * 1.2 = 2.4e18
+        // LP minted: 1220e6 * 1e30 / 2.4e18 = 508_333_333_333_333_333_333 (~508.33e18)
+        // LP value: 508.33e18 * 2.4e18 / 1e30 = 1219_999_999 (1220e6 - 1 from rounding)
+        // Shares: 1219_999_999 * 1e18 / 1e6 = 1_219_999_999e12
+        oracle.updatePrice(144_000_000);
+        curve.setPriceMultiplier(1.44e18);
+
+        usdc.mint(alice, 500e6);
+        bearToken.mint(alice, 500e18);
+        vm.startPrank(alice);
+        usdc.approve(address(ic), 500e6);
+        bearToken.approve(address(ic), 500e18);
+        uint256 shares = ic.lpDeposit(500e6, 500e18, alice, 0);
+        vm.stopPrank();
+
+        // 1220e6 round-trips through LP pricing with 1 wei rounding loss
+        assertApproxEqAbs(shares, 1220e18, 1e18, "lpDeposit 500 USDC + 500 BEAR @ $1.44");
+        assertLe(shares, 1220e18, "Rounding must favor protocol");
+    }
+
 }
