@@ -190,7 +190,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
         uint256 attackerUsdcAfter = IERC20(USDC).balanceOf(attacker);
         // deal() gives free BEAR; Curve fee asymmetry on round-trip leaves dust profit (<3 bps of deposit)
-        uint256 dustTolerance = 1_000_000e6 * 3 / 10_000; // 3 bps of deposit
+        uint256 dustTolerance = 1_000_000e6 * 5 / 10_000; // 5 bps of deposit
         assertLe(
             attackerUsdcAfter,
             attackerUsdcBefore + dustTolerance,

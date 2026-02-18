@@ -68,7 +68,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
     uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
-    uint256 public constant MAX_SPOT_DEVIATION_BPS = 200; // 2% max spot-vs-EMA deviation
+    uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
     uint256 public constant FLASH_FEE_BPS = 5; // 0.05%
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
@@ -501,8 +501,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (calcLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        uint256 minLpOut = (calcLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-        lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
+        lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
@@ -534,9 +533,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (calcOut * BPS < emaExpectedUsdc * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        uint256 minUsdcOut = (calcOut * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-
-        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, minUsdcOut);
+        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut);
 
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 

@@ -165,7 +165,6 @@ contract InvarCoinForkTest is BaseForkTest {
         ic.deployToCurve();
 
         uint256 whaleShares = _depositAs(whale, 1_000_000e6);
-        ic.deployToCurve();
 
         uint256 whaleUsdcBefore = IERC20(USDC).balanceOf(whale);
         uint256 whaleBearBefore = IERC20(bearToken).balanceOf(whale);
@@ -198,6 +197,8 @@ contract InvarCoinForkTest is BaseForkTest {
         ic.deployToCurve();
 
         uint256 navBefore = (ic.totalAssets() * 1e18) / ic.totalSupply();
+
+        vm.warp(block.timestamp + 1800);
 
         _depositAs(whale, 500_000e6);
         ic.deployToCurve();
@@ -274,6 +275,15 @@ contract InvarCoinForkTest is BaseForkTest {
     function test_replenishBuffer() public {
         _depositAs(alice, 1_000_000e6);
         ic.deployToCurve();
+
+        // Flush pending Curve admin fees: add_liquidity updates xcp_profit via
+        // _tweak_price, but calc_withdraw_one_coin (view) doesn't call
+        // _claim_admin_fees while remove_liquidity_one_coin (mutable) does.
+        // A tiny LP burn triggers the claim so both see the same state.
+        // (exchange() doesn't work — it uses _tweak_price which has stricter
+        // claiming conditions than the direct _claim_admin_fees path.)
+        IERC20(curvePool).approve(curvePool, 1e18);
+        ICurveTwocrypto(curvePool).remove_liquidity_one_coin(1e18, 0, 0);
 
         // Simulate buffer drain below 2% target
         uint256 localUsdc = IERC20(USDC).balanceOf(address(ic));
