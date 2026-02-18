@@ -412,8 +412,12 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
         uint256[2] memory amounts = [usdcAmount, bearAmount];
         uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
-        uint256 minLpOut = (expectedLp * (BPS - MAX_DEPLOY_SLIPPAGE_BPS)) / BPS;
-        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
+        uint256 totalUsdcValue = usdcAmount + (bearAmount * oraclePrice) / 1e20;
+        uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
+        if (expectedLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
+            revert InvarCoin__SpotDeviationTooHigh();
+        }
+        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp);
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;

@@ -7,6 +7,7 @@ import {OracleLib} from "../src/libraries/OracleLib.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Test} from "forge-std/Test.sol";
 
 // ==========================================
@@ -118,8 +119,9 @@ contract MockCurvePool {
         usdcBalance += amounts[0];
         bearBalance += amounts[1];
 
-        uint256 bearAsUsdc = amounts[1] / 1e12;
-        uint256 lpMinted = (amounts[0] + bearAsUsdc) * 1e12 / 2;
+        uint256 bearAsUsdc = amounts[1] * priceMultiplier / 1e30;
+        uint256 totalUsdc = amounts[0] + bearAsUsdc;
+        uint256 lpMinted = totalUsdc * 1e30 / _lpPrice();
         lpToken.mint(msg.sender, lpMinted);
 
         return lpMinted;
@@ -137,7 +139,7 @@ contract MockCurvePool {
         if (i == 0) {
             uint256 usdcShare = (usdcBalance * shareRatio) / 1e18;
             uint256 bearShare = (bearBalance * shareRatio) / 1e18;
-            uint256 bearAsUsdc = bearShare / 1e12;
+            uint256 bearAsUsdc = bearShare * priceMultiplier / 1e30;
             if (swapFeeBps > 0 && bearAsUsdc > 0) {
                 bearAsUsdc -= (bearAsUsdc * swapFeeBps) / 10_000;
             }
@@ -181,16 +183,21 @@ contract MockCurvePool {
         return virtualPrice;
     }
 
+    function _lpPrice() internal view returns (uint256) {
+        return 2 * virtualPrice * Math.sqrt(priceMultiplier * 1e18) / 1e18;
+    }
+
     function lp_price() external view returns (uint256) {
-        return 2 * virtualPrice * priceMultiplier / 1e18;
+        return _lpPrice();
     }
 
     function calc_token_amount(
         uint256[2] calldata amounts,
         bool
     ) external view returns (uint256) {
-        uint256 bearAsUsdc = amounts[1] / 1e12;
-        uint256 lp = (amounts[0] + bearAsUsdc) * 1e12 / 2;
+        uint256 bearAsUsdc = amounts[1] * priceMultiplier / 1e30;
+        uint256 totalUsdc = amounts[0] + bearAsUsdc;
+        uint256 lp = totalUsdc * 1e30 / _lpPrice();
         if (spotDiscountBps > 0) {
             lp = lp * (10_000 - spotDiscountBps) / 10_000;
         }
@@ -206,7 +213,7 @@ contract MockCurvePool {
         if (i == 0) {
             uint256 usdcShare = (usdcBalance * shareRatio) / 1e18;
             uint256 bearShare = (bearBalance * shareRatio) / 1e18;
-            uint256 bearAsUsdc = bearShare / 1e12;
+            uint256 bearAsUsdc = bearShare * priceMultiplier / 1e30;
             if (swapFeeBps > 0 && bearAsUsdc > 0) {
                 bearAsUsdc -= (bearAsUsdc * swapFeeBps) / 10_000;
             }
@@ -262,6 +269,8 @@ contract InvarCoinTest is Test {
         bearToken = new MockBEAR();
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
+
+        curve.setPriceMultiplier(1.2e18);
 
         ic = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
@@ -1054,10 +1063,10 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(100_000e6, alice);
 
-        // Oracle crashes to $0.50 while Curve EMA stays stale-high
-        // pessimistic LP price = min(oracle, EMA) = oracle ≈ 1.414 * vp
-        // optimistic LP price  = max(oracle, EMA) = EMA = 2 * vp
+        // Oracle crashes to $0.50, pool spot follows
+        // pessimistic LP price = min(oracle, EMA) ≈ 1.414 * vp
         oracle.updatePrice(50_000_000);
+        curve.setPriceMultiplier(0.5e18);
 
         uint256 bobUsdc = 10_000e6;
         uint256 bobBear = 10_000e18;

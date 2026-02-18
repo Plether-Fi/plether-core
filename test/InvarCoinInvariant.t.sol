@@ -44,6 +44,7 @@ contract InvarCoinHandler is Test {
     bytes4 constant ERR_NOTHING_TO_DEPLOY = InvarCoin.InvarCoin__NothingToDeploy.selector;
     bytes4 constant ERR_NO_YIELD = InvarCoin.InvarCoin__NoYield.selector;
     bytes4 constant ERR_STALE_PRICE = OracleLib.OracleLib__StalePrice.selector;
+    bytes4 constant ERR_SPOT_DEVIATION = InvarCoin.InvarCoin__SpotDeviationTooHigh.selector;
 
     function _assertExpectedError(
         bytes memory reason,
@@ -205,8 +206,9 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             deployToCurveCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](1);
+            bytes4[] memory allowed = new bytes4[](2);
             allowed[0] = ERR_NOTHING_TO_DEPLOY;
+            allowed[1] = ERR_SPOT_DEVIATION;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -221,8 +223,9 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             replenishBufferCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](1);
+            bytes4[] memory allowed = new bytes4[](2);
             allowed[0] = ERR_NOTHING_TO_DEPLOY;
+            allowed[1] = ERR_SPOT_DEVIATION;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -298,13 +301,14 @@ contract InvarCoinHandler is Test {
 
         uint256 supplyBefore3 = ic.totalSupply();
         try ic.lpDeposit(usdcAmount, bearAmount, currentActor, 0) returns (uint256 minted) {
-            ghost_totalDeposited += usdcAmount + bearAmount / 1e12;
+            ghost_totalDeposited += usdcAmount + bearAmount * curve.priceMultiplier() / 1e30;
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore3;
             lpDepositCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
+            bytes4[] memory allowed = new bytes4[](3);
             allowed[0] = ERR_ZERO_AMOUNT;
             allowed[1] = ERR_STALE_PRICE;
+            allowed[2] = ERR_SPOT_DEVIATION;
             _assertExpectedError(reason, allowed);
         }
     }
@@ -330,6 +334,8 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         bear = new MockBEAR();
         curveLp = new MockCurveLpToken();
         curve = new MockCurvePool(address(usdc), address(bear), address(curveLp));
+
+        curve.setPriceMultiplier(1.2e18);
 
         ic = new InvarCoin(address(usdc), address(bear), address(curveLp), address(curve), address(oracle), address(0));
 
