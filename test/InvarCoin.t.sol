@@ -803,6 +803,134 @@ contract InvarCoinTest is Test {
         assertEq(ic.trackedLpBalance(), 0, "Tracked should be zero after emergency");
     }
 
+    function test_TrackedLpBalance_ProportionalReductionOnWithdraw() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costBefore = ic.curveLpCostVp();
+
+        // Donate LP to create divergence between balanceOf and trackedLpBalance
+        curveLp.mint(address(ic), trackedBefore);
+        assertEq(curveLp.balanceOf(address(ic)), trackedBefore * 2);
+
+        // Alice withdraws 50% of her shares
+        uint256 aliceShares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.withdraw(aliceShares / 2, alice, 0);
+
+        uint256 trackedAfter = ic.trackedLpBalance();
+        uint256 costAfter = ic.curveLpCostVp();
+
+        // Both should decrease by the same proportion (lpShare / lpBal)
+        // lpBal was 2x tracked, lpShare ~50% of lpBal, so reduction ~50% of each
+        assertGt(trackedAfter, 0, "Tracked balance must not be wiped to zero");
+        assertApproxEqRel(
+            trackedAfter * 1e18 / trackedBefore,
+            costAfter * 1e18 / costBefore,
+            0.01e18,
+            "Tracked and cost basis must decrease proportionally"
+        );
+    }
+
+    function test_TrackedLpBalance_HarvestSurvivesDonationPlusWithdraw() public {
+        // Setup: Alice and Bob deposit, deploy to Curve, stake for yield
+        vm.prank(alice);
+        ic.deposit(50_000e6, alice);
+        vm.prank(bob);
+        ic.deposit(50_000e6, bob);
+        ic.deployToCurve(0);
+
+        uint256 stakeAmount = ic.balanceOf(bob);
+        vm.startPrank(bob);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, bob);
+        vm.stopPrank();
+
+        // Donate LP equal to tracked balance
+        uint256 trackedBefore = ic.trackedLpBalance();
+        curveLp.mint(address(ic), trackedBefore);
+
+        // Alice withdraws all her shares (50% of supply)
+        uint256 aliceShares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.withdraw(aliceShares, alice, 0);
+
+        // trackedLpBalance must remain > 0 for harvest to work
+        assertGt(ic.trackedLpBalance(), 0, "Tracked LP must survive donation + withdraw");
+
+        // VP growth should still produce harvestable yield for remaining stakers
+        curve.setVirtualPrice(1.05e18);
+        uint256 harvested = ic.harvest();
+        assertGt(harvested, 0, "Harvest must still work after donation + withdraw");
+    }
+
+    function test_TrackedLpBalance_ProportionalReductionOnReplenish() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costBefore = ic.curveLpCostVp();
+
+        // Donate LP via real add_liquidity so pool reserves stay consistent
+        address donor = makeAddr("donor");
+        usdc.mint(donor, 10_000e6);
+        vm.startPrank(donor);
+        usdc.approve(address(curve), type(uint256).max);
+        uint256 donatedLp = curve.add_liquidity([uint256(10_000e6), 0], 0);
+        curveLp.transfer(address(ic), donatedLp);
+        vm.stopPrank();
+
+        // Drain buffer to trigger replenish
+        uint256 localUsdc = usdc.balanceOf(address(ic));
+        deal(address(usdc), address(ic), localUsdc / 10);
+        ic.replenishBuffer();
+
+        uint256 trackedAfter = ic.trackedLpBalance();
+        uint256 costAfter = ic.curveLpCostVp();
+
+        // Both must decrease by the same proportion
+        assertGt(trackedAfter, 0, "Tracked balance must not be wiped to zero");
+        assertApproxEqRel(
+            trackedAfter * 1e18 / trackedBefore,
+            costAfter * 1e18 / costBefore,
+            0.01e18,
+            "Replenish must reduce tracked and cost basis proportionally"
+        );
+    }
+
+    function test_TrackedLpBalance_ProportionalReductionOnLpWithdraw() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+        vm.prank(bob);
+        ic.deposit(100_000e6, bob);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costBefore = ic.curveLpCostVp();
+
+        // Donate LP
+        curveLp.mint(address(ic), trackedBefore);
+
+        // Alice uses lpWithdraw for 50% of supply
+        uint256 aliceShares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.lpWithdraw(aliceShares, 0, 0);
+
+        uint256 trackedAfter = ic.trackedLpBalance();
+        uint256 costAfter = ic.curveLpCostVp();
+
+        assertGt(trackedAfter, 0, "Tracked balance must not be wiped to zero");
+        assertApproxEqRel(
+            trackedAfter * 1e18 / trackedBefore,
+            costAfter * 1e18 / costBefore,
+            0.01e18,
+            "lpWithdraw must reduce tracked and cost basis proportionally"
+        );
+    }
+
     // ==========================================
     // REPLENISH BUFFER
     // ==========================================
