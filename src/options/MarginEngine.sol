@@ -264,8 +264,7 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
 
         uint256 sharesOwedToBuyers = 0;
         if (s.settlementPrice > s.strike) {
-            uint256 outstandingOptions = IOptionToken(s.optionToken).totalSupply();
-            uint256 assetPayout = (outstandingOptions * (s.settlementPrice - s.strike)) / s.settlementPrice;
+            uint256 assetPayout = (optionsMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
 
             uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
             sharesOwedToBuyers = (assetPayout * oneShare) / s.settlementShareRate;

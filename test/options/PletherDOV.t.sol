@@ -30,6 +30,14 @@ contract MockOptionERC20 is ERC20 {
         _mint(to, amount);
     }
 
+    function burn(
+        address from,
+        uint256 amount
+    ) external {
+        require(msg.sender == minter, "not minter");
+        _burn(from, amount);
+    }
+
 }
 
 // ─── Inline Mock: StakedToken for DOV ───────────────────────────────────
@@ -129,6 +137,13 @@ contract MockMarginEngine {
         if (shares > 0) {
             stakedToken.safeTransfer(msg.sender, shares);
         }
+    }
+
+    function exercise(
+        uint256 seriesId,
+        uint256 optionsAmount
+    ) external {
+        MockOptionERC20(_series[seriesId].optionToken).burn(msg.sender, optionsAmount);
     }
 
     function series(
@@ -403,6 +418,52 @@ contract PletherDOVTest is Test {
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
         assertGt(stakedToken.balanceOf(address(dov)), 0, "DOV should hold staked tokens after epoch 2");
+    }
+
+    // ==========================================
+    // AUDIT: FAILING TESTS
+    // ==========================================
+
+    /// @dev C-1: reclaimCollateral has no access control — anyone can call it
+    /// for a filled epoch, draining collateral before settleEpoch runs.
+    /// With the real MarginEngine this permanently bricks the DOV in LOCKED state.
+    function test_AUDIT_C1_ReclaimCollateral_RevertsForFilledEpoch() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        marginEngine.settle(1);
+
+        // Should revert: epoch was filled (winningMaker != address(0)),
+        // only settleEpoch should be able to unlock this collateral.
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.reclaimCollateral(1);
+    }
+
+    function test_ExerciseUnsoldOptions_BurnsAfterCancel() public {
+        _startAuction();
+
+        vm.warp(block.timestamp + 2 hours);
+        dov.cancelAuction();
+
+        marginEngine.settle(1);
+
+        (,,, address optAddr,,,) = marginEngine.series(1);
+        uint256 optionBalance = IERC20(optAddr).balanceOf(address(dov));
+        assertGt(optionBalance, 0, "DOV holds unsold options");
+
+        dov.exerciseUnsoldOptions(1);
+
+        assertEq(IERC20(optAddr).balanceOf(address(dov)), 0, "all options burned after exercise");
+    }
+
+    function test_ExerciseUnsoldOptions_RevertsForFilledEpoch() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.exerciseUnsoldOptions(1);
     }
 
 }

@@ -491,11 +491,11 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId);
 
-        // Bob exercises only half
+        // Bob exercises ALL options
         vm.prank(bob);
-        engine.exercise(seriesId, 50e18);
+        engine.exercise(seriesId, 100e18);
 
-        // Alice unlocks — now only reserves for the 50e18 still outstanding
+        // Alice unlocks remaining collateral
         vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
@@ -524,11 +524,7 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 30e18);
 
-        // 70e18 options remain outstanding
-        uint256 remaining = opt.totalSupply();
-        assertEq(remaining, 70e18);
-
-        uint256 assetOwed = (remaining * (settlementPrice - 90e6)) / settlementPrice;
+        uint256 assetOwed = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
         uint256 sharesOwed = (assetOwed * ONE_SHARE) / settlementShareRate;
         uint256 expectedReturn = lockedShares - sharesOwed;
 
@@ -622,6 +618,107 @@ contract MarginEngineTest is Test {
 
         assertEq(engine.writerLockedShares(seriesId, alice), 0);
         assertEq(engine.writerOptions(seriesId, alice), 0);
+    }
+
+    // ==========================================
+    // AUDIT: FAILING TESTS
+    // ==========================================
+
+    /// @dev C-2: unlockCollateral reverts when >50% of options have been exercised.
+    /// The totalSupply() approach makes sharesToReturn exceed the engine's actual balance
+    /// because payoutFor(remaining=40) < payoutFor(exercised=60).
+    function test_AUDIT_C2_UnlockCollateral_SucceedsAfterMajorityExercise() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId);
+
+        // Bob exercises 60 of 100 (majority)
+        vm.prank(bob);
+        engine.exercise(seriesId, 60e18);
+
+        // Writer should be able to unlock remaining collateral.
+        // Bug: reverts with ERC20InsufficientBalance because the engine
+        // tries to send more shares than it holds.
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        assertEq(engine.writerLockedShares(seriesId, alice), 0, "writer position cleared");
+    }
+
+    /// @dev H-1: With two writers for the same series, each unlockCollateral
+    /// reserves for the GLOBAL totalSupply instead of the writer's proportional share.
+    /// The engine retains 2x the correct reserve, stranding half as unrecoverable.
+    function test_AUDIT_H1_UnlockCollateral_MultiWriter_FairDistribution() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        // Two writers, 50e18 options each
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 50e18);
+        vm.prank(bob);
+        engine.mintOptions(seriesId, 50e18);
+
+        // Transfer all options to keeper (simulating auction sale)
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(keeper, 50e18);
+        vm.prank(bob);
+        opt.transfer(keeper, 50e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId);
+
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+
+        // Both writers unlock (no exercises yet)
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+        vm.prank(bob);
+        engine.unlockCollateral(seriesId);
+
+        // Engine should retain exactly enough for 100e18 outstanding options.
+        // Per-writer accounting: each writer reserved for their own 50e18 minted options.
+        uint256 assetPayoutPerWriter = (50e18 * (settlementPrice - 90e6)) / settlementPrice;
+        uint256 reservePerWriter = (assetPayoutPerWriter * ONE_SHARE) / settlementShareRate;
+        uint256 correctReserve = reservePerWriter * 2;
+
+        uint256 engineBalance = stakedBear.balanceOf(address(engine));
+        assertEq(engineBalance, correctReserve, "engine retains only what option holders need");
+    }
+
+    /// @dev H-2: After a cancelled auction, the writer (DOV) still holds unsold options.
+    /// The fix: writer exercises their own options before unlocking, recovering full collateral
+    /// via exercise payout + unlock return = lockedShares.
+    function test_AUDIT_H2_UnlockCollateral_FullRecoveryWhenNoOptionsSold() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId);
+
+        uint256 aliceBefore = stakedBear.balanceOf(alice);
+
+        // Writer exercises their own unsold options (simulating DOV.exerciseUnsoldOptions)
+        vm.prank(alice);
+        engine.exercise(seriesId, 100e18);
+
+        // Then unlocks remaining collateral
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
+        assertEq(aliceReceived, lockedShares, "writer recovers full collateral via exercise + unlock");
     }
 
     // ==========================================
