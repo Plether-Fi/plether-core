@@ -454,7 +454,7 @@ contract InvarCoinTest is Test {
         ic.redeployToCurve(0);
     }
 
-    function test_EmergencyLpWithdraw_WorksDuringEmergency() public {
+    function test_LpWithdraw_WorksDuringEmergency() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
         ic.deployToCurve();
@@ -463,19 +463,9 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.emergencyLpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0, "Should receive USDC during emergency");
-    }
-
-    function test_EmergencyLpWithdraw_RevertsWhenNotEmergency() public {
-        vm.prank(alice);
-        ic.deposit(10_000e6, alice);
-
-        uint256 bal = ic.balanceOf(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__NotEmergency.selector);
-        vm.prank(alice);
-        ic.emergencyLpWithdraw(bal, 0, 0);
     }
 
     function test_Withdraw_RevertsWhenPaused() public {
@@ -826,7 +816,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.emergencyLpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
 
         assertGt(usdcOut, 0, "Should return USDC");
         assertGt(bearOut, 0, "Should return raw BEAR post-emergency");

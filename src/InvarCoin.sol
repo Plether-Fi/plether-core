@@ -113,7 +113,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     error InvarCoin__AlreadySet();
     error InvarCoin__SpotDeviationTooHigh();
     error InvarCoin__UseLpWithdraw();
-    error InvarCoin__NotEmergency();
 
     constructor(
         address _usdc,
@@ -326,18 +325,6 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         uint256 minUsdcOut,
         uint256 minBearOut
     ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
-        (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
-    }
-
-    /// @notice Emergency LP withdrawal: oracle-free exit, only available after emergencyWithdrawFromCurve.
-    function emergencyLpWithdraw(
-        uint256 glUsdAmount,
-        uint256 minUsdcOut,
-        uint256 minBearOut
-    ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
-        if (!emergencyActive) {
-            revert InvarCoin__NotEmergency();
-        }
         (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
     }
 
