@@ -1,0 +1,406 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.33;
+
+import {PletherDOV} from "../../src/options/PletherDOV.sol";
+import {MockUSDCPermit} from "../utils/MockUSDCPermit.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "forge-std/Test.sol";
+
+// ─── Inline Mock: Option ERC20 ─────────────────────────────────────────
+
+contract MockOptionERC20 is ERC20 {
+
+    address public minter;
+
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        address _minter
+    ) ERC20(name_, symbol_) {
+        minter = _minter;
+    }
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
+        require(msg.sender == minter, "not minter");
+        _mint(to, amount);
+    }
+
+}
+
+// ─── Inline Mock: StakedToken for DOV ───────────────────────────────────
+
+contract MockStakedTokenForDOV is ERC20 {
+
+    constructor(
+        string memory name_,
+        string memory symbol_
+    ) ERC20(name_, symbol_) {}
+
+    function decimals() public pure override returns (uint8) {
+        return 21;
+    }
+
+    function convertToAssets(
+        uint256 shares
+    ) external pure returns (uint256) {
+        return shares / 1e3;
+    }
+
+    function previewWithdraw(
+        uint256 assets
+    ) external pure returns (uint256) {
+        return assets * 1e3;
+    }
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
+        _mint(to, amount);
+    }
+
+}
+
+// ─── Inline Mock: MarginEngine ──────────────────────────────────────────
+
+contract MockMarginEngine {
+
+    using SafeERC20 for IERC20;
+
+    struct MockSeries {
+        bool isBull;
+        uint256 strike;
+        uint256 expiry;
+        address optionToken;
+        uint256 settlementPrice;
+        uint256 settlementShareRate;
+        bool isSettled;
+    }
+
+    IERC20 public stakedToken;
+    uint256 public nextId = 1;
+    mapping(uint256 => MockSeries) internal _series;
+    mapping(uint256 => uint256) public sharesLocked;
+
+    constructor(
+        address _stakedToken
+    ) {
+        stakedToken = IERC20(_stakedToken);
+    }
+
+    function createSeries(
+        bool isBull,
+        uint256 strike,
+        uint256 expiry,
+        string memory name,
+        string memory sym
+    ) external returns (uint256 id) {
+        id = nextId++;
+        MockOptionERC20 token = new MockOptionERC20(name, sym, address(this));
+        _series[id] = MockSeries(isBull, strike, expiry, address(token), 0, 0, false);
+    }
+
+    function mintOptions(
+        uint256 seriesId,
+        uint256 optionsAmount
+    ) external {
+        uint256 shares = optionsAmount * 1e3; // 1:1 rate, 21 vs 18 dec
+        stakedToken.safeTransferFrom(msg.sender, address(this), shares);
+        MockOptionERC20(_series[seriesId].optionToken).mint(msg.sender, optionsAmount);
+        sharesLocked[seriesId] += shares;
+    }
+
+    function settle(
+        uint256 seriesId
+    ) external {
+        _series[seriesId].isSettled = true;
+    }
+
+    function unlockCollateral(
+        uint256 seriesId
+    ) external {
+        uint256 shares = sharesLocked[seriesId];
+        sharesLocked[seriesId] = 0;
+        if (shares > 0) {
+            stakedToken.safeTransfer(msg.sender, shares);
+        }
+    }
+
+    function series(
+        uint256 seriesId
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool) {
+        MockSeries storage s = _series[seriesId];
+        return (s.isBull, s.strike, s.expiry, s.optionToken, s.settlementPrice, s.settlementShareRate, s.isSettled);
+    }
+
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────────
+
+contract PletherDOVTest is Test {
+
+    MockStakedTokenForDOV public stakedToken;
+    MockUSDCPermit public usdc;
+    MockMarginEngine public marginEngine;
+    PletherDOV public dov;
+
+    address alice = address(0x1); // depositor
+    address maker = address(0x2); // market maker
+
+    uint256 constant INITIAL_STAKED = 1000e21; // 1000 assets worth of staked tokens (21 dec)
+    uint256 constant USDC_BALANCE = 100_000e6;
+
+    function setUp() public {
+        vm.warp(1_735_689_600);
+
+        stakedToken = new MockStakedTokenForDOV("splDXY-BEAR", "splBEAR");
+        usdc = new MockUSDCPermit();
+
+        marginEngine = new MockMarginEngine(address(stakedToken));
+
+        dov = new PletherDOV("BEAR DOV", "bDOV", address(marginEngine), address(stakedToken), address(usdc), false);
+
+        // Fund DOV with staked tokens
+        stakedToken.mint(address(dov), INITIAL_STAKED);
+
+        // Fund users
+        usdc.mint(alice, USDC_BALANCE);
+        usdc.mint(maker, USDC_BALANCE);
+
+        vm.prank(alice);
+        usdc.approve(address(dov), type(uint256).max);
+        vm.prank(maker);
+        usdc.approve(address(dov), type(uint256).max);
+    }
+
+    // ==========================================
+    // HELPERS
+    // ==========================================
+
+    function _startAuction() internal returns (uint256 epochId) {
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+        epochId = dov.currentEpochId();
+    }
+
+    // ==========================================
+    // deposit
+    // ==========================================
+
+    function test_Deposit_QueuesUsdc() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        assertEq(dov.userUsdcDeposits(alice), 1000e6);
+        assertEq(dov.pendingUsdcDeposits(), 1000e6);
+        assertEq(usdc.balanceOf(address(dov)), 1000e6);
+    }
+
+    function test_Deposit_MultipleAccumulate() public {
+        vm.prank(alice);
+        dov.deposit(500e6);
+        vm.prank(alice);
+        dov.deposit(300e6);
+
+        assertEq(dov.userUsdcDeposits(alice), 800e6);
+        assertEq(dov.pendingUsdcDeposits(), 800e6);
+    }
+
+    function test_Deposit_RevertsOnZeroAmount() public {
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
+        dov.deposit(0);
+    }
+
+    // ==========================================
+    // startEpochAuction
+    // ==========================================
+
+    function test_StartEpochAuction_CreatesSeriesAndStartsAuction() public {
+        _startAuction();
+
+        assertEq(dov.currentEpochId(), 1);
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+
+        (
+            uint256 seriesId,
+            uint256 optionsMinted,
+            uint256 auctionStartTime,
+            uint256 maxPremium,
+            uint256 minPremium,
+            uint256 auctionDuration,
+            address winner
+        ) = dov.epochs(1);
+
+        assertEq(seriesId, 1);
+        assertGt(optionsMinted, 0);
+        assertEq(auctionStartTime, block.timestamp);
+        assertEq(maxPremium, 1e6);
+        assertEq(minPremium, 100_000);
+        assertEq(auctionDuration, 1 hours);
+        assertEq(winner, address(0));
+    }
+
+    function test_StartEpochAuction_RevertsFromNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    function test_StartEpochAuction_RevertsIfNotUnlocked() public {
+        _startAuction();
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    // ==========================================
+    // getCurrentOptionPrice
+    // ==========================================
+
+    function test_GetCurrentOptionPrice_MaxAtStart() public {
+        _startAuction();
+        assertEq(dov.getCurrentOptionPrice(), 1e6);
+    }
+
+    function test_GetCurrentOptionPrice_MinAtEnd() public {
+        _startAuction();
+        vm.warp(block.timestamp + 1 hours);
+        assertEq(dov.getCurrentOptionPrice(), 100_000);
+    }
+
+    function test_GetCurrentOptionPrice_DecaysLinearly() public {
+        _startAuction();
+        vm.warp(block.timestamp + 30 minutes); // halfway
+        uint256 price = dov.getCurrentOptionPrice();
+        uint256 midpoint = (1e6 + 100_000) / 2;
+        assertEq(price, midpoint);
+    }
+
+    // ==========================================
+    // fillAuction
+    // ==========================================
+
+    function test_FillAuction_TransfersPremiumAndOptions() public {
+        _startAuction();
+
+        (, uint256 optionsMinted,,,,,) = dov.epochs(1);
+        uint256 currentPremium = dov.getCurrentOptionPrice();
+        uint256 expectedPremium = (optionsMinted * currentPremium) / 1e18;
+
+        uint256 makerUsdcBefore = usdc.balanceOf(maker);
+
+        vm.prank(maker);
+        dov.fillAuction();
+
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.LOCKED));
+
+        // Maker paid USDC premium
+        assertEq(makerUsdcBefore - usdc.balanceOf(maker), expectedPremium);
+
+        // Maker received option tokens
+        (,,, address optAddr,,,) = marginEngine.series(1);
+        assertEq(IERC20(optAddr).balanceOf(maker), optionsMinted);
+    }
+
+    function test_FillAuction_RevertsIfNotAuctioning() public {
+        vm.prank(maker);
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.fillAuction();
+    }
+
+    function test_FillAuction_RevertsAfterDuration() public {
+        _startAuction();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(maker);
+        vm.expectRevert(PletherDOV.PletherDOV__AuctionEnded.selector);
+        dov.fillAuction();
+    }
+
+    /// @dev Known bug: if auction expires without a fill, the vault is stuck in AUCTIONING
+    /// state forever because there is no cancel/expire mechanism.
+    function test_FillAuction_StuckVaultBug() public {
+        _startAuction();
+        vm.warp(block.timestamp + 2 hours); // well past auction
+
+        // Can't fill — auction ended
+        vm.prank(maker);
+        vm.expectRevert(PletherDOV.PletherDOV__AuctionEnded.selector);
+        dov.fillAuction();
+
+        // Can't start new auction — still AUCTIONING
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+
+        // Can't settle — not LOCKED
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.settleEpoch();
+
+        // State is permanently AUCTIONING
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+    }
+
+    // ==========================================
+    // settleEpoch
+    // ==========================================
+
+    function test_SettleEpoch_UnlocksAndResetsState() public {
+        _startAuction();
+
+        vm.prank(maker);
+        dov.fillAuction();
+
+        // Settle the series in the margin engine first
+        marginEngine.settle(1);
+
+        uint256 stakedBefore = stakedToken.balanceOf(address(dov));
+        dov.settleEpoch();
+
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+        assertGt(stakedToken.balanceOf(address(dov)), stakedBefore, "DOV should receive collateral back");
+    }
+
+    function test_SettleEpoch_RevertsIfNotLocked() public {
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.settleEpoch();
+    }
+
+    // ==========================================
+    // FULL LIFECYCLE
+    // ==========================================
+
+    function test_FullLifecycle_TwoEpochs() public {
+        // ── Epoch 1 ──
+        _startAuction();
+
+        vm.prank(maker);
+        dov.fillAuction();
+
+        marginEngine.settle(1);
+        dov.settleEpoch();
+
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+        uint256 stakedAfterEpoch1 = stakedToken.balanceOf(address(dov));
+        assertGt(stakedAfterEpoch1, 0, "DOV should hold staked tokens after epoch 1");
+
+        // ── Epoch 2 ──
+        dov.startEpochAuction(95e6, block.timestamp + 7 days, 800_000, 50_000, 2 hours);
+        assertEq(dov.currentEpochId(), 2);
+
+        vm.warp(block.timestamp + 1 hours); // let price decay
+
+        vm.prank(maker);
+        dov.fillAuction();
+
+        marginEngine.settle(2);
+        dov.settleEpoch();
+
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+        assertGt(stakedToken.balanceOf(address(dov)), 0, "DOV should hold staked tokens after epoch 2");
+    }
+
+}
