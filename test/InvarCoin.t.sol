@@ -357,7 +357,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 aliceShares = ic.balanceOf(alice);
         uint256 bigWithdraw = (aliceShares * 30) / 100;
@@ -380,7 +380,7 @@ contract InvarCoinTest is Test {
     function test_Withdraw_RevertsAfterEmergency() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         ic.emergencyWithdrawFromCurve();
         ic.unpause();
@@ -396,7 +396,7 @@ contract InvarCoinTest is Test {
     function test_Withdraw_WorksAfterEmergencyCleared() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // Seed pool with BEAR so remove_liquidity returns both tokens
         curve.setBearBalance(5000e18);
@@ -420,7 +420,7 @@ contract InvarCoinTest is Test {
     function test_RedeployToCurve_DeploysBothTokens() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setBearBalance(5000e18);
         bearToken.mint(address(curve), 5000e18);
@@ -457,7 +457,7 @@ contract InvarCoinTest is Test {
     function test_LpWithdraw_WorksDuringEmergency() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         ic.emergencyWithdrawFromCurve();
 
@@ -483,7 +483,7 @@ contract InvarCoinTest is Test {
     function test_LpWithdraw_AllowedWhenPaused() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         ic.pause();
 
@@ -513,7 +513,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -532,7 +532,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
@@ -548,7 +548,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        uint256 lpMinted = ic.deployToCurve();
+        uint256 lpMinted = ic.deployToCurve(0);
 
         assertGt(lpMinted, 0);
         assertGt(curveLp.balanceOf(address(ic)), 0);
@@ -559,7 +559,7 @@ contract InvarCoinTest is Test {
         ic.deposit(500e6, alice);
 
         vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
     }
 
     function test_DeployToCurve_RevertsWhenPaused() public {
@@ -569,7 +569,7 @@ contract InvarCoinTest is Test {
         ic.pause();
 
         vm.expectRevert();
-        ic.deployToCurve();
+        ic.deployToCurve(0);
     }
 
     function test_DeployToCurve_RevertsOnSpotManipulation() public {
@@ -579,7 +579,7 @@ contract InvarCoinTest is Test {
         curve.setSpotDiscountBps(600);
 
         vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
     }
 
     function test_DeployToCurve_AllowsNormalSpotDrift() public {
@@ -588,7 +588,7 @@ contract InvarCoinTest is Test {
 
         curve.setSpotDiscountBps(30);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
     }
 
     // ==========================================
@@ -613,7 +613,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
 
@@ -634,7 +634,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.02e18);
 
@@ -652,7 +652,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // BEAR price rises 20% — lp_price goes up but virtual_price unchanged
         curve.setPriceMultiplier(1.2e18);
@@ -671,7 +671,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // 5% fee yield (VP up) + 20% price appreciation (multiplier up)
         curve.setVirtualPrice(1.05e18);
@@ -700,7 +700,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // Simulate buffer drain (e.g., external event that depletes USDC)
         uint256 localUsdc = usdc.balanceOf(address(ic));
@@ -716,7 +716,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         deal(address(usdc), address(ic), 0);
 
@@ -741,7 +741,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 total = ic.totalAssets();
         assertApproxEqRel(total, 20_000e6, 0.02e18);
@@ -771,7 +771,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         ic.emergencyWithdrawFromCurve();
 
@@ -831,7 +831,7 @@ contract InvarCoinTest is Test {
     function test_EmergencyWithdrawFromCurve_WorksWhenAlreadyPaused() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         ic.pause();
         assertTrue(ic.paused());
@@ -845,7 +845,7 @@ contract InvarCoinTest is Test {
     function test_RedeployToCurve_WorksWhenPaused() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setBearBalance(5000e18);
         bearToken.mint(address(curve), 5000e18);
@@ -910,7 +910,7 @@ contract InvarCoinTest is Test {
 
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 total = ic.totalAssets();
         assertGt(total, 0);
@@ -920,7 +920,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 navAtDefault = ic.totalAssets();
 
@@ -938,7 +938,7 @@ contract InvarCoinTest is Test {
         vm.prank(bob);
         ic.deposit(20_000e6, bob);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 aliceBal = ic.balanceOf(alice);
         uint256 bobBal = ic.balanceOf(bob);
@@ -957,7 +957,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // Pump oracle to $2.00 while Curve EMA stays stale-low
         oracle.updatePrice(200_000_000);
@@ -988,7 +988,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
 
@@ -1007,7 +1007,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -1154,7 +1154,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(depositAmount, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
@@ -1175,7 +1175,7 @@ contract InvarCoinTest is Test {
         ic.deposit(amount, alice);
 
         uint256 navBefore = ic.totalAssets();
-        ic.deployToCurve();
+        ic.deployToCurve(0);
         uint256 navAfter = ic.totalAssets();
 
         assertApproxEqRel(navAfter, navBefore, 0.01e18, "Deploy should preserve NAV within 1%");
@@ -1223,7 +1223,7 @@ contract InvarCoinTest is Test {
 
         assertEq(ic.curveLpCostVp(), 0);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         assertGt(ic.curveLpCostVp(), 0);
     }
@@ -1232,7 +1232,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         deal(address(usdc), address(ic), 0);
 
@@ -1246,7 +1246,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 costBefore = ic.curveLpCostVp();
         assertGt(costBefore, 0);
@@ -1262,7 +1262,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
         assertGt(ic.curveLpCostVp(), 0);
 
         ic.emergencyWithdrawFromCurve();
@@ -1280,7 +1280,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
         curve.setVirtualPrice(1.004e18);
 
         uint256 toWithdraw = ic.balanceOf(alice) / 50;
@@ -1309,7 +1309,7 @@ contract InvarCoinTest is Test {
     function test_LpWithdraw_SurvivesStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
@@ -1324,7 +1324,7 @@ contract InvarCoinTest is Test {
     function test_Withdraw_SucceedsWithStaleOracleAndPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
         oracle.setUpdatedAt(block.timestamp - 25 hours);
@@ -1342,7 +1342,7 @@ contract InvarCoinTest is Test {
 
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
         assertGt(curveLp.balanceOf(address(ic)), 0, "deployToCurve should succeed with stale oracle");
     }
 
@@ -1356,7 +1356,7 @@ contract InvarCoinTest is Test {
         sInvar.deposit(stakeAmount, alice);
         vm.stopPrank();
 
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
 

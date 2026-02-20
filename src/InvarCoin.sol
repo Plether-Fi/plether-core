@@ -278,7 +278,8 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     }
 
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
-    /// @dev User pays any AMM single-sided penalty; minUsdcOut is their protection.
+    /// @dev Intentionally skips _harvest() to guarantee withdrawal liveness during oracle outages.
+    ///      Unharvested LP yield embedded in burned tokens is forfeited by the withdrawing user.
     function withdraw(
         uint256 glUsdAmount,
         address receiver,
@@ -319,7 +320,8 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     // ==========================================
 
     /// @notice LP withdrawal: bypasses buffer and unwinds Curve LP pro-rata.
-    /// @dev User receives a mix of USDC and BEAR, paying AMM gas/slippage themselves.
+    /// @dev Intentionally skips _harvest() to guarantee withdrawal liveness during oracle outages.
+    ///      Unharvested LP yield embedded in burned tokens is forfeited by the withdrawing user.
     function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
@@ -474,7 +476,10 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     }
 
     /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
-    function deployToCurve() external nonReentrant whenNotPaused returns (uint256 lpMinted) {
+    /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
+    function deployToCurve(
+        uint256 maxUsdc
+    ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -485,6 +490,9 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         }
 
         uint256 usdcToDeploy = localUsdc - bufferTarget;
+        if (maxUsdc > 0 && maxUsdc < usdcToDeploy) {
+            usdcToDeploy = maxUsdc;
+        }
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);

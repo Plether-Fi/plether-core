@@ -115,7 +115,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         _pumpBear(40_000_000e6);
 
         vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
     }
 
     // ==========================================
@@ -126,7 +126,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_ReplenishBuffer_FlashMintSandwich_Blocked() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -149,7 +149,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_ReplenishBuffer_DumpAttack_Blocked() public {
         _depositAs(alice, 1_000_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         // Drain buffer below target so replenishBuffer is callable
         deal(USDC, address(ic), 0);
@@ -166,7 +166,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_DepositWithdraw_Manipulation_Unprofitable() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 attackerUsdcBefore = IERC20(USDC).balanceOf(attacker);
 
@@ -270,7 +270,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_Harvest_PhantomYield_Blocked() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 aliceShares = ic.balanceOf(alice);
         vm.startPrank(alice);
@@ -335,7 +335,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_LpWithdraw_AfterManipulation_UserProtected() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 aliceShares = ic.balanceOf(alice);
 
@@ -365,7 +365,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
     function test_FullSandwich_DepositDeployWithdraw_Unprofitable() public {
         _depositAs(alice, 500_000e6);
-        ic.deployToCurve();
+        ic.deployToCurve(0);
 
         uint256 honestNavBefore = ic.totalAssets();
         uint256 attackerUsdcBefore = IERC20(USDC).balanceOf(attacker);
