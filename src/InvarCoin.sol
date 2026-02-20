@@ -539,7 +539,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
     function redeployToCurve(
         uint256 minLpOut
-    ) external onlyOwner nonReentrant whenNotPaused {
+    ) external onlyOwner nonReentrant {
         uint256 bearBal = BEAR.balanceOf(address(this));
         if (bearBal == 0) {
             revert InvarCoin__NothingToDeploy();
@@ -562,7 +562,9 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         curveLpCostVp = 0;
         emergencyActive = true;
-        _pause();
+        if (!paused()) {
+            _pause();
+        }
 
         uint256[2] memory received;
         if (lpBal > 0) {

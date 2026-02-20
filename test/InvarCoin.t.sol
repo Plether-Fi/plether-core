@@ -828,6 +828,35 @@ contract InvarCoinTest is Test {
         ic.emergencyWithdrawFromCurve();
     }
 
+    function test_EmergencyWithdrawFromCurve_WorksWhenAlreadyPaused() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve();
+
+        ic.pause();
+        assertTrue(ic.paused());
+
+        ic.emergencyWithdrawFromCurve();
+
+        assertTrue(ic.paused());
+        assertEq(curveLp.balanceOf(address(ic)), 0);
+    }
+
+    function test_RedeployToCurve_WorksWhenPaused() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice);
+        ic.deployToCurve();
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        ic.emergencyWithdrawFromCurve();
+
+        assertTrue(ic.paused());
+        ic.redeployToCurve(0);
+        assertFalse(ic.emergencyActive());
+    }
+
     // ==========================================
     // RESCUE TOKEN
     // ==========================================
