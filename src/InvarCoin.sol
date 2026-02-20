@@ -404,7 +404,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (expectedLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp);
+        uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -492,7 +492,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (calcLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp);
+        lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp > 0 ? calcLp - 1 : 0);
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
@@ -524,7 +524,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         if (calcOut * BPS < emaExpectedUsdc * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut);
+        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut > 0 ? calcOut - 1 : 0);
 
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
