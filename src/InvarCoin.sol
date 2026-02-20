@@ -87,6 +87,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
     StakedToken public stakedInvarCoin;
     uint256 public curveLpCostVp;
+    uint256 public trackedLpBalance;
     bool public emergencyActive;
 
     // ==========================================
@@ -280,6 +281,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
     /// @dev Intentionally skips _harvest() to guarantee withdrawal liveness during oracle outages.
     ///      Unharvested LP yield embedded in burned tokens is forfeited by the withdrawing user.
+    ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
     function withdraw(
         uint256 glUsdAmount,
         address receiver,
@@ -303,6 +305,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             if (lpShare > 0) {
                 uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
                 usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
+                trackedLpBalance -= Math.min(lpShare, trackedLpBalance);
                 curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
             }
         }
@@ -353,6 +356,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
+            trackedLpBalance -= Math.min(lpToBurn, trackedLpBalance);
             curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
             uint256[2] memory min_amounts = [uint256(0), uint256(0)];
             uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
@@ -407,6 +411,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             revert InvarCoin__SpotDeviationTooHigh();
         }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
+        trackedLpBalance += lpMinted;
 
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -441,7 +446,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
         uint256 totalYieldUsdc = 0;
 
-        uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        uint256 lpBal = trackedLpBalance;
         if (lpBal > 0) {
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
@@ -501,6 +506,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             revert InvarCoin__SpotDeviationTooHigh();
         }
         lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp > 0 ? calcLp - 1 : 0);
+        trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
@@ -533,6 +539,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             revert InvarCoin__SpotDeviationTooHigh();
         }
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut > 0 ? calcOut - 1 : 0);
+        trackedLpBalance -= lpToBurn;
 
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
@@ -560,6 +567,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
         uint256[2] memory amounts = [usdcToDeploy, bearBal];
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
+        trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
         emergencyActive = false;
 
@@ -568,6 +576,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
 
     function emergencyWithdrawFromCurve() external onlyOwner nonReentrant {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+        trackedLpBalance = 0;
         curveLpCostVp = 0;
         emergencyActive = true;
         if (!paused()) {

@@ -692,6 +692,117 @@ contract InvarCoinTest is Test {
         assertApproxEqRel(yieldValue, expectedFeeYield, 0.1e18, "Yield should reflect fees only, not price moves");
     }
 
+    function test_Harvest_IgnoresDonatedLpTokens() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
+
+        // Attacker donates LP tokens directly to InvarCoin
+        curveLp.mint(address(ic), 5000e18);
+
+        // harvest should see no yield — VP hasn't changed, only balanceOf increased
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+
+        assertEq(ic.balanceOf(address(sInvar)), sInvarBefore, "No INVAR should be minted from donation");
+    }
+
+    function test_Harvest_DonationDoesNotAmplifyRealYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+
+        // Record legitimate yield with no donation
+        curve.setVirtualPrice(1.05e18);
+        uint256 yieldWithout = ic.harvest();
+
+        // Reset: re-deposit and deploy fresh
+        curve.setVirtualPrice(1e18);
+        vm.prank(bob);
+        ic.deposit(20_000e6, bob);
+        ic.deployToCurve(0);
+
+        // Donate LP then trigger same VP growth
+        curveLp.mint(address(ic), 50_000e18);
+        curve.setVirtualPrice(1.05e18);
+        uint256 yieldWith = ic.harvest();
+
+        // Yield should be based on tracked LP, not inflated balanceOf
+        // The second harvest covers more tracked LP (bob's deposit added more),
+        // but the donated 50k LP should not contribute
+        assertLt(yieldWith, yieldWithout * 3, "Donated LP must not amplify yield disproportionately");
+    }
+
+    function test_Harvest_DonationAttackNotProfitable() public {
+        // Setup: Alice deposits and stakes, buffer deployed to Curve
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+
+        // Attacker (bob) deposits a small amount and stakes to capture yield
+        vm.prank(bob);
+        uint256 bobShares = ic.deposit(1000e6, bob);
+        vm.startPrank(bob);
+        ic.approve(address(sInvar), bobShares);
+        sInvar.deposit(bobShares, bob);
+        vm.stopPrank();
+
+        uint256 bobStakedBefore = sInvar.balanceOf(bob);
+
+        // Attacker donates LP tokens (simulating buying cheap at spot)
+        curveLp.mint(address(ic), 10_000e18);
+
+        // Even with VP unchanged, attacker tries to harvest
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+
+        // Bob's staked position should be unchanged
+        assertEq(sInvar.balanceOf(bob), bobStakedBefore, "Attacker should not gain from donation");
+    }
+
+    function test_TrackedLpBalance_TracksCorrectly() public {
+        assertEq(ic.trackedLpBalance(), 0);
+
+        // Deploy adds to tracked balance
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+        uint256 tracked = ic.trackedLpBalance();
+        assertEq(tracked, curveLp.balanceOf(address(ic)), "Tracked should match actual after deploy");
+
+        // Donation increases balanceOf but NOT tracked
+        curveLp.mint(address(ic), 1000e18);
+        assertEq(ic.trackedLpBalance(), tracked, "Tracked should NOT increase from donation");
+        assertGt(curveLp.balanceOf(address(ic)), tracked, "balanceOf should exceed tracked");
+
+        // Emergency withdraw resets tracked to 0
+        ic.emergencyWithdrawFromCurve();
+        assertEq(ic.trackedLpBalance(), 0, "Tracked should be zero after emergency");
+    }
+
     // ==========================================
     // REPLENISH BUFFER
     // ==========================================
