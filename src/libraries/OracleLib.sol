@@ -13,6 +13,7 @@ library OracleLib {
     error OracleLib__SequencerGracePeriod();
     error OracleLib__StalePrice();
     error OracleLib__InvalidPrice();
+    error OracleLib__NoPriceAtExpiry();
 
     /// @notice Check if the L2 sequencer is up and grace period has passed.
     /// @param sequencerFeed The Chainlink sequencer uptime feed.
@@ -51,6 +52,55 @@ library OracleLib {
         if (updatedAt < block.timestamp - timeout) {
             revert OracleLib__StalePrice();
         }
+    }
+
+    /// @notice Check staleness relative to a specific reference timestamp instead of block.timestamp.
+    /// @param updatedAt The timestamp when the price was last updated.
+    /// @param timeout The maximum age in seconds for a valid price.
+    /// @param referenceTime The timestamp to measure staleness against.
+    function checkStalenessAt(
+        uint256 updatedAt,
+        uint256 timeout,
+        uint256 referenceTime
+    ) internal pure {
+        if (updatedAt < referenceTime - timeout) {
+            revert OracleLib__StalePrice();
+        }
+    }
+
+    /// @notice Walks backwards through Chainlink rounds to find the price at a target timestamp.
+    /// @param feed The Chainlink price feed.
+    /// @param targetTimestamp The timestamp to look up the price for.
+    /// @param maxTraversal Maximum number of rounds to walk backwards.
+    /// @return price The price at the target timestamp.
+    /// @return updatedAt The timestamp of the round found.
+    function getHistoricalPrice(
+        AggregatorV3Interface feed,
+        uint256 targetTimestamp,
+        uint256 maxTraversal
+    ) internal view returns (int256 price, uint256 updatedAt) {
+        (uint80 roundId, int256 latestPrice,, uint256 latestUpdatedAt,) = feed.latestRoundData();
+
+        if (latestUpdatedAt <= targetTimestamp) {
+            return (latestPrice, latestUpdatedAt);
+        }
+
+        for (uint256 i = 0; i < maxTraversal; i++) {
+            if (roundId == 0) {
+                break;
+            }
+            roundId--;
+
+            try feed.getRoundData(roundId) returns (uint80, int256 p, uint256, uint256 u, uint80) {
+                if (u <= targetTimestamp) {
+                    return (p, u);
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        revert OracleLib__NoPriceAtExpiry();
     }
 
     /// @notice Get a validated price from an oracle with staleness and sequencer checks.

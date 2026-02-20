@@ -352,28 +352,25 @@ contract MarginEngineTest is Test {
         engine.settle(seriesId);
     }
 
-    function test_Settle_RevertsAfterSettlementWindow() public {
-        uint256 seriesId = _createBearSeries(90e6);
-        vm.warp(block.timestamp + 7 days + 1 hours + 1);
-        _refreshFeeds();
-        vm.expectRevert(MarginEngine.MarginEngine__SettlementWindowClosed.selector);
-        engine.settle(seriesId);
-    }
-
-    function test_Settle_SucceedsWithinSettlementWindow() public {
+    function test_Settle_SucceedsAfterLongDelay() public {
         uint256 seriesId = _createBearSeries(90e6);
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        vm.warp(block.timestamp + 7 days + 30 minutes);
+        // Refresh feeds near expiry so historical lookup finds fresh data at expiry
+        vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
+
+        // Warp 3 more days — settle should still work via historical lookup
+        vm.warp(block.timestamp + 3 days);
         engine.settle(seriesId);
 
-        (,,,,,, bool settled) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
+        assertEq(settlementPrice, BEAR_PRICE);
     }
 
-    function test_Settle_EarlyAccelerationBypassesWindow() public {
+    function test_Settle_EarlyAccelerationWorks() public {
         uint256 seriesId = _createBearSeries(90e6);
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
@@ -763,6 +760,72 @@ contract MarginEngineTest is Test {
 
         uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
         assertEq(aliceReceived, lockedShares, "writer recovers full collateral via exercise + unlock");
+    }
+
+    // ==========================================
+    // EXERCISE CAP (Finding 2)
+    // ==========================================
+
+    function test_Exercise_CapsPayoutOnNegativeYield() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        // Extreme negative yield: 1 share now worth 0.1 assets (90% loss)
+        stakedBear.setExchangeRate(1, 10);
+
+        engine.settle(seriesId);
+
+        // Transfer options to bob for exercise
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(bob, 100e18);
+
+        uint256 bobBefore = stakedBear.balanceOf(bob);
+
+        vm.prank(bob);
+        engine.exercise(seriesId, 100e18);
+
+        uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
+        assertLe(bobReceived, lockedShares, "payout capped to series collateral");
+    }
+
+    function test_Exercise_CrossSeriesIsolation() public {
+        // Series A (Alice) and Series B (Bob)
+        uint256 seriesA = _createBearSeries(90e6);
+        uint256 seriesB = engine.createSeries(false, 90e6, block.timestamp + 7 days, "BEAR-B", "oBEAR-B");
+
+        vm.prank(alice);
+        engine.mintOptions(seriesA, 100e18);
+        uint256 seriesBShares = stakedBear.previewWithdraw(100e18);
+        vm.prank(bob);
+        engine.mintOptions(seriesB, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        // Negative yield
+        stakedBear.setExchangeRate(1, 10);
+
+        engine.settle(seriesA);
+        engine.settle(seriesB);
+
+        // Alice transfers her options to keeper for exercise
+        OptionToken optA = _getOptionToken(seriesA);
+        vm.prank(alice);
+        optA.transfer(keeper, 100e18);
+
+        vm.prank(keeper);
+        engine.exercise(seriesA, 100e18);
+
+        // After exercising ALL of series A, engine must retain at least series B's locked shares
+        uint256 engineBalance = stakedBear.balanceOf(address(engine));
+        assertGe(engineBalance, seriesBShares, "series B collateral must be isolated");
     }
 
     // ==========================================

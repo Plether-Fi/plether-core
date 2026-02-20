@@ -124,40 +124,40 @@ contract SettlementOracleTest is Test {
     // ==========================================
 
     function test_GetSettlementPrices_CorrectBasketCalculation() public view {
-        (uint256 bear, uint256 bull) = oracle.getSettlementPrices();
+        (uint256 bear, uint256 bull) = oracle.getSettlementPrices(block.timestamp);
         assertEq(bear, EXPECTED_BEAR, "bearPrice should be $1.06");
         assertEq(bull, EXPECTED_BULL, "bullPrice should be $0.94");
     }
 
     function test_GetSettlementPrices_BearClampedToCAP() public {
         eurFeed.updatePrice(500_000_000); // $5.00 → basket >> CAP
-        (uint256 bear, uint256 bull) = oracle.getSettlementPrices();
+        (uint256 bear, uint256 bull) = oracle.getSettlementPrices(block.timestamp);
         assertEq(bear, CAP);
         assertEq(bull, 0);
     }
 
     function test_GetSettlementPrices_BullZeroWhenBearAtCAP() public {
         eurFeed.updatePrice(500_000_000);
-        (, uint256 bull) = oracle.getSettlementPrices();
+        (, uint256 bull) = oracle.getSettlementPrices(block.timestamp);
         assertEq(bull, 0);
     }
 
     function test_GetSettlementPrices_RevertsWhenSequencerDown() public {
         sequencerFeed.updatePrice(1); // answer=1 → DOWN
         vm.expectRevert(OracleLib.OracleLib__SequencerDown.selector);
-        oracle.getSettlementPrices();
+        oracle.getSettlementPrices(block.timestamp);
     }
 
     function test_GetSettlementPrices_RevertsInGracePeriod() public {
         sequencerFeed.setUpdatedAt(block.timestamp); // just came back up
         vm.expectRevert(OracleLib.OracleLib__SequencerGracePeriod.selector);
-        oracle.getSettlementPrices();
+        oracle.getSettlementPrices(block.timestamp);
     }
 
     function test_GetSettlementPrices_RevertsOnStaleFeed() public {
         eurFeed.setUpdatedAt(block.timestamp - 25 hours);
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
-        oracle.getSettlementPrices();
+        oracle.getSettlementPrices(block.timestamp);
     }
 
     function test_GetSettlementPrices_RevertsOnZeroPrice() public {
@@ -165,7 +165,7 @@ contract SettlementOracleTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(SettlementOracle.SettlementOracle__InvalidPrice.selector, address(eurFeed))
         );
-        oracle.getSettlementPrices();
+        oracle.getSettlementPrices(block.timestamp);
     }
 
     function test_GetSettlementPrices_RevertsOnNegativePrice() public {
@@ -173,14 +173,39 @@ contract SettlementOracleTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(SettlementOracle.SettlementOracle__InvalidPrice.selector, address(eurFeed))
         );
-        oracle.getSettlementPrices();
+        oracle.getSettlementPrices(block.timestamp);
     }
 
     function test_GetSettlementPrices_SkipsSequencerWhenZeroAddress() public {
         SettlementOracle noSeq = _deployOracle(address(0));
-        (uint256 bear, uint256 bull) = noSeq.getSettlementPrices();
+        (uint256 bear, uint256 bull) = noSeq.getSettlementPrices(block.timestamp);
         assertEq(bear, EXPECTED_BEAR);
         assertEq(bull, EXPECTED_BULL);
+    }
+
+    // ==========================================
+    // HISTORICAL PRICE LOOKUP
+    // ==========================================
+
+    function test_GetSettlementPrices_UsesHistoricalPriceAtExpiry() public {
+        // Warp forward and update prices — creates round 2 at new timestamp
+        vm.warp(block.timestamp + 1 hours);
+        eurFeed.updatePrice(130_000_000); // $1.30
+        jpyFeed.updatePrice(800_000); // $0.008
+
+        // Query at pre-warp time — historical lookup should find round 1 (initial prices)
+        uint256 expiry = block.timestamp - 1 hours;
+        (uint256 bear, uint256 bull) = oracle.getSettlementPrices(expiry);
+        assertEq(bear, EXPECTED_BEAR, "should use historical EUR price");
+        assertEq(bull, EXPECTED_BULL, "should use historical JPY price");
+    }
+
+    function test_GetSettlementPrices_RevertsWhenNoHistoricalPriceFound() public {
+        // Expiry is before any round was recorded — no round has updatedAt <= expiry
+        uint256 expiryBeforeAnyRound = 1000;
+
+        vm.expectRevert(OracleLib.OracleLib__NoPriceAtExpiry.selector);
+        oracle.getSettlementPrices(expiryBeforeAnyRound);
     }
 
     // ==========================================
@@ -197,7 +222,7 @@ contract SettlementOracleTest is Test {
         eurFeed.updatePrice(int256(eurPrice));
         jpyFeed.updatePrice(int256(jpyPrice));
 
-        (uint256 bear, uint256 bull) = oracle.getSettlementPrices();
+        (uint256 bear, uint256 bull) = oracle.getSettlementPrices(block.timestamp);
         assertEq(bear + bull, CAP, "bear + bull must equal CAP");
     }
 
@@ -211,7 +236,7 @@ contract SettlementOracleTest is Test {
         eurFeed.updatePrice(int256(eurPrice));
         jpyFeed.updatePrice(int256(jpyPrice));
 
-        (uint256 bear,) = oracle.getSettlementPrices();
+        (uint256 bear,) = oracle.getSettlementPrices(block.timestamp);
         assertLe(bear, CAP, "bear must not exceed CAP");
     }
 

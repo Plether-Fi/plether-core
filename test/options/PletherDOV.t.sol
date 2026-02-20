@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import {ISyntheticSplitter} from "../../src/interfaces/ISyntheticSplitter.sol";
 import {PletherDOV} from "../../src/options/PletherDOV.sol";
 import {MockUSDCPermit} from "../utils/MockUSDCPermit.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -74,6 +75,24 @@ contract MockStakedTokenForDOV is ERC20 {
 
 }
 
+// ─── Inline Mock: Splitter for DOV ────────────────────────────────────
+
+contract MockSplitterForDOV {
+
+    ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
+
+    function currentStatus() external view returns (ISyntheticSplitter.Status) {
+        return _status;
+    }
+
+    function setStatus(
+        ISyntheticSplitter.Status s
+    ) external {
+        _status = s;
+    }
+
+}
+
 // ─── Inline Mock: MarginEngine ──────────────────────────────────────────
 
 contract MockMarginEngine {
@@ -91,14 +110,17 @@ contract MockMarginEngine {
     }
 
     IERC20 public stakedToken;
+    address public SPLITTER;
     uint256 public nextId = 1;
     mapping(uint256 => MockSeries) internal _series;
     mapping(uint256 => uint256) public sharesLocked;
 
     constructor(
-        address _stakedToken
+        address _stakedToken,
+        address _splitter
     ) {
         stakedToken = IERC20(_stakedToken);
+        SPLITTER = _splitter;
     }
 
     function createSeries(
@@ -161,6 +183,7 @@ contract PletherDOVTest is Test {
 
     MockStakedTokenForDOV public stakedToken;
     MockUSDCPermit public usdc;
+    MockSplitterForDOV public splitter;
     MockMarginEngine public marginEngine;
     PletherDOV public dov;
 
@@ -175,8 +198,9 @@ contract PletherDOVTest is Test {
 
         stakedToken = new MockStakedTokenForDOV("splDXY-BEAR", "splBEAR");
         usdc = new MockUSDCPermit();
+        splitter = new MockSplitterForDOV();
 
-        marginEngine = new MockMarginEngine(address(stakedToken));
+        marginEngine = new MockMarginEngine(address(stakedToken), address(splitter));
 
         dov = new PletherDOV("BEAR DOV", "bDOV", address(marginEngine), address(stakedToken), address(usdc), false);
 
@@ -464,6 +488,28 @@ contract PletherDOVTest is Test {
 
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.exerciseUnsoldOptions(1);
+    }
+
+    // ==========================================
+    // AUCTION SNIPING GUARD (Finding 3)
+    // ==========================================
+
+    function test_FillAuction_RevertsWhenSeriesSettled() public {
+        _startAuction();
+        marginEngine.settle(1);
+
+        vm.prank(maker);
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.fillAuction();
+    }
+
+    function test_FillAuction_RevertsWhenSplitterLiquidated() public {
+        _startAuction();
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        vm.prank(maker);
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.fillAuction();
     }
 
 }

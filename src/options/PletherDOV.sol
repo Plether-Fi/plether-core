@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {ISyntheticSplitter} from "../interfaces/ISyntheticSplitter.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -34,6 +35,7 @@ interface IMarginEngine {
     function series(
         uint256 seriesId
     ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool);
+    function SPLITTER() external view returns (address);
 
 }
 
@@ -205,6 +207,14 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         uint256 elapsed = block.timestamp - e.auctionStartTime;
         if (elapsed > e.auctionDuration) {
             revert PletherDOV__AuctionEnded();
+        }
+
+        (,,,,,, bool isSettled) = MARGIN_ENGINE.series(e.seriesId);
+        if (
+            isSettled
+                || ISyntheticSplitter(MARGIN_ENGINE.SPLITTER()).currentStatus() == ISyntheticSplitter.Status.SETTLED
+        ) {
+            revert PletherDOV__WrongState();
         }
 
         uint256 currentPremium = getCurrentOptionPrice();

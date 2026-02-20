@@ -8,8 +8,8 @@ import {OracleLib} from "../libraries/OracleLib.sol";
 /// @title SettlementOracle
 /// @custom:security-contact contact@plether.com
 /// @notice Pure theoretical oracle for option settlement.
-/// @dev Strips out the AMM deviation checks found in BasketOracle to ensure
-///      flash-loan resistance during exact-block option expiration.
+/// @dev Uses historical Chainlink round data to look up prices at expiry,
+///      eliminating the settlement window and preventing lookback MEV.
 contract SettlementOracle {
 
     struct Component {
@@ -24,6 +24,7 @@ contract SettlementOracle {
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
+    uint256 public constant MAX_ROUND_TRAVERSAL = 50;
 
     error SettlementOracle__InvalidPrice(address feed);
     error SettlementOracle__LengthMismatch();
@@ -61,10 +62,13 @@ contract SettlementOracle {
         }
     }
 
-    /// @notice Returns the pure theoretical settlement prices.
+    /// @notice Returns the pure theoretical settlement prices at a given expiry timestamp.
+    /// @param expiry The timestamp at which to look up prices.
     /// @return bearPrice min(BasketPrice, CAP) in 8 decimals
     /// @return bullPrice CAP - bearPrice in 8 decimals
-    function getSettlementPrices() external view returns (uint256 bearPrice, uint256 bullPrice) {
+    function getSettlementPrices(
+        uint256 expiry
+    ) external view returns (uint256 bearPrice, uint256 bullPrice) {
         OracleLib.checkSequencer(SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD);
 
         int256 totalPrice = 0;
@@ -72,7 +76,8 @@ contract SettlementOracle {
         uint256 len = components.length;
 
         for (uint256 i = 0; i < len; i++) {
-            (, int256 price,, uint256 updatedAt,) = components[i].feed.latestRoundData();
+            (int256 price, uint256 updatedAt) =
+                OracleLib.getHistoricalPrice(components[i].feed, expiry, MAX_ROUND_TRAVERSAL);
 
             if (price <= 0) {
                 revert SettlementOracle__InvalidPrice(address(components[i].feed));
@@ -88,7 +93,7 @@ contract SettlementOracle {
             }
         }
 
-        OracleLib.checkStaleness(minUpdatedAt, ORACLE_TIMEOUT);
+        OracleLib.checkStalenessAt(minUpdatedAt, ORACLE_TIMEOUT, expiry);
 
         uint256 theoreticalBear = uint256(totalPrice);
 

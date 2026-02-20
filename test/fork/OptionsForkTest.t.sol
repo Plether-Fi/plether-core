@@ -142,7 +142,7 @@ contract OptionsForkTest is Test {
     }
 
     function test_SettlementOracle_ReturnsRealisticPrices() public view {
-        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices();
+        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp);
 
         assertGt(bear, 80_000_000, "bearPrice should be > $0.80");
         assertLt(bear, 120_000_000, "bearPrice should be < $1.20");
@@ -151,7 +151,7 @@ contract OptionsForkTest is Test {
     }
 
     function test_SettlementOracle_BearPlusBullEqualsCAP() public view {
-        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices();
+        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp);
         assertEq(bear + bull, CAP, "bear + bull must equal CAP");
     }
 
@@ -184,7 +184,7 @@ contract OptionsForkTest is Test {
         BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
 
         // BasketOracle needs a Curve pool — use aligned price so deviation check passes
-        (uint256 bear,) = settlementOracle.getSettlementPrices();
+        (uint256 bear,) = settlementOracle.getSettlementPrices(block.timestamp);
         uint256 bearPrice18 = bear * 1e10;
         MockCurvePoolForOptions pool = new MockCurvePoolForOptions(bearPrice18);
         basket.setCurvePool(address(pool));
@@ -200,7 +200,7 @@ contract OptionsForkTest is Test {
         vm.warp(block.timestamp + 25 hours);
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
-        settlementOracle.getSettlementPrices();
+        settlementOracle.getSettlementPrices(block.timestamp);
     }
 
 }

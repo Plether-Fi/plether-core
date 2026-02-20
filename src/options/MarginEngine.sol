@@ -11,7 +11,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 interface ISettlementOracle {
 
-    function getSettlementPrices() external view returns (uint256 bearPrice, uint256 bullPrice);
+    function getSettlementPrices(
+        uint256 expiry
+    ) external view returns (uint256 bearPrice, uint256 bullPrice);
 
 }
 
@@ -60,7 +62,6 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     IERC4626 public immutable STAKED_BULL;
     address public immutable OPTION_IMPLEMENTATION;
     uint256 public immutable CAP;
-    uint256 public constant SETTLEMENT_WINDOW = 1 hours;
 
     uint256 public nextSeriesId = 1;
     mapping(uint256 => Series) public series;
@@ -70,6 +71,10 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
     // seriesId => writer => amount of options minted
     mapping(uint256 => mapping(address => uint256)) public writerOptions;
+
+    // Per-series collateral tracking for exercise cap (prevents cross-series drain from negative yield)
+    mapping(uint256 => uint256) public totalSeriesShares;
+    mapping(uint256 => uint256) public totalSeriesMinted;
 
     event SeriesCreated(uint256 indexed seriesId, address optionToken, bool isBull, uint256 strike, uint256 expiry);
     event OptionsMinted(uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesLocked);
@@ -89,7 +94,6 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     error MarginEngine__OptionIsOTM();
     error MarginEngine__ZeroAmount();
     error MarginEngine__SplitterNotActive();
-    error MarginEngine__SettlementWindowClosed();
 
     constructor(
         address _splitter,
@@ -161,6 +165,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         // State accounting
         writerLockedShares[seriesId][msg.sender] += sharesToLock;
         writerOptions[seriesId][msg.sender] += optionsAmount;
+        totalSeriesShares[seriesId] += sharesToLock;
+        totalSeriesMinted[seriesId] += optionsAmount;
 
         // Pull collateral from writer
         IERC20(address(vault)).safeTransferFrom(msg.sender, address(this), sharesToLock);
@@ -185,16 +191,12 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (block.timestamp < s.expiry && !isLiquidated) {
             revert MarginEngine__NotExpired();
         }
-        if (!isLiquidated && block.timestamp > s.expiry + SETTLEMENT_WINDOW) {
-            revert MarginEngine__SettlementWindowClosed();
-        }
 
         uint256 price;
         if (isLiquidated) {
-            // Early Acceleration logic: Hard boundaries take effect immediately
             price = s.isBull ? 0 : CAP;
         } else {
-            (uint256 bearPrice, uint256 bullPrice) = ORACLE.getSettlementPrices();
+            (uint256 bearPrice, uint256 bullPrice) = ORACLE.getSettlementPrices(s.expiry);
             price = s.isBull ? bullPrice : bearPrice;
         }
 
@@ -241,6 +243,12 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         // Convert the asset payout into equivalent shares using the locked settlement exchange rate:
         uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
         uint256 sharePayout = (assetPayout * oneShare) / s.settlementShareRate;
+
+        // Cap payout to this series' pro-rata share of collateral (prevents cross-series drain on negative yield)
+        uint256 maxPayout = (optionsAmount * totalSeriesShares[seriesId]) / totalSeriesMinted[seriesId];
+        if (sharePayout > maxPayout) {
+            sharePayout = maxPayout;
+        }
 
         IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
         vault.safeTransfer(msg.sender, sharePayout);
