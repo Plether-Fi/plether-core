@@ -11,6 +11,7 @@ import {OracleLib} from "../libraries/OracleLib.sol";
 /// @dev Strips out the AMM deviation checks found in BasketOracle to ensure
 ///      flash-loan resistance during exact-block option expiration.
 contract SettlementOracle {
+
     struct Component {
         AggregatorV3Interface feed;
         uint256 quantity;
@@ -39,23 +40,25 @@ contract SettlementOracle {
         if (_feeds.length != _quantities.length || _feeds.length != _basePrices.length) {
             revert SettlementOracle__LengthMismatch();
         }
-        
+
         CAP = _cap;
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
 
         uint256 totalWeight = 0;
         for (uint256 i = 0; i < _feeds.length; i++) {
-            if (_basePrices[i] == 0) revert SettlementOracle__InvalidBasePrice();
-            
-            components.push(Component({
-                feed: AggregatorV3Interface(_feeds[i]),
-                quantity: _quantities[i],
-                basePrice: _basePrices[i]
-            }));
+            if (_basePrices[i] == 0) {
+                revert SettlementOracle__InvalidBasePrice();
+            }
+
+            components.push(
+                Component({feed: AggregatorV3Interface(_feeds[i]), quantity: _quantities[i], basePrice: _basePrices[i]})
+            );
             totalWeight += _quantities[i];
         }
-        
-        if (totalWeight != 1e18) revert SettlementOracle__InvalidWeights();
+
+        if (totalWeight != 1e18) {
+            revert SettlementOracle__InvalidWeights();
+        }
     }
 
     /// @notice Returns the pure theoretical settlement prices.
@@ -69,12 +72,14 @@ contract SettlementOracle {
         uint256 len = components.length;
 
         for (uint256 i = 0; i < len; i++) {
-            (, int256 price, , uint256 updatedAt, ) = components[i].feed.latestRoundData();
-            
-            if (price <= 0) revert SettlementOracle__InvalidPrice(address(components[i].feed));
+            (, int256 price,, uint256 updatedAt,) = components[i].feed.latestRoundData();
+
+            if (price <= 0) {
+                revert SettlementOracle__InvalidPrice(address(components[i].feed));
+            }
 
             // Weight(18) * Price(8) / BasePrice(8) normalized to 8 decimals
-            int256 value = (price * int256(components[i].quantity)) 
+            int256 value = (price * int256(components[i].quantity))
                 / int256(components[i].basePrice * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
             totalPrice += value;
 
@@ -82,12 +87,13 @@ contract SettlementOracle {
                 minUpdatedAt = updatedAt;
             }
         }
-        
+
         OracleLib.checkStaleness(minUpdatedAt, ORACLE_TIMEOUT);
 
         uint256 theoreticalBear = uint256(totalPrice);
-        
+
         bearPrice = theoreticalBear > CAP ? CAP : theoreticalBear;
         bullPrice = CAP - bearPrice;
     }
+
 }

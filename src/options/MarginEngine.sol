@@ -1,23 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ISyntheticSplitter} from "../interfaces/ISyntheticSplitter.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {ISyntheticSplitter} from "../interfaces/ISyntheticSplitter.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface ISettlementOracle {
+
     function getSettlementPrices() external view returns (uint256 bearPrice, uint256 bullPrice);
+
 }
 
 interface IOptionToken {
-    function initialize(string memory name, string memory symbol, address marginEngine) external;
-    function mint(address to, uint256 amount) external;
-    function burn(address from, uint256 amount) external;
+
+    function initialize(
+        string memory name,
+        string memory symbol,
+        address marginEngine
+    ) external;
+    function mint(
+        address to,
+        uint256 amount
+    ) external;
+    function burn(
+        address from,
+        uint256 amount
+    ) external;
+    function totalSupply() external view returns (uint256);
+
 }
 
 /// @title MarginEngine
@@ -25,6 +40,7 @@ interface IOptionToken {
 /// @notice Core options clearinghouse for Plether DOVs.
 /// @dev Enforces 100% margin requirements and Fractional In-Kind Settlement via StakedTokens.
 contract MarginEngine is ReentrancyGuard, Ownable2Step {
+
     using SafeERC20 for IERC20;
 
     struct Series {
@@ -46,18 +62,22 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
 
     uint256 public nextSeriesId = 1;
     mapping(uint256 => Series) public series;
-    
+
     // seriesId => writer => amount of splDXY shares locked
     mapping(uint256 => mapping(address => uint256)) public writerLockedShares;
-    
+
     // seriesId => writer => amount of options minted
     mapping(uint256 => mapping(address => uint256)) public writerOptions;
 
     event SeriesCreated(uint256 indexed seriesId, address optionToken, bool isBull, uint256 strike, uint256 expiry);
     event OptionsMinted(uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesLocked);
     event SeriesSettled(uint256 indexed seriesId, uint256 settlementPrice, uint256 settlementShareRate);
-    event OptionsExercised(uint256 indexed seriesId, address indexed buyer, uint256 optionsAmount, uint256 sharesReceived);
-    event CollateralUnlocked(uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesReturned);
+    event OptionsExercised(
+        uint256 indexed seriesId, address indexed buyer, uint256 optionsAmount, uint256 sharesReceived
+    );
+    event CollateralUnlocked(
+        uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesReturned
+    );
 
     error MarginEngine__InvalidParams();
     error MarginEngine__Expired();
@@ -91,7 +111,9 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         string memory name,
         string memory symbol
     ) external onlyOwner returns (uint256 seriesId) {
-        if (strike >= CAP || expiry <= block.timestamp) revert MarginEngine__InvalidParams();
+        if (strike >= CAP || expiry <= block.timestamp) {
+            revert MarginEngine__InvalidParams();
+        }
 
         address proxy = Clones.clone(OPTION_IMPLEMENTATION);
         IOptionToken(proxy).initialize(name, symbol, address(this));
@@ -112,16 +134,22 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
 
     /// @notice Writers (DOVs) call this to lock splDXY yield-bearing shares and mint options.
     /// @dev Ensures exact 1:1 backing of the underlying asset capacity.
-    function mintOptions(uint256 seriesId, uint256 optionsAmount) external nonReentrant {
-        if (optionsAmount == 0) revert MarginEngine__ZeroAmount();
+    function mintOptions(
+        uint256 seriesId,
+        uint256 optionsAmount
+    ) external nonReentrant {
+        if (optionsAmount == 0) {
+            revert MarginEngine__ZeroAmount();
+        }
         Series storage s = series[seriesId];
-        
-        if (s.isSettled || block.timestamp >= s.expiry || SPLITTER.currentStatus() == ISyntheticSplitter.Status.SETTLED) {
+
+        if (s.isSettled || block.timestamp >= s.expiry || SPLITTER.currentStatus() == ISyntheticSplitter.Status.SETTLED)
+        {
             revert MarginEngine__Expired();
         }
 
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        
+
         // Exact 1:1 Backing: calculate how many shares are needed to fully collateralize `optionsAmount` of underlying assets.
         // previewWithdraw rounds UP natively in ERC4626, ensuring the MarginEngine is always mathematically fully collateralized.
         uint256 sharesToLock = vault.previewWithdraw(optionsAmount);
@@ -141,12 +169,18 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
 
     /// @notice Locks the settlement price and exchange rate at expiration.
     /// @dev Callable by anyone. Triggers "Early Acceleration" if protocol liquidates mid-cycle.
-    function settle(uint256 seriesId) external {
+    function settle(
+        uint256 seriesId
+    ) external {
         Series storage s = series[seriesId];
-        if (s.isSettled) revert MarginEngine__AlreadySettled();
-        
+        if (s.isSettled) {
+            revert MarginEngine__AlreadySettled();
+        }
+
         bool isLiquidated = SPLITTER.currentStatus() == ISyntheticSplitter.Status.SETTLED;
-        if (block.timestamp < s.expiry && !isLiquidated) revert MarginEngine__NotExpired();
+        if (block.timestamp < s.expiry && !isLiquidated) {
+            revert MarginEngine__NotExpired();
+        }
 
         uint256 price;
         if (isLiquidated) {
@@ -158,26 +192,37 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         }
 
         s.settlementPrice = price;
-        
+
         // Lock the exchange rate exactly at settlement to cleanly partition post-expiry yield
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        
-        // StakedTokens have 21 decimals (18 underlying + 3 offset). 
+
+        // StakedTokens have 21 decimals (18 underlying + 3 offset).
         uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
         s.settlementShareRate = vault.convertToAssets(oneShare);
-        
-        if (s.settlementShareRate == 0) s.settlementShareRate = 1e18; // Fallback math safety
+
+        if (s.settlementShareRate == 0) {
+            s.settlementShareRate = 1e18; // Fallback math safety
+        }
         s.isSettled = true;
 
         emit SeriesSettled(seriesId, price, s.settlementShareRate);
     }
 
     /// @notice Buyers burn ITM Options to extract their fractional payout of the collateral pool.
-    function exercise(uint256 seriesId, uint256 optionsAmount) external nonReentrant {
-        if (optionsAmount == 0) revert MarginEngine__ZeroAmount();
+    function exercise(
+        uint256 seriesId,
+        uint256 optionsAmount
+    ) external nonReentrant {
+        if (optionsAmount == 0) {
+            revert MarginEngine__ZeroAmount();
+        }
         Series storage s = series[seriesId];
-        if (!s.isSettled) revert MarginEngine__NotSettled();
-        if (s.settlementPrice <= s.strike) revert MarginEngine__OptionIsOTM();
+        if (!s.isSettled) {
+            revert MarginEngine__NotSettled();
+        }
+        if (s.settlementPrice <= s.strike) {
+            revert MarginEngine__OptionIsOTM();
+        }
 
         // Burn Option Tokens
         IOptionToken(s.optionToken).burn(msg.sender, optionsAmount);
@@ -185,7 +230,7 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         // Fractional Payout Math
         // Calculate the raw underlying asset value owed to the buyer:
         uint256 assetPayout = (optionsAmount * (s.settlementPrice - s.strike)) / s.settlementPrice;
-        
+
         // Convert the asset payout into equivalent shares using the locked settlement exchange rate:
         uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
         uint256 sharePayout = (assetPayout * oneShare) / s.settlementShareRate;
@@ -197,24 +242,31 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Writers unlock their remaining splDXY shares post-settlement.
-    /// @dev If OTM, writer retains 100% of their shares + 100% of the accrued Morpho yield. 
-    function unlockCollateral(uint256 seriesId) external nonReentrant {
+    /// @dev If OTM, writer retains 100% of their shares + 100% of the accrued Morpho yield.
+    function unlockCollateral(
+        uint256 seriesId
+    ) external nonReentrant {
         Series storage s = series[seriesId];
-        if (!s.isSettled) revert MarginEngine__NotSettled();
+        if (!s.isSettled) {
+            revert MarginEngine__NotSettled();
+        }
 
         uint256 lockedShares = writerLockedShares[seriesId][msg.sender];
         uint256 optionsMinted = writerOptions[seriesId][msg.sender];
-        
-        if (lockedShares == 0) revert MarginEngine__ZeroAmount();
-        
+
+        if (lockedShares == 0) {
+            revert MarginEngine__ZeroAmount();
+        }
+
         // Checks-Effects
         writerLockedShares[seriesId][msg.sender] = 0;
         writerOptions[seriesId][msg.sender] = 0;
 
         uint256 sharesOwedToBuyers = 0;
         if (s.settlementPrice > s.strike) {
-            uint256 assetPayout = (optionsMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
-            
+            uint256 outstandingOptions = IOptionToken(s.optionToken).totalSupply();
+            uint256 assetPayout = (outstandingOptions * (s.settlementPrice - s.strike)) / s.settlementPrice;
+
             uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
             sharesOwedToBuyers = (assetPayout * oneShare) / s.settlementShareRate;
         }
@@ -229,4 +281,5 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
 
         emit CollateralUnlocked(seriesId, msg.sender, optionsMinted, sharesToReturn);
     }
+
 }

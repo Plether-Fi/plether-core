@@ -478,13 +478,9 @@ contract MarginEngineTest is Test {
         assertEq(_getOptionToken(seriesId).balanceOf(alice), 0);
     }
 
-    /// @dev Known bug: writer's unlockCollateral reserves shares for ALL options minted,
-    /// regardless of how many were actually exercised. If fewer options are exercised than minted,
-    /// the difference in shares is stranded in the engine with no recovery mechanism.
-    function test_Exercise_StrandedCollateralBug() public {
+    function test_Exercise_NoStrandedCollateral() public {
         uint256 seriesId = _createBearSeries(90e6);
 
-        // Alice writes 100e18 options, transfers all to Bob
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
         OptionToken opt = _getOptionToken(seriesId);
@@ -499,16 +495,48 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 50e18);
 
-        // Alice unlocks — reserves shares for ALL 100e18 options, not just the 50e18 exercised
+        // Alice unlocks — now only reserves for the 50e18 still outstanding
         vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        // Engine still holds shares that were reserved for the unexercised 50e18
         uint256 engineBalance = stakedBear.balanceOf(address(engine));
-        assertGt(engineBalance, 0, "shares stranded in engine");
+        assertEq(engineBalance, 0, "no shares stranded in engine");
+    }
 
-        // Bob could still exercise remaining 50e18, but if he doesn't, shares are stuck forever
-        assertEq(opt.balanceOf(bob), 50e18, "Bob has unexercised options");
+    function test_UnlockCollateral_CorrectAfterPartialExercise() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        uint256 optionsAmount = 100e18;
+
+        vm.prank(alice);
+        engine.mintOptions(seriesId, optionsAmount);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(bob, optionsAmount);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId);
+
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+
+        // Bob exercises 30 of 100
+        vm.prank(bob);
+        engine.exercise(seriesId, 30e18);
+
+        // 70e18 options remain outstanding
+        uint256 remaining = opt.totalSupply();
+        assertEq(remaining, 70e18);
+
+        uint256 assetOwed = (remaining * (settlementPrice - 90e6)) / settlementPrice;
+        uint256 sharesOwed = (assetOwed * ONE_SHARE) / settlementShareRate;
+        uint256 expectedReturn = lockedShares - sharesOwed;
+
+        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        assertEq(stakedBear.balanceOf(alice) - aliceBefore, expectedReturn, "writer gets correct shares back");
     }
 
     // ==========================================

@@ -321,27 +321,29 @@ contract PletherDOVTest is Test {
         dov.fillAuction();
     }
 
-    /// @dev Known bug: if auction expires without a fill, the vault is stuck in AUCTIONING
-    /// state forever because there is no cancel/expire mechanism.
-    function test_FillAuction_StuckVaultBug() public {
+    function test_CancelAuction_UnlocksExpiredAuction() public {
         _startAuction();
-        vm.warp(block.timestamp + 2 hours); // well past auction
+        vm.warp(block.timestamp + 2 hours);
 
-        // Can't fill — auction ended
-        vm.prank(maker);
-        vm.expectRevert(PletherDOV.PletherDOV__AuctionEnded.selector);
-        dov.fillAuction();
+        dov.cancelAuction();
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
 
-        // Can't start new auction — still AUCTIONING
-        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        // Can start a new epoch
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+        assertEq(dov.currentEpochId(), 2);
+    }
 
-        // Can't settle — not LOCKED
+    function test_CancelAuction_RevertsBeforeExpiry() public {
+        _startAuction();
+        vm.warp(block.timestamp + 30 minutes);
+
+        vm.expectRevert(PletherDOV.PletherDOV__AuctionNotExpired.selector);
+        dov.cancelAuction();
+    }
+
+    function test_CancelAuction_RevertsIfNotAuctioning() public {
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
-        dov.settleEpoch();
-
-        // State is permanently AUCTIONING
-        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+        dov.cancelAuction();
     }
 
     // ==========================================

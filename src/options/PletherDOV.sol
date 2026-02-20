@@ -1,19 +1,36 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IMarginEngine {
-    function createSeries(bool isBull, uint256 strike, uint256 expiry, string memory name, string memory sym) external returns (uint256);
-    function mintOptions(uint256 seriesId, uint256 optionsAmount) external;
-    function settle(uint256 seriesId) external;
-    function unlockCollateral(uint256 seriesId) external;
-    function series(uint256 seriesId) external view returns (bool, uint256, uint256, address, uint256, uint256, bool);
+
+    function createSeries(
+        bool isBull,
+        uint256 strike,
+        uint256 expiry,
+        string memory name,
+        string memory sym
+    ) external returns (uint256);
+    function mintOptions(
+        uint256 seriesId,
+        uint256 optionsAmount
+    ) external;
+    function settle(
+        uint256 seriesId
+    ) external;
+    function unlockCollateral(
+        uint256 seriesId
+    ) external;
+    function series(
+        uint256 seriesId
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool);
+
 }
 
 /// @title PletherDOV
@@ -21,16 +38,21 @@ interface IMarginEngine {
 /// @notice Automated Covered Call Vault for Plether synthetic assets.
 /// @dev Natively holds splDXY to prevent weekly AMM slippage. Implements on-chain Dutch Auctions.
 contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
+
     using SafeERC20 for IERC20;
 
-    enum State { UNLOCKED, AUCTIONING, LOCKED }
+    enum State {
+        UNLOCKED,
+        AUCTIONING,
+        LOCKED
+    }
 
     struct Epoch {
         uint256 seriesId;
         uint256 optionsMinted;
         uint256 auctionStartTime;
-        uint256 maxPremium;    // Max USDC price per option (6 decimals)
-        uint256 minPremium;    // Min USDC price per option (6 decimals)
+        uint256 maxPremium; // Max USDC price per option (6 decimals)
+        uint256 minPremium; // Min USDC price per option (6 decimals)
         uint256 auctionDuration;
         address winningMaker;
     }
@@ -42,7 +64,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
 
     State public currentState = State.UNLOCKED;
     uint256 public currentEpochId = 0;
-    
+
     mapping(uint256 => Epoch) public epochs;
 
     // Queue Accounting
@@ -52,11 +74,13 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     event DepositQueued(address indexed user, uint256 amount);
     event EpochRolled(uint256 indexed epochId, uint256 seriesId, uint256 optionsMinted);
     event AuctionFilled(uint256 indexed epochId, address indexed buyer, uint256 premiumPaid);
+    event AuctionCancelled(uint256 indexed epochId);
     event EpochSettled(uint256 indexed epochId, uint256 collateralReturned);
 
     error PletherDOV__WrongState();
     error PletherDOV__ZeroAmount();
     error PletherDOV__AuctionEnded();
+    error PletherDOV__AuctionNotExpired();
 
     constructor(
         string memory _name,
@@ -75,21 +99,25 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     // ==========================================
-    // RETAIL QUEUE 
+    // RETAIL QUEUE
     // ==========================================
 
     /// @notice Queue USDC to be deposited into the DOV at the start of the next epoch.
-    function deposit(uint256 amount) external nonReentrant {
-        if (amount == 0) revert PletherDOV__ZeroAmount();
-        
+    function deposit(
+        uint256 amount
+    ) external nonReentrant {
+        if (amount == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         userUsdcDeposits[msg.sender] += amount;
         pendingUsdcDeposits += amount;
-        
+
         emit DepositQueued(msg.sender, amount);
     }
 
-    // Note: A real implementation requires a `processDeposit` function where users claim their DOV shares 
+    // Note: A real implementation requires a `processDeposit` function where users claim their DOV shares
     // based on the execution price of the Friday zap. Omitted for brevity to focus on options logic.
 
     // ==========================================
@@ -104,19 +132,21 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         uint256 minPremium,
         uint256 duration
     ) external onlyOwner nonReentrant {
-        if (currentState != State.UNLOCKED) revert PletherDOV__WrongState();
-        
+        if (currentState != State.UNLOCKED) {
+            revert PletherDOV__WrongState();
+        }
+
         currentEpochId++;
-        
+
         // 1. (External Zap Logic Goes Here)
         // Convert all USDC (queued deposits + last week's premium) into splDXY.
 
         // 2. Calculate Active Collateral
         uint256 sharesBalance = STAKED_TOKEN.balanceOf(address(this));
-        
+
         // MarginEngine requires underlying asset amounts. Convert our ERC4626 shares to assets.
         uint256 optionsToMint = STAKED_TOKEN.convertToAssets(sharesBalance);
-        
+
         // Rounding protection: ensure previewWithdraw doesn't try to pull 1 wei more than we have
         uint256 requiredShares = STAKED_TOKEN.previewWithdraw(optionsToMint);
         if (requiredShares > sharesBalance) {
@@ -148,10 +178,14 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     /// @notice Calculates the current linearly decaying price per option.
     function getCurrentOptionPrice() public view returns (uint256) {
         Epoch storage e = epochs[currentEpochId];
-        if (block.timestamp <= e.auctionStartTime) return e.maxPremium;
-        
+        if (block.timestamp <= e.auctionStartTime) {
+            return e.maxPremium;
+        }
+
         uint256 elapsed = block.timestamp - e.auctionStartTime;
-        if (elapsed >= e.auctionDuration) return e.minPremium;
+        if (elapsed >= e.auctionDuration) {
+            return e.minPremium;
+        }
 
         uint256 priceDrop = ((e.maxPremium - e.minPremium) * elapsed) / e.auctionDuration;
         return e.maxPremium - priceDrop;
@@ -159,11 +193,15 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
 
     /// @notice Step 2: Market Makers call this to buy the entire batch of options.
     function fillAuction() external nonReentrant {
-        if (currentState != State.AUCTIONING) revert PletherDOV__WrongState();
+        if (currentState != State.AUCTIONING) {
+            revert PletherDOV__WrongState();
+        }
         Epoch storage e = epochs[currentEpochId];
 
         uint256 elapsed = block.timestamp - e.auctionStartTime;
-        if (elapsed > e.auctionDuration) revert PletherDOV__AuctionEnded();
+        if (elapsed > e.auctionDuration) {
+            revert PletherDOV__AuctionEnded();
+        }
 
         uint256 currentPremium = getCurrentOptionPrice();
 
@@ -175,13 +213,37 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         USDC.safeTransferFrom(msg.sender, address(this), totalPremiumUsdc);
 
         // 2. Transfer all Option tokens to the winning Market Maker
-        (, , , address optionToken, , , ) = MARGIN_ENGINE.series(e.seriesId);
+        (,,, address optionToken,,,) = MARGIN_ENGINE.series(e.seriesId);
         IERC20(optionToken).safeTransfer(msg.sender, e.optionsMinted);
 
         e.winningMaker = msg.sender;
         currentState = State.LOCKED;
-        
+
         emit AuctionFilled(currentEpochId, msg.sender, totalPremiumUsdc);
+    }
+
+    /// @notice Cancels an expired auction that received no fill, returning the vault to UNLOCKED.
+    function cancelAuction() external nonReentrant {
+        if (currentState != State.AUCTIONING) {
+            revert PletherDOV__WrongState();
+        }
+        Epoch storage e = epochs[currentEpochId];
+
+        uint256 elapsed = block.timestamp - e.auctionStartTime;
+        if (elapsed <= e.auctionDuration) {
+            revert PletherDOV__AuctionNotExpired();
+        }
+
+        currentState = State.UNLOCKED;
+        emit AuctionCancelled(currentEpochId);
+    }
+
+    /// @notice Reclaims collateral from an unsold series after it has been settled.
+    function reclaimCollateral(
+        uint256 epochId
+    ) external nonReentrant {
+        Epoch storage e = epochs[epochId];
+        MARGIN_ENGINE.unlockCollateral(e.seriesId);
     }
 
     // ==========================================
@@ -190,9 +252,11 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
 
     /// @notice Step 3: At expiration, unlocks remaining collateral.
     function settleEpoch() external nonReentrant {
-        if (currentState != State.LOCKED) revert PletherDOV__WrongState();
+        if (currentState != State.LOCKED) {
+            revert PletherDOV__WrongState();
+        }
         Epoch storage e = epochs[currentEpochId];
-        
+
         // 1. Reclaim remaining Collateral from Margin Engine
         // (Assumes MarginEngine.settle() was already called by a keeper)
         MARGIN_ENGINE.unlockCollateral(e.seriesId);
@@ -203,4 +267,5 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         currentState = State.UNLOCKED;
         emit EpochSettled(currentEpochId, STAKED_TOKEN.balanceOf(address(this)));
     }
+
 }

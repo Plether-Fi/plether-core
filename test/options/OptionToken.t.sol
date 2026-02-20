@@ -79,19 +79,22 @@ contract OptionTokenTest is Test {
         token.transfer(bob, 11e18);
     }
 
-    /// @dev Known bug: transfer to address(0) doesn't decrement totalSupply.
-    /// Only engine mint/burn adjusts supply, so tokens sent to address(0) are effectively burned
-    /// from the sender's perspective but totalSupply becomes permanently inflated.
-    function test_Transfer_ToAddressZeroBug() public {
+    function test_Transfer_RevertsToAddressZero() public {
         token.mint(alice, 100e18);
-        uint256 supplyBefore = token.totalSupply();
 
         vm.prank(alice);
+        vm.expectRevert(OptionToken.OptionToken__ZeroAddress.selector);
         token.transfer(address(0), 50e18);
+    }
 
-        assertEq(token.balanceOf(alice), 50e18);
-        assertEq(token.balanceOf(address(0)), 50e18);
-        assertEq(token.totalSupply(), supplyBefore, "Bug: totalSupply unchanged despite address(0) transfer");
+    function test_TransferFrom_RevertsToAddressZero() public {
+        token.mint(alice, 100e18);
+        vm.prank(alice);
+        token.approve(bob, 100e18);
+
+        vm.prank(bob);
+        vm.expectRevert(OptionToken.OptionToken__ZeroAddress.selector);
+        token.transferFrom(alice, address(0), 50e18);
     }
 
     function test_TransferFrom_WithApproval() public {
