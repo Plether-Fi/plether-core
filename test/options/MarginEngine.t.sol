@@ -6,6 +6,7 @@ import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
 import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -132,6 +133,7 @@ contract MarginEngineTest is Test {
         engine = new MarginEngine(
             address(splitter), address(oracle), address(stakedBear), address(stakedBull), address(optionImpl)
         );
+        engine.grantRole(engine.SERIES_CREATOR_ROLE(), address(this));
 
         // Fund actors with staked tokens (21 decimals) and approve engine
         stakedBear.mint(alice, 1_000_000e21);
@@ -210,10 +212,18 @@ contract MarginEngineTest is Test {
         assertEq(id2, 2);
     }
 
-    function test_CreateSeries_RevertsFromNonOwner() public {
+    function test_CreateSeries_RevertsFromNonCreator() public {
+        bytes32 role = engine.SERIES_CREATOR_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
         engine.createSeries(false, 90e6, block.timestamp + 7 days, "X", "Y");
+    }
+
+    function test_CreateSeries_SucceedsFromGrantedDOV() public {
+        engine.grantRole(engine.SERIES_CREATOR_ROLE(), bob);
+        vm.prank(bob);
+        uint256 id = engine.createSeries(false, 90e6, block.timestamp + 7 days, "DOV-BEAR", "oBEAR");
+        assertEq(id, 1);
     }
 
     function test_CreateSeries_RevertsOnStrikeAtCAP() public {
@@ -340,6 +350,40 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         vm.expectRevert(MarginEngine.MarginEngine__NotExpired.selector);
         engine.settle(seriesId);
+    }
+
+    function test_Settle_RevertsAfterSettlementWindow() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.warp(block.timestamp + 7 days + 1 hours + 1);
+        _refreshFeeds();
+        vm.expectRevert(MarginEngine.MarginEngine__SettlementWindowClosed.selector);
+        engine.settle(seriesId);
+    }
+
+    function test_Settle_SucceedsWithinSettlementWindow() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 30 minutes);
+        _refreshFeeds();
+        engine.settle(seriesId);
+
+        (,,,,,, bool settled) = engine.series(seriesId);
+        assertTrue(settled);
+    }
+
+    function test_Settle_EarlyAccelerationBypassesWindow() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 2 hours);
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+        engine.settle(seriesId);
+
+        (,,,,,, bool settled) = engine.series(seriesId);
+        assertTrue(settled);
     }
 
     function test_Settle_RevertsWhenAlreadySettled() public {

@@ -2,8 +2,7 @@
 pragma solidity 0.8.33;
 
 import {ISyntheticSplitter} from "../interfaces/ISyntheticSplitter.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -39,9 +38,11 @@ interface IOptionToken {
 /// @custom:security-contact contact@plether.com
 /// @notice Core options clearinghouse for Plether DOVs.
 /// @dev Enforces 100% margin requirements and Fractional In-Kind Settlement via StakedTokens.
-contract MarginEngine is ReentrancyGuard, Ownable2Step {
+contract MarginEngine is ReentrancyGuard, AccessControl {
 
     using SafeERC20 for IERC20;
+
+    bytes32 public constant SERIES_CREATOR_ROLE = keccak256("SERIES_CREATOR_ROLE");
 
     struct Series {
         bool isBull;
@@ -59,6 +60,7 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
     IERC4626 public immutable STAKED_BULL;
     address public immutable OPTION_IMPLEMENTATION;
     uint256 public immutable CAP;
+    uint256 public constant SETTLEMENT_WINDOW = 1 hours;
 
     uint256 public nextSeriesId = 1;
     mapping(uint256 => Series) public series;
@@ -87,6 +89,7 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
     error MarginEngine__OptionIsOTM();
     error MarginEngine__ZeroAmount();
     error MarginEngine__SplitterNotActive();
+    error MarginEngine__SettlementWindowClosed();
 
     constructor(
         address _splitter,
@@ -94,7 +97,8 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         address _stakedBear,
         address _stakedBull,
         address _optionImplementation
-    ) Ownable(msg.sender) {
+    ) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         SPLITTER = ISyntheticSplitter(_splitter);
         ORACLE = ISettlementOracle(_oracle);
         STAKED_BEAR = IERC4626(_stakedBear);
@@ -110,7 +114,7 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         uint256 expiry,
         string memory name,
         string memory symbol
-    ) external onlyOwner returns (uint256 seriesId) {
+    ) external onlyRole(SERIES_CREATOR_ROLE) returns (uint256 seriesId) {
         if (strike >= CAP || expiry <= block.timestamp) {
             revert MarginEngine__InvalidParams();
         }
@@ -180,6 +184,9 @@ contract MarginEngine is ReentrancyGuard, Ownable2Step {
         bool isLiquidated = SPLITTER.currentStatus() == ISyntheticSplitter.Status.SETTLED;
         if (block.timestamp < s.expiry && !isLiquidated) {
             revert MarginEngine__NotExpired();
+        }
+        if (!isLiquidated && block.timestamp > s.expiry + SETTLEMENT_WINDOW) {
+            revert MarginEngine__SettlementWindowClosed();
         }
 
         uint256 price;
