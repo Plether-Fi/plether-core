@@ -521,6 +521,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256 lpBalBefore = CURVE_LP_TOKEN.balanceOf(address(this));
+        if (lpBalBefore == 0) {
+            revert InvarCoin__NothingToDeploy();
+        }
         uint256 usdcBefore = currentBuffer;
 
         uint256 maxReplenish = bufferTarget - currentBuffer;
