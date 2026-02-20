@@ -305,7 +305,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             if (lpShare > 0) {
                 uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
                 usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
-                trackedLpBalance -= Math.min(lpShare, trackedLpBalance);
+                trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpShare, lpBal);
                 curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
             }
         }
@@ -356,7 +356,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
-            trackedLpBalance -= Math.min(lpToBurn, trackedLpBalance);
+            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
             curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
             uint256[2] memory min_amounts = [uint256(0), uint256(0)];
             uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
@@ -539,8 +539,7 @@ contract InvarCoin is ERC20, ERC20Permit, ERC20FlashMint, Ownable2Step, Pausable
             revert InvarCoin__SpotDeviationTooHigh();
         }
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut > 0 ? calcOut - 1 : 0);
-        trackedLpBalance -= lpToBurn;
-
+        trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBalBefore);
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
         uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
