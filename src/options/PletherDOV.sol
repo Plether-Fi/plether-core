@@ -23,7 +23,8 @@ interface IMarginEngine {
         uint256 optionsAmount
     ) external;
     function settle(
-        uint256 seriesId
+        uint256 seriesId,
+        uint80[] calldata roundHints
     ) external;
     function unlockCollateral(
         uint256 seriesId
@@ -253,7 +254,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Exercises unsold option tokens held by the DOV after a cancelled auction.
-    /// @dev Must be called after settlement and before reclaimCollateral if options are ITM.
+    /// @dev Skips exercise for OTM options so keeper batch transactions don't revert.
     function exerciseUnsoldOptions(
         uint256 epochId
     ) external nonReentrant {
@@ -262,9 +263,9 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__WrongState();
         }
 
-        (,,, address optionToken,,,) = MARGIN_ENGINE.series(e.seriesId);
+        (, uint256 strike,, address optionToken, uint256 settlementPrice,,) = MARGIN_ENGINE.series(e.seriesId);
         uint256 balance = IERC20(optionToken).balanceOf(address(this));
-        if (balance > 0) {
+        if (balance > 0 && settlementPrice > strike) {
             MARGIN_ENGINE.exercise(e.seriesId, balance);
         }
     }

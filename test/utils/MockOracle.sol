@@ -38,6 +38,14 @@ contract MockOracle is AggregatorV3Interface {
         rounds[currentRoundId].updatedAt = _timestamp;
     }
 
+    function updatePriceAtRound(
+        int256 _newPrice,
+        uint80 _roundId
+    ) external {
+        currentRoundId = _roundId;
+        rounds[_roundId] = Round(_newPrice, block.timestamp);
+    }
+
     function decimals() external view override returns (uint8) {
         return _decimals;
     }

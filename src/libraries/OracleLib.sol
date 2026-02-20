@@ -68,39 +68,50 @@ library OracleLib {
         }
     }
 
-    /// @notice Walks backwards through Chainlink rounds to find the price at a target timestamp.
+    /// @notice Verifies a caller-provided hint round is the correct price at a target timestamp.
+    /// @dev Avoids backward traversal that breaks on Chainlink phase boundaries.
     /// @param feed The Chainlink price feed.
     /// @param targetTimestamp The timestamp to look up the price for.
-    /// @param maxTraversal Maximum number of rounds to walk backwards.
+    /// @param hintRoundId The round ID that the caller claims was active at targetTimestamp.
     /// @return price The price at the target timestamp.
     /// @return updatedAt The timestamp of the round found.
-    function getHistoricalPrice(
+    function verifyHistoricalPrice(
         AggregatorV3Interface feed,
         uint256 targetTimestamp,
-        uint256 maxTraversal
+        uint80 hintRoundId
     ) internal view returns (int256 price, uint256 updatedAt) {
-        (uint80 roundId, int256 latestPrice,, uint256 latestUpdatedAt,) = feed.latestRoundData();
-
+        (uint80 latestRoundId, int256 latestPrice,, uint256 latestUpdatedAt,) = feed.latestRoundData();
         if (latestUpdatedAt <= targetTimestamp) {
             return (latestPrice, latestUpdatedAt);
         }
 
-        for (uint256 i = 0; i < maxTraversal; i++) {
-            if (roundId == 0) {
-                break;
-            }
-            roundId--;
-
-            try feed.getRoundData(roundId) returns (uint80, int256 p, uint256, uint256 u, uint80) {
-                if (u <= targetTimestamp) {
-                    return (p, u);
-                }
-            } catch {
-                continue;
-            }
+        (, int256 hintPrice,, uint256 hintUpdatedAt,) = feed.getRoundData(hintRoundId);
+        if (hintUpdatedAt == 0 || hintUpdatedAt > targetTimestamp) {
+            revert OracleLib__NoPriceAtExpiry();
         }
 
-        revert OracleLib__NoPriceAtExpiry();
+        uint80 nextRoundId = hintRoundId + 1;
+        uint16 hintPhase = uint16(hintRoundId >> 64);
+        uint16 nextPhase = uint16(nextRoundId >> 64);
+
+        if (hintPhase == nextPhase) {
+            try feed.getRoundData(nextRoundId) returns (uint80, int256, uint256, uint256 nextUpdatedAt, uint80) {
+                if (nextUpdatedAt != 0 && nextUpdatedAt <= targetTimestamp) {
+                    revert OracleLib__NoPriceAtExpiry();
+                }
+            } catch {}
+        }
+
+        uint80 nextPhaseFirstRound = (uint80(hintPhase + 1) << 64) | 1;
+        if (nextPhaseFirstRound <= latestRoundId) {
+            try feed.getRoundData(nextPhaseFirstRound) returns (uint80, int256, uint256, uint256 npUpdatedAt, uint80) {
+                if (npUpdatedAt != 0 && npUpdatedAt <= targetTimestamp) {
+                    revert OracleLib__NoPriceAtExpiry();
+                }
+            } catch {}
+        }
+
+        return (hintPrice, hintUpdatedAt);
     }
 
     /// @notice Get a validated price from an oracle with staleness and sequencer checks.

@@ -146,9 +146,18 @@ contract MockMarginEngine {
     }
 
     function settle(
-        uint256 seriesId
+        uint256 seriesId,
+        uint80[] calldata
     ) external {
         _series[seriesId].isSettled = true;
+        _series[seriesId].settlementPrice = 106_000_000;
+    }
+
+    function setSettlementPrice(
+        uint256 seriesId,
+        uint256 price
+    ) external {
+        _series[seriesId].settlementPrice = price;
     }
 
     function unlockCollateral(
@@ -396,7 +405,7 @@ contract PletherDOVTest is Test {
         dov.fillAuction();
 
         // Settle the series in the margin engine first
-        marginEngine.settle(1);
+        marginEngine.settle(1, new uint80[](0));
 
         uint256 stakedBefore = stakedToken.balanceOf(address(dov));
         dov.settleEpoch();
@@ -421,7 +430,7 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         dov.fillAuction();
 
-        marginEngine.settle(1);
+        marginEngine.settle(1, new uint80[](0));
         dov.settleEpoch();
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
@@ -437,7 +446,7 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         dov.fillAuction();
 
-        marginEngine.settle(2);
+        marginEngine.settle(2, new uint80[](0));
         dov.settleEpoch();
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
@@ -456,7 +465,7 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         dov.fillAuction();
 
-        marginEngine.settle(1);
+        marginEngine.settle(1, new uint80[](0));
 
         // Should revert: epoch was filled (winningMaker != address(0)),
         // only settleEpoch should be able to unlock this collateral.
@@ -470,7 +479,7 @@ contract PletherDOVTest is Test {
         vm.warp(block.timestamp + 2 hours);
         dov.cancelAuction();
 
-        marginEngine.settle(1);
+        marginEngine.settle(1, new uint80[](0));
 
         (,,, address optAddr,,,) = marginEngine.series(1);
         uint256 optionBalance = IERC20(optAddr).balanceOf(address(dov));
@@ -496,7 +505,7 @@ contract PletherDOVTest is Test {
 
     function test_FillAuction_RevertsWhenSeriesSettled() public {
         _startAuction();
-        marginEngine.settle(1);
+        marginEngine.settle(1, new uint80[](0));
 
         vm.prank(maker);
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
@@ -510,6 +519,29 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.fillAuction();
+    }
+
+    // ==========================================
+    // INFORMATIONAL: OTM exercise guard
+    // ==========================================
+
+    function test_ExerciseUnsoldOptions_NoRevertWhenOTM() public {
+        _startAuction();
+
+        vm.warp(block.timestamp + 2 hours);
+        dov.cancelAuction();
+
+        marginEngine.settle(1, new uint80[](0));
+        // Force OTM: settlement price below strike
+        marginEngine.setSettlementPrice(1, 80_000_000);
+
+        (,,, address optAddr,,,) = marginEngine.series(1);
+        uint256 optionsBefore = IERC20(optAddr).balanceOf(address(dov));
+        assertGt(optionsBefore, 0, "DOV holds unsold options");
+
+        dov.exerciseUnsoldOptions(1);
+
+        assertEq(IERC20(optAddr).balanceOf(address(dov)), optionsBefore, "OTM options not exercised");
     }
 
 }

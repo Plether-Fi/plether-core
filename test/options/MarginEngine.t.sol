@@ -179,6 +179,12 @@ contract MarginEngineTest is Test {
         jpyFeed.updatePrice(670_000);
     }
 
+    function _buildHints() internal view returns (uint80[] memory hints) {
+        hints = new uint80[](2);
+        (hints[0],,,,) = eurFeed.latestRoundData();
+        (hints[1],,,,) = jpyFeed.latestRoundData();
+    }
+
     // ==========================================
     // createSeries
     // ==========================================
@@ -325,7 +331,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled) = engine.series(seriesId);
         assertTrue(settled);
@@ -340,7 +346,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, BULL_PRICE);
@@ -348,8 +354,9 @@ contract MarginEngineTest is Test {
 
     function test_Settle_RevertsBeforeExpiry() public {
         uint256 seriesId = _createBearSeries(90e6);
+        uint80[] memory hints = _buildHints();
         vm.expectRevert(MarginEngine.MarginEngine__NotExpired.selector);
-        engine.settle(seriesId);
+        engine.settle(seriesId, hints);
     }
 
     function test_Settle_SucceedsAfterLongDelay() public {
@@ -363,7 +370,7 @@ contract MarginEngineTest is Test {
 
         // Warp 3 more days — settle should still work via historical lookup
         vm.warp(block.timestamp + 3 days);
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
@@ -375,9 +382,12 @@ contract MarginEngineTest is Test {
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        vm.warp(block.timestamp + 7 days + 2 hours);
+        // Refresh feeds at expiry so oracle has fresh data
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        vm.warp(block.timestamp + 2 hours);
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,,,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
@@ -387,10 +397,11 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        uint80[] memory hints = _buildHints();
+        engine.settle(seriesId, hints);
 
         vm.expectRevert(MarginEngine.MarginEngine__AlreadySettled.selector);
-        engine.settle(seriesId);
+        engine.settle(seriesId, hints);
     }
 
     function test_Settle_EarlyAccelerationBearGetsCAP() public {
@@ -399,7 +410,7 @@ contract MarginEngineTest is Test {
         engine.mintOptions(seriesId, 100e18);
 
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
@@ -412,7 +423,7 @@ contract MarginEngineTest is Test {
         engine.mintOptions(seriesId, 100e18);
 
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, 0);
@@ -424,7 +435,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
 
         vm.prank(keeper);
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,,,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
@@ -448,7 +459,7 @@ contract MarginEngineTest is Test {
         // Settle
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         // Hand-calculated payout:
         //   assetPayout = 100e18 * (106e6 - 90e6) / 106e6 = 15_094_339_622_641_509_433
@@ -469,7 +480,7 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         vm.prank(bob);
         vm.expectRevert(MarginEngine.MarginEngine__ZeroAmount.selector);
@@ -494,7 +505,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__OptionIsOTM.selector);
@@ -508,7 +519,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         vm.prank(alice);
         engine.exercise(seriesId, 30e18);
@@ -530,7 +541,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         // Bob exercises ALL options
         vm.prank(bob);
@@ -557,7 +568,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
 
@@ -590,7 +601,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         uint256 aliceBefore = stakedBear.balanceOf(alice);
 
@@ -609,7 +620,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
         uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
@@ -638,7 +649,7 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         vm.prank(bob);
         vm.expectRevert(MarginEngine.MarginEngine__ZeroAmount.selector);
@@ -652,7 +663,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         vm.prank(alice);
         engine.unlockCollateral(seriesId);
@@ -678,7 +689,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         // Bob exercises 60 of 100 (majority)
         vm.prank(bob);
@@ -714,7 +725,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
 
@@ -724,11 +735,9 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.unlockCollateral(seriesId);
 
-        // Engine should retain exactly enough for 100e18 outstanding options.
-        // Per-writer accounting: each writer reserved for their own 50e18 minted options.
-        uint256 assetPayoutPerWriter = (50e18 * (settlementPrice - 90e6)) / settlementPrice;
-        uint256 reservePerWriter = (assetPayoutPerWriter * ONE_SHARE) / settlementShareRate;
-        uint256 correctReserve = reservePerWriter * 2;
+        // Engine retains global debt computed once over totalMinted (not per-writer sum)
+        uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
+        uint256 correctReserve = (assetPayout * ONE_SHARE) / settlementShareRate;
 
         uint256 engineBalance = stakedBear.balanceOf(address(engine));
         assertEq(engineBalance, correctReserve, "engine retains only what option holders need");
@@ -746,7 +755,7 @@ contract MarginEngineTest is Test {
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         uint256 aliceBefore = stakedBear.balanceOf(alice);
 
@@ -779,7 +788,7 @@ contract MarginEngineTest is Test {
         // Extreme negative yield: 1 share now worth 0.1 assets (90% loss)
         stakedBear.setExchangeRate(1, 10);
 
-        engine.settle(seriesId);
+        engine.settle(seriesId, _buildHints());
 
         // Transfer options to bob for exercise
         OptionToken opt = _getOptionToken(seriesId);
@@ -812,8 +821,8 @@ contract MarginEngineTest is Test {
         // Negative yield
         stakedBear.setExchangeRate(1, 10);
 
-        engine.settle(seriesA);
-        engine.settle(seriesB);
+        engine.settle(seriesA, _buildHints());
+        engine.settle(seriesB, _buildHints());
 
         // Alice transfers her options to keeper for exercise
         OptionToken optA = _getOptionToken(seriesA);
@@ -854,6 +863,112 @@ contract MarginEngineTest is Test {
 
         uint256 assetPayout = (amount * (price - strike)) / price;
         assertLe(assetPayout, amount, "payout must not exceed collateral");
+    }
+
+    // ==========================================
+    // H-1: POST-EXPIRY LIQUIDATION
+    // ==========================================
+
+    function test_Settle_PostExpiryLiquidationUsesOracle() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        vm.warp(block.timestamp + 1 hours);
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+        engine.settle(seriesId, _buildHints());
+
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        assertEq(settlementPrice, BEAR_PRICE, "post-expiry liquidation should use oracle price");
+    }
+
+    // ==========================================
+    // C-1: GLOBAL DEBT PRO-RATA
+    // ==========================================
+
+    function test_UnlockCollateral_GlobalDebtProRata_MultiWriter() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 60e18);
+        vm.prank(bob);
+        engine.mintOptions(seriesId, 40e18);
+
+        uint256 aliceShares = engine.writerLockedShares(seriesId, alice);
+        uint256 bobShares = engine.writerLockedShares(seriesId, bob);
+        uint256 totalShares = aliceShares + bobShares;
+
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(keeper, 60e18);
+        vm.prank(bob);
+        opt.transfer(keeper, 40e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
+        uint256 globalDebt = 0;
+        if (sp > 90e6) {
+            uint256 assetPayout = (100e18 * (sp - 90e6)) / sp;
+            globalDebt = (assetPayout * ONE_SHARE) / ssr;
+        }
+        uint256 remaining = totalShares - globalDebt;
+
+        vm.prank(keeper);
+        engine.exercise(seriesId, 50e18);
+
+        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
+
+        uint256 bobBefore = stakedBear.balanceOf(bob);
+        vm.prank(bob);
+        engine.unlockCollateral(seriesId);
+        uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
+
+        assertEq(aliceReceived, (remaining * aliceShares) / totalShares, "alice pro-rata");
+        assertEq(bobReceived, (remaining * bobShares) / totalShares, "bob pro-rata");
+    }
+
+    // ==========================================
+    // H-2: ADMIN SETTLEMENT ESCAPE HATCH
+    // ==========================================
+
+    function test_AdminSettle_WorksAfterGracePeriod() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 3 days);
+        engine.adminSettle(seriesId, BEAR_PRICE);
+
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
+        assertTrue(settled);
+        assertEq(settlementPrice, BEAR_PRICE);
+    }
+
+    function test_AdminSettle_RevertsBeforeGracePeriod() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        vm.warp(block.timestamp + 7 days + 1 days);
+        vm.expectRevert(MarginEngine.MarginEngine__AdminSettleTooEarly.selector);
+        engine.adminSettle(seriesId, BEAR_PRICE);
+    }
+
+    function test_AdminSettle_RevertsFromNonAdmin() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        vm.warp(block.timestamp + 7 days + 3 days);
+        bytes32 role = engine.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
+        vm.prank(alice);
+        engine.adminSettle(seriesId, BEAR_PRICE);
     }
 
 }

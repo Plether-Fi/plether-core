@@ -24,10 +24,10 @@ contract SettlementOracle {
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
     uint256 public constant SEQUENCER_GRACE_PERIOD = 1 hours;
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
-    uint256 public constant MAX_ROUND_TRAVERSAL = 50;
 
     error SettlementOracle__InvalidPrice(address feed);
     error SettlementOracle__LengthMismatch();
+    error SettlementOracle__WrongHintCount();
     error SettlementOracle__InvalidBasePrice();
     error SettlementOracle__InvalidWeights();
 
@@ -64,26 +64,31 @@ contract SettlementOracle {
 
     /// @notice Returns the pure theoretical settlement prices at a given expiry timestamp.
     /// @param expiry The timestamp at which to look up prices.
+    /// @param roundHints Caller-provided Chainlink round IDs (one per component) active at expiry.
     /// @return bearPrice min(BasketPrice, CAP) in 8 decimals
     /// @return bullPrice CAP - bearPrice in 8 decimals
     function getSettlementPrices(
-        uint256 expiry
+        uint256 expiry,
+        uint80[] calldata roundHints
     ) external view returns (uint256 bearPrice, uint256 bullPrice) {
         OracleLib.checkSequencer(SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD);
 
+        uint256 len = components.length;
+        if (roundHints.length != len) {
+            revert SettlementOracle__WrongHintCount();
+        }
+
         int256 totalPrice = 0;
         uint256 minUpdatedAt = type(uint256).max;
-        uint256 len = components.length;
 
         for (uint256 i = 0; i < len; i++) {
             (int256 price, uint256 updatedAt) =
-                OracleLib.getHistoricalPrice(components[i].feed, expiry, MAX_ROUND_TRAVERSAL);
+                OracleLib.verifyHistoricalPrice(components[i].feed, expiry, roundHints[i]);
 
             if (price <= 0) {
                 revert SettlementOracle__InvalidPrice(address(components[i].feed));
             }
 
-            // Weight(18) * Price(8) / BasePrice(8) normalized to 8 decimals
             int256 value = (price * int256(components[i].quantity))
                 / int256(components[i].basePrice * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
             totalPrice += value;

@@ -12,7 +12,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 interface ISettlementOracle {
 
     function getSettlementPrices(
-        uint256 expiry
+        uint256 expiry,
+        uint80[] calldata roundHints
     ) external view returns (uint256 bearPrice, uint256 bullPrice);
 
 }
@@ -94,6 +95,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     error MarginEngine__OptionIsOTM();
     error MarginEngine__ZeroAmount();
     error MarginEngine__SplitterNotActive();
+    error MarginEngine__AdminSettleTooEarly();
 
     constructor(
         address _splitter,
@@ -179,8 +181,10 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
     /// @notice Locks the settlement price and exchange rate at expiration.
     /// @dev Callable by anyone. Triggers "Early Acceleration" if protocol liquidates mid-cycle.
+    /// @param roundHints Chainlink round IDs for oracle lookup (one per feed component).
     function settle(
-        uint256 seriesId
+        uint256 seriesId,
+        uint80[] calldata roundHints
     ) external {
         Series storage s = series[seriesId];
         if (s.isSettled) {
@@ -193,28 +197,55 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         uint256 price;
-        if (isLiquidated) {
+        if (isLiquidated && block.timestamp < s.expiry) {
             price = s.isBull ? 0 : CAP;
         } else {
-            (uint256 bearPrice, uint256 bullPrice) = ORACLE.getSettlementPrices(s.expiry);
+            (uint256 bearPrice, uint256 bullPrice) = ORACLE.getSettlementPrices(s.expiry, roundHints);
             price = s.isBull ? bullPrice : bearPrice;
         }
 
         s.settlementPrice = price;
 
-        // Lock the exchange rate exactly at settlement to cleanly partition post-expiry yield
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-
-        // StakedTokens have 21 decimals (18 underlying + 3 offset).
         uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
         s.settlementShareRate = vault.convertToAssets(oneShare);
 
         if (s.settlementShareRate == 0) {
-            s.settlementShareRate = 1e18; // Fallback math safety
+            s.settlementShareRate = 1e18;
         }
         s.isSettled = true;
 
         emit SeriesSettled(seriesId, price, s.settlementShareRate);
+    }
+
+    /// @notice Admin fallback for oracle failures — settles with a manually provided price.
+    /// @dev 2-day grace period after expiry gives the oracle time to recover first.
+    function adminSettle(
+        uint256 seriesId,
+        uint256 settlementPrice
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        Series storage s = series[seriesId];
+        if (s.isSettled) {
+            revert MarginEngine__AlreadySettled();
+        }
+        if (block.timestamp < s.expiry + 2 days) {
+            revert MarginEngine__AdminSettleTooEarly();
+        }
+        if (settlementPrice > CAP) {
+            revert MarginEngine__InvalidParams();
+        }
+
+        s.settlementPrice = settlementPrice;
+
+        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
+        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
+        s.settlementShareRate = vault.convertToAssets(oneShare);
+        if (s.settlementShareRate == 0) {
+            s.settlementShareRate = 1e18;
+        }
+        s.isSettled = true;
+
+        emit SeriesSettled(seriesId, settlementPrice, s.settlementShareRate);
     }
 
     /// @notice Buyers burn ITM Options to extract their fractional payout of the collateral pool.
@@ -257,7 +288,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     }
 
     /// @notice Writers unlock their remaining splDXY shares post-settlement.
-    /// @dev If OTM, writer retains 100% of their shares + 100% of the accrued Morpho yield.
+    /// @dev Uses global debt pro-rata to stay consistent with the exercise cap.
     function unlockCollateral(
         uint256 seriesId
     ) external nonReentrant {
@@ -273,20 +304,24 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
             revert MarginEngine__ZeroAmount();
         }
 
-        // Checks-Effects
         writerLockedShares[seriesId][msg.sender] = 0;
         writerOptions[seriesId][msg.sender] = 0;
 
-        uint256 sharesOwedToBuyers = 0;
-        if (s.settlementPrice > s.strike) {
-            uint256 assetPayout = (optionsMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
+        uint256 totalMinted = totalSeriesMinted[seriesId];
+        uint256 totalShares = totalSeriesShares[seriesId];
+        uint256 globalDebtShares = 0;
 
+        if (s.settlementPrice > s.strike) {
+            uint256 assetPayout = (totalMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
             uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
-            sharesOwedToBuyers = (assetPayout * oneShare) / s.settlementShareRate;
+            globalDebtShares = (assetPayout * oneShare) / s.settlementShareRate;
+            if (globalDebtShares > totalShares) {
+                globalDebtShares = totalShares;
+            }
         }
 
-        // Writer retains exactly what is left after fulfilling their buyer obligations
-        uint256 sharesToReturn = lockedShares > sharesOwedToBuyers ? lockedShares - sharesOwedToBuyers : 0;
+        uint256 remainingPool = totalShares - globalDebtShares;
+        uint256 sharesToReturn = (remainingPool * lockedShares) / totalShares;
 
         if (sharesToReturn > 0) {
             IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));

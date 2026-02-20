@@ -81,6 +81,8 @@ contract MarginEngineHandler is Test {
     MockStakedTokenInv public stakedBear;
     MockStakedTokenInv public stakedBull;
     MockOptionsSplitterInv public splitter;
+    MockOracle public eurFeed;
+    MockOracle public jpyFeed;
 
     address[] public actors;
     uint256[] public seriesIds;
@@ -105,12 +107,16 @@ contract MarginEngineHandler is Test {
         MockStakedTokenInv _stakedBear,
         MockStakedTokenInv _stakedBull,
         MockOptionsSplitterInv _splitter,
+        MockOracle _eurFeed,
+        MockOracle _jpyFeed,
         address[] memory _actors
     ) {
         engine = _engine;
         stakedBear = _stakedBear;
         stakedBull = _stakedBull;
         splitter = _splitter;
+        eurFeed = _eurFeed;
+        jpyFeed = _jpyFeed;
         actors = _actors;
     }
 
@@ -172,7 +178,11 @@ contract MarginEngineHandler is Test {
         }
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
 
-        try engine.settle(seriesId) {
+        uint80[] memory hints = new uint80[](2);
+        (hints[0],,,,) = eurFeed.latestRoundData();
+        (hints[1],,,,) = jpyFeed.latestRoundData();
+
+        try engine.settle(seriesId, hints) {
             (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
             ghost_settledPrice[seriesId] = sp;
             ghost_settledRate[seriesId] = ssr;
@@ -293,7 +303,7 @@ contract MarginEngineInvariantTest is Test {
             stakedBull.approve(address(engine), type(uint256).max);
         }
 
-        handler = new MarginEngineHandler(engine, stakedBear, stakedBull, splitter, actors);
+        handler = new MarginEngineHandler(engine, stakedBear, stakedBull, splitter, eurFeed, jpyFeed, actors);
 
         targetContract(address(handler));
     }

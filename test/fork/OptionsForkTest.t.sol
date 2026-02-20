@@ -141,8 +141,18 @@ contract OptionsForkTest is Test {
         settlementOracle = new SettlementOracle(feeds, quantities, basePrices, CAP, address(0));
     }
 
+    function _buildForkHints() internal view returns (uint80[] memory hints) {
+        hints = new uint80[](6);
+        (hints[0],,,,) = AggregatorV3Interface(CL_EUR_USD).latestRoundData();
+        (hints[1],,,,) = AggregatorV3Interface(CL_JPY_USD).latestRoundData();
+        (hints[2],,,,) = AggregatorV3Interface(CL_GBP_USD).latestRoundData();
+        (hints[3],,,,) = AggregatorV3Interface(CL_CAD_USD).latestRoundData();
+        (hints[4],,,,) = AggregatorV3Interface(address(sekFeed)).latestRoundData();
+        (hints[5],,,,) = AggregatorV3Interface(CL_CHF_USD).latestRoundData();
+    }
+
     function test_SettlementOracle_ReturnsRealisticPrices() public view {
-        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp);
+        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
 
         assertGt(bear, 80_000_000, "bearPrice should be > $0.80");
         assertLt(bear, 120_000_000, "bearPrice should be < $1.20");
@@ -151,12 +161,11 @@ contract OptionsForkTest is Test {
     }
 
     function test_SettlementOracle_BearPlusBullEqualsCAP() public view {
-        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp);
+        (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
         assertEq(bear + bull, CAP, "bear + bull must equal CAP");
     }
 
     function test_SettlementOracle_MatchesBasketOracle() public {
-        // Deploy BasketOracle with same params
         address[] memory feeds = new address[](6);
         feeds[0] = CL_EUR_USD;
         feeds[1] = CL_JPY_USD;
@@ -183,24 +192,21 @@ contract OptionsForkTest is Test {
 
         BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
 
-        // BasketOracle needs a Curve pool — use aligned price so deviation check passes
-        (uint256 bear,) = settlementOracle.getSettlementPrices(block.timestamp);
+        (uint256 bear,) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
         uint256 bearPrice18 = bear * 1e10;
         MockCurvePoolForOptions pool = new MockCurvePoolForOptions(bearPrice18);
         basket.setCurvePool(address(pool));
 
         (, int256 basketPrice,,,) = basket.latestRoundData();
 
-        // SettlementOracle strips Curve deviation check but uses same basket math
         assertEq(bear, uint256(basketPrice), "settlement oracle should match basket oracle");
     }
 
     function test_SettlementOracle_StaleAfter24Hours() public {
-        // Warp 25 hours
         vm.warp(block.timestamp + 25 hours);
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
-        settlementOracle.getSettlementPrices(block.timestamp);
+        settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
     }
 
 }
