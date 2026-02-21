@@ -285,6 +285,49 @@ contract PletherDOVTest is Test {
     }
 
     // ==========================================
+    // withdrawDeposit
+    // ==========================================
+
+    function test_WithdrawDeposit_ReturnsUsdc() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        uint256 balanceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        dov.withdrawDeposit(400e6);
+
+        assertEq(dov.userUsdcDeposits(alice), 600e6);
+        assertEq(dov.pendingUsdcDeposits(), 600e6);
+        assertEq(usdc.balanceOf(alice), balanceBefore + 400e6);
+    }
+
+    function test_WithdrawDeposit_FullAmount() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        vm.prank(alice);
+        dov.withdrawDeposit(1000e6);
+
+        assertEq(dov.userUsdcDeposits(alice), 0);
+        assertEq(dov.pendingUsdcDeposits(), 0);
+    }
+
+    function test_WithdrawDeposit_RevertsOnZeroAmount() public {
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
+        dov.withdrawDeposit(0);
+    }
+
+    function test_WithdrawDeposit_RevertsOnInsufficientDeposit() public {
+        vm.prank(alice);
+        dov.deposit(500e6);
+
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__InsufficientDeposit.selector);
+        dov.withdrawDeposit(501e6);
+    }
+
+    // ==========================================
     // startEpochAuction
     // ==========================================
 
@@ -327,6 +370,11 @@ contract PletherDOVTest is Test {
     function test_StartEpochAuction_RevertsOnMinGreaterThanMax() public {
         vm.expectRevert(PletherDOV.PletherDOV__InvalidParams.selector);
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 100_000, 1e6, 1 hours);
+    }
+
+    function test_StartEpochAuction_RevertsOnZeroMinPremium() public {
+        vm.expectRevert(PletherDOV.PletherDOV__InvalidParams.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 0, 1 hours);
     }
 
     function test_StartEpochAuction_RevertsIfNotUnlocked() public {
@@ -681,17 +729,16 @@ contract PletherDOVTest is Test {
     }
 
     // ==========================================
-    // M-5: EPOCH ORDERING ENFORCEMENT
+    // EPOCH ORDERING ENFORCEMENT
     // ==========================================
 
-    function test_StartEpochAuction_RevertsIfPreviousUnsettled() public {
+    function test_StartEpochAuction_SucceedsAfterCancelledAuction() public {
         _startAuction();
         vm.warp(block.timestamp + 2 hours);
         dov.cancelAuction();
 
-        // Previous epoch series is NOT settled — should revert
-        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+        assertEq(dov.currentEpochId(), 2);
     }
 
 }

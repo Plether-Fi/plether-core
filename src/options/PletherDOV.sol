@@ -79,6 +79,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     mapping(address => uint256) public userUsdcDeposits;
 
     event DepositQueued(address indexed user, uint256 amount);
+    event DepositWithdrawn(address indexed user, uint256 amount);
     event EpochRolled(uint256 indexed epochId, uint256 seriesId, uint256 optionsMinted);
     event AuctionFilled(uint256 indexed epochId, address indexed buyer, uint256 premiumPaid);
     event AuctionCancelled(uint256 indexed epochId);
@@ -91,6 +92,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     error PletherDOV__AuctionNotExpired();
     error PletherDOV__SplitterNotSettled();
     error PletherDOV__InvalidParams();
+    error PletherDOV__InsufficientDeposit();
 
     constructor(
         string memory _name,
@@ -127,8 +129,23 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         emit DepositQueued(msg.sender, amount);
     }
 
-    // Note: A real implementation requires a `processDeposit` function where users claim their DOV shares
-    // based on the execution price of the Friday zap. Omitted for brevity to focus on options logic.
+    /// @notice Withdraw queued USDC that has not yet been processed into an epoch.
+    function withdrawDeposit(
+        uint256 amount
+    ) external nonReentrant {
+        if (amount == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+        if (userUsdcDeposits[msg.sender] < amount) {
+            revert PletherDOV__InsufficientDeposit();
+        }
+
+        userUsdcDeposits[msg.sender] -= amount;
+        pendingUsdcDeposits -= amount;
+
+        USDC.safeTransfer(msg.sender, amount);
+        emit DepositWithdrawn(msg.sender, amount);
+    }
 
     // ==========================================
     // EPOCH KEEPER LOGIC (Friday Operations)
@@ -145,13 +162,13 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (currentState != State.UNLOCKED) {
             revert PletherDOV__WrongState();
         }
-        if (duration == 0 || minPremium > maxPremium) {
+        if (duration == 0 || minPremium == 0 || minPremium > maxPremium) {
             revert PletherDOV__InvalidParams();
         }
 
         if (currentEpochId > 0) {
             Epoch storage prev = epochs[currentEpochId];
-            if (prev.seriesId != 0) {
+            if (prev.seriesId != 0 && prev.winningMaker != address(0)) {
                 (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(prev.seriesId);
                 if (!isSettled) {
                     revert PletherDOV__WrongState();
@@ -287,7 +304,10 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__WrongState();
         }
 
-        (, uint256 strike,, address optionToken, uint256 settlementPrice,,,) = MARGIN_ENGINE.series(e.seriesId);
+        (bool isBull, uint256 strike,, address optionToken, uint256 settlementPrice,,,) = MARGIN_ENGINE.series(e.seriesId);
+        if (isBull != IS_BULL) {
+            revert PletherDOV__InvalidParams();
+        }
         uint256 balance = IERC20(optionToken).balanceOf(address(this));
         if (balance > 0 && settlementPrice > strike) {
             MARGIN_ENGINE.exercise(e.seriesId, balance);

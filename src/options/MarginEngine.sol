@@ -55,7 +55,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 settlementPrice;
         uint256 settlementShareRate;
         bool isSettled;
-        uint256 mintShareRate; // Share rate snapshot from first mint (manipulation-resistant)
+        uint256 mintShareRate; // Share rate snapshot from first mint — freezes conversion for settlement
+            // to prevent donation/manipulation attacks. Tradeoff: yield accrued between mint and
+            // settlement on the "owed" shares goes to exercisers rather than writers.
     }
 
     ISyntheticSplitter public immutable SPLITTER;
@@ -250,6 +252,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     }
 
     /// @notice Buyers burn ITM Options to extract their fractional payout of the collateral pool.
+    /// @dev Share conversion uses the mint-time rate (not current) to prevent manipulation. This means
+    ///      exercisers receive yield accrued on their share of collateral since minting — an intentional
+    ///      tradeoff for manipulation resistance.
     function exercise(
         uint256 seriesId,
         uint256 optionsAmount
