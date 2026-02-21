@@ -123,7 +123,7 @@ library OracleLib {
                             foundNextValid = true;
                         }
                     } catch {
-                        break;
+                        continue;
                     }
                 }
             }

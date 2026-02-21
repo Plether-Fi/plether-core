@@ -55,9 +55,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 settlementPrice;
         uint256 settlementShareRate;
         bool isSettled;
-        uint256 mintShareRate; // Share rate snapshot from first mint — freezes conversion for settlement
-            // to prevent donation/manipulation attacks. Tradeoff: yield accrued between mint and
-            // settlement on the "owed" shares goes to exercisers rather than writers.
+        uint256 mintShareRate; // Share rate snapshot from first mint — informational only.
+            // Settlement uses a fresh vault rate at settle time for economically correct payouts.
     }
 
     ISyntheticSplitter public immutable SPLITTER;
@@ -219,7 +218,10 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         s.settlementPrice = price;
-        s.settlementShareRate = s.mintShareRate;
+        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
+        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
+        uint256 currentRate = vault.convertToAssets(oneShare);
+        s.settlementShareRate = currentRate > 0 ? currentRate : oneShare;
         s.isSettled = true;
         settlementTimestamp[seriesId] = block.timestamp;
 
@@ -239,12 +241,15 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (block.timestamp < s.expiry + 2 days) {
             revert MarginEngine__AdminSettleTooEarly();
         }
-        if (settlementPrice == 0 || settlementPrice > CAP) {
+        if (settlementPrice > CAP) {
             revert MarginEngine__InvalidParams();
         }
 
         s.settlementPrice = settlementPrice;
-        s.settlementShareRate = s.mintShareRate;
+        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
+        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
+        uint256 currentRate = vault.convertToAssets(oneShare);
+        s.settlementShareRate = currentRate > 0 ? currentRate : oneShare;
         s.isSettled = true;
         settlementTimestamp[seriesId] = block.timestamp;
 
@@ -252,9 +257,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     }
 
     /// @notice Buyers burn ITM Options to extract their fractional payout of the collateral pool.
-    /// @dev Share conversion uses the mint-time rate (not current) to prevent manipulation. This means
-    ///      exercisers receive yield accrued on their share of collateral since minting — an intentional
-    ///      tradeoff for manipulation resistance.
+    /// @dev Share conversion uses the settlement-time rate for economically correct payouts.
     function exercise(
         uint256 seriesId,
         uint256 optionsAmount
@@ -265,6 +268,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         Series storage s = series[seriesId];
         if (!s.isSettled) {
             revert MarginEngine__NotSettled();
+        }
+        if (block.timestamp >= settlementTimestamp[seriesId] + 90 days) {
+            revert MarginEngine__Expired();
         }
         if (s.settlementPrice <= s.strike) {
             revert MarginEngine__OptionIsOTM();

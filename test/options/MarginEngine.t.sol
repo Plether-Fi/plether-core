@@ -519,6 +519,36 @@ contract MarginEngineTest is Test {
         engine.exercise(seriesId, 50e18);
     }
 
+    function test_Exercise_RevertsAfter90DayDeadline() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.warp(block.timestamp + 91 days);
+        vm.prank(alice);
+        vm.expectRevert(MarginEngine.MarginEngine__Expired.selector);
+        engine.exercise(seriesId, 50e18);
+    }
+
+    function test_Exercise_SucceedsJustBefore90DayDeadline() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.warp(block.timestamp + 89 days);
+        vm.prank(alice);
+        engine.exercise(seriesId, 50e18);
+        assertEq(_getOptionToken(seriesId).balanceOf(alice), 50e18);
+    }
+
     function test_Exercise_PartialExercise() public {
         uint256 seriesId = _createBearSeries(90e6);
         vm.prank(alice);
@@ -1005,7 +1035,7 @@ contract MarginEngineTest is Test {
     // H-2: SHARE RATE SNAPSHOT AT MINT TIME
     // ==========================================
 
-    function test_Settle_UsesSnapshotShareRate() public {
+    function test_Settle_UsesCurrentShareRate() public {
         uint256 seriesId = _createBearSeries(90e6);
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
@@ -1014,13 +1044,15 @@ contract MarginEngineTest is Test {
         assertGt(mintRate, 0, "mint rate should be set on first mint");
 
         stakedBear.setExchangeRate(2, 1);
+        uint256 currentRate = stakedBear.convertToAssets(ONE_SHARE);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
-        assertEq(ssr, mintRate, "settlement rate must equal mint-time snapshot");
+        assertEq(ssr, currentRate, "settlement rate must equal settle-time rate");
+        assertTrue(ssr != mintRate, "settlement rate should differ from mint rate after yield");
     }
 
     function test_MintOptions_SnapshotsOnlyOnFirstMint() public {
@@ -1052,14 +1084,21 @@ contract MarginEngineTest is Test {
     // M-4: ADMIN SETTLE PRICE VALIDATION
     // ==========================================
 
-    function test_AdminSettle_RevertsOnZeroPrice() public {
-        uint256 seriesId = _createBearSeries(90e6);
+    function test_AdminSettle_SucceedsOnZeroPrice() public {
+        uint256 seriesId = _createBullSeries(90e6);
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days + 3 days);
-        vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
         engine.adminSettle(seriesId, 0);
+
+        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
+        assertTrue(settled);
+        assertEq(settlementPrice, 0, "zero price settlement succeeds for BULL OTM");
+
+        vm.prank(alice);
+        vm.expectRevert(MarginEngine.MarginEngine__OptionIsOTM.selector);
+        engine.exercise(seriesId, 50e18);
     }
 
     // ==========================================
