@@ -90,25 +90,39 @@ library OracleLib {
             revert OracleLib__NoPriceAtExpiry();
         }
 
-        uint80 nextRoundId = hintRoundId + 1;
         uint16 hintPhase = uint16(hintRoundId >> 64);
-        uint16 nextPhase = uint16(nextRoundId >> 64);
+        uint80 searchRoundId = hintRoundId + 1;
+        bool foundNextValid = false;
 
-        if (hintPhase == nextPhase) {
-            try feed.getRoundData(nextRoundId) returns (uint80, int256, uint256, uint256 nextUpdatedAt, uint80) {
-                if (nextUpdatedAt != 0 && nextUpdatedAt <= targetTimestamp) {
-                    revert OracleLib__NoPriceAtExpiry();
+        for (uint256 i = 0; i < 50; i++) {
+            if (uint16(searchRoundId >> 64) != hintPhase) {
+                break;
+            }
+            try feed.getRoundData(searchRoundId) returns (uint80, int256, uint256, uint256 nextUpdatedAt, uint80) {
+                if (nextUpdatedAt != 0) {
+                    if (nextUpdatedAt <= targetTimestamp) {
+                        revert OracleLib__NoPriceAtExpiry();
+                    }
+                    foundNextValid = true;
+                    break;
                 }
             } catch {}
+            searchRoundId++;
         }
 
-        uint80 nextPhaseFirstRound = (uint80(hintPhase + 1) << 64) | 1;
-        if (nextPhaseFirstRound <= latestRoundId) {
-            try feed.getRoundData(nextPhaseFirstRound) returns (uint80, int256, uint256, uint256 npUpdatedAt, uint80) {
-                if (npUpdatedAt != 0 && npUpdatedAt <= targetTimestamp) {
-                    revert OracleLib__NoPriceAtExpiry();
-                }
-            } catch {}
+        if (!foundNextValid) {
+            uint16 latestPhase = uint16(latestRoundId >> 64);
+            for (uint16 p = hintPhase + 1; p <= latestPhase; p++) {
+                uint80 phaseFirstRound = (uint80(p) << 64) | 1;
+                try feed.getRoundData(phaseFirstRound) returns (uint80, int256, uint256, uint256 npUpdatedAt, uint80) {
+                    if (npUpdatedAt != 0) {
+                        if (npUpdatedAt <= targetTimestamp) {
+                            revert OracleLib__NoPriceAtExpiry();
+                        }
+                        break;
+                    }
+                } catch {}
+            }
         }
 
         return (hintPrice, hintUpdatedAt);

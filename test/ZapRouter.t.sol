@@ -1029,6 +1029,10 @@ contract MockSplitter is ISyntheticSplitter {
         return _status;
     }
 
+    function liquidationTimestamp() external pure returns (uint256) {
+        return 0;
+    }
+
 }
 
 contract MockCurvePoolWithMEV is ICurvePool {

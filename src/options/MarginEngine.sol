@@ -197,7 +197,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         uint256 price;
-        if (isLiquidated && block.timestamp < s.expiry) {
+        if (isLiquidated && SPLITTER.liquidationTimestamp() <= s.expiry) {
             price = s.isBull ? 0 : CAP;
         } else {
             (uint256 bearPrice, uint256 bullPrice) = ORACLE.getSettlementPrices(s.expiry, roundHints);

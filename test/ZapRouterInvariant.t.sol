@@ -222,6 +222,10 @@ contract InvMockSplitter is ISyntheticSplitter {
         bytes32
     ) external override {}
 
+    function liquidationTimestamp() external pure returns (uint256) {
+        return 0;
+    }
+
 }
 
 // ==========================================

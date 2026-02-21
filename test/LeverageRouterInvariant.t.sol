@@ -733,6 +733,10 @@ contract InvariantMockSplitter is ISyntheticSplitter {
         bytes32
     ) external override {}
 
+    function liquidationTimestamp() external pure returns (uint256) {
+        return 0;
+    }
+
 }
 
 /// @notice Mock Morpho that supports both splDXY-BEAR and splDXY-BULL as collateral

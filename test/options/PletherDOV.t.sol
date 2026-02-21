@@ -79,6 +79,7 @@ contract MockStakedTokenForDOV is ERC20 {
 
 contract MockSplitterForDOV {
 
+    uint256 public liquidationTimestamp;
     ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
 
     function currentStatus() external view returns (ISyntheticSplitter.Status) {
@@ -89,6 +90,9 @@ contract MockSplitterForDOV {
         ISyntheticSplitter.Status s
     ) external {
         _status = s;
+        if (s == ISyntheticSplitter.Status.SETTLED) {
+            liquidationTimestamp = block.timestamp;
+        }
     }
 
 }

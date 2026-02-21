@@ -15,6 +15,7 @@ import "forge-std/Test.sol";
 contract MockOptionsSplitterInv {
 
     uint256 public CAP = 2e8;
+    uint256 public liquidationTimestamp;
     ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
 
     function currentStatus() external view returns (ISyntheticSplitter.Status) {
@@ -25,6 +26,9 @@ contract MockOptionsSplitterInv {
         ISyntheticSplitter.Status s
     ) external {
         _status = s;
+        if (s == ISyntheticSplitter.Status.SETTLED) {
+            liquidationTimestamp = block.timestamp;
+        }
     }
 
 }

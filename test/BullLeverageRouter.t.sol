@@ -1687,6 +1687,10 @@ contract MockSplitter is ISyntheticSplitter {
         return _status;
     }
 
+    function liquidationTimestamp() external pure returns (uint256) {
+        return 0;
+    }
+
 }
 
 /// @notice Mock staked token that simulates exchange rate drift between preview and redeem

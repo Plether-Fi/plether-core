@@ -16,6 +16,7 @@ import "forge-std/Test.sol";
 contract MockOptionsSplitter {
 
     uint256 public CAP = 2e8;
+    uint256 public liquidationTimestamp;
     ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
 
     function currentStatus() external view returns (ISyntheticSplitter.Status) {
@@ -26,6 +27,9 @@ contract MockOptionsSplitter {
         ISyntheticSplitter.Status s
     ) external {
         _status = s;
+        if (s == ISyntheticSplitter.Status.SETTLED) {
+            liquidationTimestamp = block.timestamp;
+        }
     }
 
 }
@@ -883,6 +887,29 @@ contract MarginEngineTest is Test {
 
         (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, BEAR_PRICE, "post-expiry liquidation should use oracle price");
+    }
+
+    // ==========================================
+    // DELAYED EXECUTION MEV PREVENTION
+    // ==========================================
+
+    function test_Settle_DelayedExecutionStillUsesHardcodedPrice() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        // Liquidation happens mid-week (before expiry)
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        // MEV attacker delays settle() past expiry, hoping oracle price is more favorable
+        vm.warp(block.timestamp + 7 days + 1 hours);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        // Despite block.timestamp > expiry, the liquidationTimestamp is before expiry
+        // so hardcoded prices (CAP for bear, 0 for bull) must be used
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        assertEq(settlementPrice, CAP, "pre-expiry liquidation must use CAP regardless of settle timing");
     }
 
     // ==========================================

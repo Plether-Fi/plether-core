@@ -72,6 +72,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
 
     // Liquidation State
     bool public isLiquidated;
+    uint256 public liquidationTimestamp;
 
     // Sequencer Feed
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
@@ -371,6 +372,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
 
         isLiquidated = true;
+        liquidationTimestamp = block.timestamp;
         emit LiquidationTriggered(price);
     }
 
@@ -384,6 +386,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             uint256 price = _getOraclePrice();
             if (price >= CAP) {
                 isLiquidated = true;
+                liquidationTimestamp = block.timestamp;
                 emit LiquidationTriggered(price);
             } else {
                 revert Splitter__NotLiquidated();

@@ -247,6 +247,34 @@ contract SettlementOracleTest is Test {
     }
 
     // ==========================================
+    // DROPPED ROUNDS
+    // ==========================================
+
+    function test_GetSettlementPrices_RejectsStaleHintWithDroppedRounds() public {
+        // Round 1 exists (from setUp). Create round 3 (skip round 2) at +1h.
+        vm.warp(block.timestamp + 1 hours);
+        eurFeed.updatePriceAtRound(120_000_000, 3);
+        jpyFeed.updatePriceAtRound(700_000, 3);
+
+        // Read expiry from storage to avoid via-IR TIMESTAMP optimization
+        (,, uint256 expiry,,) = eurFeed.getRoundData(3);
+
+        // Create round 4 after expiry so latestRoundData doesn't hit the fast path
+        vm.warp(block.timestamp + 2 hours);
+        eurFeed.updatePrice(118_800_000); // round 4
+        jpyFeed.updatePrice(670_000);
+
+        // Hint round 1 is stale — round 3 (past the dropped round 2) is closer to expiry.
+        // The bounded forward search should find round 3 and reject hint 1.
+        uint80[] memory hints = new uint80[](2);
+        hints[0] = 1;
+        hints[1] = 1;
+
+        vm.expectRevert(OracleLib.OracleLib__NoPriceAtExpiry.selector);
+        oracle.getSettlementPrices(expiry, hints);
+    }
+
+    // ==========================================
     // FUZZ
     // ==========================================
 

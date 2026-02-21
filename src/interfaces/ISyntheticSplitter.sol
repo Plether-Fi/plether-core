@@ -87,4 +87,10 @@ interface ISyntheticSplitter {
      */
     function CAP() external view returns (uint256);
 
+    /**
+     * @notice Returns the timestamp when the protocol was liquidated.
+     * @return The liquidation timestamp (0 if not liquidated).
+     */
+    function liquidationTimestamp() external view returns (uint256);
+
 }
