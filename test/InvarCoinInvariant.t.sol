@@ -202,7 +202,7 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.deployToCurve() {
+        try ic.deployToCurve(0) {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             deployToCurveCalls++;
         } catch (bytes memory reason) {
