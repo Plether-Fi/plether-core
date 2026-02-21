@@ -6,85 +6,10 @@ import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
 import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
+import {MockOptionsSplitter, MockStakedTokenOptions} from "../utils/OptionsMocks.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
-
-// ─── Inline Mocks ───────────────────────────────────────────────────────
-
-contract MockOptionsSplitter {
-
-    uint256 public CAP = 2e8;
-    uint256 public liquidationTimestamp;
-    ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
-
-    function currentStatus() external view returns (ISyntheticSplitter.Status) {
-        return _status;
-    }
-
-    function setStatus(
-        ISyntheticSplitter.Status s
-    ) external {
-        _status = s;
-        if (s == ISyntheticSplitter.Status.SETTLED) {
-            liquidationTimestamp = block.timestamp;
-        }
-    }
-
-}
-
-/// @dev 21-decimal ERC20 simulating StakedToken (ERC4626 with _decimalsOffset=3).
-contract MockStakedTokenOptions is ERC20 {
-
-    uint256 private _rateNum = 1;
-    uint256 private _rateDen = 1;
-
-    constructor(
-        string memory name_,
-        string memory symbol_
-    ) ERC20(name_, symbol_) {}
-
-    function decimals() public pure override returns (uint8) {
-        return 21;
-    }
-
-    function setExchangeRate(
-        uint256 num,
-        uint256 den
-    ) external {
-        _rateNum = num;
-        _rateDen = den;
-    }
-
-    /// @dev Rounds DOWN: shares → assets.
-    function convertToAssets(
-        uint256 shares
-    ) external view returns (uint256) {
-        return (shares * _rateNum) / (_rateDen * 1e3);
-    }
-
-    /// @dev Rounds UP: assets → shares (ERC4626 previewWithdraw spec).
-    function previewWithdraw(
-        uint256 assets
-    ) external view returns (uint256) {
-        if (_rateNum == 0) {
-            return assets * 1e3;
-        }
-        uint256 numerator = assets * _rateDen * 1e3;
-        return (numerator + _rateNum - 1) / _rateNum;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-// ─── Tests ──────────────────────────────────────────────────────────────
 
 contract MarginEngineTest is Test {
 
@@ -796,20 +721,6 @@ contract MarginEngineTest is Test {
         assertGe(assets, amount, "shares must cover at least the option amount");
     }
 
-    function testFuzz_Exercise_PayoutNeverExceedsCollateral(
-        uint256 strike,
-        uint256 price,
-        uint256 amount
-    ) public pure {
-        uint256 cap = 2e8;
-        strike = bound(strike, 1, cap - 1);
-        price = bound(price, strike + 1, cap);
-        amount = bound(amount, 1e18, 100_000e18);
-
-        uint256 assetPayout = (amount * (price - strike)) / price;
-        assertLe(assetPayout, amount, "payout must not exceed collateral");
-    }
-
     // ==========================================
     // H-1: POST-EXPIRY LIQUIDATION
     // ==========================================
@@ -1035,6 +946,101 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 90 days);
         engine.exercise(seriesId, 50e18);
         assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 50e18);
+    }
+
+    // ==========================================
+    // WRITER UNLOCK UNDER NEGATIVE YIELD
+    // ==========================================
+
+    function test_UnlockCollateral_ModerateNegativeYield() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
+        OptionToken opt = _getOptionToken(seriesId);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        // Moderate negative yield: 1 share worth 2/3 of original
+        stakedBear.setExchangeRate(2, 3);
+        engine.settle(seriesId, _buildHints());
+
+        // Bob exercises all options
+        vm.prank(bob);
+        engine.exercise(seriesId, 100e18);
+
+        uint256 exercisedShares = engine.totalSeriesExercisedShares(seriesId);
+
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
+        engine.unlockCollateral(seriesId);
+        uint256 returned = stakedBear.balanceOf(address(this)) - selfBefore;
+
+        assertEq(returned, lockedShares - exercisedShares, "writer gets remainder after exercise");
+    }
+
+    function test_UnlockCollateral_ExtremeNegativeYield() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        OptionToken opt = _getOptionToken(seriesId);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        // Extreme negative yield: 1 share worth 1/10 of original
+        stakedBear.setExchangeRate(1, 10);
+        engine.settle(seriesId, _buildHints());
+
+        // Bob exercises all options — payout capped to totalShares
+        vm.prank(bob);
+        engine.exercise(seriesId, 100e18);
+
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
+        engine.unlockCollateral(seriesId);
+        uint256 returned = stakedBear.balanceOf(address(this)) - selfBefore;
+
+        assertEq(returned, 0, "writer gets nothing under extreme negative yield");
+    }
+
+    // ==========================================
+    // PARTIAL SWEEP
+    // ==========================================
+
+    function test_SweepUnclaimedShares_PartialExercise() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        OptionToken opt = _getOptionToken(seriesId);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        // Bob exercises 33 of 100
+        vm.prank(bob);
+        engine.exercise(seriesId, 33e18);
+
+        uint256 exercisedShares = engine.totalSeriesExercisedShares(seriesId);
+
+        engine.unlockCollateral(seriesId);
+
+        vm.warp(block.timestamp + 91 days);
+
+        uint256 adminBefore = stakedBear.balanceOf(address(this));
+        engine.sweepUnclaimedShares(seriesId);
+        uint256 swept = stakedBear.balanceOf(address(this)) - adminBefore;
+
+        // globalDebtShares for the full 100 options minus the 33 already exercised
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+        uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
+        uint256 globalDebtShares = (assetPayout * ONE_SHARE) / settlementShareRate;
+        uint256 expectedSwept = globalDebtShares - exercisedShares;
+
+        assertEq(swept, expectedSwept, "swept amount equals unclaimed debt shares");
     }
 
 }

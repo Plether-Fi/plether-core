@@ -151,13 +151,14 @@ contract OptionsForkTest is Test {
         (hints[5],,,,) = AggregatorV3Interface(CL_CHF_USD).latestRoundData();
     }
 
+    uint256 constant EXPECTED_BEAR = 105_526_507;
+    uint256 constant EXPECTED_BULL = 94_473_493;
+
     function test_SettlementOracle_ReturnsRealisticPrices() public view {
         (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
 
-        assertGt(bear, 80_000_000, "bearPrice should be > $0.80");
-        assertLt(bear, 120_000_000, "bearPrice should be < $1.20");
-        assertGt(bull, 80_000_000, "bullPrice should be > $0.80");
-        assertLt(bull, 120_000_000, "bullPrice should be < $1.20");
+        assertEq(bear, EXPECTED_BEAR, "bearPrice at fork block");
+        assertEq(bull, EXPECTED_BULL, "bullPrice at fork block");
     }
 
     function test_SettlementOracle_BearPlusBullEqualsCAP() public view {
@@ -203,10 +204,12 @@ contract OptionsForkTest is Test {
     }
 
     function test_SettlementOracle_StaleAfter24Hours() public {
-        vm.warp(block.timestamp + 25 hours);
+        uint256 staleTime = block.timestamp + 25 hours;
+        vm.warp(staleTime);
+        uint80[] memory hints = _buildForkHints();
 
         vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
-        settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
+        settlementOracle.getSettlementPrices(staleTime, hints);
     }
 
 }

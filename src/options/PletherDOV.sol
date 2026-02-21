@@ -198,6 +198,10 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         // MarginEngine requires underlying asset amounts. Convert our ERC4626 shares to assets.
         uint256 optionsToMint = STAKED_TOKEN.previewRedeem(sharesBalance);
 
+        if (optionsToMint == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+
         // Rounding protection: ensure previewWithdraw doesn't try to pull 1 wei more than we have
         uint256 requiredShares = STAKED_TOKEN.previewWithdraw(optionsToMint);
         if (requiredShares > sharesBalance) {

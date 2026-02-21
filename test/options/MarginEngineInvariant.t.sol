@@ -1,90 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import {ISyntheticSplitter} from "../../src/interfaces/ISyntheticSplitter.sol";
 import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
 import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {MockOptionsSplitter, MockStakedTokenOptions} from "../utils/OptionsMocks.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
-
-// ─── Inline Mocks (same as MarginEngine.t.sol) ─────────────────────────
-
-contract MockOptionsSplitterInv {
-
-    uint256 public CAP = 2e8;
-    uint256 public liquidationTimestamp;
-    ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
-
-    function currentStatus() external view returns (ISyntheticSplitter.Status) {
-        return _status;
-    }
-
-    function setStatus(
-        ISyntheticSplitter.Status s
-    ) external {
-        _status = s;
-        if (s == ISyntheticSplitter.Status.SETTLED) {
-            liquidationTimestamp = block.timestamp;
-        }
-    }
-
-}
-
-contract MockStakedTokenInv is ERC20 {
-
-    uint256 private _rateNum = 1;
-    uint256 private _rateDen = 1;
-
-    constructor(
-        string memory name_,
-        string memory symbol_
-    ) ERC20(name_, symbol_) {}
-
-    function decimals() public pure override returns (uint8) {
-        return 21;
-    }
-
-    function setExchangeRate(
-        uint256 num,
-        uint256 den
-    ) external {
-        _rateNum = num;
-        _rateDen = den;
-    }
-
-    function convertToAssets(
-        uint256 shares
-    ) external view returns (uint256) {
-        return (shares * _rateNum) / (_rateDen * 1e3);
-    }
-
-    function previewWithdraw(
-        uint256 assets
-    ) external view returns (uint256) {
-        uint256 numerator = assets * _rateDen * 1e3;
-        return (numerator + _rateNum - 1) / _rateNum;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
 
 // ─── Handler ────────────────────────────────────────────────────────────
 
 contract MarginEngineHandler is Test {
 
     MarginEngine public engine;
-    MockStakedTokenInv public stakedBear;
-    MockStakedTokenInv public stakedBull;
-    MockOptionsSplitterInv public splitter;
+    MockStakedTokenOptions public stakedBear;
+    MockStakedTokenOptions public stakedBull;
+    MockOptionsSplitter public splitter;
     MockOracle public eurFeed;
     MockOracle public jpyFeed;
 
@@ -108,9 +40,9 @@ contract MarginEngineHandler is Test {
 
     constructor(
         MarginEngine _engine,
-        MockStakedTokenInv _stakedBear,
-        MockStakedTokenInv _stakedBull,
-        MockOptionsSplitterInv _splitter,
+        MockStakedTokenOptions _stakedBear,
+        MockStakedTokenOptions _stakedBull,
+        MockOptionsSplitter _splitter,
         MockOracle _eurFeed,
         MockOracle _jpyFeed,
         address[] memory _actors
@@ -159,7 +91,7 @@ contract MarginEngineHandler is Test {
         amount = bound(amount, 1e18, 10_000e18);
 
         (bool isBull,,,,,,) = engine.series(seriesId);
-        MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
+        MockStakedTokenOptions vault = isBull ? stakedBull : stakedBear;
         uint256 sharesToLock = vault.previewWithdraw(amount);
 
         try engine.mintOptions(seriesId, amount) {
@@ -174,6 +106,30 @@ contract MarginEngineHandler is Test {
     ) external {
         timeDelta = bound(timeDelta, 1 hours, 7 days);
         vm.warp(block.timestamp + timeDelta);
+    }
+
+    function warpYield(
+        uint256 bearNum,
+        uint256 bearDen,
+        uint256 bullNum,
+        uint256 bullDen
+    ) external {
+        bearNum = bound(bearNum, 1, 10);
+        bearDen = bound(bearDen, 1, 10);
+        bullNum = bound(bullNum, 1, 10);
+        bullDen = bound(bullDen, 1, 10);
+        stakedBear.setExchangeRate(bearNum, bearDen);
+        stakedBull.setExchangeRate(bullNum, bullDen);
+    }
+
+    function warpPrices(
+        uint256 eurPrice,
+        uint256 jpyPrice
+    ) external {
+        eurPrice = bound(eurPrice, 50_000_000, 200_000_000);
+        jpyPrice = bound(jpyPrice, 300_000, 1_500_000);
+        eurFeed.updatePrice(int256(eurPrice));
+        jpyFeed.updatePrice(int256(jpyPrice));
     }
 
     function settle(
@@ -215,7 +171,7 @@ contract MarginEngineHandler is Test {
         amount = bound(amount, 1, balance);
 
         (bool isBull,,,,,,) = engine.series(seriesId);
-        MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
+        MockStakedTokenOptions vault = isBull ? stakedBull : stakedBear;
         uint256 vaultBefore = vault.balanceOf(actor);
 
         vm.prank(actor);
@@ -237,7 +193,7 @@ contract MarginEngineHandler is Test {
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
 
         (bool isBull,,,,,,) = engine.series(seriesId);
-        MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
+        MockStakedTokenOptions vault = isBull ? stakedBull : stakedBear;
         uint256 vaultBefore = vault.balanceOf(address(this));
 
         try engine.unlockCollateral(seriesId) {
@@ -253,9 +209,9 @@ contract MarginEngineHandler is Test {
 contract MarginEngineInvariantTest is Test {
 
     MarginEngine public engine;
-    MockOptionsSplitterInv public splitter;
-    MockStakedTokenInv public stakedBear;
-    MockStakedTokenInv public stakedBull;
+    MockOptionsSplitter public splitter;
+    MockStakedTokenOptions public stakedBear;
+    MockStakedTokenOptions public stakedBull;
     MarginEngineHandler public handler;
 
     MockOracle public eurFeed;
@@ -267,7 +223,7 @@ contract MarginEngineInvariantTest is Test {
     function setUp() public {
         vm.warp(1_735_689_600);
 
-        splitter = new MockOptionsSplitterInv();
+        splitter = new MockOptionsSplitter();
 
         sequencerFeed = new MockOracle(0, "Sequencer");
         vm.warp(block.timestamp + 2 hours);
@@ -287,8 +243,8 @@ contract MarginEngineInvariantTest is Test {
 
         SettlementOracle oracle = new SettlementOracle(feeds, quantities, basePrices, 2e8, address(sequencerFeed));
 
-        stakedBear = new MockStakedTokenInv("splDXY-BEAR", "splBEAR");
-        stakedBull = new MockStakedTokenInv("splDXY-BULL", "splBULL");
+        stakedBear = new MockStakedTokenOptions("splDXY-BEAR", "splBEAR");
+        stakedBull = new MockStakedTokenOptions("splDXY-BULL", "splBULL");
         OptionToken optionImpl = new OptionToken();
 
         engine = new MarginEngine(
@@ -315,8 +271,8 @@ contract MarginEngineInvariantTest is Test {
         targetContract(address(handler));
     }
 
-    /// @dev Shares in engine + released (exercised + unlocked) should account for all deposited shares.
-    /// Allows 1e3 dust per series for rounding.
+    /// @dev Shares in engine + released (exercised + unlocked) must never exceed deposited.
+    /// Rounding dust gets trapped inside the engine (favors protocol), so the lower bound uses a dust allowance.
     function invariant_sharesConservation() public view {
         uint256 bearInEngine = stakedBear.balanceOf(address(engine));
         uint256 bullInEngine = stakedBull.balanceOf(address(engine));
@@ -325,10 +281,10 @@ contract MarginEngineInvariantTest is Test {
         uint256 totalReleased = handler.ghost_totalSharesExercised() + handler.ghost_totalSharesUnlocked();
         uint256 totalDeposited = handler.ghost_totalSharesDeposited();
 
+        assertLe(totalInEngine + totalReleased, totalDeposited, "more shares released than deposited");
+
         uint256 seriesCount = handler.getSeriesCount();
         uint256 dustAllowance = seriesCount * 1e3;
-
-        assertLe(totalInEngine + totalReleased, totalDeposited + dustAllowance, "more shares released than deposited");
         assertGe(
             totalInEngine + totalReleased,
             totalDeposited > dustAllowance ? totalDeposited - dustAllowance : 0,

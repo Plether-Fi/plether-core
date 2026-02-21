@@ -737,8 +737,9 @@ contract PletherDOVTest is Test {
         vm.warp(block.timestamp + 2 hours);
         dov.cancelAuction();
 
-        // Must settle the cancelled series before starting a new epoch (M-04)
         marginEngine.settle(1, new uint80[](0));
+        dov.exerciseUnsoldOptions(1);
+        dov.reclaimCollateral(1);
 
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
         assertEq(dov.currentEpochId(), 2);
@@ -832,6 +833,17 @@ contract PletherDOVTest is Test {
         // Do NOT settle the cancelled series — next epoch should be blocked
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    // ==========================================
+    // COLD START GUARD
+    // ==========================================
+
+    function test_StartEpochAuction_RevertsOnZeroBalance() public {
+        PletherDOV emptyDov =
+            new PletherDOV("EMPTY DOV", "eDOV", address(marginEngine), address(stakedToken), address(usdc), false);
+        vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
+        emptyDov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
     }
 
 }
