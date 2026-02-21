@@ -337,11 +337,6 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 userDebtShares = (globalDebtShares * optionsMinted) / totalMinted;
         uint256 sharesToReturn = lockedShares > userDebtShares ? lockedShares - userDebtShares : 0;
 
-        uint256 poolCap = ((totalShares - globalDebtShares) * lockedShares) / totalShares;
-        if (sharesToReturn > poolCap) {
-            sharesToReturn = poolCap;
-        }
-
         if (sharesToReturn > 0) {
             IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
             vault.safeTransfer(msg.sender, sharesToReturn);

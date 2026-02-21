@@ -27,6 +27,7 @@ contract MarginEngineHandler is Test {
     uint256 public ghost_totalSharesDeposited;
     uint256 public ghost_totalSharesExercised;
     uint256 public ghost_totalSharesUnlocked;
+    uint256 public ghost_totalSharesSwept;
     uint256 public ghost_totalOptionsMinted;
     uint256 public ghost_totalOptionsExercised;
 
@@ -140,9 +141,11 @@ contract MarginEngineHandler is Test {
         }
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
 
+        (,, uint256 expiry,,,,) = engine.series(seriesId);
+
         uint80[] memory hints = new uint80[](2);
-        (hints[0],,,,) = eurFeed.latestRoundData();
-        (hints[1],,,,) = jpyFeed.latestRoundData();
+        hints[0] = _findHintRound(eurFeed, expiry);
+        hints[1] = _findHintRound(jpyFeed, expiry);
 
         try engine.settle(seriesId, hints) {
             (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
@@ -150,6 +153,36 @@ contract MarginEngineHandler is Test {
             ghost_settledRate[seriesId] = ssr;
             ghost_isSettled[seriesId] = true;
         } catch {}
+    }
+
+    function sweep(
+        uint256 seriesSeed
+    ) external {
+        if (seriesIds.length == 0) {
+            return;
+        }
+        uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
+        (bool isBull,,,,,,) = engine.series(seriesId);
+        MockStakedTokenOptions vault = isBull ? stakedBull : stakedBear;
+        uint256 vaultBefore = vault.balanceOf(address(this));
+        try engine.sweepUnclaimedShares(seriesId) {
+            ghost_totalSharesSwept += vault.balanceOf(address(this)) - vaultBefore;
+        } catch {}
+    }
+
+    function _findHintRound(
+        MockOracle feed,
+        uint256 expiry
+    ) internal view returns (uint80) {
+        uint80 roundId = feed.currentRoundId();
+        while (roundId > 0) {
+            (,,, uint256 updatedAt,) = feed.getRoundData(roundId);
+            if (updatedAt <= expiry) {
+                return roundId;
+            }
+            roundId--;
+        }
+        return feed.currentRoundId();
     }
 
     function exercise(
@@ -265,31 +298,25 @@ contract MarginEngineInvariantTest is Test {
 
         handler = new MarginEngineHandler(engine, stakedBear, stakedBull, splitter, eurFeed, jpyFeed, actors);
         engine.grantRole(engine.SERIES_CREATOR_ROLE(), address(handler));
+        engine.grantRole(engine.DEFAULT_ADMIN_ROLE(), address(handler));
         stakedBear.mint(address(handler), 10_000_000e21);
         stakedBull.mint(address(handler), 10_000_000e21);
 
         targetContract(address(handler));
     }
 
-    /// @dev Shares in engine + released (exercised + unlocked) must never exceed deposited.
-    /// Rounding dust gets trapped inside the engine (favors protocol), so the lower bound uses a dust allowance.
+    /// @dev Under single-writer, share conservation is mathematically exact:
+    /// engine_balance + exercised + unlocked + swept = deposited.
     function invariant_sharesConservation() public view {
         uint256 bearInEngine = stakedBear.balanceOf(address(engine));
         uint256 bullInEngine = stakedBull.balanceOf(address(engine));
         uint256 totalInEngine = bearInEngine + bullInEngine;
 
-        uint256 totalReleased = handler.ghost_totalSharesExercised() + handler.ghost_totalSharesUnlocked();
+        uint256 totalReleased = handler.ghost_totalSharesExercised() + handler.ghost_totalSharesUnlocked()
+            + handler.ghost_totalSharesSwept();
         uint256 totalDeposited = handler.ghost_totalSharesDeposited();
 
-        assertLe(totalInEngine + totalReleased, totalDeposited, "more shares released than deposited");
-
-        uint256 seriesCount = handler.getSeriesCount();
-        uint256 dustAllowance = seriesCount * 1e3;
-        assertGe(
-            totalInEngine + totalReleased,
-            totalDeposited > dustAllowance ? totalDeposited - dustAllowance : 0,
-            "shares went missing"
-        );
+        assertEq(totalInEngine + totalReleased, totalDeposited, "share conservation violated");
     }
 
     /// @dev Settlement prices for a series must never change once set.

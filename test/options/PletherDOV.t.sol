@@ -184,10 +184,9 @@ contract MockMarginEngine {
         uint256 seriesId
     ) external {
         uint256 shares = sharesLocked[seriesId];
+        require(shares > 0, "no shares");
         sharesLocked[seriesId] = 0;
-        if (shares > 0) {
-            stakedToken.safeTransfer(msg.sender, shares);
-        }
+        stakedToken.safeTransfer(msg.sender, shares);
     }
 
     function exercise(
