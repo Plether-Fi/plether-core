@@ -53,8 +53,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 expiry;
         address optionToken;
         uint256 settlementPrice;
-        uint256 settlementShareRate; // Exchange rate of the vault locked at expiration
+        uint256 settlementShareRate;
         bool isSettled;
+        uint256 mintShareRate; // Share rate snapshot from first mint (manipulation-resistant)
     }
 
     ISyntheticSplitter public immutable SPLITTER;
@@ -76,6 +77,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     // Per-series collateral tracking for exercise cap (prevents cross-series drain from negative yield)
     mapping(uint256 => uint256) public totalSeriesShares;
     mapping(uint256 => uint256) public totalSeriesMinted;
+    mapping(uint256 => uint256) public totalSeriesExercisedShares;
+    mapping(uint256 => uint256) public settlementTimestamp;
 
     event SeriesCreated(uint256 indexed seriesId, address optionToken, bool isBull, uint256 strike, uint256 expiry);
     event OptionsMinted(uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesLocked);
@@ -86,6 +89,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     event CollateralUnlocked(
         uint256 indexed seriesId, address indexed writer, uint256 optionsAmount, uint256 sharesReturned
     );
+    event UnclaimedSharesSwept(uint256 indexed seriesId, uint256 sharesSwept);
 
     error MarginEngine__InvalidParams();
     error MarginEngine__Expired();
@@ -96,6 +100,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     error MarginEngine__ZeroAmount();
     error MarginEngine__SplitterNotActive();
     error MarginEngine__AdminSettleTooEarly();
+    error MarginEngine__SweepTooEarly();
 
     constructor(
         address _splitter,
@@ -121,7 +126,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         string memory name,
         string memory symbol
     ) external onlyRole(SERIES_CREATOR_ROLE) returns (uint256 seriesId) {
-        if (strike >= CAP || expiry <= block.timestamp) {
+        if (strike == 0 || strike >= CAP || expiry <= block.timestamp) {
             revert MarginEngine__InvalidParams();
         }
 
@@ -136,7 +141,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
             optionToken: proxy,
             settlementPrice: 0,
             settlementShareRate: 0,
-            isSettled: false
+            isSettled: false,
+            mintShareRate: 0
         });
 
         emit SeriesCreated(seriesId, proxy, isBull, strike, expiry);
@@ -160,8 +166,14 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
 
-        // Exact 1:1 Backing: calculate how many shares are needed to fully collateralize `optionsAmount` of underlying assets.
-        // previewWithdraw rounds UP natively in ERC4626, ensuring the MarginEngine is always mathematically fully collateralized.
+        if (s.mintShareRate == 0) {
+            uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
+            s.mintShareRate = vault.convertToAssets(oneShare);
+            if (s.mintShareRate == 0) {
+                s.mintShareRate = 1e18;
+            }
+        }
+
         uint256 sharesToLock = vault.previewWithdraw(optionsAmount);
 
         // State accounting
@@ -205,15 +217,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         s.settlementPrice = price;
-
-        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
-        s.settlementShareRate = vault.convertToAssets(oneShare);
-
-        if (s.settlementShareRate == 0) {
-            s.settlementShareRate = 1e18;
-        }
+        s.settlementShareRate = s.mintShareRate;
         s.isSettled = true;
+        settlementTimestamp[seriesId] = block.timestamp;
 
         emit SeriesSettled(seriesId, price, s.settlementShareRate);
     }
@@ -231,19 +237,14 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (block.timestamp < s.expiry + 2 days) {
             revert MarginEngine__AdminSettleTooEarly();
         }
-        if (settlementPrice > CAP) {
+        if (settlementPrice == 0 || settlementPrice > CAP) {
             revert MarginEngine__InvalidParams();
         }
 
         s.settlementPrice = settlementPrice;
-
-        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
-        s.settlementShareRate = vault.convertToAssets(oneShare);
-        if (s.settlementShareRate == 0) {
-            s.settlementShareRate = 1e18;
-        }
+        s.settlementShareRate = s.mintShareRate;
         s.isSettled = true;
+        settlementTimestamp[seriesId] = block.timestamp;
 
         emit SeriesSettled(seriesId, settlementPrice, s.settlementShareRate);
     }
@@ -280,6 +281,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (sharePayout > maxPayout) {
             sharePayout = maxPayout;
         }
+
+        totalSeriesExercisedShares[seriesId] += sharePayout;
 
         IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
         vault.safeTransfer(msg.sender, sharePayout);
@@ -329,6 +332,45 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         emit CollateralUnlocked(seriesId, msg.sender, optionsMinted, sharesToReturn);
+    }
+
+    /// @notice Sweeps unclaimed exercise shares 90 days after settlement.
+    /// @dev Returns shares reserved for unexercised ITM options to the admin for distribution.
+    function sweepUnclaimedShares(
+        uint256 seriesId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        Series storage s = series[seriesId];
+        if (!s.isSettled) {
+            revert MarginEngine__NotSettled();
+        }
+        if (block.timestamp < settlementTimestamp[seriesId] + 90 days) {
+            revert MarginEngine__SweepTooEarly();
+        }
+
+        uint256 totalMinted = totalSeriesMinted[seriesId];
+        uint256 totalShares = totalSeriesShares[seriesId];
+        uint256 globalDebtShares = 0;
+
+        if (s.settlementPrice > s.strike) {
+            uint256 assetPayout = (totalMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
+            uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
+            globalDebtShares = (assetPayout * oneShare) / s.settlementShareRate;
+            if (globalDebtShares > totalShares) {
+                globalDebtShares = totalShares;
+            }
+        }
+
+        uint256 unclaimedShares = globalDebtShares - totalSeriesExercisedShares[seriesId];
+        if (unclaimedShares == 0) {
+            revert MarginEngine__ZeroAmount();
+        }
+
+        totalSeriesExercisedShares[seriesId] += unclaimedShares;
+
+        IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
+        vault.safeTransfer(msg.sender, unclaimedShares);
+
+        emit UnclaimedSharesSwept(seriesId, unclaimedShares);
     }
 
 }

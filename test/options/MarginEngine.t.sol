@@ -174,7 +174,7 @@ contract MarginEngineTest is Test {
     function _getOptionToken(
         uint256 seriesId
     ) internal view returns (OptionToken) {
-        (,,, address optAddr,,,) = engine.series(seriesId);
+        (,,, address optAddr,,,,) = engine.series(seriesId);
         return OptionToken(optAddr);
     }
 
@@ -197,7 +197,7 @@ contract MarginEngineTest is Test {
         uint256 expiry = block.timestamp + 7 days;
         uint256 id = engine.createSeries(false, 90e6, expiry, "BEAR-90C", "oBEAR");
 
-        (bool isBull, uint256 strike, uint256 exp, address optAddr, uint256 sp, uint256 ssr, bool settled) =
+        (bool isBull, uint256 strike, uint256 exp, address optAddr, uint256 sp, uint256 ssr, bool settled,) =
             engine.series(id);
 
         assertEq(id, 1);
@@ -337,7 +337,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
         assertEq(settlementShareRate, stakedBear.convertToAssets(ONE_SHARE));
@@ -352,7 +352,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
         assertEq(settlementPrice, BULL_PRICE);
     }
 
@@ -376,7 +376,7 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 3 days);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
     }
@@ -393,7 +393,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,,,, bool settled) = engine.series(seriesId);
+        (,,,,,, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
     }
 
@@ -416,7 +416,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, CAP);
     }
@@ -429,7 +429,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
         assertEq(settlementPrice, 0);
     }
 
@@ -441,7 +441,7 @@ contract MarginEngineTest is Test {
         vm.prank(keeper);
         engine.settle(seriesId, _buildHints());
 
-        (,,,,,, bool settled) = engine.series(seriesId);
+        (,,,,,, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
     }
 
@@ -574,7 +574,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
 
         // Bob exercises 30 of 100
         vm.prank(bob);
@@ -626,7 +626,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
         uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
         uint256 sharesOwed = (assetPayout * ONE_SHARE) / settlementShareRate;
         uint256 expectedReturn = lockedShares - sharesOwed;
@@ -731,7 +731,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
 
         // Both writers unlock (no exercises yet)
         vm.prank(alice);
@@ -885,7 +885,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
         assertEq(settlementPrice, BEAR_PRICE, "post-expiry liquidation should use oracle price");
     }
 
@@ -908,7 +908,7 @@ contract MarginEngineTest is Test {
 
         // Despite block.timestamp > expiry, the liquidationTimestamp is before expiry
         // so hardcoded prices (CAP for bear, 0 for bull) must be used
-        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
         assertEq(settlementPrice, CAP, "pre-expiry liquidation must use CAP regardless of settle timing");
     }
 
@@ -938,7 +938,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
+        (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
         uint256 globalDebt = 0;
         if (sp > 90e6) {
             uint256 assetPayout = (100e18 * (sp - 90e6)) / sp;
@@ -975,7 +975,7 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 7 days + 3 days);
         engine.adminSettle(seriesId, BEAR_PRICE);
 
-        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
     }
@@ -996,6 +996,138 @@ contract MarginEngineTest is Test {
         vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
         vm.prank(alice);
         engine.adminSettle(seriesId, BEAR_PRICE);
+    }
+
+    // ==========================================
+    // H-2: SHARE RATE SNAPSHOT AT MINT TIME
+    // ==========================================
+
+    function test_Settle_UsesSnapshotShareRate() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        (,,,,,,, uint256 mintRate) = engine.series(seriesId);
+        assertGt(mintRate, 0, "mint rate should be set on first mint");
+
+        stakedBear.setExchangeRate(2, 1);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
+        assertEq(ssr, mintRate, "settlement rate must equal mint-time snapshot");
+    }
+
+    function test_MintOptions_SnapshotsOnlyOnFirstMint() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 50e18);
+
+        (,,,,,,, uint256 firstRate) = engine.series(seriesId);
+
+        stakedBear.setExchangeRate(3, 1);
+
+        vm.prank(bob);
+        engine.mintOptions(seriesId, 50e18);
+
+        (,,,,,,, uint256 secondRate) = engine.series(seriesId);
+        assertEq(secondRate, firstRate, "rate should not change after first mint");
+    }
+
+    // ==========================================
+    // L-2: STRIKE = 0 REJECTION
+    // ==========================================
+
+    function test_CreateSeries_RevertsOnZeroStrike() public {
+        vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
+        engine.createSeries(false, 0, block.timestamp + 7 days, "X", "Y");
+    }
+
+    // ==========================================
+    // M-4: ADMIN SETTLE PRICE VALIDATION
+    // ==========================================
+
+    function test_AdminSettle_RevertsOnZeroPrice() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 3 days);
+        vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
+        engine.adminSettle(seriesId, 0);
+    }
+
+    // ==========================================
+    // M-1: SWEEP UNCLAIMED SHARES
+    // ==========================================
+
+    function test_SweepUnclaimedShares_RecoversAfter90Days() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        vm.warp(block.timestamp + 91 days);
+
+        uint256 adminBefore = stakedBear.balanceOf(address(this));
+        engine.sweepUnclaimedShares(seriesId);
+        uint256 swept = stakedBear.balanceOf(address(this)) - adminBefore;
+        assertGt(swept, 0, "should have swept unclaimed shares");
+    }
+
+    function test_SweepUnclaimedShares_RevertsBefore90Days() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        vm.warp(block.timestamp + 89 days);
+
+        vm.expectRevert(MarginEngine.MarginEngine__SweepTooEarly.selector);
+        engine.sweepUnclaimedShares(seriesId);
+    }
+
+    function test_SweepUnclaimedShares_ZeroWhenAllExercised() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.prank(bob);
+        engine.exercise(seriesId, 100e18);
+
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+
+        vm.warp(block.timestamp + 91 days);
+
+        vm.expectRevert(MarginEngine.MarginEngine__ZeroAmount.selector);
+        engine.sweepUnclaimedShares(seriesId);
     }
 
 }

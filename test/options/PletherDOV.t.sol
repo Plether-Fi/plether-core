@@ -183,9 +183,9 @@ contract MockMarginEngine {
 
     function series(
         uint256 seriesId
-    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool) {
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool, uint256) {
         MockSeries storage s = _series[seriesId];
-        return (s.isBull, s.strike, s.expiry, s.optionToken, s.settlementPrice, s.settlementShareRate, s.isSettled);
+        return (s.isBull, s.strike, s.expiry, s.optionToken, s.settlementPrice, s.settlementShareRate, s.isSettled, 0);
     }
 
 }
@@ -354,7 +354,7 @@ contract PletherDOVTest is Test {
         assertEq(makerUsdcBefore - usdc.balanceOf(maker), expectedPremium);
 
         // Maker received option tokens
-        (,,, address optAddr,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,,) = marginEngine.series(1);
         assertEq(IERC20(optAddr).balanceOf(maker), optionsMinted);
     }
 
@@ -380,7 +380,11 @@ contract PletherDOVTest is Test {
         dov.cancelAuction();
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
 
-        // Can start a new epoch
+        // Settle previous epoch's series before starting new one (M-5 fix)
+        marginEngine.settle(1, new uint80[](0));
+        dov.exerciseUnsoldOptions(1);
+        dov.reclaimCollateral(1);
+
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
         assertEq(dov.currentEpochId(), 2);
     }
@@ -412,7 +416,7 @@ contract PletherDOVTest is Test {
         marginEngine.settle(1, new uint80[](0));
 
         uint256 stakedBefore = stakedToken.balanceOf(address(dov));
-        dov.settleEpoch();
+        dov.settleEpoch(new uint80[](0));
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
         assertGt(stakedToken.balanceOf(address(dov)), stakedBefore, "DOV should receive collateral back");
@@ -420,7 +424,7 @@ contract PletherDOVTest is Test {
 
     function test_SettleEpoch_RevertsIfNotLocked() public {
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
-        dov.settleEpoch();
+        dov.settleEpoch(new uint80[](0));
     }
 
     // ==========================================
@@ -435,7 +439,7 @@ contract PletherDOVTest is Test {
         dov.fillAuction();
 
         marginEngine.settle(1, new uint80[](0));
-        dov.settleEpoch();
+        dov.settleEpoch(new uint80[](0));
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
         uint256 stakedAfterEpoch1 = stakedToken.balanceOf(address(dov));
@@ -451,7 +455,7 @@ contract PletherDOVTest is Test {
         dov.fillAuction();
 
         marginEngine.settle(2, new uint80[](0));
-        dov.settleEpoch();
+        dov.settleEpoch(new uint80[](0));
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
         assertGt(stakedToken.balanceOf(address(dov)), 0, "DOV should hold staked tokens after epoch 2");
@@ -485,7 +489,7 @@ contract PletherDOVTest is Test {
 
         marginEngine.settle(1, new uint80[](0));
 
-        (,,, address optAddr,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,,) = marginEngine.series(1);
         uint256 optionBalance = IERC20(optAddr).balanceOf(address(dov));
         assertGt(optionBalance, 0, "DOV holds unsold options");
 
@@ -539,13 +543,111 @@ contract PletherDOVTest is Test {
         // Force OTM: settlement price below strike
         marginEngine.setSettlementPrice(1, 80_000_000);
 
-        (,,, address optAddr,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,,) = marginEngine.series(1);
         uint256 optionsBefore = IERC20(optAddr).balanceOf(address(dov));
         assertGt(optionsBefore, 0, "DOV holds unsold options");
 
         dov.exerciseUnsoldOptions(1);
 
         assertEq(IERC20(optAddr).balanceOf(address(dov)), optionsBefore, "OTM options not exercised");
+    }
+
+    // ==========================================
+    // H-1: EMERGENCY WITHDRAWAL
+    // ==========================================
+
+    function test_EmergencyWithdraw_RecoversFundsAfterLiquidation() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        uint256 stakedBalance = stakedToken.balanceOf(address(dov));
+        assertGt(stakedBalance, 0, "DOV should hold staked tokens");
+
+        dov.emergencyWithdraw(IERC20(address(stakedToken)));
+        assertEq(stakedToken.balanceOf(address(dov)), 0, "all staked tokens withdrawn");
+    }
+
+    function test_EmergencyWithdraw_RecoversPremiumUsdc() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        uint256 usdcBalance = usdc.balanceOf(address(dov));
+        assertGt(usdcBalance, 0, "DOV should hold USDC premium");
+
+        dov.emergencyWithdraw(IERC20(address(usdc)));
+        assertEq(usdc.balanceOf(address(dov)), 0, "all USDC withdrawn");
+    }
+
+    function test_EmergencyWithdraw_RevertsWhenNotSettled() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        vm.expectRevert(PletherDOV.PletherDOV__SplitterNotSettled.selector);
+        dov.emergencyWithdraw(IERC20(address(stakedToken)));
+    }
+
+    function test_EmergencyWithdraw_RevertsFromNonOwner() public {
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+        stakedToken.mint(address(dov), 1e21);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        dov.emergencyWithdraw(IERC20(address(stakedToken)));
+    }
+
+    // ==========================================
+    // M-2: ATOMIC SETTLE IN settleEpoch
+    // ==========================================
+
+    function test_SettleEpoch_AtomicSettleAndUnlock() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        // Do NOT call marginEngine.settle() separately — settleEpoch should handle it
+        dov.settleEpoch(new uint80[](0));
+
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+        assertGt(stakedToken.balanceOf(address(dov)), 0, "DOV should receive collateral back");
+    }
+
+    // ==========================================
+    // M-3: EARLY CANCEL ON LIQUIDATION
+    // ==========================================
+
+    function test_CancelAuction_AllowsEarlyCancelOnLiquidation() public {
+        _startAuction();
+
+        // Liquidation happens mid-auction, before duration expires
+        splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
+
+        // Should succeed despite auction not expired
+        dov.cancelAuction();
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+    }
+
+    // ==========================================
+    // M-5: EPOCH ORDERING ENFORCEMENT
+    // ==========================================
+
+    function test_StartEpochAuction_RevertsIfPreviousUnsettled() public {
+        _startAuction();
+        vm.warp(block.timestamp + 2 hours);
+        dov.cancelAuction();
+
+        // Previous epoch series is NOT settled — should revert
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
     }
 
 }

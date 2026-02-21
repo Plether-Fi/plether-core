@@ -138,7 +138,7 @@ contract MarginEngineHandler is Test {
 
         try engine.createSeries(isBull, strike, expiry, "TEST", "tOPT") returns (uint256 id) {
             seriesIds.push(id);
-            (,,, address optAddr,,,) = engine.series(id);
+            (,,, address optAddr,,,,) = engine.series(id);
             seriesOptionToken[id] = optAddr;
         } catch {}
     }
@@ -156,7 +156,7 @@ contract MarginEngineHandler is Test {
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
         amount = bound(amount, 1e18, 10_000e18);
 
-        (bool isBull,,,,,,) = engine.series(seriesId);
+        (bool isBull,,,,,,,) = engine.series(seriesId);
         MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
         uint256 sharesToLock = vault.previewWithdraw(amount);
 
@@ -187,7 +187,7 @@ contract MarginEngineHandler is Test {
         (hints[1],,,,) = jpyFeed.latestRoundData();
 
         try engine.settle(seriesId, hints) {
-            (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
+            (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
             ghost_settledPrice[seriesId] = sp;
             ghost_settledRate[seriesId] = ssr;
             ghost_isSettled[seriesId] = true;
@@ -212,7 +212,7 @@ contract MarginEngineHandler is Test {
         }
         amount = bound(amount, 1, balance);
 
-        (bool isBull,,,,,,) = engine.series(seriesId);
+        (bool isBull,,,,,,,) = engine.series(seriesId);
         MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
         uint256 vaultBefore = vault.balanceOf(actor);
 
@@ -235,7 +235,7 @@ contract MarginEngineHandler is Test {
         address actor = actors[actorSeed % actors.length];
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
 
-        (bool isBull,,,,,,) = engine.series(seriesId);
+        (bool isBull,,,,,,,) = engine.series(seriesId);
         MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
         uint256 vaultBefore = vault.balanceOf(actor);
 
@@ -342,7 +342,7 @@ contract MarginEngineInvariantTest is Test {
                 continue;
             }
 
-            (,,,, uint256 currentPrice, uint256 currentRate, bool isSettled) = engine.series(seriesId);
+            (,,,, uint256 currentPrice, uint256 currentRate, bool isSettled,) = engine.series(seriesId);
             assertTrue(isSettled, "settled flag flipped");
             assertEq(currentPrice, handler.ghost_settledPrice(seriesId), "settlement price changed");
             assertEq(currentRate, handler.ghost_settledRate(seriesId), "settlement rate changed");

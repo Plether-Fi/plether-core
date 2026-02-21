@@ -141,4 +141,22 @@ contract OptionTokenTest is Test {
         assertEq(token.allowance(alice, bob), 42e18);
     }
 
+    // ==========================================
+    // L-1: IMPLEMENTATION CANNOT BE INITIALIZED
+    // ==========================================
+
+    function test_Implementation_CannotBeInitialized() public {
+        vm.expectRevert(OptionToken.OptionToken__AlreadyInitialized.selector);
+        implementation.initialize("X", "Y", address(0xdead));
+    }
+
+    // ==========================================
+    // L-3: MINT ZERO ADDRESS CHECK
+    // ==========================================
+
+    function test_Mint_RevertsToAddressZero() public {
+        vm.expectRevert(OptionToken.OptionToken__ZeroAddress.selector);
+        token.mint(address(0), 100e18);
+    }
+
 }

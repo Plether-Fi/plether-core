@@ -18,12 +18,17 @@ contract OptionToken {
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
+    event Initialized(string name, string symbol, address marginEngine);
 
     error OptionToken__AlreadyInitialized();
     error OptionToken__Unauthorized();
     error OptionToken__InsufficientBalance();
     error OptionToken__InsufficientAllowance();
     error OptionToken__ZeroAddress();
+
+    constructor() {
+        _initialized = true;
+    }
 
     modifier onlyEngine() {
         if (msg.sender != marginEngine) {
@@ -45,12 +50,16 @@ contract OptionToken {
         symbol = _symbol;
         marginEngine = _marginEngine;
         _initialized = true;
+        emit Initialized(_name, _symbol, _marginEngine);
     }
 
     function mint(
         address to,
         uint256 amount
     ) external onlyEngine {
+        if (to == address(0)) {
+            revert OptionToken__ZeroAddress();
+        }
         totalSupply += amount;
         balanceOf[to] += amount;
         emit Transfer(address(0), to, amount);

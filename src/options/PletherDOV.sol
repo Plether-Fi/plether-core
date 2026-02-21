@@ -35,7 +35,7 @@ interface IMarginEngine {
     ) external;
     function series(
         uint256 seriesId
-    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool);
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool, uint256);
     function SPLITTER() external view returns (address);
 
 }
@@ -83,11 +83,13 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     event AuctionFilled(uint256 indexed epochId, address indexed buyer, uint256 premiumPaid);
     event AuctionCancelled(uint256 indexed epochId);
     event EpochSettled(uint256 indexed epochId, uint256 collateralReturned);
+    event EmergencyWithdraw(address indexed token, uint256 amount);
 
     error PletherDOV__WrongState();
     error PletherDOV__ZeroAmount();
     error PletherDOV__AuctionEnded();
     error PletherDOV__AuctionNotExpired();
+    error PletherDOV__SplitterNotSettled();
 
     constructor(
         string memory _name,
@@ -141,6 +143,16 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     ) external onlyOwner nonReentrant {
         if (currentState != State.UNLOCKED) {
             revert PletherDOV__WrongState();
+        }
+
+        if (currentEpochId > 0) {
+            Epoch storage prev = epochs[currentEpochId];
+            if (prev.seriesId != 0) {
+                (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(prev.seriesId);
+                if (!isSettled) {
+                    revert PletherDOV__WrongState();
+                }
+            }
         }
 
         currentEpochId++;
@@ -210,7 +222,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__AuctionEnded();
         }
 
-        (,,,,,, bool isSettled) = MARGIN_ENGINE.series(e.seriesId);
+        (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(e.seriesId);
         if (
             isSettled
                 || ISyntheticSplitter(MARGIN_ENGINE.SPLITTER()).currentStatus() == ISyntheticSplitter.Status.SETTLED
@@ -228,7 +240,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         USDC.safeTransferFrom(msg.sender, address(this), totalPremiumUsdc);
 
         // 2. Transfer all Option tokens to the winning Market Maker
-        (,,, address optionToken,,,) = MARGIN_ENGINE.series(e.seriesId);
+        (,,, address optionToken,,,,) = MARGIN_ENGINE.series(e.seriesId);
         IERC20(optionToken).safeTransfer(msg.sender, e.optionsMinted);
 
         e.winningMaker = msg.sender;
@@ -238,15 +250,21 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Cancels an expired auction that received no fill, returning the vault to UNLOCKED.
+    /// @dev Also allows immediate cancellation when the Splitter has liquidated.
     function cancelAuction() external nonReentrant {
         if (currentState != State.AUCTIONING) {
             revert PletherDOV__WrongState();
         }
-        Epoch storage e = epochs[currentEpochId];
 
-        uint256 elapsed = block.timestamp - e.auctionStartTime;
-        if (elapsed <= e.auctionDuration) {
-            revert PletherDOV__AuctionNotExpired();
+        bool isLiquidated =
+            ISyntheticSplitter(MARGIN_ENGINE.SPLITTER()).currentStatus() == ISyntheticSplitter.Status.SETTLED;
+
+        if (!isLiquidated) {
+            Epoch storage e = epochs[currentEpochId];
+            uint256 elapsed = block.timestamp - e.auctionStartTime;
+            if (elapsed <= e.auctionDuration) {
+                revert PletherDOV__AuctionNotExpired();
+            }
         }
 
         currentState = State.UNLOCKED;
@@ -263,7 +281,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__WrongState();
         }
 
-        (, uint256 strike,, address optionToken, uint256 settlementPrice,,) = MARGIN_ENGINE.series(e.seriesId);
+        (, uint256 strike,, address optionToken, uint256 settlementPrice,,,) = MARGIN_ENGINE.series(e.seriesId);
         uint256 balance = IERC20(optionToken).balanceOf(address(this));
         if (balance > 0 && settlementPrice > strike) {
             MARGIN_ENGINE.exercise(e.seriesId, balance);
@@ -285,22 +303,46 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     // KEEPER: EXPIRATION SETTLEMENT
     // ==========================================
 
-    /// @notice Step 3: At expiration, unlocks remaining collateral.
-    function settleEpoch() external nonReentrant {
+    /// @notice Step 3: At expiration, settles the series and unlocks remaining collateral.
+    /// @param roundHints Chainlink round IDs for oracle lookup (one per feed component).
+    ///        Ignored if the series is already settled.
+    function settleEpoch(
+        uint80[] calldata roundHints
+    ) external nonReentrant {
         if (currentState != State.LOCKED) {
             revert PletherDOV__WrongState();
         }
         Epoch storage e = epochs[currentEpochId];
 
-        // 1. Reclaim remaining Collateral from Margin Engine
-        // (Assumes MarginEngine.settle() was already called by a keeper)
-        MARGIN_ENGINE.unlockCollateral(e.seriesId);
+        (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(e.seriesId);
+        if (!isSettled) {
+            MARGIN_ENGINE.settle(e.seriesId, roundHints);
+        }
 
-        // 2. The DOV now holds USDC (from the MM premium) and splDXY (from the unlocked collateral).
-        // This unlocks the vault for the next `startEpochAuction()`, where the USDC will be compounded.
+        MARGIN_ENGINE.unlockCollateral(e.seriesId);
 
         currentState = State.UNLOCKED;
         emit EpochSettled(currentEpochId, STAKED_TOKEN.balanceOf(address(this)));
+    }
+
+    // ==========================================
+    // EMERGENCY
+    // ==========================================
+
+    /// @notice Recovers stranded funds after Splitter liquidation (protocol end-of-life).
+    /// @dev Only callable by owner when the Splitter has permanently settled.
+    function emergencyWithdraw(
+        IERC20 token
+    ) external onlyOwner {
+        if (ISyntheticSplitter(MARGIN_ENGINE.SPLITTER()).currentStatus() != ISyntheticSplitter.Status.SETTLED) {
+            revert PletherDOV__SplitterNotSettled();
+        }
+        uint256 balance = token.balanceOf(address(this));
+        if (balance == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+        token.safeTransfer(msg.sender, balance);
+        emit EmergencyWithdraw(address(token), balance);
     }
 
 }
