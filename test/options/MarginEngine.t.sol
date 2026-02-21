@@ -156,6 +156,11 @@ contract MarginEngineTest is Test {
         stakedBear.approve(address(engine), type(uint256).max);
         vm.prank(bob);
         stakedBull.approve(address(engine), type(uint256).max);
+
+        stakedBear.mint(address(this), 1_000_000e21);
+        stakedBull.mint(address(this), 1_000_000e21);
+        stakedBear.approve(address(engine), type(uint256).max);
+        stakedBull.approve(address(engine), type(uint256).max);
     }
 
     // ==========================================
@@ -258,20 +263,18 @@ contract MarginEngineTest is Test {
         uint256 optionsAmount = 100e18;
         uint256 expectedShares = stakedBear.previewWithdraw(optionsAmount); // 100e21 at 1:1
 
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, optionsAmount);
 
-        assertEq(engine.writerLockedShares(seriesId, alice), expectedShares);
-        assertEq(engine.writerOptions(seriesId, alice), optionsAmount);
-        assertEq(stakedBear.balanceOf(alice), aliceBefore - expectedShares);
-        assertEq(_getOptionToken(seriesId).balanceOf(alice), optionsAmount);
+        assertEq(engine.writerLockedShares(seriesId, address(this)), expectedShares);
+        assertEq(engine.writerOptions(seriesId, address(this)), optionsAmount);
+        assertEq(stakedBear.balanceOf(address(this)), selfBefore - expectedShares);
+        assertEq(_getOptionToken(seriesId).balanceOf(address(this)), optionsAmount);
     }
 
     function test_MintOptions_RevertsOnZeroAmount() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__ZeroAmount.selector);
         engine.mintOptions(seriesId, 0);
     }
@@ -280,7 +283,6 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__Expired.selector);
         engine.mintOptions(seriesId, 1e18);
     }
@@ -288,7 +290,6 @@ contract MarginEngineTest is Test {
     function test_MintOptions_RevertsWhenSplitterSettled() public {
         uint256 seriesId = _createBearSeries(90e6);
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__Expired.selector);
         engine.mintOptions(seriesId, 1e18);
     }
@@ -298,13 +299,12 @@ contract MarginEngineTest is Test {
         uint256 optionsAmount = 50e18;
         uint256 expectedShares = stakedBull.previewWithdraw(optionsAmount);
 
-        uint256 aliceBullBefore = stakedBull.balanceOf(alice);
+        uint256 selfBullBefore = stakedBull.balanceOf(address(this));
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, optionsAmount);
 
-        assertEq(stakedBull.balanceOf(alice), aliceBullBefore - expectedShares);
-        assertEq(engine.writerLockedShares(seriesId, alice), expectedShares);
+        assertEq(stakedBull.balanceOf(address(this)), selfBullBefore - expectedShares);
+        assertEq(engine.writerLockedShares(seriesId, address(this)), expectedShares);
     }
 
     function test_MintOptions_SharesRoundUp() public {
@@ -322,9 +322,8 @@ contract MarginEngineTest is Test {
         uint256 assetsFromFloor = stakedBear.convertToAssets(flooredShares);
         assertLt(assetsFromFloor, optionsAmount, "floored shares would under-collateralize");
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, optionsAmount);
-        assertEq(engine.writerLockedShares(seriesId, alice), sharesToLock);
+        assertEq(engine.writerLockedShares(seriesId, address(this)), sharesToLock);
     }
 
     // ==========================================
@@ -333,7 +332,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_LocksPriceForBearSeries() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -348,7 +346,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_LocksPriceForBullSeries() public {
         uint256 seriesId = _createBullSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -368,7 +365,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_SucceedsAfterLongDelay() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         // Refresh feeds near expiry so historical lookup finds fresh data at expiry
@@ -386,7 +382,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_EarlyAccelerationWorks() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         // Refresh feeds at expiry so oracle has fresh data
@@ -413,7 +408,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_EarlyAccelerationBearGetsCAP() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
@@ -426,7 +420,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_EarlyAccelerationBullGetsZero() public {
         uint256 seriesId = _createBullSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
@@ -456,11 +449,8 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         uint256 optionsAmount = 100e18;
 
-        // Alice writes, transfers options to Bob
-        vm.prank(alice);
         engine.mintOptions(seriesId, optionsAmount);
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, optionsAmount);
 
         // Settle
@@ -496,10 +486,8 @@ contract MarginEngineTest is Test {
 
     function test_Exercise_RevertsIfNotSettled() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__NotSettled.selector);
         engine.exercise(seriesId, 50e18);
     }
@@ -507,21 +495,18 @@ contract MarginEngineTest is Test {
     function test_Exercise_RevertsIfOTM() public {
         // Strike 110e6 > bearPrice 106e6 → OTM
         uint256 seriesId = _createBearSeries(110e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__OptionIsOTM.selector);
         engine.exercise(seriesId, 50e18);
     }
 
     function test_Exercise_RevertsAfter90DayDeadline() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -529,14 +514,12 @@ contract MarginEngineTest is Test {
         engine.settle(seriesId, _buildHints());
 
         vm.warp(block.timestamp + 91 days);
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__Expired.selector);
         engine.exercise(seriesId, 50e18);
     }
 
     function test_Exercise_SucceedsJustBefore90DayDeadline() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -544,36 +527,30 @@ contract MarginEngineTest is Test {
         engine.settle(seriesId, _buildHints());
 
         vm.warp(block.timestamp + 89 days);
-        vm.prank(alice);
         engine.exercise(seriesId, 50e18);
-        assertEq(_getOptionToken(seriesId).balanceOf(alice), 50e18);
+        assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 50e18);
     }
 
     function test_Exercise_PartialExercise() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        vm.prank(alice);
         engine.exercise(seriesId, 30e18);
-        assertEq(_getOptionToken(seriesId).balanceOf(alice), 70e18);
+        assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 70e18);
 
-        vm.prank(alice);
         engine.exercise(seriesId, 70e18);
-        assertEq(_getOptionToken(seriesId).balanceOf(alice), 0);
+        assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 0);
     }
 
     function test_Exercise_NoStrandedCollateral() public {
         uint256 seriesId = _createBearSeries(90e6);
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -584,8 +561,6 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 100e18);
 
-        // Alice unlocks remaining collateral
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
         uint256 engineBalance = stakedBear.balanceOf(address(engine));
@@ -596,11 +571,9 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         uint256 optionsAmount = 100e18;
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, optionsAmount);
-        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, optionsAmount);
 
         vm.warp(block.timestamp + 7 days);
@@ -617,11 +590,10 @@ contract MarginEngineTest is Test {
         uint256 sharesOwed = (assetOwed * ONE_SHARE) / settlementShareRate;
         uint256 expectedReturn = lockedShares - sharesOwed;
 
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
-        vm.prank(alice);
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
         engine.unlockCollateral(seriesId);
 
-        assertEq(stakedBear.balanceOf(alice) - aliceBefore, expectedReturn, "writer gets correct shares back");
+        assertEq(stakedBear.balanceOf(address(this)) - selfBefore, expectedReturn, "writer gets correct shares back");
     }
 
     // ==========================================
@@ -631,29 +603,26 @@ contract MarginEngineTest is Test {
     function test_UnlockCollateral_FullRecoveryWhenOTM() public {
         // Strike 110e6 > bearPrice 106e6 → OTM
         uint256 seriesId = _createBearSeries(110e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        assertEq(stakedBear.balanceOf(alice) - aliceBefore, lockedShares, "full shares returned when OTM");
+        assertEq(stakedBear.balanceOf(address(this)) - selfBefore, lockedShares, "full shares returned when OTM");
     }
 
     function test_UnlockCollateral_PartialRecoveryWhenITM() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
@@ -664,20 +633,17 @@ contract MarginEngineTest is Test {
         uint256 sharesOwed = (assetPayout * ONE_SHARE) / settlementShareRate;
         uint256 expectedReturn = lockedShares - sharesOwed;
 
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        assertEq(stakedBear.balanceOf(alice) - aliceBefore, expectedReturn, "partial shares returned when ITM");
+        assertEq(stakedBear.balanceOf(address(this)) - selfBefore, expectedReturn, "partial shares returned when ITM");
     }
 
     function test_UnlockCollateral_RevertsIfNotSettled() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__NotSettled.selector);
         engine.unlockCollateral(seriesId);
     }
@@ -695,18 +661,16 @@ contract MarginEngineTest is Test {
 
     function test_UnlockCollateral_ClearsWriterState() public {
         uint256 seriesId = _createBearSeries(110e6); // OTM
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        assertEq(engine.writerLockedShares(seriesId, alice), 0);
-        assertEq(engine.writerOptions(seriesId, alice), 0);
+        assertEq(engine.writerLockedShares(seriesId, address(this)), 0);
+        assertEq(engine.writerOptions(seriesId, address(this)), 0);
     }
 
     // ==========================================
@@ -718,10 +682,8 @@ contract MarginEngineTest is Test {
     /// because payoutFor(remaining=40) < payoutFor(exercised=60).
     function test_AUDIT_C2_UnlockCollateral_SucceedsAfterMajorityExercise() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -732,52 +694,9 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 60e18);
 
-        // Writer should be able to unlock remaining collateral.
-        // Bug: reverts with ERC20InsufficientBalance because the engine
-        // tries to send more shares than it holds.
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        assertEq(engine.writerLockedShares(seriesId, alice), 0, "writer position cleared");
-    }
-
-    /// @dev H-1: With two writers for the same series, each unlockCollateral
-    /// reserves for the GLOBAL totalSupply instead of the writer's proportional share.
-    /// The engine retains 2x the correct reserve, stranding half as unrecoverable.
-    function test_AUDIT_H1_UnlockCollateral_MultiWriter_FairDistribution() public {
-        uint256 seriesId = _createBearSeries(90e6);
-
-        // Two writers, 50e18 options each
-        vm.prank(alice);
-        engine.mintOptions(seriesId, 50e18);
-        vm.prank(bob);
-        engine.mintOptions(seriesId, 50e18);
-
-        // Transfer all options to keeper (simulating auction sale)
-        OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
-        opt.transfer(keeper, 50e18);
-        vm.prank(bob);
-        opt.transfer(keeper, 50e18);
-
-        vm.warp(block.timestamp + 7 days);
-        _refreshFeeds();
-        engine.settle(seriesId, _buildHints());
-
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
-
-        // Both writers unlock (no exercises yet)
-        vm.prank(alice);
-        engine.unlockCollateral(seriesId);
-        vm.prank(bob);
-        engine.unlockCollateral(seriesId);
-
-        // Engine retains global debt computed once over totalMinted (not per-writer sum)
-        uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
-        uint256 correctReserve = (assetPayout * ONE_SHARE) / settlementShareRate;
-
-        uint256 engineBalance = stakedBear.balanceOf(address(engine));
-        assertEq(engineBalance, correctReserve, "engine retains only what option holders need");
+        assertEq(engine.writerLockedShares(seriesId, address(this)), 0, "writer position cleared");
     }
 
     /// @dev H-2: After a cancelled auction, the writer (DOV) still holds unsold options.
@@ -786,26 +705,21 @@ contract MarginEngineTest is Test {
     function test_AUDIT_H2_UnlockCollateral_FullRecoveryWhenNoOptionsSold() public {
         uint256 seriesId = _createBearSeries(90e6);
 
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
-        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        uint256 selfBefore = stakedBear.balanceOf(address(this));
 
-        // Writer exercises their own unsold options (simulating DOV.exerciseUnsoldOptions)
-        vm.prank(alice);
         engine.exercise(seriesId, 100e18);
 
-        // Then unlocks remaining collateral
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
-        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
-        assertEq(aliceReceived, lockedShares, "writer recovers full collateral via exercise + unlock");
+        uint256 selfReceived = stakedBear.balanceOf(address(this)) - selfBefore;
+        assertEq(selfReceived, lockedShares, "writer recovers full collateral via exercise + unlock");
     }
 
     // ==========================================
@@ -814,10 +728,9 @@ contract MarginEngineTest is Test {
 
     function test_Exercise_CapsPayoutOnNegativeYield() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        uint256 lockedShares = engine.writerLockedShares(seriesId, alice);
+        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
@@ -829,7 +742,6 @@ contract MarginEngineTest is Test {
 
         // Transfer options to bob for exercise
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, 100e18);
 
         uint256 bobBefore = stakedBear.balanceOf(bob);
@@ -846,10 +758,8 @@ contract MarginEngineTest is Test {
         uint256 seriesA = _createBearSeries(90e6);
         uint256 seriesB = engine.createSeries(false, 90e6, block.timestamp + 7 days, "BEAR-B", "oBEAR-B");
 
-        vm.prank(alice);
         engine.mintOptions(seriesA, 100e18);
         uint256 seriesBShares = stakedBear.previewWithdraw(100e18);
-        vm.prank(bob);
         engine.mintOptions(seriesB, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -861,9 +771,7 @@ contract MarginEngineTest is Test {
         engine.settle(seriesA, _buildHints());
         engine.settle(seriesB, _buildHints());
 
-        // Alice transfers her options to keeper for exercise
         OptionToken optA = _getOptionToken(seriesA);
-        vm.prank(alice);
         optA.transfer(keeper, 100e18);
 
         vm.prank(keeper);
@@ -908,7 +816,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_PostExpiryLiquidationUsesOracle() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -928,7 +835,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_DelayedExecutionStillUsesHardcodedPrice() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         // Liquidation happens mid-week (before expiry)
@@ -946,65 +852,11 @@ contract MarginEngineTest is Test {
     }
 
     // ==========================================
-    // C-1: GLOBAL DEBT PRO-RATA
-    // ==========================================
-
-    function test_UnlockCollateral_GlobalDebtProRata_MultiWriter() public {
-        uint256 seriesId = _createBearSeries(90e6);
-
-        vm.prank(alice);
-        engine.mintOptions(seriesId, 60e18);
-        vm.prank(bob);
-        engine.mintOptions(seriesId, 40e18);
-
-        uint256 aliceShares = engine.writerLockedShares(seriesId, alice);
-        uint256 bobShares = engine.writerLockedShares(seriesId, bob);
-        uint256 totalShares = aliceShares + bobShares;
-
-        OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
-        opt.transfer(keeper, 60e18);
-        vm.prank(bob);
-        opt.transfer(keeper, 40e18);
-
-        vm.warp(block.timestamp + 7 days);
-        _refreshFeeds();
-        engine.settle(seriesId, _buildHints());
-
-        (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
-        uint256 globalDebt = 0;
-        if (sp > 90e6) {
-            uint256 assetPayout = (100e18 * (sp - 90e6)) / sp;
-            globalDebt = (assetPayout * ONE_SHARE) / ssr;
-        }
-        uint256 remaining = totalShares - globalDebt;
-
-        vm.prank(keeper);
-        engine.exercise(seriesId, 50e18);
-
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
-        vm.prank(alice);
-        engine.unlockCollateral(seriesId);
-        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
-
-        uint256 bobBefore = stakedBear.balanceOf(bob);
-        vm.prank(bob);
-        engine.unlockCollateral(seriesId);
-        uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
-
-        uint256 aliceDebt = (globalDebt * 60e18) / 100e18;
-        uint256 bobDebt = (globalDebt * 40e18) / 100e18;
-        assertEq(aliceReceived, aliceShares - aliceDebt, "alice liability-based");
-        assertEq(bobReceived, bobShares - bobDebt, "bob liability-based");
-    }
-
-    // ==========================================
     // H-2: ADMIN SETTLEMENT ESCAPE HATCH
     // ==========================================
 
     function test_AdminSettle_WorksAfterGracePeriod() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days + 3 days);
@@ -1039,7 +891,6 @@ contract MarginEngineTest is Test {
 
     function test_Settle_UsesCurrentShareRate() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         stakedBear.setExchangeRate(2, 1);
@@ -1068,7 +919,6 @@ contract MarginEngineTest is Test {
 
     function test_AdminSettle_SucceedsOnZeroPrice() public {
         uint256 seriesId = _createBullSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days + 3 days);
@@ -1089,18 +939,15 @@ contract MarginEngineTest is Test {
 
     function test_SweepUnclaimedShares_RecoversAfter90Days() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, 100e18);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
         vm.warp(block.timestamp + 91 days);
@@ -1113,14 +960,12 @@ contract MarginEngineTest is Test {
 
     function test_SweepUnclaimedShares_RevertsBefore90Days() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
         vm.warp(block.timestamp + 89 days);
@@ -1131,11 +976,9 @@ contract MarginEngineTest is Test {
 
     function test_SweepUnclaimedShares_ZeroWhenAllExercised() public {
         uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
         OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
         opt.transfer(bob, 100e18);
 
         vm.warp(block.timestamp + 7 days);
@@ -1145,7 +988,6 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 100e18);
 
-        vm.prank(alice);
         engine.unlockCollateral(seriesId);
 
         vm.warp(block.timestamp + 91 days);
@@ -1155,50 +997,14 @@ contract MarginEngineTest is Test {
     }
 
     // ==========================================
-    // H-01: LIABILITY-BASED DEBT PREVENTS SIPHONING
+    // SINGLE WRITER RESTRICTION
     // ==========================================
 
-    function test_UnlockCollateral_LiabilityBasedDebt_PreventsSiphoning() public {
+    function test_MintOptions_RevertsFromNonCreator() public {
         uint256 seriesId = _createBearSeries(90e6);
-
-        // DOV mints at rate 1:1 (1 share = 1e-3 asset)
         vm.prank(alice);
+        vm.expectRevert(MarginEngine.MarginEngine__Unauthorized.selector);
         engine.mintOptions(seriesId, 100e18);
-        uint256 aliceShares = engine.writerLockedShares(seriesId, alice);
-
-        // Yield accrues: exchange rate doubles (1 share = 2e-3 assets)
-        stakedBear.setExchangeRate(2, 1);
-
-        // Attacker mints at 2:1 rate — locks half the shares for same option liability
-        vm.prank(bob);
-        engine.mintOptions(seriesId, 100e18);
-        uint256 bobShares = engine.writerLockedShares(seriesId, bob);
-        assertLt(bobShares, aliceShares, "attacker locks fewer shares at higher rate");
-
-        // Transfer options out so they can be exercised
-        OptionToken opt = _getOptionToken(seriesId);
-        vm.prank(alice);
-        opt.transfer(keeper, 100e18);
-        vm.prank(bob);
-        opt.transfer(keeper, 100e18);
-
-        vm.warp(block.timestamp + 7 days);
-        _refreshFeeds();
-        engine.settle(seriesId, _buildHints());
-
-        // Both unlock
-        uint256 aliceBefore = stakedBear.balanceOf(alice);
-        vm.prank(alice);
-        engine.unlockCollateral(seriesId);
-        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
-
-        uint256 bobBefore = stakedBear.balanceOf(bob);
-        vm.prank(bob);
-        engine.unlockCollateral(seriesId);
-        uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
-
-        // Attacker (bob) should not profit — gets back at most what they put in
-        assertLe(bobReceived, bobShares, "attacker must not extract more shares than locked");
     }
 
 }

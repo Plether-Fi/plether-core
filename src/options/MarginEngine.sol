@@ -66,6 +66,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
     uint256 public nextSeriesId = 1;
     mapping(uint256 => Series) public series;
+    mapping(uint256 => address) public seriesCreator;
 
     // seriesId => writer => amount of splDXY shares locked
     mapping(uint256 => mapping(address => uint256)) public writerLockedShares;
@@ -100,6 +101,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
     error MarginEngine__SplitterNotActive();
     error MarginEngine__AdminSettleTooEarly();
     error MarginEngine__SweepTooEarly();
+    error MarginEngine__Unauthorized();
 
     constructor(
         address _splitter,
@@ -133,6 +135,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         IOptionToken(proxy).initialize(name, symbol, address(this));
 
         seriesId = nextSeriesId++;
+        seriesCreator[seriesId] = msg.sender;
         series[seriesId] = Series({
             isBull: isBull,
             strike: strike,
@@ -152,6 +155,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 seriesId,
         uint256 optionsAmount
     ) external nonReentrant {
+        if (msg.sender != seriesCreator[seriesId]) {
+            revert MarginEngine__Unauthorized();
+        }
         if (optionsAmount == 0) {
             revert MarginEngine__ZeroAmount();
         }
@@ -327,6 +333,11 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         uint256 userDebtShares = (globalDebtShares * optionsMinted) / totalMinted;
         uint256 sharesToReturn = lockedShares > userDebtShares ? lockedShares - userDebtShares : 0;
+
+        uint256 poolCap = ((totalShares - globalDebtShares) * lockedShares) / totalShares;
+        if (sharesToReturn > poolCap) {
+            sharesToReturn = poolCap;
+        }
 
         if (sharesToReturn > 0) {
             IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));

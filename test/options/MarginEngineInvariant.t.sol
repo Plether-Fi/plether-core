@@ -122,6 +122,8 @@ contract MarginEngineHandler is Test {
         eurFeed = _eurFeed;
         jpyFeed = _jpyFeed;
         actors = _actors;
+        _stakedBear.approve(address(_engine), type(uint256).max);
+        _stakedBull.approve(address(_engine), type(uint256).max);
     }
 
     function getSeriesCount() external view returns (uint256) {
@@ -160,10 +162,10 @@ contract MarginEngineHandler is Test {
         MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
         uint256 sharesToLock = vault.previewWithdraw(amount);
 
-        vm.prank(actor);
         try engine.mintOptions(seriesId, amount) {
             ghost_totalSharesDeposited += sharesToLock;
             ghost_totalOptionsMinted += amount;
+            OptionToken(seriesOptionToken[seriesId]).transfer(actor, amount);
         } catch {}
     }
 
@@ -232,16 +234,14 @@ contract MarginEngineHandler is Test {
             return;
         }
 
-        address actor = actors[actorSeed % actors.length];
         uint256 seriesId = seriesIds[seriesSeed % seriesIds.length];
 
         (bool isBull,,,,,,) = engine.series(seriesId);
         MockStakedTokenInv vault = isBull ? stakedBull : stakedBear;
-        uint256 vaultBefore = vault.balanceOf(actor);
+        uint256 vaultBefore = vault.balanceOf(address(this));
 
-        vm.prank(actor);
         try engine.unlockCollateral(seriesId) {
-            uint256 received = vault.balanceOf(actor) - vaultBefore;
+            uint256 received = vault.balanceOf(address(this)) - vaultBefore;
             ghost_totalSharesUnlocked += received;
         } catch {}
     }
@@ -308,6 +308,9 @@ contract MarginEngineInvariantTest is Test {
         }
 
         handler = new MarginEngineHandler(engine, stakedBear, stakedBull, splitter, eurFeed, jpyFeed, actors);
+        engine.grantRole(engine.SERIES_CREATOR_ROLE(), address(handler));
+        stakedBear.mint(address(handler), 10_000_000e21);
+        stakedBull.mint(address(handler), 10_000_000e21);
 
         targetContract(address(handler));
     }
