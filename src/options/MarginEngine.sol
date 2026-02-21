@@ -55,8 +55,6 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         uint256 settlementPrice;
         uint256 settlementShareRate;
         bool isSettled;
-        uint256 mintShareRate; // Share rate snapshot from first mint — informational only.
-            // Settlement uses a fresh vault rate at settle time for economically correct payouts.
     }
 
     ISyntheticSplitter public immutable SPLITTER;
@@ -142,8 +140,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
             optionToken: proxy,
             settlementPrice: 0,
             settlementShareRate: 0,
-            isSettled: false,
-            mintShareRate: 0
+            isSettled: false
         });
 
         emit SeriesCreated(seriesId, proxy, isBull, strike, expiry);
@@ -166,15 +163,6 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-
-        if (s.mintShareRate == 0) {
-            uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
-            s.mintShareRate = vault.convertToAssets(oneShare);
-            if (s.mintShareRate == 0) {
-                s.mintShareRate = oneShare;
-            }
-        }
-
         uint256 sharesToLock = vault.previewWithdraw(optionsAmount);
 
         // State accounting
@@ -337,8 +325,8 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
             }
         }
 
-        uint256 remainingPool = totalShares - globalDebtShares;
-        uint256 sharesToReturn = (remainingPool * lockedShares) / totalShares;
+        uint256 userDebtShares = (globalDebtShares * optionsMinted) / totalMinted;
+        uint256 sharesToReturn = lockedShares > userDebtShares ? lockedShares - userDebtShares : 0;
 
         if (sharesToReturn > 0) {
             IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));

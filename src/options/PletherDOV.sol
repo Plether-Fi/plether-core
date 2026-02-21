@@ -35,7 +35,7 @@ interface IMarginEngine {
     ) external;
     function series(
         uint256 seriesId
-    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool, uint256);
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool);
     function SPLITTER() external view returns (address);
 
 }
@@ -77,6 +77,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     // Queue Accounting
     uint256 public pendingUsdcDeposits;
     mapping(address => uint256) public userUsdcDeposits;
+    mapping(address => uint256) public userDepositEpoch;
 
     event DepositQueued(address indexed user, uint256 amount);
     event DepositWithdrawn(address indexed user, uint256 amount);
@@ -93,6 +94,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     error PletherDOV__SplitterNotSettled();
     error PletherDOV__InvalidParams();
     error PletherDOV__InsufficientDeposit();
+    error PletherDOV__DepositProcessed();
 
     constructor(
         string memory _name,
@@ -122,6 +124,11 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__ZeroAmount();
         }
 
+        if (userDepositEpoch[msg.sender] < currentEpochId) {
+            userUsdcDeposits[msg.sender] = 0;
+            userDepositEpoch[msg.sender] = currentEpochId;
+        }
+
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         userUsdcDeposits[msg.sender] += amount;
         pendingUsdcDeposits += amount;
@@ -135,6 +142,9 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     ) external nonReentrant {
         if (amount == 0) {
             revert PletherDOV__ZeroAmount();
+        }
+        if (userDepositEpoch[msg.sender] < currentEpochId) {
+            revert PletherDOV__DepositProcessed();
         }
         if (userUsdcDeposits[msg.sender] < amount) {
             revert PletherDOV__InsufficientDeposit();
@@ -169,7 +179,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (currentEpochId > 0) {
             Epoch storage prev = epochs[currentEpochId];
             if (prev.seriesId != 0 && prev.winningMaker != address(0)) {
-                (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(prev.seriesId);
+                (,,,,,, bool isSettled) = MARGIN_ENGINE.series(prev.seriesId);
                 if (!isSettled) {
                     revert PletherDOV__WrongState();
                 }
@@ -177,6 +187,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         }
 
         currentEpochId++;
+        pendingUsdcDeposits = 0;
 
         // 1. (External Zap Logic Goes Here)
         // Convert all USDC (queued deposits + last week's premium) into splDXY.
@@ -245,7 +256,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__AuctionEnded();
         }
 
-        (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(e.seriesId);
+        (,,,,,, bool isSettled) = MARGIN_ENGINE.series(e.seriesId);
         if (
             isSettled
                 || ISyntheticSplitter(MARGIN_ENGINE.SPLITTER()).currentStatus() == ISyntheticSplitter.Status.SETTLED
@@ -263,7 +274,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         USDC.safeTransferFrom(msg.sender, address(this), totalPremiumUsdc);
 
         // 2. Transfer all Option tokens to the winning Market Maker
-        (,,, address optionToken,,,,) = MARGIN_ENGINE.series(e.seriesId);
+        (,,, address optionToken,,,) = MARGIN_ENGINE.series(e.seriesId);
         IERC20(optionToken).safeTransfer(msg.sender, e.optionsMinted);
 
         e.winningMaker = msg.sender;
@@ -304,7 +315,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__WrongState();
         }
 
-        (bool isBull, uint256 strike,, address optionToken, uint256 settlementPrice,,,) = MARGIN_ENGINE.series(e.seriesId);
+        (bool isBull, uint256 strike,, address optionToken, uint256 settlementPrice,,) =
+            MARGIN_ENGINE.series(e.seriesId);
         if (isBull != IS_BULL) {
             revert PletherDOV__InvalidParams();
         }
@@ -340,7 +352,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         }
         Epoch storage e = epochs[currentEpochId];
 
-        (,,,,,, bool isSettled,) = MARGIN_ENGINE.series(e.seriesId);
+        (,,,,,, bool isSettled) = MARGIN_ENGINE.series(e.seriesId);
         if (!isSettled) {
             MARGIN_ENGINE.settle(e.seriesId, roundHints);
         }

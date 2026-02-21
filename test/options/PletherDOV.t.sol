@@ -199,9 +199,9 @@ contract MockMarginEngine {
 
     function series(
         uint256 seriesId
-    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool, uint256) {
+    ) external view returns (bool, uint256, uint256, address, uint256, uint256, bool) {
         MockSeries storage s = _series[seriesId];
-        return (s.isBull, s.strike, s.expiry, s.optionToken, s.settlementPrice, s.settlementShareRate, s.isSettled, 0);
+        return (s.isBull, s.strike, s.expiry, s.optionToken, s.settlementPrice, s.settlementShareRate, s.isSettled);
     }
 
 }
@@ -428,7 +428,7 @@ contract PletherDOVTest is Test {
         assertEq(makerUsdcBefore - usdc.balanceOf(maker), expectedPremium);
 
         // Maker received option tokens
-        (,,, address optAddr,,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,) = marginEngine.series(1);
         assertEq(IERC20(optAddr).balanceOf(maker), optionsMinted);
     }
 
@@ -563,7 +563,7 @@ contract PletherDOVTest is Test {
 
         marginEngine.settle(1, new uint80[](0));
 
-        (,,, address optAddr,,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,) = marginEngine.series(1);
         uint256 optionBalance = IERC20(optAddr).balanceOf(address(dov));
         assertGt(optionBalance, 0, "DOV holds unsold options");
 
@@ -617,7 +617,7 @@ contract PletherDOVTest is Test {
         // Force OTM: settlement price below strike
         marginEngine.setSettlementPrice(1, 80_000_000);
 
-        (,,, address optAddr,,,,) = marginEngine.series(1);
+        (,,, address optAddr,,,) = marginEngine.series(1);
         uint256 optionsBefore = IERC20(optAddr).balanceOf(address(dov));
         assertGt(optionsBefore, 0, "DOV holds unsold options");
 
@@ -739,6 +739,60 @@ contract PletherDOVTest is Test {
 
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
         assertEq(dov.currentEpochId(), 2);
+    }
+
+    // ==========================================
+    // H-02: DEPOSIT EPOCH TRACKING
+    // ==========================================
+
+    function test_WithdrawDeposit_RevertsAfterEpochProcessed() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        _startAuction();
+
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__DepositProcessed.selector);
+        dov.withdrawDeposit(1000e6);
+    }
+
+    function test_Deposit_ResetsStaleBalanceOnNewEpoch() public {
+        vm.prank(alice);
+        dov.deposit(500e6);
+        assertEq(dov.userUsdcDeposits(alice), 500e6);
+
+        // Process epoch 0 → epoch 1
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        // Deposit again in the new epoch — stale balance should be cleared
+        vm.prank(alice);
+        dov.deposit(200e6);
+
+        assertEq(dov.userUsdcDeposits(alice), 200e6, "stale balance must be reset");
+        assertEq(dov.userDepositEpoch(alice), dov.currentEpochId(), "epoch must be updated");
+    }
+
+    function test_WithdrawDeposit_SucceedsForCurrentEpochDeposit() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        // Deposit after epoch started — this is a fresh deposit in the current epoch
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        uint256 balanceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        dov.withdrawDeposit(1000e6);
+
+        assertEq(usdc.balanceOf(alice), balanceBefore + 1000e6, "withdrawal should succeed");
+        assertEq(dov.userUsdcDeposits(alice), 0);
     }
 
 }

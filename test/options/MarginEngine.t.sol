@@ -177,7 +177,7 @@ contract MarginEngineTest is Test {
     function _getOptionToken(
         uint256 seriesId
     ) internal view returns (OptionToken) {
-        (,,, address optAddr,,,,) = engine.series(seriesId);
+        (,,, address optAddr,,,) = engine.series(seriesId);
         return OptionToken(optAddr);
     }
 
@@ -200,7 +200,7 @@ contract MarginEngineTest is Test {
         uint256 expiry = block.timestamp + 7 days;
         uint256 id = engine.createSeries(false, 90e6, expiry, "BEAR-90C", "oBEAR");
 
-        (bool isBull, uint256 strike, uint256 exp, address optAddr, uint256 sp, uint256 ssr, bool settled,) =
+        (bool isBull, uint256 strike, uint256 exp, address optAddr, uint256 sp, uint256 ssr, bool settled) =
             engine.series(id);
 
         assertEq(id, 1);
@@ -340,7 +340,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
         assertEq(settlementShareRate, stakedBear.convertToAssets(ONE_SHARE));
@@ -355,7 +355,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, BULL_PRICE);
     }
 
@@ -379,7 +379,7 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 3 days);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
     }
@@ -396,7 +396,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,,,, bool settled,) = engine.series(seriesId);
+        (,,,,,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
     }
 
@@ -419,7 +419,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, CAP);
     }
@@ -432,7 +432,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, 0);
     }
 
@@ -444,7 +444,7 @@ contract MarginEngineTest is Test {
         vm.prank(keeper);
         engine.settle(seriesId, _buildHints());
 
-        (,,,,,, bool settled,) = engine.series(seriesId);
+        (,,,,,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
     }
 
@@ -607,7 +607,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
 
         // Bob exercises 30 of 100
         vm.prank(bob);
@@ -659,7 +659,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
         uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
         uint256 sharesOwed = (assetPayout * ONE_SHARE) / settlementShareRate;
         uint256 expectedReturn = lockedShares - sharesOwed;
@@ -764,7 +764,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
 
         // Both writers unlock (no exercises yet)
         vm.prank(alice);
@@ -918,7 +918,7 @@ contract MarginEngineTest is Test {
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, BEAR_PRICE, "post-expiry liquidation should use oracle price");
     }
 
@@ -941,7 +941,7 @@ contract MarginEngineTest is Test {
 
         // Despite block.timestamp > expiry, the liquidationTimestamp is before expiry
         // so hardcoded prices (CAP for bear, 0 for bull) must be used
-        (,,,, uint256 settlementPrice,,,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,,) = engine.series(seriesId);
         assertEq(settlementPrice, CAP, "pre-expiry liquidation must use CAP regardless of settle timing");
     }
 
@@ -971,7 +971,7 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
+        (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
         uint256 globalDebt = 0;
         if (sp > 90e6) {
             uint256 assetPayout = (100e18 * (sp - 90e6)) / sp;
@@ -992,8 +992,10 @@ contract MarginEngineTest is Test {
         engine.unlockCollateral(seriesId);
         uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
 
-        assertEq(aliceReceived, (remaining * aliceShares) / totalShares, "alice pro-rata");
-        assertEq(bobReceived, (remaining * bobShares) / totalShares, "bob pro-rata");
+        uint256 aliceDebt = (globalDebt * 60e18) / 100e18;
+        uint256 bobDebt = (globalDebt * 40e18) / 100e18;
+        assertEq(aliceReceived, aliceShares - aliceDebt, "alice liability-based");
+        assertEq(bobReceived, bobShares - bobDebt, "bob liability-based");
     }
 
     // ==========================================
@@ -1008,7 +1010,7 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 7 days + 3 days);
         engine.adminSettle(seriesId, BEAR_PRICE);
 
-        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
     }
@@ -1040,9 +1042,6 @@ contract MarginEngineTest is Test {
         vm.prank(alice);
         engine.mintOptions(seriesId, 100e18);
 
-        (,,,,,,, uint256 mintRate) = engine.series(seriesId);
-        assertGt(mintRate, 0, "mint rate should be set on first mint");
-
         stakedBear.setExchangeRate(2, 1);
         uint256 currentRate = stakedBear.convertToAssets(ONE_SHARE);
 
@@ -1050,25 +1049,8 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 sp, uint256 ssr,,) = engine.series(seriesId);
+        (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
         assertEq(ssr, currentRate, "settlement rate must equal settle-time rate");
-        assertTrue(ssr != mintRate, "settlement rate should differ from mint rate after yield");
-    }
-
-    function test_MintOptions_SnapshotsOnlyOnFirstMint() public {
-        uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
-        engine.mintOptions(seriesId, 50e18);
-
-        (,,,,,,, uint256 firstRate) = engine.series(seriesId);
-
-        stakedBear.setExchangeRate(3, 1);
-
-        vm.prank(bob);
-        engine.mintOptions(seriesId, 50e18);
-
-        (,,,,,,, uint256 secondRate) = engine.series(seriesId);
-        assertEq(secondRate, firstRate, "rate should not change after first mint");
     }
 
     // ==========================================
@@ -1092,28 +1074,13 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 7 days + 3 days);
         engine.adminSettle(seriesId, 0);
 
-        (,,,, uint256 settlementPrice,, bool settled,) = engine.series(seriesId);
+        (,,,, uint256 settlementPrice,, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, 0, "zero price settlement succeeds for BULL OTM");
 
         vm.prank(alice);
         vm.expectRevert(MarginEngine.MarginEngine__OptionIsOTM.selector);
         engine.exercise(seriesId, 50e18);
-    }
-
-    // ==========================================
-    // M-02: MINT SHARE RATE FALLBACK DECIMALS
-    // ==========================================
-
-    function test_MintShareRate_FallbackUsesVaultDecimals() public {
-        stakedBear.setExchangeRate(0, 1);
-
-        uint256 seriesId = _createBearSeries(90e6);
-        vm.prank(alice);
-        engine.mintOptions(seriesId, 100e18);
-
-        (,,,,,,, uint256 mintRate) = engine.series(seriesId);
-        assertEq(mintRate, ONE_SHARE, "fallback should use 10^decimals, not 1e18");
     }
 
     // ==========================================
@@ -1185,6 +1152,53 @@ contract MarginEngineTest is Test {
 
         vm.expectRevert(MarginEngine.MarginEngine__ZeroAmount.selector);
         engine.sweepUnclaimedShares(seriesId);
+    }
+
+    // ==========================================
+    // H-01: LIABILITY-BASED DEBT PREVENTS SIPHONING
+    // ==========================================
+
+    function test_UnlockCollateral_LiabilityBasedDebt_PreventsSiphoning() public {
+        uint256 seriesId = _createBearSeries(90e6);
+
+        // DOV mints at rate 1:1 (1 share = 1e-3 asset)
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+        uint256 aliceShares = engine.writerLockedShares(seriesId, alice);
+
+        // Yield accrues: exchange rate doubles (1 share = 2e-3 assets)
+        stakedBear.setExchangeRate(2, 1);
+
+        // Attacker mints at 2:1 rate — locks half the shares for same option liability
+        vm.prank(bob);
+        engine.mintOptions(seriesId, 100e18);
+        uint256 bobShares = engine.writerLockedShares(seriesId, bob);
+        assertLt(bobShares, aliceShares, "attacker locks fewer shares at higher rate");
+
+        // Transfer options out so they can be exercised
+        OptionToken opt = _getOptionToken(seriesId);
+        vm.prank(alice);
+        opt.transfer(keeper, 100e18);
+        vm.prank(bob);
+        opt.transfer(keeper, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        // Both unlock
+        uint256 aliceBefore = stakedBear.balanceOf(alice);
+        vm.prank(alice);
+        engine.unlockCollateral(seriesId);
+        uint256 aliceReceived = stakedBear.balanceOf(alice) - aliceBefore;
+
+        uint256 bobBefore = stakedBear.balanceOf(bob);
+        vm.prank(bob);
+        engine.unlockCollateral(seriesId);
+        uint256 bobReceived = stakedBear.balanceOf(bob) - bobBefore;
+
+        // Attacker (bob) should not profit — gets back at most what they put in
+        assertLe(bobReceived, bobShares, "attacker must not extract more shares than locked");
     }
 
 }
