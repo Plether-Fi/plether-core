@@ -1007,4 +1007,34 @@ contract MarginEngineTest is Test {
         engine.mintOptions(seriesId, 100e18);
     }
 
+    // ==========================================
+    // L-01: adminSettle rejects price 0 for BEAR
+    // ==========================================
+
+    function test_AdminSettle_RevertsOnZeroPriceForBear() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 3 days);
+        vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
+        engine.adminSettle(seriesId, 0);
+    }
+
+    // ==========================================
+    // L-03: exercise allowed at exactly 90 days
+    // ==========================================
+
+    function test_Exercise_AllowedAtExact90Days() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        vm.warp(block.timestamp + 90 days);
+        engine.exercise(seriesId, 50e18);
+        assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 50e18);
+    }
+
 }

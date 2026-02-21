@@ -178,7 +178,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
 
         if (currentEpochId > 0) {
             Epoch storage prev = epochs[currentEpochId];
-            if (prev.seriesId != 0 && prev.winningMaker != address(0)) {
+            if (prev.seriesId != 0) {
                 (,,,,,, bool isSettled) = MARGIN_ENGINE.series(prev.seriesId);
                 if (!isSettled) {
                     revert PletherDOV__WrongState();
@@ -252,7 +252,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         Epoch storage e = epochs[currentEpochId];
 
         uint256 elapsed = block.timestamp - e.auctionStartTime;
-        if (elapsed > e.auctionDuration) {
+        if (elapsed >= e.auctionDuration) {
             revert PletherDOV__AuctionEnded();
         }
 
@@ -357,7 +357,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             MARGIN_ENGINE.settle(e.seriesId, roundHints);
         }
 
-        MARGIN_ENGINE.unlockCollateral(e.seriesId);
+        try MARGIN_ENGINE.unlockCollateral(e.seriesId) {} catch {}
 
         currentState = State.UNLOCKED;
         emit EpochSettled(currentEpochId, STAKED_TOKEN.balanceOf(address(this)));

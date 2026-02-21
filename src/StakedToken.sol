@@ -19,6 +19,8 @@ contract StakedToken is ERC4626 {
     /// @notice Duration over which donated rewards are streamed.
     uint256 public constant STREAM_DURATION = 1 hours;
 
+    uint256 private _trackedBalance;
+
     /// @notice Current reward streaming rate (tokens per second, scaled by 1e18).
     uint256 public rewardRate;
 
@@ -41,9 +43,7 @@ contract StakedToken is ERC4626 {
     /// @notice Returns total assets including only vested streamed rewards.
     /// @dev Overrides ERC4626 to exclude unvested rewards from share price calculation.
     function totalAssets() public view override returns (uint256) {
-        uint256 balance = IERC20(asset()).balanceOf(address(this));
-        uint256 unvested = _unvestedRewards();
-        return balance - unvested;
+        return _trackedBalance - _unvestedRewards();
     }
 
     /// @notice Donates yield that streams to stakers over STREAM_DURATION.
@@ -56,6 +56,7 @@ contract StakedToken is ERC4626 {
         uint256 remaining = _unvestedRewards();
 
         IERC20(asset()).safeTransferFrom(msg.sender, address(this), amount);
+        _trackedBalance += amount;
 
         uint256 total = remaining + amount;
         if (total == 0) {
@@ -93,6 +94,27 @@ contract StakedToken is ERC4626 {
     ) external returns (uint256 shares) {
         IERC20Permit(asset()).permit(msg.sender, address(this), assets, deadline, v, r, s);
         return deposit(assets, receiver);
+    }
+
+    function _deposit(
+        address caller,
+        address receiver,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
+        _trackedBalance += assets;
+        super._deposit(caller, receiver, assets, shares);
+    }
+
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
+        _trackedBalance -= assets;
+        super._withdraw(caller, receiver, owner, assets, shares);
     }
 
     /// @dev Calculates unvested rewards from the current stream.

@@ -238,6 +238,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (settlementPrice > CAP) {
             revert MarginEngine__InvalidParams();
         }
+        if (!s.isBull && settlementPrice == 0) {
+            revert MarginEngine__InvalidParams();
+        }
 
         s.settlementPrice = settlementPrice;
         IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
@@ -263,7 +266,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         if (!s.isSettled) {
             revert MarginEngine__NotSettled();
         }
-        if (block.timestamp >= settlementTimestamp[seriesId] + 90 days) {
+        if (block.timestamp > settlementTimestamp[seriesId] + 90 days) {
             revert MarginEngine__Expired();
         }
         if (s.settlementPrice <= s.strike) {

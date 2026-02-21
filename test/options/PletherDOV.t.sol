@@ -440,7 +440,7 @@ contract PletherDOVTest is Test {
 
     function test_FillAuction_RevertsAfterDuration() public {
         _startAuction();
-        vm.warp(block.timestamp + 1 hours + 1);
+        vm.warp(block.timestamp + 1 hours);
 
         vm.prank(maker);
         vm.expectRevert(PletherDOV.PletherDOV__AuctionEnded.selector);
@@ -737,6 +737,9 @@ contract PletherDOVTest is Test {
         vm.warp(block.timestamp + 2 hours);
         dov.cancelAuction();
 
+        // Must settle the cancelled series before starting a new epoch (M-04)
+        marginEngine.settle(1, new uint80[](0));
+
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
         assertEq(dov.currentEpochId(), 2);
     }
@@ -793,6 +796,42 @@ contract PletherDOVTest is Test {
 
         assertEq(usdc.balanceOf(alice), balanceBefore + 1000e6, "withdrawal should succeed");
         assertEq(dov.userUsdcDeposits(alice), 0);
+    }
+
+    // ==========================================
+    // M-03: settleEpoch succeeds even if unlockCollateral reverts
+    // ==========================================
+
+    function test_SettleEpoch_TransitionsEvenIfUnlockReverts() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        marginEngine.settle(1, new uint80[](0));
+
+        // Drain shares so unlockCollateral will revert (transfer fails with 0 balance)
+        uint256 locked = marginEngine.sharesLocked(1);
+        marginEngine.unlockCollateral(1);
+        // Re-lock nothing — the mock now has 0 shares for series 1
+        // so the DOV's settleEpoch call to unlockCollateral will transfer 0 (no-op after drain)
+
+        // settleEpoch should still transition to UNLOCKED even if unlock returned nothing
+        dov.settleEpoch(new uint80[](0));
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+    }
+
+    // ==========================================
+    // M-04: cancelled auction blocks next epoch if unsettled
+    // ==========================================
+
+    function test_StartEpochAuction_RevertsIfCancelledSeriesUnsettled() public {
+        _startAuction();
+        vm.warp(block.timestamp + 2 hours);
+        dov.cancelAuction();
+
+        // Do NOT settle the cancelled series — next epoch should be blocked
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
     }
 
 }

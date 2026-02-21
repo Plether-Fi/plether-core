@@ -159,4 +159,14 @@ contract OptionTokenTest is Test {
         token.mint(address(0), 100e18);
     }
 
+    // ==========================================
+    // L-04: INITIALIZE REJECTS ZERO-ADDRESS ENGINE
+    // ==========================================
+
+    function test_Initialize_RevertsOnZeroAddressEngine() public {
+        OptionToken proxy = OptionToken(Clones.clone(address(implementation)));
+        vm.expectRevert(OptionToken.OptionToken__ZeroAddress.selector);
+        proxy.initialize("X", "Y", address(0));
+    }
+
 }

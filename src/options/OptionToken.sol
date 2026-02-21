@@ -46,6 +46,9 @@ contract OptionToken {
         if (_initialized) {
             revert OptionToken__AlreadyInitialized();
         }
+        if (_marginEngine == address(0)) {
+            revert OptionToken__ZeroAddress();
+        }
         name = _name;
         symbol = _symbol;
         marginEngine = _marginEngine;

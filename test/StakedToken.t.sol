@@ -402,6 +402,24 @@ contract StakedTokenTest is Test {
         assertEq(underlying.balanceOf(signer), 0);
     }
 
+    // ==========================================
+    // M-01: DIRECT TRANSFER DOES NOT INFLATE TOTAL ASSETS
+    // ==========================================
+
+    function test_DirectTransfer_DoesNotInflateTotalAssets() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 100 ether);
+        stakedToken.deposit(100 ether, alice);
+        vm.stopPrank();
+
+        uint256 totalBefore = stakedToken.totalAssets();
+
+        vm.prank(attacker);
+        underlying.transfer(address(stakedToken), 50 ether);
+
+        assertEq(stakedToken.totalAssets(), totalBefore, "direct transfer must not inflate totalAssets");
+    }
+
     function test_DepositWithPermit_DifferentReceiver() public {
         uint256 privateKey = 0x5678;
         address signer = vm.addr(privateKey);
