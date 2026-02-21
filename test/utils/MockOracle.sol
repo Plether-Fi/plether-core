@@ -14,6 +14,7 @@ contract MockOracle is AggregatorV3Interface {
     string public _description;
     uint80 public currentRoundId;
     mapping(uint80 => Round) public rounds;
+    mapping(uint80 => bool) public roundExists;
 
     constructor(
         int256 _initialPrice,
@@ -23,6 +24,7 @@ contract MockOracle is AggregatorV3Interface {
         _description = description_;
         currentRoundId = 1;
         rounds[1] = Round(_initialPrice, block.timestamp);
+        roundExists[1] = true;
     }
 
     function updatePrice(
@@ -30,6 +32,7 @@ contract MockOracle is AggregatorV3Interface {
     ) external {
         currentRoundId++;
         rounds[currentRoundId] = Round(_newPrice, block.timestamp);
+        roundExists[currentRoundId] = true;
     }
 
     function setUpdatedAt(
@@ -44,6 +47,19 @@ contract MockOracle is AggregatorV3Interface {
     ) external {
         currentRoundId = _roundId;
         rounds[_roundId] = Round(_newPrice, block.timestamp);
+        roundExists[_roundId] = true;
+    }
+
+    function setRoundData(
+        uint80 roundId,
+        int256 price,
+        uint256 updatedAt
+    ) external {
+        rounds[roundId] = Round(price, updatedAt);
+        roundExists[roundId] = true;
+        if (roundId > currentRoundId) {
+            currentRoundId = roundId;
+        }
     }
 
     function decimals() external view override returns (uint8) {
@@ -61,8 +77,8 @@ contract MockOracle is AggregatorV3Interface {
     function getRoundData(
         uint80 _roundId
     ) external view override returns (uint80, int256, uint256, uint256, uint80) {
+        require(roundExists[_roundId], "No data for round");
         Round storage r = rounds[_roundId];
-        require(r.updatedAt != 0, "No data for round");
         return (_roundId, r.price, r.updatedAt, r.updatedAt, _roundId);
     }
 

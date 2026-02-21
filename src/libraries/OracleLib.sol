@@ -112,17 +112,25 @@ library OracleLib {
 
         if (!foundNextValid) {
             uint16 latestPhase = uint16(latestRoundId >> 64);
-            for (uint16 p = hintPhase + 1; p <= latestPhase; p++) {
-                uint80 phaseFirstRound = (uint80(p) << 64) | 1;
-                try feed.getRoundData(phaseFirstRound) returns (uint80, int256, uint256, uint256 npUpdatedAt, uint80) {
-                    if (npUpdatedAt != 0) {
-                        if (npUpdatedAt <= targetTimestamp) {
-                            revert OracleLib__NoPriceAtExpiry();
+            for (uint16 p = hintPhase + 1; p <= latestPhase && !foundNextValid; p++) {
+                for (uint256 j = 1; j <= 50 && !foundNextValid; j++) {
+                    uint80 phaseRound = (uint80(p) << 64) | uint80(j);
+                    try feed.getRoundData(phaseRound) returns (uint80, int256, uint256, uint256 npUpdatedAt, uint80) {
+                        if (npUpdatedAt != 0) {
+                            if (npUpdatedAt <= targetTimestamp) {
+                                revert OracleLib__NoPriceAtExpiry();
+                            }
+                            foundNextValid = true;
                         }
+                    } catch {
                         break;
                     }
-                } catch {}
+                }
             }
+        }
+
+        if (!foundNextValid) {
+            revert OracleLib__NoPriceAtExpiry();
         }
 
         return (hintPrice, hintUpdatedAt);

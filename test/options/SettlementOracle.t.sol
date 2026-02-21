@@ -275,6 +275,65 @@ contract SettlementOracleTest is Test {
     }
 
     // ==========================================
+    // H-01: CROSS-PHASE SKIPPED ROUNDS
+    // ==========================================
+
+    function test_VerifyHistoricalPrice_RevertsWhenPhaseRound1Skipped() public {
+        // Use concrete timestamp to avoid via-IR TIMESTAMP optimization
+        uint256 expiry = 1_735_696_800;
+
+        // Phase 1 round 1 has valid data at expiry (hint)
+        uint80 phase1Round1 = (uint80(1) << 64) | 1;
+        eurFeed.setRoundData(phase1Round1, 118_800_000, expiry);
+        jpyFeed.setRoundData(phase1Round1, 670_000, expiry);
+
+        // Phase 2: round 1 is skipped (exists but updatedAt=0), round 2 has valid data after expiry
+        uint80 phase2Round1 = (uint80(2) << 64) | 1;
+        uint80 phase2Round2 = (uint80(2) << 64) | 2;
+        eurFeed.setRoundData(phase2Round1, 0, 0);
+        eurFeed.setRoundData(phase2Round2, 120_000_000, expiry + 1 hours);
+        jpyFeed.setRoundData(phase2Round1, 0, 0);
+        jpyFeed.setRoundData(phase2Round2, 700_000, expiry + 1 hours);
+
+        vm.warp(expiry + 2 hours);
+
+        // Hint is phase 1 round 1 — cross-phase search should skip phase 2 round 1
+        // (updatedAt=0) and find phase 2 round 2, confirming the hint is valid
+        uint80[] memory hints = new uint80[](2);
+        hints[0] = phase1Round1;
+        hints[1] = phase1Round1;
+        (uint256 bear,) = oracle.getSettlementPrices(expiry, hints);
+        assertEq(bear, EXPECTED_BEAR, "should return hint price when cross-phase validates");
+    }
+
+    function test_VerifyHistoricalPrice_RevertsFailClosed() public {
+        // Use concrete timestamp to avoid via-IR TIMESTAMP optimization
+        uint256 expiry = 1_735_696_800;
+
+        // Phase 1 round 1 at expiry (hint). Phase 1 round 100 at expiry+1h (latest, beyond 50-round search).
+        uint80 phase1Round1 = (uint80(1) << 64) | 1;
+        eurFeed.setRoundData(phase1Round1, 118_800_000, expiry);
+        uint80 phase1Round100 = (uint80(1) << 64) | 100;
+        eurFeed.setRoundData(phase1Round100, 120_000_000, expiry + 1 hours);
+
+        // JPY: simple setup — latest at expiry+1h so it goes through historical lookup too
+        jpyFeed.setRoundData(phase1Round1, 670_000, expiry);
+        jpyFeed.setRoundData(phase1Round100, 700_000, expiry + 1 hours);
+
+        vm.warp(expiry + 2 hours);
+
+        // Hint is round 1. Forward search tries rounds 2-51 (none exist).
+        // Cross-phase: hint and latest are in the same phase, so no cross-phase search.
+        // Result: !foundNextValid → revert (fail closed).
+        uint80[] memory hints = new uint80[](2);
+        hints[0] = phase1Round1;
+        hints[1] = phase1Round1;
+
+        vm.expectRevert(OracleLib.OracleLib__NoPriceAtExpiry.selector);
+        oracle.getSettlementPrices(expiry, hints);
+    }
+
+    // ==========================================
     // FUZZ
     // ==========================================
 

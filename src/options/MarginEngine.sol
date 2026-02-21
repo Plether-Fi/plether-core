@@ -170,7 +170,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
             uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
             s.mintShareRate = vault.convertToAssets(oneShare);
             if (s.mintShareRate == 0) {
-                s.mintShareRate = 1e18;
+                s.mintShareRate = oneShare;
             }
         }
 
@@ -292,6 +292,9 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
     /// @notice Writers unlock their remaining splDXY shares post-settlement.
     /// @dev Uses global debt pro-rata to stay consistent with the exercise cap.
+    ///      `globalDebtShares` represents the theoretical max debt assuming 100% exercise.
+    ///      If some option holders don't exercise, their unclaimed share of `globalDebtShares`
+    ///      remains locked until `sweepUnclaimedShares` is called after 90 days.
     function unlockCollateral(
         uint256 seriesId
     ) external nonReentrant {

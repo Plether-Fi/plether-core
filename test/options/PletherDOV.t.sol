@@ -45,6 +45,8 @@ contract MockOptionERC20 is ERC20 {
 
 contract MockStakedTokenForDOV is ERC20 {
 
+    uint256 private _withdrawalFeeBps;
+
     constructor(
         string memory name_,
         string memory symbol_
@@ -54,16 +56,30 @@ contract MockStakedTokenForDOV is ERC20 {
         return 21;
     }
 
+    function setWithdrawalFee(
+        uint256 bps
+    ) external {
+        _withdrawalFeeBps = bps;
+    }
+
     function convertToAssets(
         uint256 shares
     ) external pure returns (uint256) {
         return shares / 1e3;
     }
 
+    function previewRedeem(
+        uint256 shares
+    ) external view returns (uint256) {
+        uint256 assets = shares / 1e3;
+        return assets - (assets * _withdrawalFeeBps) / 10_000;
+    }
+
     function previewWithdraw(
         uint256 assets
-    ) external pure returns (uint256) {
-        return assets * 1e3;
+    ) external view returns (uint256) {
+        uint256 netAssets = assets + (assets * _withdrawalFeeBps) / (10_000 - _withdrawalFeeBps);
+        return netAssets * 1e3;
     }
 
     function mint(
@@ -301,6 +317,16 @@ contract PletherDOVTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    function test_StartEpochAuction_RevertsOnZeroDuration() public {
+        vm.expectRevert(PletherDOV.PletherDOV__InvalidParams.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 0);
+    }
+
+    function test_StartEpochAuction_RevertsOnMinGreaterThanMax() public {
+        vm.expectRevert(PletherDOV.PletherDOV__InvalidParams.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 100_000, 1e6, 1 hours);
     }
 
     function test_StartEpochAuction_RevertsIfNotUnlocked() public {
@@ -634,6 +660,24 @@ contract PletherDOVTest is Test {
         // Should succeed despite auction not expired
         dov.cancelAuction();
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
+    }
+
+    // ==========================================
+    // M-01: FEE-AWARE previewRedeem
+    // ==========================================
+
+    function test_StartEpochAuction_UsesPreviewRedeemForFeeAwareness() public {
+        uint256 sharesBalance = stakedToken.balanceOf(address(dov));
+        uint256 convertToAssetsAmount = stakedToken.convertToAssets(sharesBalance);
+
+        stakedToken.setWithdrawalFee(100); // 1% fee
+        uint256 previewRedeemAmount = stakedToken.previewRedeem(sharesBalance);
+        assertLt(previewRedeemAmount, convertToAssetsAmount, "previewRedeem should be less with fee");
+
+        _startAuction();
+
+        (, uint256 optionsMinted,,,,,) = dov.epochs(1);
+        assertEq(optionsMinted, previewRedeemAmount, "should use previewRedeem, not convertToAssets");
     }
 
     // ==========================================

@@ -90,6 +90,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     error PletherDOV__AuctionEnded();
     error PletherDOV__AuctionNotExpired();
     error PletherDOV__SplitterNotSettled();
+    error PletherDOV__InvalidParams();
 
     constructor(
         string memory _name,
@@ -144,6 +145,9 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (currentState != State.UNLOCKED) {
             revert PletherDOV__WrongState();
         }
+        if (duration == 0 || minPremium > maxPremium) {
+            revert PletherDOV__InvalidParams();
+        }
 
         if (currentEpochId > 0) {
             Epoch storage prev = epochs[currentEpochId];
@@ -164,7 +168,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         uint256 sharesBalance = STAKED_TOKEN.balanceOf(address(this));
 
         // MarginEngine requires underlying asset amounts. Convert our ERC4626 shares to assets.
-        uint256 optionsToMint = STAKED_TOKEN.convertToAssets(sharesBalance);
+        uint256 optionsToMint = STAKED_TOKEN.previewRedeem(sharesBalance);
 
         // Rounding protection: ensure previewWithdraw doesn't try to pull 1 wei more than we have
         uint256 requiredShares = STAKED_TOKEN.previewWithdraw(optionsToMint);
@@ -211,6 +215,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Step 2: Market Makers call this to buy the entire batch of options.
+    /// @dev Premium calculation: optionsMinted (18 decimals) * currentPremium (6 decimals) / 1e18
+    ///      = totalPremiumUsdc (6 decimals). Relies on OptionToken.decimals() == 18.
     function fillAuction() external nonReentrant {
         if (currentState != State.AUCTIONING) {
             revert PletherDOV__WrongState();

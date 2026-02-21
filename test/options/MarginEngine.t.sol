@@ -68,6 +68,9 @@ contract MockStakedTokenOptions is ERC20 {
     function previewWithdraw(
         uint256 assets
     ) external view returns (uint256) {
+        if (_rateNum == 0) {
+            return assets * 1e3;
+        }
         uint256 numerator = assets * _rateDen * 1e3;
         return (numerator + _rateNum - 1) / _rateNum;
     }
@@ -1057,6 +1060,21 @@ contract MarginEngineTest is Test {
         vm.warp(block.timestamp + 7 days + 3 days);
         vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
         engine.adminSettle(seriesId, 0);
+    }
+
+    // ==========================================
+    // M-02: MINT SHARE RATE FALLBACK DECIMALS
+    // ==========================================
+
+    function test_MintShareRate_FallbackUsesVaultDecimals() public {
+        stakedBear.setExchangeRate(0, 1);
+
+        uint256 seriesId = _createBearSeries(90e6);
+        vm.prank(alice);
+        engine.mintOptions(seriesId, 100e18);
+
+        (,,,,,,, uint256 mintRate) = engine.series(seriesId);
+        assertEq(mintRate, ONE_SHARE, "fallback should use 10^decimals, not 1e18");
     }
 
     // ==========================================
