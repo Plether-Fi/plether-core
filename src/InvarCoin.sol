@@ -538,7 +538,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (calcOut * BPS < emaExpectedUsdc * (BPS - MAX_SPOT_DEVIATION_BPS)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut > 0 ? calcOut - 1 : 0);
+        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut * (BPS - 5) / BPS);
         trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBalBefore);
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
