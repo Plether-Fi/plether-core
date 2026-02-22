@@ -976,4 +976,60 @@ contract MarginEngineTest is OptionsTestSetup {
         assertEq(swept, expectedSwept, "swept amount equals unclaimed debt shares");
     }
 
+    // ==========================================
+    // SWEEP ACCESS CONTROL
+    // ==========================================
+
+    function test_SweepUnclaimedShares_RevertsFromNonAdmin() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        OptionToken opt = _getOptionToken(seriesId);
+        opt.transfer(bob, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+        engine.settle(seriesId, _buildHints());
+
+        engine.unlockCollateral(seriesId);
+        vm.warp(block.timestamp + 91 days);
+
+        bytes32 role = engine.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, role));
+        vm.prank(alice);
+        engine.sweepUnclaimedShares(seriesId);
+    }
+
+    // ==========================================
+    // ADMIN SETTLE PRICE > CAP
+    // ==========================================
+
+    function test_AdminSettle_RevertsOnPriceAboveCAP() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days + 3 days);
+        vm.expectRevert(MarginEngine.MarginEngine__InvalidParams.selector);
+        engine.adminSettle(seriesId, CAP + 1);
+    }
+
+    // ==========================================
+    // EXCHANGE RATE ZERO FALLBACK
+    // ==========================================
+
+    function test_Settle_FallsBackToOneShareWhenRateIsZero() public {
+        uint256 seriesId = _createBearSeries(90e6);
+        engine.mintOptions(seriesId, 100e18);
+
+        vm.warp(block.timestamp + 7 days);
+        _refreshFeeds();
+
+        stakedBear.setExchangeRate(0, 1);
+
+        engine.settle(seriesId, _buildHints());
+
+        (,,,,, uint256 settlementShareRate,) = engine.series(seriesId);
+        assertEq(settlementShareRate, ONE_SHARE, "fallback to oneShare when rate is zero");
+    }
+
 }

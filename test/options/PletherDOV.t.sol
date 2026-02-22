@@ -120,6 +120,7 @@ contract MockMarginEngine {
     using SafeERC20 for IERC20;
 
     error MarginEngine__ZeroAmount();
+    error MarginEngine__NotSettled();
 
     struct MockSeries {
         bool isBull;
@@ -136,6 +137,7 @@ contract MockMarginEngine {
     uint256 public nextId = 1;
     mapping(uint256 => MockSeries) internal _series;
     mapping(uint256 => uint256) public sharesLocked;
+    bool public forceUnlockRevert;
 
     constructor(
         address _stakedToken,
@@ -182,11 +184,22 @@ contract MockMarginEngine {
         _series[seriesId].settlementPrice = price;
     }
 
+    function setForceUnlockRevert(
+        bool flag
+    ) external {
+        forceUnlockRevert = flag;
+    }
+
     function unlockCollateral(
         uint256 seriesId
     ) external {
+        if (forceUnlockRevert) {
+            revert MarginEngine__NotSettled();
+        }
         uint256 shares = sharesLocked[seriesId];
-        if (shares == 0) revert MarginEngine__ZeroAmount();
+        if (shares == 0) {
+            revert MarginEngine__ZeroAmount();
+        }
         sharesLocked[seriesId] = 0;
         stakedToken.safeTransfer(msg.sender, shares);
     }
@@ -849,6 +862,22 @@ contract PletherDOVTest is Test {
             new PletherDOV("EMPTY DOV", "eDOV", address(marginEngine), address(stakedToken), address(usdc), false);
         vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
         emptyDov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    // ==========================================
+    // SETTLE EPOCH RE-RAISE
+    // ==========================================
+
+    function test_SettleEpoch_ReRaisesNonZeroAmountErrors() public {
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+
+        marginEngine.settle(1, new uint80[](0));
+        marginEngine.setForceUnlockRevert(true);
+
+        vm.expectRevert(MockMarginEngine.MarginEngine__NotSettled.selector);
+        dov.settleEpoch(new uint80[](0));
     }
 
 }

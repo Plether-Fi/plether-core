@@ -386,4 +386,15 @@ contract MarginEngineInvariantTest is OptionsTestSetup {
         assertEq(actualSupply, expectedSupply, "option supply mismatch");
     }
 
+    /// @dev Exercised shares for any series must never exceed its total locked shares.
+    function invariant_exercisedSharesBounded() public view {
+        uint256 count = handler.getSeriesCount();
+        for (uint256 i = 0; i < count; i++) {
+            uint256 seriesId = handler.seriesIds(i);
+            uint256 exercised = engine.totalSeriesExercisedShares(seriesId);
+            uint256 total = engine.totalSeriesShares(seriesId);
+            assertLe(exercised, total, "exercised shares exceed total series shares");
+        }
+    }
+
 }
