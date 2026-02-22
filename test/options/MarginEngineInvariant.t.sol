@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import {OracleLib} from "../../src/libraries/OracleLib.sol";
 import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
@@ -63,23 +64,6 @@ contract MarginEngineHandler is Test {
         return seriesIds.length;
     }
 
-    function _isExpectedRevert(
-        bytes memory reason,
-        bytes4[] memory allowed
-    ) internal pure returns (bool) {
-        if (reason.length < 4) {
-            return false;
-        }
-        bytes4 sel;
-        assembly { sel := mload(add(reason, 0x20)) }
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (sel == allowed[i]) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     function _bubbleRevert(
         bytes memory reason
     ) internal pure {
@@ -94,18 +78,10 @@ contract MarginEngineHandler is Test {
         uint256 strike = bound(strikeSeed, 1, 199_000_000);
         uint256 expiry = block.timestamp + bound(expirySeed, 1 hours, 30 days);
 
-        try engine.createSeries(isBull, strike, expiry, "TEST", "tOPT") returns (uint256 id) {
-            seriesIds.push(id);
-            (,,, address optAddr,,,) = engine.series(id);
-            seriesOptionToken[id] = optAddr;
-        } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = MarginEngine.MarginEngine__InvalidParams.selector;
-            allowed[1] = MarginEngine.MarginEngine__Expired.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
-                _bubbleRevert(reason);
-            }
-        }
+        uint256 id = engine.createSeries(isBull, strike, expiry, "TEST", "tOPT");
+        seriesIds.push(id);
+        (,,, address optAddr,,,) = engine.series(id);
+        seriesOptionToken[id] = optAddr;
     }
 
     function mintOptions(
@@ -130,12 +106,12 @@ contract MarginEngineHandler is Test {
             ghost_totalOptionsMinted += amount;
             OptionToken(seriesOptionToken[seriesId]).transfer(actor, amount);
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = MarginEngine.MarginEngine__Expired.selector;
-            allowed[1] = MarginEngine.MarginEngine__ZeroAmount.selector;
-            allowed[2] = MarginEngine.MarginEngine__Unauthorized.selector;
-            allowed[3] = MarginEngine.MarginEngine__SplitterNotActive.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (sel != MarginEngine.MarginEngine__Expired.selector) {
                 _bubbleRevert(reason);
             }
         }
@@ -192,10 +168,17 @@ contract MarginEngineHandler is Test {
             ghost_settledRate[seriesId] = ssr;
             ghost_isSettled[seriesId] = true;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = MarginEngine.MarginEngine__AlreadySettled.selector;
-            allowed[1] = MarginEngine.MarginEngine__NotExpired.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != MarginEngine.MarginEngine__AlreadySettled.selector
+                    && sel != MarginEngine.MarginEngine__NotExpired.selector
+                    && sel != OracleLib.OracleLib__StalePrice.selector
+                    && sel != OracleLib.OracleLib__NoPriceAtExpiry.selector
+            ) {
                 _bubbleRevert(reason);
             }
         }
@@ -214,11 +197,16 @@ contract MarginEngineHandler is Test {
         try engine.sweepUnclaimedShares(seriesId) {
             ghost_totalSharesSwept += vault.balanceOf(address(this)) - vaultBefore;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = MarginEngine.MarginEngine__NotSettled.selector;
-            allowed[1] = MarginEngine.MarginEngine__SweepTooEarly.selector;
-            allowed[2] = MarginEngine.MarginEngine__ZeroAmount.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != MarginEngine.MarginEngine__NotSettled.selector
+                    && sel != MarginEngine.MarginEngine__SweepTooEarly.selector
+                    && sel != MarginEngine.MarginEngine__ZeroAmount.selector
+            ) {
                 _bubbleRevert(reason);
             }
         }
@@ -267,12 +255,16 @@ contract MarginEngineHandler is Test {
             ghost_totalSharesExercised += received;
             ghost_totalOptionsExercised += amount;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = MarginEngine.MarginEngine__ZeroAmount.selector;
-            allowed[1] = MarginEngine.MarginEngine__NotSettled.selector;
-            allowed[2] = MarginEngine.MarginEngine__Expired.selector;
-            allowed[3] = MarginEngine.MarginEngine__OptionIsOTM.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != MarginEngine.MarginEngine__NotSettled.selector
+                    && sel != MarginEngine.MarginEngine__Expired.selector
+                    && sel != MarginEngine.MarginEngine__OptionIsOTM.selector
+            ) {
                 _bubbleRevert(reason);
             }
         }
@@ -296,10 +288,15 @@ contract MarginEngineHandler is Test {
             uint256 received = vault.balanceOf(address(this)) - vaultBefore;
             ghost_totalSharesUnlocked += received;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = MarginEngine.MarginEngine__NotSettled.selector;
-            allowed[1] = MarginEngine.MarginEngine__ZeroAmount.selector;
-            if (!_isExpectedRevert(reason, allowed)) {
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != MarginEngine.MarginEngine__NotSettled.selector
+                    && sel != MarginEngine.MarginEngine__ZeroAmount.selector
+            ) {
                 _bubbleRevert(reason);
             }
         }

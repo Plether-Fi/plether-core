@@ -406,13 +406,21 @@ contract MarginEngineTest is OptionsTestSetup {
 
         engine.exercise(seriesId, 30e18);
         assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 70e18);
-        assertGt(stakedBear.balanceOf(address(this)), balBefore, "exerciser received shares after first exercise");
+        assertEq(
+            stakedBear.balanceOf(address(this)) - balBefore,
+            4_528_301_886_792_452_830_000,
+            "exerciser received exact shares after first exercise"
+        );
 
         uint256 balMid = stakedBear.balanceOf(address(this));
 
         engine.exercise(seriesId, 70e18);
         assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 0);
-        assertGt(stakedBear.balanceOf(address(this)), balMid, "exerciser received shares after second exercise");
+        assertEq(
+            stakedBear.balanceOf(address(this)) - balMid,
+            10_566_037_735_849_056_603_000,
+            "exerciser received exact shares after second exercise"
+        );
     }
 
     function test_Exercise_NoStrandedCollateral() public {

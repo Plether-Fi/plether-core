@@ -36,7 +36,7 @@ contract PletherDOVIntegrationTest is OptionsTestSetup {
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
 
         (, uint256 optionsMinted,,,,,) = dov.epochs(1);
-        assertGt(optionsMinted, 0, "options minted");
+        assertEq(optionsMinted, 1000e18, "options minted");
 
         vm.prank(maker);
         dov.fillAuction();
@@ -48,7 +48,7 @@ contract PletherDOVIntegrationTest is OptionsTestSetup {
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
         uint256 dovBalance = stakedBear.balanceOf(address(dov));
-        assertGt(dovBalance, 0, "DOV should hold residual collateral");
+        assertEq(dovBalance, 849_056_603_773_584_905_661_000, "DOV residual collateral");
     }
 
     function test_FullLifecycle_WithExercise() public {
