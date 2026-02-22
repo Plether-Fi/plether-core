@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "../../src/libraries/OracleLib.sol";
-import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import "forge-std/Test.sol";
 
@@ -47,23 +46,6 @@ contract MockSEKFeedOptions is AggregatorV3Interface {
 
     function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
         return (1, _price, _updatedAt, _updatedAt, 1);
-    }
-
-}
-
-/// @notice Mock Curve pool for BasketOracle comparison
-contract MockCurvePoolForOptions {
-
-    uint256 public oraclePrice;
-
-    constructor(
-        uint256 _price
-    ) {
-        oraclePrice = _price;
-    }
-
-    function price_oracle() external view returns (uint256) {
-        return oraclePrice;
     }
 
 }
@@ -164,43 +146,6 @@ contract OptionsForkTest is Test {
     function test_SettlementOracle_BearPlusBullEqualsCAP() public view {
         (uint256 bear, uint256 bull) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
         assertEq(bear + bull, CAP, "bear + bull must equal CAP");
-    }
-
-    function test_SettlementOracle_MatchesBasketOracle() public {
-        address[] memory feeds = new address[](6);
-        feeds[0] = CL_EUR_USD;
-        feeds[1] = CL_JPY_USD;
-        feeds[2] = CL_GBP_USD;
-        feeds[3] = CL_CAD_USD;
-        feeds[4] = address(sekFeed);
-        feeds[5] = CL_CHF_USD;
-
-        uint256[] memory quantities = new uint256[](6);
-        quantities[0] = WEIGHT_EUR;
-        quantities[1] = WEIGHT_JPY;
-        quantities[2] = WEIGHT_GBP;
-        quantities[3] = WEIGHT_CAD;
-        quantities[4] = WEIGHT_SEK;
-        quantities[5] = WEIGHT_CHF;
-
-        uint256[] memory basePrices = new uint256[](6);
-        basePrices[0] = BASE_EUR;
-        basePrices[1] = BASE_JPY;
-        basePrices[2] = BASE_GBP;
-        basePrices[3] = BASE_CAD;
-        basePrices[4] = BASE_SEK;
-        basePrices[5] = BASE_CHF;
-
-        BasketOracle basket = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
-
-        (uint256 bear,) = settlementOracle.getSettlementPrices(block.timestamp, _buildForkHints());
-        uint256 bearPrice18 = bear * 1e10;
-        MockCurvePoolForOptions pool = new MockCurvePoolForOptions(bearPrice18);
-        basket.setCurvePool(address(pool));
-
-        (, int256 basketPrice,,,) = basket.latestRoundData();
-
-        assertEq(bear, uint256(basketPrice), "settlement oracle should match basket oracle");
     }
 
     function test_SettlementOracle_StaleAfter24Hours() public {

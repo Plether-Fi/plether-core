@@ -4,67 +4,18 @@ pragma solidity 0.8.33;
 import {ISyntheticSplitter} from "../../src/interfaces/ISyntheticSplitter.sol";
 import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
-import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
-import {MockOracle} from "../utils/MockOracle.sol";
-import {MockOptionsSplitter, MockStakedTokenOptions} from "../utils/OptionsMocks.sol";
+import {OptionsTestSetup} from "../utils/OptionsTestSetup.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "forge-std/Test.sol";
 
-contract MarginEngineTest is Test {
-
-    uint256 constant CAP = 2e8;
-    // Oracle basket: bearPrice = 106e6, bullPrice = 94e6
-    uint256 constant BEAR_PRICE = 106_000_000;
-    uint256 constant BULL_PRICE = 94_000_000;
-    uint256 constant ONE_SHARE = 1e21;
-
-    MockOptionsSplitter public splitter;
-    SettlementOracle public oracle;
-    MockStakedTokenOptions public stakedBear;
-    MockStakedTokenOptions public stakedBull;
-    OptionToken public optionImpl;
-    MarginEngine public engine;
-
-    MockOracle public eurFeed;
-    MockOracle public jpyFeed;
-    MockOracle public sequencerFeed;
+contract MarginEngineTest is OptionsTestSetup {
 
     address alice = address(0x1);
     address bob = address(0x2);
     address keeper = address(0x3);
 
     function setUp() public {
-        vm.warp(1_735_689_600);
-
-        splitter = new MockOptionsSplitter();
-
-        // Sequencer UP, then warp past grace period
-        sequencerFeed = new MockOracle(0, "Sequencer");
-        vm.warp(block.timestamp + 2 hours);
-
-        eurFeed = new MockOracle(118_800_000, "EUR/USD");
-        jpyFeed = new MockOracle(670_000, "JPY/USD");
-
-        address[] memory feeds = new address[](2);
-        feeds[0] = address(eurFeed);
-        feeds[1] = address(jpyFeed);
-        uint256[] memory quantities = new uint256[](2);
-        quantities[0] = 600_000_000_000_000_000;
-        quantities[1] = 400_000_000_000_000_000;
-        uint256[] memory basePrices = new uint256[](2);
-        basePrices[0] = 108_000_000;
-        basePrices[1] = 670_000;
-
-        oracle = new SettlementOracle(feeds, quantities, basePrices, CAP, address(sequencerFeed));
-
-        stakedBear = new MockStakedTokenOptions("splDXY-BEAR", "splBEAR");
-        stakedBull = new MockStakedTokenOptions("splDXY-BULL", "splBULL");
-        optionImpl = new OptionToken();
-
-        engine = new MarginEngine(
-            address(splitter), address(oracle), address(stakedBear), address(stakedBull), address(optionImpl)
-        );
+        _deployOptionsInfra();
         engine.grantRole(engine.SERIES_CREATOR_ROLE(), address(this));
 
         // Fund actors with staked tokens (21 decimals) and approve engine
@@ -109,17 +60,6 @@ contract MarginEngineTest is Test {
     ) internal view returns (OptionToken) {
         (,,, address optAddr,,,) = engine.series(seriesId);
         return OptionToken(optAddr);
-    }
-
-    function _refreshFeeds() internal {
-        eurFeed.updatePrice(118_800_000);
-        jpyFeed.updatePrice(670_000);
-    }
-
-    function _buildHints() internal view returns (uint80[] memory hints) {
-        hints = new uint80[](2);
-        (hints[0],,,,) = eurFeed.latestRoundData();
-        (hints[1],,,,) = jpyFeed.latestRoundData();
     }
 
     // ==========================================
@@ -383,11 +323,9 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        // Hand-calculated payout:
-        //   assetPayout = 100e18 * (106e6 - 90e6) / 106e6 = 15_094_339_622_641_509_433
-        //   sharePayout = assetPayout * 1e21 / 1e18 = 15_094_339_622_641_509_433_000
-        uint256 expectedAssetPayout = (optionsAmount * (BEAR_PRICE - 90e6)) / BEAR_PRICE;
-        uint256 expectedSharePayout = (expectedAssetPayout * ONE_SHARE) / stakedBear.convertToAssets(ONE_SHARE);
+        // Hand-calculated: 100e18 * 16e6 / 106e6 = 15_094_339_622_641_509_433 assets
+        // shares = assets * 1e3 = 15_094_339_622_641_509_433_000
+        uint256 expectedSharePayout = 15_094_339_622_641_509_433_000;
 
         uint256 bobBefore = stakedBear.balanceOf(bob);
 
@@ -464,11 +402,17 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
+        uint256 balBefore = stakedBear.balanceOf(address(this));
+
         engine.exercise(seriesId, 30e18);
         assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 70e18);
+        assertGt(stakedBear.balanceOf(address(this)), balBefore, "exerciser received shares after first exercise");
+
+        uint256 balMid = stakedBear.balanceOf(address(this));
 
         engine.exercise(seriesId, 70e18);
         assertEq(_getOptionToken(seriesId).balanceOf(address(this)), 0);
+        assertGt(stakedBear.balanceOf(address(this)), balMid, "exerciser received shares after second exercise");
     }
 
     function test_Exercise_NoStrandedCollateral() public {
@@ -497,7 +441,6 @@ contract MarginEngineTest is Test {
         uint256 optionsAmount = 100e18;
 
         engine.mintOptions(seriesId, optionsAmount);
-        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
         OptionToken opt = _getOptionToken(seriesId);
         opt.transfer(bob, optionsAmount);
 
@@ -505,15 +448,13 @@ contract MarginEngineTest is Test {
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
-
         // Bob exercises 30 of 100
         vm.prank(bob);
         engine.exercise(seriesId, 30e18);
 
-        uint256 assetOwed = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
-        uint256 sharesOwed = (assetOwed * ONE_SHARE) / settlementShareRate;
-        uint256 expectedReturn = lockedShares - sharesOwed;
+        // Hand-calculated: sharesOwed = 100e18 * 16e6 / 106e6 * 1e3 = 15_094_339_622_641_509_433_000
+        // expectedReturn = 100e21 - 15_094_339_622_641_509_433_000 = 84_905_660_377_358_490_567_000
+        uint256 expectedReturn = 84_905_660_377_358_490_567_000;
 
         uint256 selfBefore = stakedBear.balanceOf(address(this));
         engine.unlockCollateral(seriesId);
@@ -547,16 +488,12 @@ contract MarginEngineTest is Test {
         uint256 seriesId = _createBearSeries(90e6);
         engine.mintOptions(seriesId, 100e18);
 
-        uint256 lockedShares = engine.writerLockedShares(seriesId, address(this));
-
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
-        uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
-        uint256 sharesOwed = (assetPayout * ONE_SHARE) / settlementShareRate;
-        uint256 expectedReturn = lockedShares - sharesOwed;
+        // Hand-calculated: 100e21 - 15_094_339_622_641_509_433_000 = 84_905_660_377_358_490_567_000
+        uint256 expectedReturn = 84_905_660_377_358_490_567_000;
 
         uint256 selfBefore = stakedBear.balanceOf(address(this));
 
@@ -1024,8 +961,6 @@ contract MarginEngineTest is Test {
         vm.prank(bob);
         engine.exercise(seriesId, 33e18);
 
-        uint256 exercisedShares = engine.totalSeriesExercisedShares(seriesId);
-
         engine.unlockCollateral(seriesId);
 
         vm.warp(block.timestamp + 91 days);
@@ -1034,11 +969,9 @@ contract MarginEngineTest is Test {
         engine.sweepUnclaimedShares(seriesId);
         uint256 swept = stakedBear.balanceOf(address(this)) - adminBefore;
 
-        // globalDebtShares for the full 100 options minus the 33 already exercised
-        (,,,, uint256 settlementPrice, uint256 settlementShareRate,) = engine.series(seriesId);
-        uint256 assetPayout = (100e18 * (settlementPrice - 90e6)) / settlementPrice;
-        uint256 globalDebtShares = (assetPayout * ONE_SHARE) / settlementShareRate;
-        uint256 expectedSwept = globalDebtShares - exercisedShares;
+        // Hand-calculated: globalDebtShares(100) - exercisedShares(33)
+        // = 15_094_339_622_641_509_433_000 - 4_981_132_075_471_698_113_000 = 10_113_207_547_169_811_320_000
+        uint256 expectedSwept = 10_113_207_547_169_811_320_000;
 
         assertEq(swept, expectedSwept, "swept amount equals unclaimed debt shares");
     }

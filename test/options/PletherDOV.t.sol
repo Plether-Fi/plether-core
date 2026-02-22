@@ -644,8 +644,10 @@ contract PletherDOVTest is Test {
         uint256 stakedBalance = stakedToken.balanceOf(address(dov));
         assertGt(stakedBalance, 0, "DOV should hold staked tokens");
 
+        uint256 ownerBefore = stakedToken.balanceOf(address(this));
         dov.emergencyWithdraw(IERC20(address(stakedToken)));
         assertEq(stakedToken.balanceOf(address(dov)), 0, "all staked tokens withdrawn");
+        assertEq(stakedToken.balanceOf(address(this)) - ownerBefore, stakedBalance, "owner received staked tokens");
     }
 
     function test_EmergencyWithdraw_RecoversPremiumUsdc() public {
@@ -658,8 +660,10 @@ contract PletherDOVTest is Test {
         uint256 usdcBalance = usdc.balanceOf(address(dov));
         assertGt(usdcBalance, 0, "DOV should hold USDC premium");
 
+        uint256 ownerBefore = usdc.balanceOf(address(this));
         dov.emergencyWithdraw(IERC20(address(usdc)));
         assertEq(usdc.balanceOf(address(dov)), 0, "all USDC withdrawn");
+        assertEq(usdc.balanceOf(address(this)) - ownerBefore, usdcBalance, "owner received USDC");
     }
 
     function test_EmergencyWithdraw_RevertsWhenNotSettled() public {

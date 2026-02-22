@@ -3,9 +3,9 @@ pragma solidity 0.8.33;
 
 import {MarginEngine} from "../../src/options/MarginEngine.sol";
 import {OptionToken} from "../../src/options/OptionToken.sol";
-import {SettlementOracle} from "../../src/oracles/SettlementOracle.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
 import {MockOptionsSplitter, MockStakedTokenOptions} from "../utils/OptionsMocks.sol";
+import {OptionsTestSetup} from "../utils/OptionsTestSetup.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 
@@ -63,6 +63,29 @@ contract MarginEngineHandler is Test {
         return seriesIds.length;
     }
 
+    function _isExpectedRevert(
+        bytes memory reason,
+        bytes4[] memory allowed
+    ) internal pure returns (bool) {
+        if (reason.length < 4) {
+            return false;
+        }
+        bytes4 sel;
+        assembly { sel := mload(add(reason, 0x20)) }
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (sel == allowed[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _bubbleRevert(
+        bytes memory reason
+    ) internal pure {
+        assembly { revert(add(reason, 0x20), mload(reason)) }
+    }
+
     function createSeries(
         uint256 strikeSeed,
         uint256 expirySeed,
@@ -75,7 +98,14 @@ contract MarginEngineHandler is Test {
             seriesIds.push(id);
             (,,, address optAddr,,,) = engine.series(id);
             seriesOptionToken[id] = optAddr;
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](2);
+            allowed[0] = MarginEngine.MarginEngine__InvalidParams.selector;
+            allowed[1] = MarginEngine.MarginEngine__Expired.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
     function mintOptions(
@@ -99,7 +129,16 @@ contract MarginEngineHandler is Test {
             ghost_totalSharesDeposited += sharesToLock;
             ghost_totalOptionsMinted += amount;
             OptionToken(seriesOptionToken[seriesId]).transfer(actor, amount);
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](4);
+            allowed[0] = MarginEngine.MarginEngine__Expired.selector;
+            allowed[1] = MarginEngine.MarginEngine__ZeroAmount.selector;
+            allowed[2] = MarginEngine.MarginEngine__Unauthorized.selector;
+            allowed[3] = MarginEngine.MarginEngine__SplitterNotActive.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
     function warpTime(
@@ -152,7 +191,14 @@ contract MarginEngineHandler is Test {
             ghost_settledPrice[seriesId] = sp;
             ghost_settledRate[seriesId] = ssr;
             ghost_isSettled[seriesId] = true;
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](2);
+            allowed[0] = MarginEngine.MarginEngine__AlreadySettled.selector;
+            allowed[1] = MarginEngine.MarginEngine__NotExpired.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
     function sweep(
@@ -167,7 +213,15 @@ contract MarginEngineHandler is Test {
         uint256 vaultBefore = vault.balanceOf(address(this));
         try engine.sweepUnclaimedShares(seriesId) {
             ghost_totalSharesSwept += vault.balanceOf(address(this)) - vaultBefore;
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](3);
+            allowed[0] = MarginEngine.MarginEngine__NotSettled.selector;
+            allowed[1] = MarginEngine.MarginEngine__SweepTooEarly.selector;
+            allowed[2] = MarginEngine.MarginEngine__ZeroAmount.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
     function _findHintRound(
@@ -212,7 +266,16 @@ contract MarginEngineHandler is Test {
             uint256 received = vault.balanceOf(actor) - vaultBefore;
             ghost_totalSharesExercised += received;
             ghost_totalOptionsExercised += amount;
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](4);
+            allowed[0] = MarginEngine.MarginEngine__ZeroAmount.selector;
+            allowed[1] = MarginEngine.MarginEngine__NotSettled.selector;
+            allowed[2] = MarginEngine.MarginEngine__Expired.selector;
+            allowed[3] = MarginEngine.MarginEngine__OptionIsOTM.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
     function unlockCollateral(
@@ -232,57 +295,28 @@ contract MarginEngineHandler is Test {
         try engine.unlockCollateral(seriesId) {
             uint256 received = vault.balanceOf(address(this)) - vaultBefore;
             ghost_totalSharesUnlocked += received;
-        } catch {}
+        } catch (bytes memory reason) {
+            bytes4[] memory allowed = new bytes4[](2);
+            allowed[0] = MarginEngine.MarginEngine__NotSettled.selector;
+            allowed[1] = MarginEngine.MarginEngine__ZeroAmount.selector;
+            if (!_isExpectedRevert(reason, allowed)) {
+                _bubbleRevert(reason);
+            }
+        }
     }
 
 }
 
 // ─── Invariant Test ─────────────────────────────────────────────────────
 
-contract MarginEngineInvariantTest is Test {
+contract MarginEngineInvariantTest is OptionsTestSetup {
 
-    MarginEngine public engine;
-    MockOptionsSplitter public splitter;
-    MockStakedTokenOptions public stakedBear;
-    MockStakedTokenOptions public stakedBull;
     MarginEngineHandler public handler;
-
-    MockOracle public eurFeed;
-    MockOracle public jpyFeed;
-    MockOracle public sequencerFeed;
 
     address[] public actors;
 
     function setUp() public {
-        vm.warp(1_735_689_600);
-
-        splitter = new MockOptionsSplitter();
-
-        sequencerFeed = new MockOracle(0, "Sequencer");
-        vm.warp(block.timestamp + 2 hours);
-
-        eurFeed = new MockOracle(118_800_000, "EUR/USD");
-        jpyFeed = new MockOracle(670_000, "JPY/USD");
-
-        address[] memory feeds = new address[](2);
-        feeds[0] = address(eurFeed);
-        feeds[1] = address(jpyFeed);
-        uint256[] memory quantities = new uint256[](2);
-        quantities[0] = 600_000_000_000_000_000;
-        quantities[1] = 400_000_000_000_000_000;
-        uint256[] memory basePrices = new uint256[](2);
-        basePrices[0] = 108_000_000;
-        basePrices[1] = 670_000;
-
-        SettlementOracle oracle = new SettlementOracle(feeds, quantities, basePrices, 2e8, address(sequencerFeed));
-
-        stakedBear = new MockStakedTokenOptions("splDXY-BEAR", "splBEAR");
-        stakedBull = new MockStakedTokenOptions("splDXY-BULL", "splBULL");
-        OptionToken optionImpl = new OptionToken();
-
-        engine = new MarginEngine(
-            address(splitter), address(oracle), address(stakedBear), address(stakedBull), address(optionImpl)
-        );
+        _deployOptionsInfra();
 
         // 5 actors
         for (uint256 i = 1; i <= 5; i++) {
