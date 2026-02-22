@@ -1742,4 +1742,112 @@ contract InvarCoinTest is Test {
         assertLe(shares, 1220e18, "Rounding must favor protocol");
     }
 
+    // ==========================================
+    // FINDING 1: YIELD THEFT VIA WITHDRAW
+    // ==========================================
+
+    function test_WithdrawHarvestsYieldBeforeBurn() public {
+        // Alice deposits and stakes into sINVAR (she should receive yield)
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(500_000e6, alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        // Bob deposits
+        vm.prank(bob);
+        uint256 bobShares = ic.deposit(500_000e6, bob);
+
+        // Deploy to Curve
+        ic.deployToCurve(0);
+
+        // Simulate Curve fee yield: VP grows 5%
+        uint256 vpBefore = curve.virtualPrice();
+        curve.setVirtualPrice(vpBefore * 105 / 100);
+
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
+
+        // Bob withdraws — _harvestSafe() runs automatically, capturing yield BEFORE burn
+        vm.prank(bob);
+        ic.withdraw(bobShares, bob, 0);
+
+        uint256 sInvarAfter = ic.balanceOf(address(sInvar));
+
+        // sINVAR received yield from the full LP (before Bob's share was burned)
+        assertGt(sInvarAfter, sInvarBefore, "sINVAR should receive yield during withdraw");
+
+        // Explicit harvest should now find no yield (already captured)
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
+    function test_WithdrawLivenessOnStaleOracle() public {
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(100_000e6, alice);
+
+        ic.deployToCurve(0);
+
+        // Simulate VP growth so _harvestSafe() has yield to try capturing
+        curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
+
+        // Make oracle stale (older than ORACLE_TIMEOUT = 24 hours)
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        // withdraw should still work — _harvestSafe() skips gracefully
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(aliceShares, alice, 0);
+        assertGt(usdcOut, 0, "Withdrawal should succeed with stale oracle");
+    }
+
+    function test_MicroHarvestPreservesCostBasis() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 costVpBefore = ic.curveLpCostVp();
+
+        // Tiny VP growth — so small that totalYieldUsdc rounds to 0
+        uint256 vpBefore = curve.virtualPrice();
+        curve.setVirtualPrice(vpBefore + 1);
+
+        // Trigger harvest (via deposit since it calls _harvest)
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(ic), 1e6);
+        ic.deposit(1e6, bob);
+        vm.stopPrank();
+
+        uint256 costVpAfter = ic.curveLpCostVp();
+
+        // FIX: curveLpCostVp should NOT be stepped up when yield rounds to 0
+        assertEq(costVpAfter, costVpBefore, "Cost basis unchanged when yield rounds to zero");
+    }
+
+    function test_LpWithdrawHarvestsYieldBeforeBurn() public {
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(500_000e6, alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        vm.prank(bob);
+        uint256 bobShares = ic.deposit(500_000e6, bob);
+
+        ic.deployToCurve(0);
+
+        uint256 vpBefore = curve.virtualPrice();
+        curve.setVirtualPrice(vpBefore * 105 / 100);
+
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
+
+        // lpWithdraw should also harvest first
+        vm.prank(bob);
+        ic.lpWithdraw(bobShares, 0, 0);
+
+        uint256 sInvarAfter = ic.balanceOf(address(sInvar));
+        assertGt(sInvarAfter, sInvarBefore, "sINVAR should receive yield during lpWithdraw");
+    }
+
 }
