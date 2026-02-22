@@ -364,7 +364,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             MARGIN_ENGINE.settle(e.seriesId, roundHints);
         }
 
-        try MARGIN_ENGINE.unlockCollateral(e.seriesId) {} catch (bytes memory reason) {
+        try MARGIN_ENGINE.unlockCollateral(e.seriesId) {}
+        catch (bytes memory reason) {
             bytes4 expected = IMarginEngine.MarginEngine__ZeroAmount.selector;
             if (reason.length < 4 || bytes4(reason) != expected) {
                 assembly { revert(add(reason, 32), mload(reason)) }
