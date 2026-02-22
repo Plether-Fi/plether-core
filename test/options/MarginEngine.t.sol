@@ -206,7 +206,7 @@ contract MarginEngineTest is OptionsTestSetup {
         (,,,, uint256 settlementPrice, uint256 settlementShareRate, bool settled) = engine.series(seriesId);
         assertTrue(settled);
         assertEq(settlementPrice, BEAR_PRICE);
-        assertEq(settlementShareRate, stakedBear.convertToAssets(ONE_SHARE));
+        assertEq(settlementShareRate, 1e18);
     }
 
     function test_Settle_LocksPriceForBullSeries() public {
@@ -750,14 +750,13 @@ contract MarginEngineTest is OptionsTestSetup {
         engine.mintOptions(seriesId, 100e18);
 
         stakedBear.setExchangeRate(2, 1);
-        uint256 currentRate = stakedBear.convertToAssets(ONE_SHARE);
 
         vm.warp(block.timestamp + 7 days);
         _refreshFeeds();
         engine.settle(seriesId, _buildHints());
 
         (,,,, uint256 sp, uint256 ssr,) = engine.series(seriesId);
-        assertEq(ssr, currentRate, "settlement rate must equal settle-time rate");
+        assertEq(ssr, 2e18, "settlement rate must equal settle-time rate");
     }
 
     // ==========================================
@@ -811,7 +810,7 @@ contract MarginEngineTest is OptionsTestSetup {
         uint256 adminBefore = stakedBear.balanceOf(address(this));
         engine.sweepUnclaimedShares(seriesId);
         uint256 swept = stakedBear.balanceOf(address(this)) - adminBefore;
-        assertGt(swept, 0, "should have swept unclaimed shares");
+        assertEq(swept, 15_094_339_622_641_509_433_000, "swept unclaimed shares");
     }
 
     function test_SweepUnclaimedShares_RevertsBefore90Days() public {

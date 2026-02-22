@@ -96,7 +96,7 @@ contract PletherDOVIntegrationTest is OptionsTestSetup {
         dov.settleEpoch(_buildHints());
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
-        assertGt(stakedBear.balanceOf(address(dov)), 0, "DOV should hold collateral after epoch 1");
+        assertEq(stakedBear.balanceOf(address(dov)), 849_056_603_773_584_905_661_000, "DOV collateral after epoch 1");
     }
 
     function runEpoch2() external {
