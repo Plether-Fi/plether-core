@@ -84,6 +84,38 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 |----------|-------------|
 | [`VaultAdapter`](src/VaultAdapter.sol) | ERC-4626 wrapper for Morpho Vault vault yield. Owner can `claimRewards()` from external distributors (Merkl, URD). |
 
+### InvarCoin (INVAR)
+
+| Contract | Description |
+|----------|-------------|
+| [`InvarCoin`](src/InvarCoin.sol) | Retail-friendly global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
+
+InvarCoin is a passive savings token that maintains exposure to a basket of global currencies. Users deposit USDC, which the vault pairs with plDXY-BEAR through Curve to create a balanced position that hedges against USD weakness.
+
+**Deposit flow:** USDC in → mint INVAR shares (priced against optimistic NAV to prevent dilution).
+
+![Deposit Flow](assets/diagrams/invar-deposit.svg)
+
+**Withdraw flow:** Burn INVAR → receive USDC from local buffer + JIT Curve LP unwinding. An EMA-based slippage floor prevents MEV sandwich amplification on the Curve leg.
+
+![Withdraw Flow](assets/diagrams/invar-withdraw.svg)
+
+**LP deposit/withdraw:** Advanced path for depositing USDC + BEAR directly into Curve LP, or withdrawing pro-rata (USDC + BEAR). `lpWithdraw` intentionally works when paused, serving as the emergency exit.
+
+**Yield:** Curve LP trading fees accrue as virtual price growth. Keepers call `harvest()` to mint INVAR proportional to the fee yield and donate it to sINVAR (StakedToken) stakers via a 1-hour streaming window. Only fee yield is captured — price appreciation of the underlying assets is excluded via VP-based cost tracking.
+
+**Keeper operations:**
+- `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP
+- `replenishBuffer()` — burns Curve LP to restore the 2% USDC buffer
+- `harvest()` — captures LP fee yield and streams to sINVAR stakers
+
+**Safety:**
+- Dual LP pricing: pessimistic (min of EMA, oracle) for withdrawals, optimistic (max) for deposits
+- Spot-vs-EMA deviation guard (0.5%) blocks deposits/deployments during pool manipulation
+- Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
+- `_harvestSafe()` wraps all Curve + oracle calls in try/catch to guarantee withdrawal liveness
+- `setEmergencyMode()` resets LP tracking without touching Curve, enabling exits even if the pool is fully bricked
+- L2 sequencer uptime validation on all oracle reads including harvest
 
 ## Ecosystem Integrations
 
