@@ -270,6 +270,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         // Safe permit wrapper against mempool griefing
         try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s) {}
         catch {
+            if (block.timestamp > deadline) {
+                revert InvarCoin__PermitFailed();
+            }
             if (USDC.allowance(msg.sender, address(this)) < usdcAmount) {
                 revert InvarCoin__PermitFailed();
             }
@@ -304,6 +307,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
                 trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpShare, lpBal);
                 curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
                 uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
+                try CURVE_POOL.lp_price() returns (uint256 lpPrice) {
+                    uint256 emaMin = (lpShare * lpPrice) / 1e30 * (BPS - MAX_SPOT_DEVIATION_BPS) / BPS;
+                    if (emaMin > minCurveOut) {
+                        minCurveOut = emaMin;
+                    }
+                } catch {}
                 usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
             }
         }
@@ -464,12 +473,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             return;
         }
 
-        (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
-        if (rawPrice <= 0 || block.timestamp - updatedAt > ORACLE_TIMEOUT) {
-            return;
-        }
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
 
-        _harvestWithPrice(lpBal, currentVpValue, uint256(rawPrice));
+        _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
     }
 
     function _harvest() internal returns (uint256 donated) {
