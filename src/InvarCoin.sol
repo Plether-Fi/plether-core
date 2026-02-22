@@ -100,6 +100,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
     event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
+    event StakedInvarCoinSet(address indexed stakedInvarCoin);
 
     error InvarCoin__ZeroAmount();
     error InvarCoin__ZeroAddress();
@@ -148,6 +149,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__AlreadySet();
         }
         stakedInvarCoin = StakedToken(_stakedInvarCoin);
+        emit StakedInvarCoinSet(_stakedInvarCoin);
     }
 
     // ==========================================
@@ -299,10 +301,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             uint256 lpShare = Math.mulDiv(lpBal, glUsdAmount, supply);
             if (lpShare > 0) {
-                uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
-                usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
                 trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpShare, lpBal);
                 curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
+                uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
+                usdcOut += CURVE_POOL.remove_liquidity_one_coin(lpShare, USDC_INDEX, minCurveOut);
             }
         }
 
@@ -319,6 +321,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     /// @notice LP withdrawal: bypasses buffer and unwinds Curve LP pro-rata.
+    /// @dev Intentionally lacks whenNotPaused — serves as the emergency exit when contract is paused.
     function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
@@ -434,7 +437,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
-    /// @dev Best-effort harvest that silently skips on oracle failure, preserving withdrawal liveness.
+    /// @dev Best-effort harvest that silently skips on oracle or Curve failure, preserving withdrawal liveness.
     function _harvestSafe() internal {
         if (address(stakedInvarCoin) == address(0)) {
             return;
@@ -443,18 +446,30 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal == 0) {
             return;
         }
+
+        try this.harvestSafeExternal(lpBal) {} catch {}
+    }
+
+    /// @dev External entry point for _harvestSafe so the entire Curve+Oracle sequence is caught by try/catch.
+    ///      Must only be called via `this.harvestSafeExternal()` from `_harvestSafe()`.
+    function harvestSafeExternal(
+        uint256 lpBal
+    ) external {
+        if (msg.sender != address(this)) {
+            revert InvarCoin__ZeroAddress();
+        }
+
         uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
         if (currentVpValue <= curveLpCostVp) {
             return;
         }
-        try BASKET_ORACLE.latestRoundData() returns (uint80, int256 rawPrice, uint256, uint256 updatedAt, uint80) {
-            if (rawPrice <= 0 || block.timestamp - updatedAt > ORACLE_TIMEOUT) {
-                return;
-            }
-            _harvestWithPrice(lpBal, currentVpValue, uint256(rawPrice));
-        } catch {
+
+        (, int256 rawPrice,, uint256 updatedAt,) = BASKET_ORACLE.latestRoundData();
+        if (rawPrice <= 0 || block.timestamp - updatedAt > ORACLE_TIMEOUT) {
             return;
         }
+
+        _harvestWithPrice(lpBal, currentVpValue, uint256(rawPrice));
     }
 
     function _harvest() internal returns (uint256 donated) {
@@ -597,6 +612,19 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
     }
 
+    /// @notice Activates emergency mode without touching Curve. Guarantees withdrawal liveness
+    ///         even if the Curve pool is completely non-functional.
+    function setEmergencyMode() external onlyOwner {
+        trackedLpBalance = 0;
+        curveLpCostVp = 0;
+        emergencyActive = true;
+        if (!paused()) {
+            _pause();
+        }
+    }
+
+    /// @notice Attempts to recover LP tokens from Curve during emergency. Call setEmergencyMode() first
+    ///         if Curve may be non-functional, then call this separately if/when Curve recovers.
     function emergencyWithdrawFromCurve() external onlyOwner nonReentrant {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         trackedLpBalance = 0;
