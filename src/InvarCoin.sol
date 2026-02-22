@@ -276,8 +276,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
-    /// @dev Intentionally skips _harvest() to guarantee withdrawal liveness during oracle outages.
-    ///      Unharvested LP yield embedded in burned tokens is forfeited by the withdrawing user.
     ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
     function withdraw(
         uint256 glUsdAmount,
@@ -290,6 +288,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (emergencyActive) {
             revert InvarCoin__UseLpWithdraw();
         }
+        _harvestSafe();
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -320,8 +319,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // ==========================================
 
     /// @notice LP withdrawal: bypasses buffer and unwinds Curve LP pro-rata.
-    /// @dev Intentionally skips _harvest() to guarantee withdrawal liveness during oracle outages.
-    ///      Unharvested LP yield embedded in burned tokens is forfeited by the withdrawing user.
     function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
@@ -338,6 +335,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
+        _harvestSafe();
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
@@ -436,45 +434,71 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
+    /// @dev Best-effort harvest that silently skips on oracle failure, preserving withdrawal liveness.
+    function _harvestSafe() internal {
+        if (address(stakedInvarCoin) == address(0)) {
+            return;
+        }
+        uint256 lpBal = trackedLpBalance;
+        if (lpBal == 0) {
+            return;
+        }
+        uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
+        if (currentVpValue <= curveLpCostVp) {
+            return;
+        }
+        try BASKET_ORACLE.latestRoundData() returns (uint80, int256 rawPrice, uint256, uint256 updatedAt, uint80) {
+            if (rawPrice <= 0 || block.timestamp - updatedAt > ORACLE_TIMEOUT) {
+                return;
+            }
+            _harvestWithPrice(lpBal, currentVpValue, uint256(rawPrice));
+        } catch {
+            return;
+        }
+    }
+
     function _harvest() internal returns (uint256 donated) {
         if (address(stakedInvarCoin) == address(0)) {
             return 0;
         }
 
-        uint256 totalYieldUsdc = 0;
-
         uint256 lpBal = trackedLpBalance;
         if (lpBal > 0) {
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
-                uint256 vpGrowth = currentVpValue - curveLpCostVp;
-
                 uint256 oraclePrice = OracleLib.getValidatedPrice(
                     BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
                 );
-                uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
-                totalYieldUsdc += Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
-                curveLpCostVp = currentVpValue;
+                donated = _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
             }
         }
+    }
+
+    function _harvestWithPrice(
+        uint256 lpBal,
+        uint256 currentVpValue,
+        uint256 oraclePrice
+    ) private returns (uint256 donated) {
+        uint256 vpGrowth = currentVpValue - curveLpCostVp;
+        uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
+        uint256 totalYieldUsdc = Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
 
         if (totalYieldUsdc == 0) {
             return 0;
         }
+        curveLpCostVp = currentVpValue;
 
         uint256 supply = totalSupply();
         uint256 currentAssets = totalAssets();
         uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
-        uint256 glUsdToMint = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
-
-        donated = glUsdToMint;
+        donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
         _mint(address(this), donated);
         IERC20(this).approve(address(stakedInvarCoin), donated);
         stakedInvarCoin.donateYield(donated);
 
-        emit YieldHarvested(glUsdToMint, 0, donated);
+        emit YieldHarvested(donated, 0, donated);
     }
 
     /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
