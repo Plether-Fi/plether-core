@@ -11,6 +11,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 interface IMarginEngine {
 
+    error MarginEngine__ZeroAmount();
+
     function createSeries(
         bool isBull,
         uint256 strike,
@@ -202,9 +204,10 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             revert PletherDOV__ZeroAmount();
         }
 
-        // Rounding protection: ensure previewWithdraw doesn't try to pull 1 wei more than we have
-        uint256 requiredShares = STAKED_TOKEN.previewWithdraw(optionsToMint);
-        if (requiredShares > sharesBalance) {
+        // Rounding protection: previewWithdraw rounds up, so the shares needed
+        // to withdraw optionsToMint assets may exceed our balance. Decrement
+        // until the required shares fit within what we hold.
+        while (STAKED_TOKEN.previewWithdraw(optionsToMint) > sharesBalance) {
             optionsToMint -= 1;
         }
 
@@ -300,7 +303,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (!isLiquidated) {
             Epoch storage e = epochs[currentEpochId];
             uint256 elapsed = block.timestamp - e.auctionStartTime;
-            if (elapsed <= e.auctionDuration) {
+            if (elapsed < e.auctionDuration) {
                 revert PletherDOV__AuctionNotExpired();
             }
         }
@@ -361,7 +364,12 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             MARGIN_ENGINE.settle(e.seriesId, roundHints);
         }
 
-        try MARGIN_ENGINE.unlockCollateral(e.seriesId) {} catch {}
+        try MARGIN_ENGINE.unlockCollateral(e.seriesId) {} catch (bytes memory reason) {
+            bytes4 expected = IMarginEngine.MarginEngine__ZeroAmount.selector;
+            if (reason.length < 4 || bytes4(reason) != expected) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
+        }
 
         currentState = State.UNLOCKED;
         emit EpochSettled(currentEpochId, STAKED_TOKEN.balanceOf(address(this)));

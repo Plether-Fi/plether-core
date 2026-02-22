@@ -119,6 +119,8 @@ contract MockMarginEngine {
 
     using SafeERC20 for IERC20;
 
+    error MarginEngine__ZeroAmount();
+
     struct MockSeries {
         bool isBull;
         uint256 strike;
@@ -184,7 +186,7 @@ contract MockMarginEngine {
         uint256 seriesId
     ) external {
         uint256 shares = sharesLocked[seriesId];
-        require(shares > 0, "no shares");
+        if (shares == 0) revert MarginEngine__ZeroAmount();
         sharesLocked[seriesId] = 0;
         stakedToken.safeTransfer(msg.sender, shares);
     }
