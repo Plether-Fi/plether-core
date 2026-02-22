@@ -352,7 +352,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
-        if (lpBal > 0) {
+        if (lpBal > 0 && !emergencyActive) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
             trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
             curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);

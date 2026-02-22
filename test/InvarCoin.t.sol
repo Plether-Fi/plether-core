@@ -1850,4 +1850,122 @@ contract InvarCoinTest is Test {
         assertGt(sInvarAfter, sInvarBefore, "sINVAR should receive yield during lpWithdraw");
     }
 
+    // ==========================================
+    // CURVE FAILURE TESTS (M-01, M-02)
+    // ==========================================
+
+    function test_WithdrawLiveness_CurveGetVirtualPriceReverts() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
+
+        vm.mockCallRevert(address(curve), abi.encodeWithSignature("get_virtual_price()"), "Curve bricked");
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+        assertGt(usdcOut, 0, "withdraw must succeed when get_virtual_price reverts");
+    }
+
+    function test_LpWithdrawLiveness_CurveGetVirtualPriceReverts() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
+
+        vm.mockCallRevert(address(curve), abi.encodeWithSignature("get_virtual_price()"), "Curve bricked");
+
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        assertGt(usdcOut + bearOut, 0, "lpWithdraw must succeed when get_virtual_price reverts");
+    }
+
+    function test_WithdrawLiveness_CurveLpPriceReverts() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
+
+        vm.mockCallRevert(address(curve), abi.encodeWithSignature("lp_price()"), "Curve bricked");
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+        assertGt(usdcOut, 0, "withdraw must succeed when lp_price reverts");
+    }
+
+    function test_SetEmergencyMode_BrickedCurve_WithdrawViaLpWithdraw() public {
+        vm.prank(alice);
+        uint256 shares = ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        vm.mockCallRevert(
+            address(curve), abi.encodeWithSignature("remove_liquidity(uint256,uint256[2])"), "Curve bricked"
+        );
+        vm.mockCallRevert(
+            address(curve),
+            abi.encodeWithSignature("remove_liquidity_one_coin(uint256,uint256,uint256)"),
+            "Curve bricked"
+        );
+
+        ic.setEmergencyMode();
+
+        assertTrue(ic.paused(), "should be paused");
+        assertTrue(ic.emergencyActive(), "should be emergency");
+        assertEq(ic.trackedLpBalance(), 0, "trackedLpBalance reset");
+        assertEq(ic.curveLpCostVp(), 0, "curveLpCostVp reset");
+
+        vm.prank(alice);
+        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
+        assertGt(usdcOut, 0, "user gets USDC from buffer even with bricked Curve");
+    }
+
+    function test_EmergencyWithdrawFromCurve_RevertsWhenCurveBricked() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        vm.mockCallRevert(
+            address(curve), abi.encodeWithSignature("remove_liquidity(uint256,uint256[2])"), "Curve bricked"
+        );
+
+        vm.expectRevert("Curve bricked");
+        ic.emergencyWithdrawFromCurve();
+
+        assertFalse(ic.emergencyActive(), "state rolled back - emergency NOT active");
+        assertGt(ic.trackedLpBalance(), 0, "state rolled back - trackedLpBalance unchanged");
+    }
+
+    function test_SetEmergencyMode_ThenEmergencyWithdrawAfterCurveRecovers() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 lpBefore = curveLp.balanceOf(address(ic));
+        assertGt(lpBefore, 0);
+
+        ic.setEmergencyMode();
+
+        assertTrue(ic.emergencyActive());
+        assertEq(ic.trackedLpBalance(), 0);
+
+        ic.emergencyWithdrawFromCurve();
+
+        assertEq(curveLp.balanceOf(address(ic)), 0, "LP tokens recovered from Curve");
+    }
+
+    function test_SetEmergencyMode_OnlyOwner() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.setEmergencyMode();
+    }
+
+    function test_HarvestSafeExternal_RejectsDirectCalls() public {
+        vm.prank(alice);
+        vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
+        ic.harvestSafeExternal(1000);
+    }
+
 }
