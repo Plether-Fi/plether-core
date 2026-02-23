@@ -88,7 +88,7 @@ Both weights and base prices are permanently fixed and cannot be changed after d
 
 | Contract | Description |
 |----------|-------------|
-| [`InvarCoin`](src/InvarCoin.sol) | Retail-friendly global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
+| [`InvarCoin`](src/InvarCoin.sol) | Global purchasing power vault backed 50/50 by USDC + plDXY-BEAR via Curve LP |
 
 InvarCoin is a passive savings token that maintains exposure to a basket of global currencies. Users deposit USDC, which the vault pairs with plDXY-BEAR through Curve to create a balanced position that hedges against USD weakness.
 
@@ -100,7 +100,13 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 
 ![Withdraw Flow](assets/diagrams/invar-withdraw.svg)
 
-**LP deposit/withdraw:** Advanced path for depositing USDC + BEAR directly into Curve LP, or withdrawing pro-rata (USDC + BEAR). `lpWithdraw` intentionally works when paused, serving as the emergency exit.
+**LP deposit:** Advanced path for depositing USDC + BEAR directly into Curve LP.
+
+![LP Deposit Flow](assets/diagrams/invar-lp-deposit.svg)
+
+**LP withdraw:** Balanced exit returning pro-rata USDC + BEAR. `lpWithdraw` intentionally works when paused, serving as the emergency exit.
+
+![LP Withdraw Flow](assets/diagrams/invar-lp-withdraw.svg)
 
 **Yield:** Curve LP trading fees accrue as virtual price growth. Keepers call `harvest()` to mint INVAR proportional to the fee yield and donate it to sINVAR (StakedToken) stakers via a 1-hour streaming window. Only fee yield is captured — price appreciation of the underlying assets is excluded via VP-based cost tracking.
 

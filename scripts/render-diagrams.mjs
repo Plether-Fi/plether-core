@@ -9,7 +9,8 @@ const classes = `
     classDef contract fill:#f1f5f9,stroke:#475569,color:#1e293b,stroke-width:2px
     classDef token fill:#dcfce7,stroke:#16a34a,color:#166534,stroke-width:1.5px
     classDef external fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:1.5px
-    classDef desc fill:#fafafa,stroke:#d4d4d4,color:#737373,stroke-width:0.75px`;
+    classDef desc fill:#fafafa,stroke:#d4d4d4,color:#737373,stroke-width:0.75px
+    classDef buffer fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px`;
 
 const howItWorks = `graph TD
     U([💳 User]) -->|Deposit USDC| B[SyntheticSplitter]
@@ -111,9 +112,77 @@ const flywheel = `graph TD
     class BAL desc
 ${classes}`;
 
+const invarDeposit = `sequenceDiagram
+    actor K as Keeper
+    actor U as User
+    box rgba(241,245,249,0.4) Protocol
+        participant IC as InvarCoin Vault
+        participant BUF as USDC Buffer (2%)
+    end
+    box rgba(254,249,195,0.4) External
+        participant CU as Curve USDC/BEAR
+    end
+
+    U->>IC: USDC
+    IC->>U: INVAR shares
+    IC->>BUF: USDC held locally
+
+    Note over BUF: Buffer sits until keeper deploys
+
+    K->>IC: deployToCurve
+    IC->>BUF: Keep 2%, release excess
+    BUF->>CU: Excess USDC
+    CU-->>IC: LP tokens (earns trading fees)
+`;
+
+const invarLpDeposit = `graph TD
+    U([User]) -->|USDC + BEAR · receive INVAR| IC[InvarCoin Vault]
+    IC -->|Both tokens deposited directly| CU{{Curve USDC/BEAR Pool}}
+    CU -.- D1>Shares priced with pessimistic LP valuation]
+
+    class U user
+    class IC contract
+    class CU external
+    class D1 desc
+${classes}`;
+
+const invarLpWithdraw = `graph TD
+    U([User]) -->|INVAR shares · receive USDC + BEAR| IC[InvarCoin Vault]
+    IC -->|Burn LP (balanced exit)| CU{{Curve USDC/BEAR Pool}}
+    CU -.- D1>Works even when contract is paused]
+
+    class U user
+    class IC contract
+    class CU external
+    class D1 desc
+${classes}`;
+
+const invarWithdraw = `sequenceDiagram
+    actor K as Keeper
+    actor U as User
+    box rgba(241,245,249,0.4) Protocol
+        participant IC as InvarCoin Vault
+        participant BUF as USDC Buffer (2%)
+    end
+    box rgba(254,249,195,0.4) External
+        participant CU as Curve USDC/BEAR
+    end
+
+    U->>IC: INVAR shares (burned)
+    BUF-->>IC: Pro-rata USDC
+    IC->>CU: Burn pro-rata LP (single-sided)
+    CU-->>IC: USDC from LP
+    IC->>U: Total USDC
+
+    K->>IC: replenishBuffer
+    IC->>BUF: Buffer < 2%? Restore target
+    IC->>CU: Burn LP (single-sided)
+    CU-->>BUF: USDC replenishment
+`;
+
 mkdirSync(outDir, { recursive: true });
 
-const [svg1, svg2, svg3, svg4, svg5, svg6, svg7] = await Promise.all([
+const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11] = await Promise.all([
   renderMermaid(howItWorks, theme),
   renderMermaid(tokenFlow, theme),
   renderMermaid(bearLeverage, theme),
@@ -121,6 +190,10 @@ const [svg1, svg2, svg3, svg4, svg5, svg6, svg7] = await Promise.all([
   renderMermaid(staking, theme),
   renderMermaid(burn, theme),
   renderMermaid(flywheel, theme),
+  renderMermaid(invarDeposit, theme),
+  renderMermaid(invarLpDeposit, theme),
+  renderMermaid(invarLpWithdraw, theme),
+  renderMermaid(invarWithdraw, theme),
 ]);
 
 writeFileSync(`${outDir}/how-it-works.svg`, svg1);
@@ -130,5 +203,9 @@ writeFileSync(`${outDir}/bull-leverage.svg`, svg4);
 writeFileSync(`${outDir}/staking.svg`, svg5);
 writeFileSync(`${outDir}/burn.svg`, svg6);
 writeFileSync(`${outDir}/flywheel.svg`, svg7);
+writeFileSync(`${outDir}/invar-deposit.svg`, svg8);
+writeFileSync(`${outDir}/invar-lp-deposit.svg`, svg9);
+writeFileSync(`${outDir}/invar-lp-withdraw.svg`, svg10);
+writeFileSync(`${outDir}/invar-withdraw.svg`, svg11);
 
-console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel');
+console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw');
