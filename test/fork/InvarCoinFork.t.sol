@@ -291,7 +291,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         uint256 usdcBefore = IERC20(USDC).balanceOf(address(ic));
 
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         assertGt(IERC20(USDC).balanceOf(address(ic)), usdcBefore, "Local USDC buffer should increase");
     }
@@ -362,7 +362,7 @@ contract InvarCoinForkTest is BaseForkTest {
         vm.stopPrank();
 
         vm.expectRevert();
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     function test_deployToCurve_sandwichProtection() public {

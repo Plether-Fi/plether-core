@@ -556,7 +556,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
-    function replenishBuffer() external nonReentrant whenNotPaused {
+    /// @param maxLpToBurn Cap on LP tokens to burn (0 = no cap, burn entire deficit).
+    function replenishBuffer(
+        uint256 maxLpToBurn
+    ) external nonReentrant whenNotPaused {
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -577,6 +580,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpToBurn = (maxReplenish * 1e30) / lpPrice;
         if (lpToBurn > lpBalBefore) {
             lpToBurn = lpBalBefore;
+        }
+        if (maxLpToBurn > 0 && maxLpToBurn < lpToBurn) {
+            lpToBurn = maxLpToBurn;
         }
 
         uint256 calcOut = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);

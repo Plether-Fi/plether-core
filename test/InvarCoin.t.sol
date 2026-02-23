@@ -886,7 +886,7 @@ contract InvarCoinTest is Test {
         // Drain buffer to trigger replenish
         uint256 localUsdc = usdc.balanceOf(address(ic));
         deal(address(usdc), address(ic), localUsdc / 10);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         uint256 trackedAfter = ic.trackedLpBalance();
         uint256 costAfter = ic.curveLpCostVp();
@@ -946,7 +946,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), localUsdc / 10);
 
         uint256 usdcBefore = usdc.balanceOf(address(ic));
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         assertGt(usdc.balanceOf(address(ic)), usdcBefore);
     }
@@ -962,7 +962,7 @@ contract InvarCoinTest is Test {
         curve.setSpotDiscountBps(600);
 
         vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     // ==========================================
@@ -1476,7 +1476,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), 0);
 
         uint256 costBefore = ic.curveLpCostVp();
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         assertLt(ic.curveLpCostVp(), costBefore);
     }
@@ -1531,7 +1531,7 @@ contract InvarCoinTest is Test {
         uint256 sInvarBal = ic.balanceOf(address(sInvar));
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
         try ic.harvest() {}
         catch (bytes memory reason) {
             require(bytes4(reason) == InvarCoin.InvarCoin__NoYield.selector, "Unexpected harvest error");
