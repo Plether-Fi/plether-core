@@ -7,6 +7,7 @@ import {OracleLib} from "../src/libraries/OracleLib.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -1966,6 +1967,673 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
         ic.harvestSafeExternal(1000);
+    }
+
+    // ==========================================
+    // GROUP 1: WITHDRAW() LP BURN PATH
+    // ==========================================
+
+    function test_Withdraw_JIT_ExactUsdcFromLpBurn() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 buffer = usdc.balanceOf(address(ic));
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice) / 2;
+
+        uint256 bufferShare = Math.mulDiv(buffer, shares, supply);
+        uint256 lpShare = Math.mulDiv(lpBal, shares, supply);
+
+        uint256 totalLp = curveLp.totalSupply();
+        uint256 shareRatio = (lpShare * 1e18) / totalLp;
+        uint256 curveUsdcOut = (curve.usdcBalance() * shareRatio) / 1e18;
+
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+
+        assertEq(usdcOut, bufferShare + curveUsdcOut, "Exact USDC from buffer + LP burn");
+    }
+
+    function test_Withdraw_JIT_EmaFloorViaExpectCall() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice);
+
+        uint256 lpShare = Math.mulDiv(lpBal, shares, supply);
+        uint256 lpPrice = curve.lp_price();
+        uint256 emaMin = (lpShare * lpPrice) / 1e30 * 9950 / 10_000;
+
+        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpShare, 0, emaMin)));
+
+        vm.prank(alice);
+        ic.withdraw(shares, alice, 0);
+    }
+
+    function test_Withdraw_JIT_CostBasisExactValues() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costBefore = ic.curveLpCostVp();
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice) / 4;
+
+        uint256 lpShare = Math.mulDiv(lpBal, shares, supply);
+        uint256 expectedTracked = trackedBefore - Math.mulDiv(trackedBefore, lpShare, lpBal);
+        uint256 expectedCost = costBefore - Math.mulDiv(costBefore, lpShare, lpBal);
+
+        vm.prank(alice);
+        ic.withdraw(shares, alice, 0);
+
+        assertEq(ic.trackedLpBalance(), expectedTracked);
+        assertEq(ic.curveLpCostVp(), expectedCost);
+    }
+
+    function test_Withdraw_JIT_MinCurveOutFromUserSlippage() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 buffer = usdc.balanceOf(address(ic));
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice);
+
+        uint256 bufferShare = Math.mulDiv(buffer, shares, supply);
+        uint256 lpShare = Math.mulDiv(lpBal, shares, supply);
+
+        uint256 lpPrice = curve.lp_price();
+        uint256 emaMin = (lpShare * lpPrice) / 1e30 * 9950 / 10_000;
+        uint256 minUsdcOut = bufferShare + emaMin + 1;
+
+        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (lpShare, 0, emaMin + 1)));
+
+        vm.prank(alice);
+        ic.withdraw(shares, alice, minUsdcOut);
+    }
+
+    // ==========================================
+    // GROUP 2: LP WITHDRAW
+    // ==========================================
+
+    function test_LpWithdraw_RawBearDistribution() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        uint256 bearInContract = bearToken.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice) / 2;
+
+        uint256 expectedBear = Math.mulDiv(bearInContract, shares, supply);
+
+        vm.prank(alice);
+        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+
+        assertEq(bearReturned, expectedBear);
+        assertGt(bearReturned, 0);
+    }
+
+    function test_LpWithdraw_BearFromCurveRemoval() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        uint256 shares = ic.balanceOf(alice);
+        uint256 supply = ic.totalSupply();
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 lpToBurn = Math.mulDiv(lpBal, shares, supply);
+
+        uint256 totalLp = curveLp.totalSupply();
+        uint256 shareRatio = (lpToBurn * 1e18) / totalLp;
+        uint256 expectedBearFromCurve = (curve.bearBalance() * shareRatio) / 1e18;
+
+        vm.prank(alice);
+        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+
+        assertEq(bearReturned, expectedBearFromCurve);
+        assertGt(bearReturned, 0);
+    }
+
+    function test_LpWithdraw_TransfersTokensToUser() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        uint256 usdcBefore = usdc.balanceOf(alice);
+        uint256 bearBefore = bearToken.balanceOf(alice);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+
+        assertEq(usdc.balanceOf(alice) - usdcBefore, usdcReturned);
+        assertEq(bearToken.balanceOf(alice) - bearBefore, bearReturned);
+        assertGt(usdcReturned, 0);
+        assertGt(bearReturned, 0);
+    }
+
+    function test_LpWithdraw_CostBasisExact() public {
+        vm.prank(alice);
+        ic.deposit(50_000e6, alice);
+        vm.prank(bob);
+        ic.deposit(50_000e6, bob);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costBefore = ic.curveLpCostVp();
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 supply = ic.totalSupply();
+        uint256 shares = ic.balanceOf(alice);
+
+        uint256 lpToBurn = Math.mulDiv(lpBal, shares, supply);
+        uint256 expectedTracked = trackedBefore - Math.mulDiv(trackedBefore, lpToBurn, lpBal);
+        uint256 expectedCost = costBefore - Math.mulDiv(costBefore, lpToBurn, lpBal);
+
+        vm.prank(alice);
+        ic.lpWithdraw(shares, 0, 0);
+
+        assertEq(ic.trackedLpBalance(), expectedTracked);
+        assertEq(ic.curveLpCostVp(), expectedCost);
+    }
+
+    // ==========================================
+    // GROUP 3: LP DEPOSIT
+    // ==========================================
+
+    function test_LpDeposit_HarvestBeforeAction() public {
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(100_000e6, alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
+
+        bearToken.mint(bob, 10_000e18);
+        vm.startPrank(bob);
+        bearToken.approve(address(ic), 10_000e18);
+        ic.lpDeposit(10_000e6, 10_000e18, bob, 0);
+        vm.stopPrank();
+
+        assertGt(ic.balanceOf(address(sInvar)), sInvarBefore);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
+    function test_LpDeposit_SpotDeviationRevert() public {
+        vm.startPrank(alice);
+
+        curve.setSpotDiscountBps(51);
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+
+        curve.setSpotDiscountBps(0);
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+
+        vm.stopPrank();
+    }
+
+    function test_LpDeposit_BearOnlyValuation() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        bearToken.mint(alice, 1000e18);
+        vm.startPrank(alice);
+        bearToken.approve(address(ic), 1000e18);
+        ic.lpDeposit(0, 1000e18, alice, 0);
+        vm.stopPrank();
+
+        assertEq(ic.trackedLpBalance(), 450e18);
+    }
+
+    function test_LpDeposit_CostVpExactIncrease() public {
+        curve.setVirtualPrice(1.05e18);
+
+        vm.startPrank(alice);
+
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+        uint256 lp1 = ic.trackedLpBalance();
+        uint256 expectedCost1 = (lp1 * 1.05e18) / 1e18;
+        assertEq(ic.curveLpCostVp(), expectedCost1);
+
+        ic.lpDeposit(5000e6, 0, alice, 0);
+        uint256 lp2 = ic.trackedLpBalance() - lp1;
+        uint256 expectedCost2 = expectedCost1 + (lp2 * 1.05e18) / 1e18;
+        assertEq(ic.curveLpCostVp(), expectedCost2);
+
+        vm.stopPrank();
+    }
+
+    function test_LpDeposit_TrackedLpBalanceExact() public {
+        vm.startPrank(alice);
+
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+        uint256 lp1 = ic.trackedLpBalance();
+        assertGt(lp1, 0);
+        assertEq(ic.trackedLpBalance(), curveLp.balanceOf(address(ic)));
+
+        ic.lpDeposit(5000e6, 0, alice, 0);
+        uint256 lp2 = ic.trackedLpBalance();
+        assertEq(lp2, curveLp.balanceOf(address(ic)));
+        assertGt(lp2, lp1);
+
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // GROUP 4: _totalAssetsOptimistic()
+    // ==========================================
+
+    function test_TotalAssets_IncludesRawBear() public {
+        vm.prank(bob);
+        ic.deposit(10_000e6, bob);
+
+        bearToken.mint(address(ic), 10_000e18);
+
+        assertEq(ic.totalAssets(), 10_000e6 + 12_000e6);
+    }
+
+    function test_TotalAssets_OracleZeroFallsBackToEma() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice);
+        ic.deployToCurve(0);
+
+        uint256 buffer = usdc.balanceOf(address(ic));
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        uint256 lpPrice = curve.lp_price();
+
+        oracle.updatePrice(0);
+
+        uint256 total = ic.totalAssets();
+        uint256 expected = buffer + (lpBal * lpPrice) / 1e30;
+
+        assertEq(total, expected);
+        assertGt(total, 0);
+    }
+
+    // ==========================================
+    // GROUP 6: HARVEST BEFORE DEPOSIT
+    // ==========================================
+
+    function test_Deposit_HarvestsYieldBeforeAction() public {
+        vm.prank(alice);
+        uint256 aliceShares = ic.deposit(100_000e6, alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 sInvarBefore = ic.balanceOf(address(sInvar));
+
+        vm.prank(bob);
+        ic.deposit(10_000e6, bob);
+
+        assertGt(ic.balanceOf(address(sInvar)), sInvarBefore);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoYield.selector);
+        ic.harvest();
+    }
+
+    // ==========================================
+    // WAVE 2: MUTANT-KILLING TESTS
+    // ==========================================
+
+    function test_Deposit_SucceedsWithoutStakedInvarCoin() public {
+        InvarCoin freshIc = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+        );
+
+        vm.prank(alice);
+        usdc.approve(address(freshIc), type(uint256).max);
+        vm.prank(alice);
+        freshIc.deposit(20_000e6, alice);
+        freshIc.deployToCurve(0);
+
+        curve.setVirtualPrice(1.05e18);
+
+        vm.prank(bob);
+        usdc.approve(address(freshIc), type(uint256).max);
+        vm.prank(bob);
+        uint256 shares = freshIc.deposit(10_000e6, bob);
+
+        assertGt(shares, 0);
+    }
+
+    function test_Harvest_ExactDonatedAmount() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(2.5e18);
+
+        uint256 donated = ic.harvest();
+        assertEq(donated, 26_460e18);
+    }
+
+    function test_DeployToCurve_ExactBufferRemaining() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        assertEq(usdc.balanceOf(address(ic)), 360e6);
+    }
+
+    function test_DeployToCurve_MaxUsdcCapsDeployment() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(5_000e6);
+
+        assertEq(usdc.balanceOf(address(ic)), 13_000e6);
+    }
+
+    function test_DeployToCurve_SlippageGuardExactMinMint() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+
+        vm.expectCall(
+            address(curve),
+            abi.encodeCall(curve.add_liquidity, ([uint256(17_640e6), uint256(0)], 9_800e18 - 1))
+        );
+        ic.deployToCurve(0);
+    }
+
+    function test_ReplenishBuffer_RevertsWhenBufferSufficient() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
+        ic.replenishBuffer();
+    }
+
+    function test_ReplenishBuffer_ExactLpBurned() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), 180e6);
+
+        uint256 lpBefore = curveLp.balanceOf(address(ic));
+        ic.replenishBuffer();
+        uint256 lpBurned = lpBefore - curveLp.balanceOf(address(ic));
+
+        assertEq(lpBurned, 98e18);
+    }
+
+    function test_ReplenishBuffer_ClampsLpToBurn() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        bearToken.mint(address(ic), 2_000_000e18);
+        deal(address(usdc), address(ic), 0);
+
+        uint256 lpBefore = curveLp.balanceOf(address(ic));
+        ic.replenishBuffer();
+        uint256 lpBurned = lpBefore - curveLp.balanceOf(address(ic));
+
+        assertEq(lpBurned, lpBefore);
+    }
+
+    // ==========================================
+    // WAVE 3: replenishBuffer + redeployToCurve
+    // ==========================================
+
+    function test_ReplenishBuffer_SlippageFloorExactMinAmount() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), 180e6);
+
+        // lpToBurn = 98e18, calcOut = 176_400_000
+        // min_amount = 176_400_000 * (10_000 - 5) / 10_000 = 176_311_800
+        vm.expectCall(
+            address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (98e18, 0, 176_311_800))
+        );
+        ic.replenishBuffer();
+    }
+
+    function test_ReplenishBuffer_EmitsExactRecoveredAmount() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), 180e6);
+
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.BufferReplenished(98e18, 176_400_000);
+        ic.replenishBuffer();
+    }
+
+    function test_RedeployToCurve_ExactAmountsAndBuffer() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+
+        vm.prank(alice);
+        ic.deposit(18_000e6, alice);
+        bearToken.mint(address(ic), 10_000e18);
+
+        // assets = 18_000e6 + 8_100e6 = 26_100e6
+        // bufferTarget = 26_100e6 * 200 / 10_000 = 522e6
+        // usdcToDeploy = 18_000e6 - 522e6 = 17_478e6
+        vm.expectCall(
+            address(curve), abi.encodeCall(curve.add_liquidity, ([uint256(17_478e6), uint256(10_000e18)], 0))
+        );
+        ic.redeployToCurve(0);
+
+        assertEq(usdc.balanceOf(address(ic)), 522e6);
+    }
+
+    function test_RedeployToCurve_NoExcessUsdcExactTracking() public {
+        oracle.updatePrice(81_000_000);
+        curve.setPriceMultiplier(0.81e18);
+        curve.setVirtualPrice(1.5e18);
+
+        vm.prank(alice);
+        ic.deposit(100e6, alice);
+        bearToken.mint(address(ic), 10_000e18);
+
+        // assets = 100e6 + 8_100e6 = 8_200e6
+        // bufferTarget = 8_200e6 * 200 / 10_000 = 164e6
+        // localUsdc = 100e6 < 164e6 → usdcToDeploy = 0
+        // lpPrice = 2 * 1.5e18 * sqrt(0.81e18 * 1e18) / 1e18 = 2 * 1.5e18 * 0.9e18 / 1e18 = 2.7e18
+        // lpMinted = (0 + 8_100e6) * 1e30 / 2.7e18 = 3_000e18
+        // curveLpCostVp = 3_000e18 * 1.5e18 / 1e18 = 4_500e18
+        ic.redeployToCurve(0);
+
+        assertEq(usdc.balanceOf(address(ic)), 100e6);
+        assertEq(ic.trackedLpBalance(), 3_000e18);
+        assertEq(ic.curveLpCostVp(), 4_500e18);
+    }
+
+}
+
+// ==========================================
+// PERMIT TEST SUITE
+// ==========================================
+
+contract MockUSDCPermit is ERC20, ERC20Permit {
+
+    constructor() ERC20("Mock USDC", "USDC") ERC20Permit("Mock USDC") {}
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
+        _mint(to, amount);
+    }
+
+}
+
+contract InvarCoinPermitTest is Test {
+
+    InvarCoin public ic;
+    StakedToken public sInvar;
+    MockUSDCPermit public usdc;
+    MockBEAR public bearToken;
+    MockCurvePool public curve;
+    MockCurveLpToken public curveLp;
+    MockOracle public oracle;
+
+    uint256 constant ORACLE_PRICE = 120_000_000;
+    uint256 constant SIGNER_KEY = 0x1234;
+    address public signer;
+
+    function setUp() public {
+        vm.warp(100_000);
+
+        usdc = new MockUSDCPermit();
+        oracle = new MockOracle(int256(ORACLE_PRICE), "plDXY Basket");
+        bearToken = new MockBEAR();
+        curveLp = new MockCurveLpToken();
+        curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
+        curve.setPriceMultiplier(1.2e18);
+
+        ic = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+        );
+
+        sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
+        ic.setStakedInvarCoin(address(sInvar));
+
+        signer = vm.addr(SIGNER_KEY);
+        usdc.mint(signer, 1_000_000e6);
+    }
+
+    function _signPermit(
+        uint256 amount,
+        uint256 deadline
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 permitHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                usdc.DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                        signer,
+                        address(ic),
+                        amount,
+                        usdc.nonces(signer),
+                        deadline
+                    )
+                )
+            )
+        );
+        return vm.sign(SIGNER_KEY, permitHash);
+    }
+
+    function test_DepositWithPermit_HappyPath() public {
+        uint256 amount = 1000e6;
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(amount, deadline);
+
+        vm.prank(signer);
+        uint256 shares = ic.depositWithPermit(amount, signer, deadline, v, r, s);
+
+        assertGt(shares, 0);
+        assertEq(ic.balanceOf(signer), shares);
+        assertEq(usdc.balanceOf(signer), 1_000_000e6 - amount);
+    }
+
+    function test_DepositWithPermit_ExpiredDeadline() public {
+        uint256 amount = 1000e6;
+        uint256 deadline = block.timestamp - 1;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(amount, deadline);
+
+        vm.prank(signer);
+        vm.expectRevert(InvarCoin.InvarCoin__PermitFailed.selector);
+        ic.depositWithPermit(amount, signer, deadline, v, r, s);
+    }
+
+    function test_DepositWithPermit_FallbackOnAllowance() public {
+        uint256 amount = 1000e6;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.prank(signer);
+        usdc.approve(address(ic), amount);
+
+        vm.prank(signer);
+        uint256 shares = ic.depositWithPermit(amount, signer, deadline, 27, bytes32(uint256(1)), bytes32(uint256(2)));
+
+        assertGt(shares, 0);
+    }
+
+    function test_DepositWithPermit_NoAllowanceReverts() public {
+        uint256 amount = 1000e6;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.prank(signer);
+        vm.expectRevert(InvarCoin.InvarCoin__PermitFailed.selector);
+        ic.depositWithPermit(amount, signer, deadline, 27, bytes32(uint256(1)), bytes32(uint256(2)));
     }
 
 }
