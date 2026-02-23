@@ -157,7 +157,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         _dumpBear(3_000_000e18);
 
         vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     // ==========================================
@@ -458,7 +458,7 @@ contract ReplenishBufferFlashAttacker is IERC3156FlashBorrower {
         IERC20(token).approve(pool, amount);
         pool.call(abi.encodeWithSignature("exchange(uint256,uint256,uint256,uint256)", 1, 0, amount, 0));
 
-        InvarCoin(invarCoin).replenishBuffer();
+        InvarCoin(invarCoin).replenishBuffer(0);
 
         uint256 usdcBal = IERC20(usdc).balanceOf(address(this));
         IERC20(usdc).approve(pool, usdcBal);

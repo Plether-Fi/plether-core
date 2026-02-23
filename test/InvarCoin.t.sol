@@ -887,7 +887,7 @@ contract InvarCoinTest is Test {
         // Drain buffer to trigger replenish
         uint256 localUsdc = usdc.balanceOf(address(ic));
         deal(address(usdc), address(ic), localUsdc / 10);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         uint256 trackedAfter = ic.trackedLpBalance();
         uint256 costAfter = ic.curveLpCostVp();
@@ -947,7 +947,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), localUsdc / 10);
 
         uint256 usdcBefore = usdc.balanceOf(address(ic));
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         assertGt(usdc.balanceOf(address(ic)), usdcBefore);
     }
@@ -963,7 +963,7 @@ contract InvarCoinTest is Test {
         curve.setSpotDiscountBps(600);
 
         vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     // ==========================================
@@ -1477,7 +1477,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), 0);
 
         uint256 costBefore = ic.curveLpCostVp();
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
 
         assertLt(ic.curveLpCostVp(), costBefore);
     }
@@ -1532,7 +1532,7 @@ contract InvarCoinTest is Test {
         uint256 sInvarBal = ic.balanceOf(address(sInvar));
         vm.prank(alice);
         ic.withdraw(toWithdraw, alice, 0);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
         try ic.harvest() {}
         catch (bytes memory reason) {
             require(bytes4(reason) == InvarCoin.InvarCoin__NoYield.selector, "Unexpected harvest error");
@@ -1965,7 +1965,7 @@ contract InvarCoinTest is Test {
 
     function test_HarvestSafeExternal_RejectsDirectCalls() public {
         vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
+        vm.expectRevert(InvarCoin.InvarCoin__Unauthorized.selector);
         ic.harvestSafeExternal(1000);
     }
 
@@ -2366,7 +2366,7 @@ contract InvarCoinTest is Test {
 
         vm.prank(alice);
         ic.deposit(18_000e6, alice);
-        ic.deployToCurve(5_000e6);
+        ic.deployToCurve(5000e6);
 
         assertEq(usdc.balanceOf(address(ic)), 13_000e6);
     }
@@ -2379,8 +2379,7 @@ contract InvarCoinTest is Test {
         ic.deposit(18_000e6, alice);
 
         vm.expectCall(
-            address(curve),
-            abi.encodeCall(curve.add_liquidity, ([uint256(17_640e6), uint256(0)], 9_800e18 - 1))
+            address(curve), abi.encodeCall(curve.add_liquidity, ([uint256(17_640e6), uint256(0)], 9800e18 - 1))
         );
         ic.deployToCurve(0);
     }
@@ -2394,7 +2393,7 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
 
         vm.expectRevert(InvarCoin.InvarCoin__NothingToDeploy.selector);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     function test_ReplenishBuffer_ExactLpBurned() public {
@@ -2408,7 +2407,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), 180e6);
 
         uint256 lpBefore = curveLp.balanceOf(address(ic));
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
         uint256 lpBurned = lpBefore - curveLp.balanceOf(address(ic));
 
         assertEq(lpBurned, 98e18);
@@ -2426,7 +2425,7 @@ contract InvarCoinTest is Test {
         deal(address(usdc), address(ic), 0);
 
         uint256 lpBefore = curveLp.balanceOf(address(ic));
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
         uint256 lpBurned = lpBefore - curveLp.balanceOf(address(ic));
 
         assertEq(lpBurned, lpBefore);
@@ -2448,10 +2447,8 @@ contract InvarCoinTest is Test {
 
         // lpToBurn = 98e18, calcOut = 176_400_000
         // min_amount = 176_400_000 * (10_000 - 5) / 10_000 = 176_311_800
-        vm.expectCall(
-            address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (98e18, 0, 176_311_800))
-        );
-        ic.replenishBuffer();
+        vm.expectCall(address(curve), abi.encodeCall(curve.remove_liquidity_one_coin, (98e18, 0, 176_311_800)));
+        ic.replenishBuffer(0);
     }
 
     function test_ReplenishBuffer_EmitsExactRecoveredAmount() public {
@@ -2466,7 +2463,7 @@ contract InvarCoinTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit InvarCoin.BufferReplenished(98e18, 176_400_000);
-        ic.replenishBuffer();
+        ic.replenishBuffer(0);
     }
 
     function test_RedeployToCurve_ExactAmountsAndBuffer() public {
@@ -2480,9 +2477,7 @@ contract InvarCoinTest is Test {
         // assets = 18_000e6 + 8_100e6 = 26_100e6
         // bufferTarget = 26_100e6 * 200 / 10_000 = 522e6
         // usdcToDeploy = 18_000e6 - 522e6 = 17_478e6
-        vm.expectCall(
-            address(curve), abi.encodeCall(curve.add_liquidity, ([uint256(17_478e6), uint256(10_000e18)], 0))
-        );
+        vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([uint256(17_478e6), uint256(10_000e18)], 0)));
         ic.redeployToCurve(0);
 
         assertEq(usdc.balanceOf(address(ic)), 522e6);
@@ -2506,8 +2501,8 @@ contract InvarCoinTest is Test {
         ic.redeployToCurve(0);
 
         assertEq(usdc.balanceOf(address(ic)), 100e6);
-        assertEq(ic.trackedLpBalance(), 3_000e18);
-        assertEq(ic.curveLpCostVp(), 4_500e18);
+        assertEq(ic.trackedLpBalance(), 3000e18);
+        assertEq(ic.curveLpCostVp(), 4500e18);
     }
 
 }

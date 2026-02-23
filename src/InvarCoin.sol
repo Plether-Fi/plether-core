@@ -112,6 +112,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__AlreadySet();
     error InvarCoin__SpotDeviationTooHigh();
     error InvarCoin__UseLpWithdraw();
+    error InvarCoin__Unauthorized();
 
     constructor(
         address _usdc,
@@ -465,7 +466,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpBal
     ) external {
         if (msg.sender != address(this)) {
-            revert InvarCoin__ZeroAddress();
+            revert InvarCoin__Unauthorized();
         }
 
         uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -556,7 +557,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
-    function replenishBuffer() external nonReentrant whenNotPaused {
+    /// @param maxLp Cap on LP tokens to burn (0 = no cap, burn entire deficit).
+    function replenishBuffer(
+        uint256 maxLp
+    ) external nonReentrant whenNotPaused {
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -577,6 +581,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpToBurn = (maxReplenish * 1e30) / lpPrice;
         if (lpToBurn > lpBalBefore) {
             lpToBurn = lpBalBefore;
+        }
+        if (maxLp > 0 && maxLp < lpToBurn) {
+            lpToBurn = maxLp;
         }
 
         uint256 calcOut = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);

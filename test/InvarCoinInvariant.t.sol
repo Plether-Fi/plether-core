@@ -219,7 +219,7 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.replenishBuffer() {
+        try ic.replenishBuffer(0) {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             replenishBufferCalls++;
         } catch (bytes memory reason) {
