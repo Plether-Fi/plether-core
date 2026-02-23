@@ -46,8 +46,23 @@ interface ICurveTwocrypto {
 
 /// @title InvarCoin (INVAR)
 /// @custom:security-contact contact@plether.com
-/// @notice Retail-friendly global purchasing power token backed 50/50 by USDC + plDXY-BEAR.
-/// @dev Combines asynchronous batching, exact yield stripping, and flash-loan resistant NAV.
+/// @notice Global purchasing power token backed 50/50 by USDC + plDXY-BEAR via Curve LP.
+/// @dev INVAR is a vault token whose backing is held as Curve USDC/plDXY-BEAR LP tokens. Users deposit USDC,
+///      which is single-sided deployed to Curve. The vault earns Curve trading fee yield (virtual price growth),
+///      which is harvested and donated to sINVAR stakers.
+///
+///      LP tokens are valued with dual pricing to prevent manipulation:
+///        - totalAssets() and harvest use pessimistic pricing (min of EMA, oracle) for conservative NAV.
+///        - deposit() uses optimistic NAV (max of EMA, oracle) so new depositors cannot dilute existing holders.
+///        - lpDeposit() values minted LP pessimistically so depositors cannot extract value from stale-high EMA.
+///        - withdraw() and lpWithdraw() use pro-rata asset distribution (no NAV pricing needed).
+///
+///      The oracle-derived LP price mirrors the twocrypto-ng formula: 2 * virtualPrice * sqrt(bearPrice).
+///
+///      A 2% USDC buffer (BUFFER_TARGET_BPS) is maintained locally for gas-efficient withdrawals.
+///      Excess USDC is deployed to Curve via permissionless keeper calls (deployToCurve).
+///
+///      Virtual shares (1e18 INVAR / 1e6 USDC) protect against inflation attacks on the first deposit.
 contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
@@ -56,16 +71,21 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // IMMUTABLES & CONSTANTS
     // ==========================================
 
+    /// @notice USDC collateral token (6 decimals).
     IERC20 public immutable USDC;
+    /// @notice plDXY-BEAR synthetic token (18 decimals).
     IERC20 public immutable BEAR;
+    /// @notice Curve USDC/plDXY-BEAR LP token.
     IERC20 public immutable CURVE_LP_TOKEN;
+    /// @notice Curve twocrypto-ng pool for USDC/plDXY-BEAR.
     ICurveTwocrypto public immutable CURVE_POOL;
+    /// @notice Chainlink BasketOracle — weighted basket of 6 FX feeds, returns foreign currencies priced in USD (8 decimals).
     AggregatorV3Interface public immutable BASKET_ORACLE;
+    /// @notice L2 sequencer uptime feed for staleness protection (address(0) on L1).
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
 
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
-    uint256 public constant MAX_DEPLOY_SLIPPAGE_BPS = 100; // 1% max slippage
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
@@ -82,9 +102,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // STATE
     // ==========================================
 
+    /// @notice sINVAR staking contract that receives harvested yield.
     StakedToken public stakedInvarCoin;
+    /// @notice Cumulative virtual-price cost basis of tracked LP tokens (18 decimals).
+    /// @dev Used to isolate fee yield (VP growth) from price appreciation. Only LP tokens
+    ///      deployed by the vault are tracked — donated LP is excluded to prevent yield manipulation.
     uint256 public curveLpCostVp;
+    /// @notice LP token balance deployed by the vault (excludes donated LP).
     uint256 public trackedLpBalance;
+    /// @notice True when emergency mode is active — forces users to lpWithdraw (balanced exit).
     bool public emergencyActive;
 
     // ==========================================
@@ -114,6 +140,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__UseLpWithdraw();
     error InvarCoin__Unauthorized();
 
+    /// @param _usdc USDC token address.
+    /// @param _bear plDXY-BEAR token address.
+    /// @param _curveLpToken Curve USDC/plDXY-BEAR LP token address.
+    /// @param _curvePool Curve twocrypto-ng pool address.
+    /// @param _oracle BasketOracle address (Chainlink AggregatorV3Interface).
+    /// @param _sequencerUptimeFeed L2 sequencer uptime feed (address(0) on L1).
     constructor(
         address _usdc,
         address _bear,
@@ -140,6 +172,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
+    /// @notice One-time setter for the sINVAR staking contract. Cannot be changed once set.
+    /// @param _stakedInvarCoin Address of the StakedToken (sINVAR) contract.
     function setStakedInvarCoin(
         address _stakedInvarCoin
     ) external onlyOwner {
@@ -234,10 +268,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     // ==========================================
-    // RETAIL FLOWS (Cheap & Gas Efficient)
+    // USER FLOWS
     // ==========================================
 
+    /// @notice Deposit USDC to mint INVAR shares. USDC stays in the local buffer until deployed to Curve.
+    /// @dev Uses optimistic LP pricing for NAV to prevent deposit dilution. Harvests yield before minting.
+    /// @param usdcAmount Amount of USDC to deposit (6 decimals).
+    /// @param receiver Address that receives the minted INVAR shares.
     /// @param minSharesOut Minimum INVAR shares to receive (0 = no minimum).
+    /// @return glUsdMinted Number of INVAR shares minted.
     function deposit(
         uint256 usdcAmount,
         address receiver,
@@ -266,6 +305,16 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit Deposited(msg.sender, receiver, usdcAmount, glUsdMinted);
     }
 
+    /// @notice Gasless deposit using ERC-2612 permit. Falls back to existing allowance if permit
+    ///         fails (e.g., front-run griefing) and the allowance is sufficient.
+    /// @param usdcAmount Amount of USDC to deposit (6 decimals).
+    /// @param receiver Address that receives the minted INVAR shares.
+    /// @param minSharesOut Minimum INVAR shares to receive (0 = no minimum).
+    /// @param deadline Permit signature expiry timestamp.
+    /// @param v ECDSA recovery byte.
+    /// @param r ECDSA r component.
+    /// @param s ECDSA s component.
+    /// @return Number of INVAR shares minted.
     function depositWithPermit(
         uint256 usdcAmount,
         address receiver,
@@ -289,7 +338,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
+    /// @dev Burns the user's pro-rata share of local USDC and Curve LP (single-sided to USDC).
     ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
+    ///      Blocked during emergencyActive since single-sided LP exit may be unavailable.
+    /// @param glUsdAmount Amount of INVAR shares to burn.
+    /// @param receiver Address that receives the withdrawn USDC.
+    /// @param minUsdcOut Minimum USDC to receive (slippage protection).
+    /// @return usdcOut Total USDC returned (buffer + Curve LP proceeds).
     function withdraw(
         uint256 glUsdAmount,
         address receiver,
@@ -337,8 +392,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // LP WITHDRAWAL (Deep Liquidity Exit)
     // ==========================================
 
-    /// @notice LP withdrawal: bypasses buffer and unwinds Curve LP pro-rata.
-    /// @dev Intentionally lacks whenNotPaused — serves as the emergency exit when contract is paused.
+    /// @notice Balanced withdrawal: returns pro-rata USDC + BEAR from Curve LP (remove_liquidity).
+    /// @dev Intentionally lacks whenNotPaused — serves as the emergency exit when the contract is paused.
+    ///      During emergencyActive, skips Curve LP burn (LP was already removed or is inaccessible).
+    /// @param glUsdAmount Amount of INVAR shares to burn.
+    /// @param minUsdcOut Minimum USDC to receive (slippage protection).
+    /// @param minBearOut Minimum plDXY-BEAR to receive (slippage protection).
+    /// @return usdcReturned Total USDC returned.
+    /// @return bearReturned Total plDXY-BEAR returned.
     function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
@@ -393,8 +454,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit LpWithdrawn(msg.sender, glUsdAmount, usdcReturned, bearReturned);
     }
 
-    /// @notice Direct LP deposit: provide USDC + BEAR, deploy to Curve, mint INVAR.
-    /// @dev Inverse of lpWithdraw. Curve slippage borne by the depositor, not existing holders.
+    /// @notice Direct LP deposit: provide USDC and/or plDXY-BEAR, deploy to Curve, mint INVAR.
+    /// @dev Inverse of lpWithdraw. Curve slippage is borne by the depositor, not existing holders.
+    ///      Shares are priced using pessimistic LP valuation so the depositor cannot extract value
+    ///      from a stale-high EMA. Spot deviation is checked against EMA to block sandwich attacks.
+    /// @param usdcAmount Amount of USDC to deposit (6 decimals, can be 0 if bearAmount > 0).
+    /// @param bearAmount Amount of plDXY-BEAR to deposit (18 decimals, can be 0 if usdcAmount > 0).
+    /// @param receiver Address that receives the minted INVAR shares.
+    /// @param minSharesOut Minimum INVAR shares to receive (slippage protection).
+    /// @return glUsdMinted Number of INVAR shares minted.
     function lpDeposit(
         uint256 usdcAmount,
         uint256 bearAmount,
@@ -445,8 +513,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // KEEPER OPERATIONS & YIELD
     // ==========================================
 
-    /// @notice Keeper harvest for Curve LP fee yield.
-    /// @dev Mints INVAR proportional to yield, donates to sINVAR stakers.
+    /// @notice Permissionless keeper harvest for Curve LP fee yield.
+    /// @dev Measures fee yield as virtual price growth above the cost basis (curveLpCostVp).
+    ///      Mints INVAR proportional to the USDC value of yield and donates it to sINVAR stakers.
+    ///      Only tracks VP growth on vault-deployed LP (trackedLpBalance), not donated LP.
+    ///      Reverts if no yield is available — use as a heartbeat signal for keepers.
+    /// @return donated Amount of INVAR minted and donated to sINVAR.
     function harvest() external nonReentrant whenNotPaused returns (uint256 donated) {
         donated = _harvest();
         if (donated == 0) {
@@ -531,8 +603,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit YieldHarvested(donated, 0, donated);
     }
 
-    /// @notice Keeper function: Deploys excess USDC buffer into Curve as single-sided liquidity.
+    /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
+    /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000).
+    ///      Spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during pool manipulation.
     /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
+    /// @return lpMinted Amount of Curve LP tokens minted.
     function deployToCurve(
         uint256 maxUsdc
     ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
@@ -563,7 +638,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
 
-    /// @notice Keeper function: Restores USDC buffer by burning Curve LP.
+    /// @notice Permissionless keeper function: restores USDC buffer by burning Curve LP (single-sided to USDC).
+    /// @dev Inverse of deployToCurve. Uses same spot-vs-EMA deviation check for sandwich protection.
+    ///      The maxLpToBurn parameter allows chunked replenishment when the full withdrawal would
+    ///      exceed the 0.5% spot deviation limit due to price impact.
     /// @param maxLpToBurn Cap on LP tokens to burn (0 = no cap, burn entire deficit).
     function replenishBuffer(
         uint256 maxLpToBurn
@@ -611,6 +689,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // EMERGENCY & ADMIN
     // ==========================================
 
+    /// @notice Re-deploys recovered BEAR + excess USDC to Curve after emergency recovery.
+    /// @dev Clears emergencyActive flag. Should only be called after emergencyWithdrawFromCurve()
+    ///      has recovered the BEAR tokens from the pool.
+    /// @param minLpOut Minimum LP tokens to mint (slippage protection for the two-sided deposit).
     function redeployToCurve(
         uint256 minLpOut
     ) external onlyOwner nonReentrant {
@@ -634,7 +716,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Activates emergency mode without touching Curve. Guarantees withdrawal liveness
-    ///         even if the Curve pool is completely non-functional.
+    ///         even if the Curve pool is completely non-functional (bricked remove_liquidity).
+    /// @dev Sets emergencyActive so lpWithdraw skips LP burn. Zeroes trackedLpBalance and curveLpCostVp
+    ///      to prevent harvest from operating on phantom LP. Pauses the contract to force users through
+    ///      lpWithdraw (the only withdrawal path that works without Curve).
+    ///      Can later call emergencyWithdrawFromCurve() if/when Curve recovers.
     function setEmergencyMode() external onlyOwner {
         trackedLpBalance = 0;
         curveLpCostVp = 0;
@@ -644,8 +730,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
-    /// @notice Attempts to recover LP tokens from Curve during emergency. Call setEmergencyMode() first
-    ///         if Curve may be non-functional, then call this separately if/when Curve recovers.
+    /// @notice Attempts to recover LP tokens from Curve via balanced remove_liquidity.
+    /// @dev Also callable as a standalone emergency — sets emergencyActive, zeroes cost basis, and pauses.
+    ///      If Curve is bricked, the remove_liquidity call reverts and the entire tx rolls back,
+    ///      leaving state unchanged. Use setEmergencyMode() first in that case.
     function emergencyWithdrawFromCurve() external onlyOwner nonReentrant {
         uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
         trackedLpBalance = 0;
@@ -670,6 +758,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         _unpause();
     }
 
+    /// @notice Rescue accidentally sent ERC20 tokens. Cannot rescue USDC, BEAR, or Curve LP.
+    /// @param token Address of the token to rescue.
+    /// @param to Destination address for the rescued tokens.
     function rescueToken(
         address token,
         address to
