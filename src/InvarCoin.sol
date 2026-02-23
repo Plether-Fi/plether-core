@@ -112,6 +112,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__AlreadySet();
     error InvarCoin__SpotDeviationTooHigh();
     error InvarCoin__UseLpWithdraw();
+    error InvarCoin__Unauthorized();
 
     constructor(
         address _usdc,
@@ -465,7 +466,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpBal
     ) external {
         if (msg.sender != address(this)) {
-            revert InvarCoin__ZeroAddress();
+            revert InvarCoin__Unauthorized();
         }
 
         uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;

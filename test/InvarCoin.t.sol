@@ -1964,7 +1964,7 @@ contract InvarCoinTest is Test {
 
     function test_HarvestSafeExternal_RejectsDirectCalls() public {
         vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
+        vm.expectRevert(InvarCoin.InvarCoin__Unauthorized.selector);
         ic.harvestSafeExternal(1000);
     }
 
