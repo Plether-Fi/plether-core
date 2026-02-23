@@ -237,9 +237,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     // RETAIL FLOWS (Cheap & Gas Efficient)
     // ==========================================
 
+    /// @param minSharesOut Minimum INVAR shares to receive (0 = no minimum).
     function deposit(
         uint256 usdcAmount,
-        address receiver
+        address receiver,
+        uint256 minSharesOut
     ) public nonReentrant whenNotPaused returns (uint256 glUsdMinted) {
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
@@ -254,6 +256,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         // Virtual shares math against inflation attacks
         glUsdMinted = Math.mulDiv(usdcAmount, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
 
+        if (glUsdMinted < minSharesOut) {
+            revert InvarCoin__SlippageExceeded();
+        }
+
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
         _mint(receiver, glUsdMinted);
@@ -263,6 +269,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function depositWithPermit(
         uint256 usdcAmount,
         address receiver,
+        uint256 minSharesOut,
         uint256 deadline,
         uint8 v,
         bytes32 r,
@@ -278,7 +285,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
                 revert InvarCoin__PermitFailed();
             }
         }
-        return deposit(usdcAmount, receiver);
+        return deposit(usdcAmount, receiver, minSharesOut);
     }
 
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.

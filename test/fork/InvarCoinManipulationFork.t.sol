@@ -73,7 +73,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         uint256 usdcAmount
     ) internal returns (uint256 shares) {
         vm.prank(user);
-        shares = ic.deposit(usdcAmount, user);
+        shares = ic.deposit(usdcAmount, user, 0);
     }
 
     /// @dev Dumps BEAR on Curve via deal() — simulates flash-mint (free BEAR, no BULL side-effect).
@@ -174,7 +174,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         _dumpBear(5_000_000e18);
 
         vm.prank(attacker);
-        uint256 attackerShares = ic.deposit(1_000_000e6, attacker);
+        uint256 attackerShares = ic.deposit(1_000_000e6, attacker, 0);
 
         // Buy back BEAR to normalize pool (spend USDC received from dump)
         uint256 usdcFromDump = IERC20(USDC).balanceOf(attacker) - (attackerUsdcBefore - 1_000_000e6);
@@ -378,7 +378,7 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
 
         // Attacker deposits into InvarCoin
         vm.prank(attacker);
-        uint256 attackerShares = ic.deposit(1_000_000e6, attacker);
+        uint256 attackerShares = ic.deposit(1_000_000e6, attacker, 0);
 
         // Back-run: dump BEAR back for USDC (reverse the pump)
         uint256 attackerBear = IERC20(bearToken).balanceOf(attacker);

@@ -112,7 +112,7 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore = ic.totalSupply();
-        try ic.deposit(amount, currentActor) returns (uint256 minted) {
+        try ic.deposit(amount, currentActor, 0) returns (uint256 minted) {
             ghost_totalDeposited += amount;
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             depositCalls++;
