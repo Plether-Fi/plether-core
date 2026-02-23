@@ -79,7 +79,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 usdcAmount
     ) internal returns (uint256 shares) {
         vm.prank(user);
-        shares = ic.deposit(usdcAmount, user);
+        shares = ic.deposit(usdcAmount, user, 0);
     }
 
     function _generateCurveFees(
@@ -113,7 +113,7 @@ contract InvarCoinForkTest is BaseForkTest {
     function test_deposit_gasEfficiency() public {
         uint256 gasBefore = gasleft();
         vm.prank(alice);
-        uint256 shares = ic.deposit(10_000e6, alice);
+        uint256 shares = ic.deposit(10_000e6, alice, 0);
         uint256 gasUsed = gasBefore - gasleft();
 
         assertLt(gasUsed, 500_000, "Deposit gas too high");
