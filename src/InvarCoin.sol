@@ -481,16 +481,18 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             bearReturned += Math.mulDiv(bearBal, glUsdAmount, supply);
         }
 
-        uint256 lpBal = _lpBalance();
-        if (lpBal > 0 && !emergencyActive) {
-            uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
-            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
-            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
-            _ensureUnstakedLp(lpToBurn);
-            uint256[2] memory min_amounts = [uint256(0), uint256(0)];
-            uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
-            usdcReturned += withdrawn[0];
-            bearReturned += withdrawn[1];
+        if (!emergencyActive) {
+            uint256 lpBal = _lpBalance();
+            if (lpBal > 0) {
+                uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
+                trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
+                curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
+                _ensureUnstakedLp(lpToBurn);
+                uint256[2] memory min_amounts = [uint256(0), uint256(0)];
+                uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
+                usdcReturned += withdrawn[0];
+                bearReturned += withdrawn[1];
+            }
         }
 
         if (usdcReturned < minUsdcOut || bearReturned < minBearOut) {
