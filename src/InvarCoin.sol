@@ -111,7 +111,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
-    uint256 public constant DEPLOY_REWARD_BPS = 10; // 0.1% keeper reward
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
@@ -163,8 +162,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event GaugeStaked(uint256 amount);
     event GaugeUnstaked(uint256 amount);
     event GaugeRewardsClaimed();
-    event DeployRewardPaid(address indexed keeper, uint256 reward);
-
     error InvarCoin__ZeroAmount();
     error InvarCoin__ZeroAddress();
     error InvarCoin__SlippageExceeded();
@@ -237,12 +234,18 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Total assets backing INVAR (USDC, 6 decimals).
     /// @dev Uses pessimistic LP pricing: min(Curve EMA, oracle-derived) to prevent stale-EMA exploitation.
     function totalAssets() public view returns (uint256) {
+        return _totalAssetsWithLpBal(_lpBalance());
+    }
+
+    /// @dev Total assets using a pre-fetched LP balance (avoids redundant gauge.balanceOf calls).
+    function _totalAssetsWithLpBal(
+        uint256 lpBal
+    ) private view returns (uint256) {
         uint256 localUsdc = USDC.balanceOf(address(this));
 
         (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
         uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
 
-        uint256 lpBal = _lpBalance();
         uint256 lpUsdcValue = 0;
         if (lpBal > 0) {
             lpUsdcValue = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
@@ -255,6 +258,60 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         return localUsdc + lpUsdcValue + bearUsdcValue;
+    }
+
+    /// @notice Buffer health metrics for keeper bots and frontends.
+    /// @return currentBuffer USDC held locally (6 decimals).
+    /// @return targetBuffer Target USDC buffer based on total assets (6 decimals).
+    /// @return deployable Excess USDC deployable to Curve (0 if below threshold).
+    /// @return replenishable USDC deficit that needs replenishing from Curve LP.
+    function getBufferMetrics()
+        external
+        view
+        returns (uint256 currentBuffer, uint256 targetBuffer, uint256 deployable, uint256 replenishable)
+    {
+        uint256 assets = totalAssets();
+        targetBuffer = (assets * BUFFER_TARGET_BPS) / BPS;
+        currentBuffer = USDC.balanceOf(address(this));
+        if (currentBuffer > targetBuffer) {
+            uint256 excess = currentBuffer - targetBuffer;
+            deployable = excess >= DEPLOY_THRESHOLD ? excess : 0;
+        } else {
+            replenishable = targetBuffer - currentBuffer;
+        }
+    }
+
+    /// @notice Estimated harvestable Curve fee yield (USDC, 6 decimals).
+    /// @dev Read-only version of _harvest logic. Returns 0 if no staking contract or no VP growth.
+    function getHarvestableYield() external view returns (uint256 yieldUsdc) {
+        uint256 lpBal = trackedLpBalance;
+        if (lpBal == 0 || address(stakedInvarCoin) == address(0)) {
+            return 0;
+        }
+
+        uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
+        if (currentVpValue <= curveLpCostVp) {
+            return 0;
+        }
+
+        (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
+        uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
+
+        uint256 vpGrowth = currentVpValue - curveLpCostVp;
+        uint256 currentLpUsdc = (lpBal * _pessimisticLpPrice(oraclePrice)) / 1e30;
+        yieldUsdc = Math.mulDiv(currentLpUsdc, vpGrowth, currentVpValue);
+    }
+
+    /// @notice Spot-vs-EMA deviation for a 1 USDC deposit (basis points).
+    /// @dev Returns 0 if spot >= EMA (no discount). Used by keepers to check if deploy/replenish is safe.
+    function getSpotDeviation() external view returns (uint256 deviationBps) {
+        uint256[2] memory amounts = [uint256(1e6), uint256(0)];
+        uint256 spotLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 emaLp = (1e6 * 1e30) / CURVE_POOL.lp_price();
+        if (spotLp >= emaLp) {
+            return 0;
+        }
+        deviationBps = ((emaLp - spotLp) * BPS) / emaLp;
     }
 
     /// @dev Total assets using optimistic LP pricing — max(EMA, oracle) to prevent deposit dilution.
@@ -310,14 +367,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp > lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev Total LP held: local + gauge-staked. Degrades gracefully if gauge is bricked.
+    /// @dev Total LP held: local + gauge-staked. Reverts if gauge is bricked — use setEmergencyMode().
     function _lpBalance() private view returns (uint256) {
         uint256 bal = CURVE_LP_TOKEN.balanceOf(address(this));
         ICurveGauge gauge = curveGauge;
         if (address(gauge) != address(0)) {
-            try gauge.balanceOf(address(this)) returns (uint256 gaugeBal) {
-                bal += gaugeBal;
-            } catch {}
+            bal += gauge.balanceOf(address(this));
         }
         return bal;
     }
@@ -692,13 +747,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
-        uint256 excess = localUsdc - bufferTarget;
-        if (maxUsdc > 0 && maxUsdc < excess) {
-            excess = maxUsdc;
+        uint256 usdcToDeploy = localUsdc - bufferTarget;
+        if (maxUsdc > 0 && maxUsdc < usdcToDeploy) {
+            usdcToDeploy = maxUsdc;
         }
-
-        uint256 reward = (excess * DEPLOY_REWARD_BPS) / BPS;
-        uint256 usdcToDeploy = excess - reward;
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
@@ -710,14 +762,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
-        if (reward > 0) {
-            USDC.safeTransfer(msg.sender, reward);
-            emit DeployRewardPaid(msg.sender, reward);
-        }
-
         ICurveGauge gauge = curveGauge;
         if (address(gauge) != address(0)) {
-            try gauge.deposit(lpMinted) {} catch {}
+            gauge.deposit(lpMinted);
         }
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
@@ -730,8 +777,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @param maxLpToBurn Cap on LP tokens to burn (0 = no cap, burn entire deficit).
     function replenishBuffer(
         uint256 maxLpToBurn
-    ) external nonReentrant whenNotPaused {
-        uint256 assets = totalAssets();
+    ) external nonReentrant whenNotPaused returns (uint256 usdcRecovered) {
+        uint256 lpBalBefore = _lpBalance();
+        uint256 assets = _totalAssetsWithLpBal(lpBalBefore);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
         uint256 currentBuffer = USDC.balanceOf(address(this));
@@ -740,7 +788,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
-        uint256 lpBalBefore = _lpBalance();
         if (lpBalBefore == 0) {
             revert InvarCoin__NothingToDeploy();
         }
@@ -766,7 +813,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBalBefore);
         curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
 
-        uint256 usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
+        usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
 
         emit BufferReplenished(lpToBurn, usdcRecovered);
     }

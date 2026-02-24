@@ -2462,9 +2462,7 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         ic.deposit(18_000e6, alice, 0);
 
-        uint256 excess = 17_640e6;
-        uint256 reward = (excess * 10) / 10_000;
-        uint256 deploy = excess - reward;
+        uint256 deploy = 17_640e6;
         uint256 calcLp = deploy * 1e30 / curve.lp_price();
 
         vm.expectCall(address(curve), abi.encodeCall(curve.add_liquidity, ([deploy, uint256(0)], calcLp - 1)));
@@ -2606,6 +2604,89 @@ contract InvarCoinTest is Test {
         assertEq(usdc.balanceOf(address(ic)), 100e6);
         assertEq(ic.trackedLpBalance(), 3000e18);
         assertEq(ic.curveLpCostVp(), 4500e18);
+    }
+
+    // ==========================================
+    // VIEW FUNCTIONS
+    // ==========================================
+
+    function test_GetBufferMetrics_AfterDeposit() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        (uint256 currentBuffer, uint256 targetBuffer, uint256 deployable, uint256 replenishable) = ic.getBufferMetrics();
+
+        assertEq(currentBuffer, 20_000e6);
+        assertEq(targetBuffer, (ic.totalAssets() * 200) / 10_000);
+        assertGt(deployable, 0);
+        assertEq(replenishable, 0);
+    }
+
+    function test_GetBufferMetrics_AfterDeploy() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        (uint256 currentBuffer, uint256 targetBuffer, uint256 deployable, uint256 replenishable) = ic.getBufferMetrics();
+
+        assertEq(deployable, 0);
+        assertEq(replenishable, 0);
+        assertApproxEqRel(currentBuffer, targetBuffer, 0.05e18);
+    }
+
+    function test_GetBufferMetrics_NeedsReplenish() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), usdc.balanceOf(address(ic)) / 10);
+
+        (,, uint256 deployable, uint256 replenishable) = ic.getBufferMetrics();
+
+        assertEq(deployable, 0);
+        assertGt(replenishable, 0);
+    }
+
+    function test_GetHarvestableYield_NoYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        assertEq(ic.getHarvestableYield(), 0);
+    }
+
+    function test_GetHarvestableYield_WithYield() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(1.05e18);
+
+        assertGt(ic.getHarvestableYield(), 0);
+    }
+
+    function test_GetSpotDeviation_Normal() public {
+        assertEq(ic.getSpotDeviation(), 0);
+    }
+
+    function test_GetSpotDeviation_Manipulated() public {
+        curve.setSpotDiscountBps(100);
+
+        assertGt(ic.getSpotDeviation(), 0);
+    }
+
+    function test_ReplenishBuffer_ReturnsUsdcRecovered() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        deal(address(usdc), address(ic), usdc.balanceOf(address(ic)) / 10);
+
+        uint256 usdcBefore = usdc.balanceOf(address(ic));
+        uint256 recovered = ic.replenishBuffer(0);
+
+        assertEq(recovered, usdc.balanceOf(address(ic)) - usdcBefore);
+        assertGt(recovered, 0);
     }
 
 }
@@ -3290,24 +3371,6 @@ contract InvarCoinGaugeTest is Test {
         assertGt(shares, 0);
     }
 
-    function test_DeployToCurve_PaysKeeperReward() public {
-        vm.prank(alice);
-        ic.deposit(20_000e6, alice, 0);
-
-        address keeper = makeAddr("keeper");
-        uint256 keeperBefore = usdc.balanceOf(keeper);
-
-        uint256 assets = ic.totalAssets();
-        uint256 bufferTarget = (assets * 200) / 10_000;
-        uint256 excess = usdc.balanceOf(address(ic)) - bufferTarget;
-        uint256 expectedReward = (excess * 10) / 10_000;
-
-        vm.prank(keeper);
-        ic.deployToCurve(0);
-
-        assertEq(usdc.balanceOf(keeper) - keeperBefore, expectedReward);
-    }
-
     function test_DeployToCurve_AutoStakesToGauge() public {
         _setupGauge();
 
@@ -3327,7 +3390,7 @@ contract InvarCoinGaugeTest is Test {
         assertEq(curveLp.balanceOf(address(ic)), lpMinted);
     }
 
-    function test_DeployToCurve_AutoStakeFailureDoesNotBlock() public {
+    function test_DeployToCurve_RevertsIfGaugeBricked() public {
         MockBrickedGauge brickedGauge = new MockBrickedGauge(address(curveLp));
         ic.proposeGauge(address(brickedGauge));
         vm.warp(block.timestamp + 7 days);
@@ -3339,9 +3402,8 @@ contract InvarCoinGaugeTest is Test {
 
         brickedGauge.setBricked(true);
 
-        uint256 lpMinted = ic.deployToCurve(0);
-        assertGt(lpMinted, 0);
-        assertEq(curveLp.balanceOf(address(ic)), lpMinted);
+        vm.expectRevert("gauge bricked");
+        ic.deployToCurve(0);
     }
 
     // ==========================================
