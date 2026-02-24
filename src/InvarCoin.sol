@@ -959,6 +959,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         if (newGauge != address(0)) {
             CURVE_LP_TOKEN.approve(newGauge, type(uint256).max);
+            uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
+            if (lpBal > 0) {
+                ICurveGauge(newGauge).deposit(lpBal);
+            }
         }
 
         emit GaugeUpdated(address(oldGauge), newGauge);

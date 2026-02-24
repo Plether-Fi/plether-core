@@ -2806,7 +2806,7 @@ contract InvarCoinGaugeTest is Test {
         ic.finalizeGauge();
 
         assertEq(gauge.balanceOf(address(ic)), 0);
-        assertEq(curveLp.balanceOf(address(ic)), stakedInGauge);
+        assertEq(newGauge.balanceOf(address(ic)), stakedInGauge);
         assertEq(address(ic.curveGauge()), address(newGauge));
     }
 
@@ -2868,7 +2868,6 @@ contract InvarCoinGaugeTest is Test {
 
         _setupGauge();
 
-        ic.stakeToGauge(0);
         assertEq(gauge.balanceOf(address(ic)), lpBal);
         assertEq(curveLp.balanceOf(address(ic)), 0);
     }
@@ -2882,8 +2881,9 @@ contract InvarCoinGaugeTest is Test {
 
         _setupGauge();
 
+        ic.unstakeFromGauge(lpBal / 2);
         ic.stakeToGauge(lpBal / 2);
-        assertEq(gauge.balanceOf(address(ic)), lpBal / 2);
+        assertEq(gauge.balanceOf(address(ic)), lpBal);
     }
 
     function test_StakeToGauge_RevertsWithNoGauge() public {
@@ -2905,7 +2905,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         uint256 stakedBal = gauge.balanceOf(address(ic));
         assertGt(stakedBal, 0);
@@ -2960,7 +2959,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         assertGt(gauge.balanceOf(address(ic)), 0);
         assertEq(curveLp.balanceOf(address(ic)), 0);
@@ -2979,7 +2977,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -2995,7 +2992,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         deal(address(usdc), address(ic), 0);
 
@@ -3011,7 +3007,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         assertGt(gauge.balanceOf(address(ic)), 0);
 
@@ -3027,7 +3022,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -3068,6 +3062,8 @@ contract InvarCoinGaugeTest is Test {
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
 
+        ic.unstakeFromGauge(0);
+
         vm.expectEmit(true, true, true, true);
         emit InvarCoin.GaugeStaked(lpBal);
         ic.stakeToGauge(0);
@@ -3078,7 +3074,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
         _setupGauge();
-        ic.stakeToGauge(0);
 
         uint256 stakedBal = gauge.balanceOf(address(ic));
 
@@ -3142,7 +3137,6 @@ contract InvarCoinGaugeTest is Test {
         ic.deployToCurve(0);
 
         _setupGauge();
-        ic.stakeToGauge(0);
 
         vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
         ic.rescueToken(address(gauge), alice);
@@ -3228,7 +3222,6 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
-        ic.stakeToGauge(0);
 
         uint256 half = lpBal / 2;
         ic.unstakeFromGauge(half);
@@ -3249,7 +3242,7 @@ contract InvarCoinGaugeTest is Test {
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
 
-        ic.stakeToGauge(lpBal / 2);
+        ic.unstakeFromGauge(lpBal / 2);
 
         uint256 localLp = curveLp.balanceOf(address(ic));
         uint256 stakedLp = gauge.balanceOf(address(ic));
@@ -3268,7 +3261,6 @@ contract InvarCoinGaugeTest is Test {
         uint256 navBefore = ic.totalAssets();
 
         _setupGauge();
-        ic.stakeToGauge(0);
         uint256 navStaked = ic.totalAssets();
 
         ic.unstakeFromGauge(0);
@@ -3289,7 +3281,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
-        ic.stakeToGauge(lpBal / 2);
+        ic.unstakeFromGauge(lpBal / 2);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -3307,7 +3299,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
-        ic.stakeToGauge(lpBal / 4);
+        ic.unstakeFromGauge(lpBal * 3 / 4);
 
         uint256 gaugeBalBefore = gauge.balanceOf(address(ic));
 
@@ -3325,7 +3317,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 lpBal = curveLp.balanceOf(address(ic));
         _setupGauge();
-        ic.stakeToGauge(lpBal / 2);
+        ic.unstakeFromGauge(lpBal / 2);
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
@@ -3351,7 +3343,6 @@ contract InvarCoinGaugeTest is Test {
 
         ic.deployToCurve(0);
         _setupGauge();
-        ic.stakeToGauge(0);
 
         curve.setVirtualPrice(1.05e18);
 
@@ -3422,7 +3413,6 @@ contract InvarCoinGaugeTest is Test {
 
         ic.deployToCurve(0);
         _setupGauge();
-        ic.stakeToGauge(0);
 
         curve.setVirtualPrice(1.05e18);
         ic.harvest();
