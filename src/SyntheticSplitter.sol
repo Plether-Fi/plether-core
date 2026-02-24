@@ -111,6 +111,7 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
     error Splitter__CannotRescueCoreAsset();
     error Splitter__MigrationLostFunds();
     error Splitter__InvalidAdapter();
+    error Splitter__PermitFailed();
 
     // Structs for Views
     struct SystemStatus {
@@ -219,7 +220,15 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         bytes32 s
     ) external nonReentrant whenNotPaused {
         uint256 usdcNeeded = Math.mulDiv(amount, CAP, USDC_MULTIPLIER, Math.Rounding.Ceil);
-        IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcNeeded, deadline, v, r, s);
+        try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcNeeded, deadline, v, r, s) {}
+        catch {
+            if (block.timestamp > deadline) {
+                revert Splitter__PermitFailed();
+            }
+            if (USDC.allowance(msg.sender, address(this)) < usdcNeeded) {
+                revert Splitter__PermitFailed();
+            }
+        }
         _mintCore(amount);
     }
 
