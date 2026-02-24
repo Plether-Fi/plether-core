@@ -786,6 +786,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function replenishBuffer(
         uint256 maxLpToBurn
     ) external nonReentrant whenNotPaused returns (uint256 usdcRecovered) {
+        _harvestSafe();
         uint256 lpBalBefore = _lpBalance();
         uint256 assets = _totalAssetsWithLpBal(lpBalBefore);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
