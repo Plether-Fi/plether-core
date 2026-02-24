@@ -241,6 +241,35 @@ contract MockCurvePool {
 
 }
 
+contract MockCurveGauge {
+
+    IERC20 public lpToken;
+    mapping(address => uint256) public balanceOf;
+
+    constructor(
+        address _lpToken
+    ) {
+        lpToken = IERC20(_lpToken);
+    }
+
+    function deposit(
+        uint256 amount
+    ) external {
+        lpToken.transferFrom(msg.sender, address(this), amount);
+        balanceOf[msg.sender] += amount;
+    }
+
+    function withdraw(
+        uint256 amount
+    ) external {
+        balanceOf[msg.sender] -= amount;
+        lpToken.transfer(msg.sender, amount);
+    }
+
+    function claim_rewards() external {}
+
+}
+
 // ==========================================
 // TEST SUITE
 // ==========================================
@@ -2503,6 +2532,676 @@ contract InvarCoinTest is Test {
         assertEq(usdc.balanceOf(address(ic)), 100e6);
         assertEq(ic.trackedLpBalance(), 3000e18);
         assertEq(ic.curveLpCostVp(), 4500e18);
+    }
+
+}
+
+// ==========================================
+// GAUGE TEST SUITE
+// ==========================================
+
+contract InvarCoinGaugeTest is Test {
+
+    InvarCoin public ic;
+    StakedToken public sInvar;
+    MockUSDC6 public usdc;
+    MockBEAR public bearToken;
+    MockCurvePool public curve;
+    MockCurveLpToken public curveLp;
+    MockOracle public oracle;
+    MockCurveGauge public gauge;
+
+    address public alice = makeAddr("alice");
+
+    uint256 constant ORACLE_PRICE = 120_000_000;
+
+    function setUp() public {
+        vm.warp(100_000);
+
+        usdc = new MockUSDC6();
+        oracle = new MockOracle(int256(ORACLE_PRICE), "plDXY Basket");
+        bearToken = new MockBEAR();
+        curveLp = new MockCurveLpToken();
+        curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
+        curve.setPriceMultiplier(1.2e18);
+
+        ic = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+        );
+
+        sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
+        ic.setStakedInvarCoin(address(sInvar));
+
+        gauge = new MockCurveGauge(address(curveLp));
+
+        usdc.mint(alice, 1_000_000e6);
+        vm.prank(alice);
+        usdc.approve(address(ic), type(uint256).max);
+    }
+
+    function _setupGauge() internal {
+        ic.proposeGauge(address(gauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+    }
+
+    // ==========================================
+    // GAUGE GOVERNANCE
+    // ==========================================
+
+    function test_ProposeGauge_SetsTimelockParams() public {
+        ic.proposeGauge(address(gauge));
+
+        assertEq(ic.pendingGauge(), address(gauge));
+        assertEq(ic.gaugeActivationTime(), block.timestamp + 7 days);
+    }
+
+    function test_ProposeGauge_OnlyOwner() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.proposeGauge(address(gauge));
+    }
+
+    function test_ProposeGauge_RevertsIfSameAsCurrent() public {
+        _setupGauge();
+
+        vm.expectRevert(InvarCoin.InvarCoin__InvalidProposal.selector);
+        ic.proposeGauge(address(gauge));
+    }
+
+    function test_FinalizeGauge_RevertsBeforeTimelock() public {
+        ic.proposeGauge(address(gauge));
+
+        vm.expectRevert(InvarCoin.InvarCoin__GaugeTimelockActive.selector);
+        ic.finalizeGauge();
+    }
+
+    function test_FinalizeGauge_SetsGaugeAfterTimelock() public {
+        _setupGauge();
+
+        assertEq(address(ic.curveGauge()), address(gauge));
+        assertEq(ic.pendingGauge(), address(0));
+        assertEq(ic.gaugeActivationTime(), 0);
+    }
+
+    function test_FinalizeGauge_OnlyOwner() public {
+        ic.proposeGauge(address(gauge));
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.finalizeGauge();
+    }
+
+    function test_FinalizeGauge_UnstakesFromOldGauge() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+        ic.stakeToGauge(0);
+
+        uint256 stakedInGauge = gauge.balanceOf(address(ic));
+        assertGt(stakedInGauge, 0);
+
+        MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.proposeGauge(address(newGauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        assertEq(gauge.balanceOf(address(ic)), 0);
+        assertEq(curveLp.balanceOf(address(ic)), stakedInGauge);
+        assertEq(address(ic.curveGauge()), address(newGauge));
+    }
+
+    function test_FinalizeGauge_RemoveGauge() public {
+        _setupGauge();
+
+        ic.proposeGauge(address(0));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        assertEq(address(ic.curveGauge()), address(0));
+    }
+
+    function test_FinalizeGauge_RevertsWithNoPendingProposal() public {
+        vm.expectRevert(InvarCoin.InvarCoin__GaugeTimelockActive.selector);
+        ic.finalizeGauge();
+    }
+
+    // ==========================================
+    // STAKE / UNSTAKE
+    // ==========================================
+
+    function test_StakeToGauge_StakesAllWhenZero() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        assertGt(lpBal, 0);
+
+        _setupGauge();
+
+        ic.stakeToGauge(0);
+        assertEq(gauge.balanceOf(address(ic)), lpBal);
+        assertEq(curveLp.balanceOf(address(ic)), 0);
+    }
+
+    function test_StakeToGauge_StakesExactAmount() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+
+        _setupGauge();
+
+        ic.stakeToGauge(lpBal / 2);
+        assertEq(gauge.balanceOf(address(ic)), lpBal / 2);
+    }
+
+    function test_StakeToGauge_RevertsWithNoGauge() public {
+        vm.expectRevert(InvarCoin.InvarCoin__NoGauge.selector);
+        ic.stakeToGauge(0);
+    }
+
+    function test_StakeToGauge_OnlyOwner() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.stakeToGauge(0);
+    }
+
+    function test_UnstakeFromGauge_UnstakesAllWhenZero() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        uint256 stakedBal = gauge.balanceOf(address(ic));
+        assertGt(stakedBal, 0);
+
+        ic.unstakeFromGauge(0);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+        assertEq(curveLp.balanceOf(address(ic)), stakedBal);
+    }
+
+    function test_UnstakeFromGauge_RevertsWithNoGauge() public {
+        vm.expectRevert(InvarCoin.InvarCoin__NoGauge.selector);
+        ic.unstakeFromGauge(0);
+    }
+
+    function test_UnstakeFromGauge_OnlyOwner() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.unstakeFromGauge(0);
+    }
+
+    // ==========================================
+    // CLAIM REWARDS
+    // ==========================================
+
+    function test_ClaimGaugeRewards_Succeeds() public {
+        _setupGauge();
+        ic.claimGaugeRewards();
+    }
+
+    function test_ClaimGaugeRewards_RevertsWithNoGauge() public {
+        vm.expectRevert(InvarCoin.InvarCoin__NoGauge.selector);
+        ic.claimGaugeRewards();
+    }
+
+    function test_ClaimGaugeRewards_OnlyOwner() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.claimGaugeRewards();
+    }
+
+    // ==========================================
+    // JIT UNSTAKE ON WITHDRAWALS
+    // ==========================================
+
+    function test_Withdraw_JitUnstakesFromGauge() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        assertGt(gauge.balanceOf(address(ic)), 0);
+        assertEq(curveLp.balanceOf(address(ic)), 0);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+
+        assertGt(usdcOut, 0);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+    }
+
+    function test_LpWithdraw_JitUnstakesFromGauge() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+
+        assertGt(usdcOut, 0);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+    }
+
+    function test_ReplenishBuffer_JitUnstakesFromGauge() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        deal(address(usdc), address(ic), 0);
+
+        uint256 gaugeBefore = gauge.balanceOf(address(ic));
+        ic.replenishBuffer(0);
+
+        assertLt(gauge.balanceOf(address(ic)), gaugeBefore);
+    }
+
+    function test_EmergencyWithdraw_JitUnstakesFromGauge() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        assertGt(gauge.balanceOf(address(ic)), 0);
+
+        ic.emergencyWithdrawFromCurve();
+
+        assertEq(gauge.balanceOf(address(ic)), 0);
+        assertEq(curveLp.balanceOf(address(ic)), 0);
+    }
+
+    function test_PartialWithdraw_OnlyUnstakesNeeded() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        ic.withdraw(shares / 4, alice, 0);
+
+        assertGt(gauge.balanceOf(address(ic)), 0, "Remaining LP should stay staked");
+    }
+
+    // ==========================================
+    // BACKWARD COMPAT: NO GAUGE
+    // ==========================================
+
+    // ==========================================
+    // EVENTS
+    // ==========================================
+
+    function test_ProposeGauge_EmitsEvent() public {
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.GaugeProposed(address(gauge), block.timestamp + 7 days);
+        ic.proposeGauge(address(gauge));
+    }
+
+    function test_FinalizeGauge_EmitsEvent() public {
+        ic.proposeGauge(address(gauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.GaugeUpdated(address(0), address(gauge));
+        ic.finalizeGauge();
+    }
+
+    function test_StakeToGauge_EmitsEvent() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.GaugeStaked(lpBal);
+        ic.stakeToGauge(0);
+    }
+
+    function test_UnstakeFromGauge_EmitsEvent() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        uint256 stakedBal = gauge.balanceOf(address(ic));
+
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.GaugeUnstaked(stakedBal);
+        ic.unstakeFromGauge(0);
+    }
+
+    function test_ClaimGaugeRewards_EmitsEvent() public {
+        _setupGauge();
+
+        vm.expectEmit(true, true, true, true);
+        emit InvarCoin.GaugeRewardsClaimed();
+        ic.claimGaugeRewards();
+    }
+
+    // ==========================================
+    // PROPOSE GAUGE: OVERWRITE PENDING
+    // ==========================================
+
+    function test_ProposeGauge_OverwritesPendingProposal() public {
+        ic.proposeGauge(address(gauge));
+
+        MockCurveGauge gauge2 = new MockCurveGauge(address(curveLp));
+        ic.proposeGauge(address(gauge2));
+
+        assertEq(ic.pendingGauge(), address(gauge2));
+    }
+
+    function test_ProposeGauge_CanProposeZeroToRemove() public {
+        _setupGauge();
+
+        ic.proposeGauge(address(0));
+        assertEq(ic.pendingGauge(), address(0));
+        assertGt(ic.gaugeActivationTime(), block.timestamp);
+    }
+
+    // ==========================================
+    // FINALIZE GAUGE: EDGE CASES
+    // ==========================================
+
+    function test_FinalizeGauge_ExactTimelockBoundary() public {
+        ic.proposeGauge(address(gauge));
+        uint256 activationTime = ic.gaugeActivationTime();
+
+        vm.warp(activationTime - 1);
+        oracle.setUpdatedAt(block.timestamp);
+        vm.expectRevert(InvarCoin.InvarCoin__GaugeTimelockActive.selector);
+        ic.finalizeGauge();
+
+        vm.warp(activationTime);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+        assertEq(address(ic.curveGauge()), address(gauge));
+    }
+
+    function test_FinalizeGauge_NoStakedLpInOldGauge() public {
+        _setupGauge();
+
+        MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.proposeGauge(address(newGauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        assertEq(address(ic.curveGauge()), address(newGauge));
+    }
+
+    function test_FinalizeGauge_RevokesOldApproval() public {
+        _setupGauge();
+        address oldGaugeAddr = address(gauge);
+
+        ic.proposeGauge(address(0));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        assertEq(curveLp.allowance(address(ic), oldGaugeAddr), 0);
+    }
+
+    function test_FinalizeGauge_SetsMaxApprovalOnNew() public {
+        _setupGauge();
+        assertEq(curveLp.allowance(address(ic), address(gauge)), type(uint256).max);
+    }
+
+    // ==========================================
+    // UNSTAKE: EXACT AMOUNT
+    // ==========================================
+
+    function test_UnstakeFromGauge_ExactAmount() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        uint256 half = lpBal / 2;
+        ic.unstakeFromGauge(half);
+
+        assertEq(gauge.balanceOf(address(ic)), lpBal - half);
+        assertEq(curveLp.balanceOf(address(ic)), half);
+    }
+
+    // ==========================================
+    // _lpBalance: MIXED LOCAL + STAKED
+    // ==========================================
+
+    function test_TotalAssets_MixedLocalAndStakedLp() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+
+        ic.stakeToGauge(lpBal / 2);
+
+        uint256 localLp = curveLp.balanceOf(address(ic));
+        uint256 stakedLp = gauge.balanceOf(address(ic));
+        assertGt(localLp, 0);
+        assertGt(stakedLp, 0);
+
+        uint256 nav = ic.totalAssets();
+        assertApproxEqRel(nav, 20_000e6, 0.02e18);
+    }
+
+    function test_TotalAssets_PreservedAfterStakeUnstakeCycle() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 navBefore = ic.totalAssets();
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+        uint256 navStaked = ic.totalAssets();
+
+        ic.unstakeFromGauge(0);
+        uint256 navUnstaked = ic.totalAssets();
+
+        assertEq(navStaked, navBefore);
+        assertEq(navUnstaked, navBefore);
+    }
+
+    // ==========================================
+    // _ensureUnstakedLp: MIXED BALANCE
+    // ==========================================
+
+    function test_Withdraw_MixedLocalAndStakedLp() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+        ic.stakeToGauge(lpBal / 2);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+
+        assertApproxEqRel(usdcOut, 20_000e6, 0.02e18);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+        assertEq(curveLp.balanceOf(address(ic)), 0);
+    }
+
+    function test_Withdraw_LocalSufficientSkipsGauge() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+        ic.stakeToGauge(lpBal / 4);
+
+        uint256 gaugeBalBefore = gauge.balanceOf(address(ic));
+
+        uint256 shares = ic.balanceOf(alice) / 10;
+        vm.prank(alice);
+        ic.withdraw(shares, alice, 0);
+
+        assertEq(gauge.balanceOf(address(ic)), gaugeBalBefore, "Gauge untouched when local LP suffices");
+    }
+
+    function test_LpWithdraw_MixedLocalAndStakedLp() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 lpBal = curveLp.balanceOf(address(ic));
+        _setupGauge();
+        ic.stakeToGauge(lpBal / 2);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
+
+        assertGt(usdcOut, 0);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+    }
+
+    // ==========================================
+    // HARVEST WITH STAKED LP
+    // ==========================================
+
+    function test_Harvest_WorksWithGaugeStakedLp() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice);
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        curve.setVirtualPrice(1.05e18);
+
+        uint256 donated = ic.harvest();
+        assertGt(donated, 0);
+    }
+
+    // ==========================================
+    // DEPOSIT/DEPLOY WITH ACTIVE GAUGE
+    // ==========================================
+
+    function test_Deposit_WorksWithActiveGauge() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        uint256 shares = ic.deposit(20_000e6, alice, 0);
+        assertGt(shares, 0);
+    }
+
+    function test_DeployToCurve_LpStaysLocalWithActiveGauge() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        uint256 lpMinted = ic.deployToCurve(0);
+
+        assertEq(curveLp.balanceOf(address(ic)), lpMinted);
+        assertEq(gauge.balanceOf(address(ic)), 0);
+    }
+
+    // ==========================================
+    // FULL LIFECYCLE
+    // ==========================================
+
+    function test_FullCycle_DepositDeployStakeHarvestWithdraw() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        uint256 stakeAmount = ic.balanceOf(alice) / 2;
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), stakeAmount);
+        sInvar.deposit(stakeAmount, alice);
+        vm.stopPrank();
+
+        ic.deployToCurve(0);
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        curve.setVirtualPrice(1.05e18);
+        ic.harvest();
+
+        uint256 bal = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(bal, alice, 0);
+
+        assertGt(usdcOut, 0);
+        assertEq(ic.balanceOf(alice), 0);
+    }
+
+    // ==========================================
+    // BACKWARD COMPAT: NO GAUGE
+    // ==========================================
+
+    function test_NoGauge_WithdrawWorksNormally() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+
+        assertGt(usdcOut, 0);
+    }
+
+    function test_NoGauge_LpWithdrawWorksNormally() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 shares = ic.balanceOf(alice);
+        vm.prank(alice);
+        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
+
+        assertGt(usdcOut, 0);
     }
 
 }
