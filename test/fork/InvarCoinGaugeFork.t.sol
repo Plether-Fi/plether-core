@@ -296,11 +296,13 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         _proposeAndFinalizeGauge();
         ic.stakeToGauge(0);
 
+        uint256 gaugeBalBefore = gauge.balanceOf(address(ic));
+
         _depositAs(bob, 100_000e6);
         ic.deployToCurve(0);
 
-        assertGt(IERC20(curvePool).balanceOf(address(ic)), 0, "New LP minted locally");
-        assertGt(gauge.balanceOf(address(ic)), 0, "Old LP still in gauge");
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "LP should be auto-staked, not local");
+        assertGt(gauge.balanceOf(address(ic)), gaugeBalBefore, "New LP auto-staked to gauge");
         assertGt(ic.balanceOf(bob), 0, "Bob received shares");
     }
 

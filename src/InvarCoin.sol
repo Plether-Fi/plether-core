@@ -111,6 +111,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
+    uint256 public constant DEPLOY_REWARD_BPS = 10; // 0.1% keeper reward
     uint256 public constant MAX_SPOT_DEVIATION_BPS = 50; // 0.5% max spot-vs-EMA deviation
 
     uint256 public constant ORACLE_TIMEOUT = 24 hours;
@@ -162,6 +163,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event GaugeStaked(uint256 amount);
     event GaugeUnstaked(uint256 amount);
     event GaugeRewardsClaimed();
+    event DeployRewardPaid(address indexed keeper, uint256 reward);
 
     error InvarCoin__ZeroAmount();
     error InvarCoin__ZeroAddress();
@@ -690,10 +692,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
-        uint256 usdcToDeploy = localUsdc - bufferTarget;
-        if (maxUsdc > 0 && maxUsdc < usdcToDeploy) {
-            usdcToDeploy = maxUsdc;
+        uint256 excess = localUsdc - bufferTarget;
+        if (maxUsdc > 0 && maxUsdc < excess) {
+            excess = maxUsdc;
         }
+
+        uint256 reward = (excess * DEPLOY_REWARD_BPS) / BPS;
+        uint256 usdcToDeploy = excess - reward;
 
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
@@ -704,6 +709,16 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp > 0 ? calcLp - 1 : 0);
         trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
+
+        if (reward > 0) {
+            USDC.safeTransfer(msg.sender, reward);
+            emit DeployRewardPaid(msg.sender, reward);
+        }
+
+        ICurveGauge gauge = curveGauge;
+        if (address(gauge) != address(0)) {
+            try gauge.deposit(lpMinted) {} catch {}
+        }
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
