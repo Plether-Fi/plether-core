@@ -203,12 +203,13 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     function distributeRewardsWithPriceUpdate(
         bytes[] calldata pythUpdateData
     ) external payable nonReentrant returns (uint256 callerReward) {
+        uint256 preBalance = address(this).balance - msg.value;
         if (address(PYTH_ADAPTER) != address(0) && pythUpdateData.length > 0) {
             PYTH_ADAPTER.updatePrice{value: msg.value}(pythUpdateData);
         }
-        uint256 ethBalance = address(this).balance;
-        if (ethBalance > 0) {
-            (bool ok,) = msg.sender.call{value: ethBalance}("");
+        uint256 refund = address(this).balance - preBalance;
+        if (refund > 0) {
+            (bool ok,) = msg.sender.call{value: refund}("");
             if (!ok) {
                 revert RewardDistributor__RefundFailed();
             }
