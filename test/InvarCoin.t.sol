@@ -2914,6 +2914,22 @@ contract InvarCoinGaugeTest is Test {
     }
 
     // ==========================================
+    // RESCUE TOKEN: GAUGE BLACKLIST
+    // ==========================================
+
+    function test_RescueToken_CannotRescueGaugeToken() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        _setupGauge();
+        ic.stakeToGauge(0);
+
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.rescueToken(address(gauge), alice);
+    }
+
+    // ==========================================
     // PROPOSE GAUGE: OVERWRITE PENDING
     // ==========================================
 

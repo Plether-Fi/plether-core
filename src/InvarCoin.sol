@@ -820,7 +820,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address token,
         address to
     ) external onlyOwner {
-        if (token == address(USDC) || token == address(BEAR) || token == address(CURVE_LP_TOKEN)) {
+        if (
+            token == address(USDC) || token == address(BEAR) || token == address(CURVE_LP_TOKEN)
+                || token == address(curveGauge)
+        ) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
         uint256 balance = IERC20(token).balanceOf(address(this));
