@@ -491,8 +491,8 @@ contract LeverageRouter is LeverageRouterBase {
             revert LeverageRouterBase__InsufficientOutput();
         }
 
-        // 6. Send remaining USDC to user
-        uint256 usdcToReturn = usdcReceived - loanAmount;
+        // 6. Send remaining USDC to user (use balance - loanAmount to capture repay buffer dust)
+        uint256 usdcToReturn = USDC.balanceOf(address(this)) - loanAmount;
         if (usdcToReturn < minAmountOut) {
             revert LeverageRouterBase__BelowMinAmountOut();
         }
