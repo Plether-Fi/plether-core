@@ -428,8 +428,9 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
             recovered = yieldAdapter.redeem(shares, address(this), address(this));
         }
 
-        // Auto-pause to prevent new deposits into broken adapter
-        _pause();
+        if (!paused()) {
+            _pause();
+        }
 
         emit EmergencyEjected(recovered);
     }
