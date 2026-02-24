@@ -853,6 +853,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Finalize a pending gauge change after the timelock expires.
+    /// @dev This MUST revert if oldGauge.withdraw() fails. Do NOT wrap in try/catch:
+    ///      silent failure would update curveGauge to newGauge while LP stays locked in
+    ///      oldGauge, causing _lpBalance() to forget the stuck LP and collapsing totalAssets().
+    ///      If the old gauge is permanently bricked, use setEmergencyMode() instead.
     function finalizeGauge() external onlyOwner {
         if (gaugeActivationTime == 0 || block.timestamp < gaugeActivationTime) {
             revert InvarCoin__GaugeTimelockActive();

@@ -270,6 +270,43 @@ contract MockCurveGauge {
 
 }
 
+contract MockBrickedGauge {
+
+    IERC20 public lpToken;
+    mapping(address => uint256) public balanceOf;
+    bool public bricked;
+
+    constructor(
+        address _lpToken
+    ) {
+        lpToken = IERC20(_lpToken);
+    }
+
+    function deposit(
+        uint256 amount
+    ) external {
+        lpToken.transferFrom(msg.sender, address(this), amount);
+        balanceOf[msg.sender] += amount;
+    }
+
+    function withdraw(
+        uint256 amount
+    ) external {
+        require(!bricked, "gauge bricked");
+        balanceOf[msg.sender] -= amount;
+        lpToken.transfer(msg.sender, amount);
+    }
+
+    function setBricked(
+        bool _bricked
+    ) external {
+        bricked = _bricked;
+    }
+
+    function claim_rewards() external {}
+
+}
+
 // ==========================================
 // TEST SUITE
 // ==========================================
@@ -2670,6 +2707,35 @@ contract InvarCoinGaugeTest is Test {
     function test_FinalizeGauge_RevertsWithNoPendingProposal() public {
         vm.expectRevert(InvarCoin.InvarCoin__GaugeTimelockActive.selector);
         ic.finalizeGauge();
+    }
+
+    function test_FinalizeGauge_RevertsIfOldGaugeBricked() public {
+        MockBrickedGauge brickedGauge = new MockBrickedGauge(address(curveLp));
+
+        ic.proposeGauge(address(brickedGauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+        ic.stakeToGauge(0);
+
+        uint256 totalAssetsBefore = ic.totalAssets();
+
+        brickedGauge.setBricked(true);
+
+        MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.proposeGauge(address(newGauge));
+        vm.warp(block.timestamp + 14 days);
+        oracle.setUpdatedAt(block.timestamp);
+
+        vm.expectRevert("gauge bricked");
+        ic.finalizeGauge();
+
+        assertEq(ic.totalAssets(), totalAssetsBefore, "NAV must not change");
+        assertEq(address(ic.curveGauge()), address(brickedGauge), "Gauge must not change");
     }
 
     // ==========================================
