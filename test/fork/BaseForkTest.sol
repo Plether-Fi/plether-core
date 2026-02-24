@@ -39,6 +39,10 @@ interface ICurveCryptoFactory {
         uint256 initial_price
     ) external returns (address);
 
+    function deploy_gauge(
+        address pool
+    ) external returns (address);
+
 }
 
 interface ICurvePoolExtended {
