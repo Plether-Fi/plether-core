@@ -626,6 +626,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
+        ICurveGauge gauge = curveGauge;
+        if (address(gauge) != address(0)) {
+            gauge.deposit(lpMinted);
+        }
+
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
 
         if (glUsdMinted < minSharesOut) {
