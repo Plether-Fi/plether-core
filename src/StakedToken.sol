@@ -30,6 +30,8 @@ contract StakedToken is ERC4626 {
     /// @notice Emitted when yield is donated and streaming begins/extends.
     event YieldDonated(address indexed donor, uint256 amount, uint256 newStreamEndTime);
 
+    error StakedToken__PermitFailed();
+
     /// @notice Creates a new staking vault for a synthetic token.
     /// @param _asset The underlying plDXY token to stake (plDXY-BEAR or plDXY-BULL).
     /// @param _name Vault share name (e.g., "Staked plDXY-BEAR").
@@ -92,7 +94,15 @@ contract StakedToken is ERC4626 {
         bytes32 r,
         bytes32 s
     ) external returns (uint256 shares) {
-        IERC20Permit(asset()).permit(msg.sender, address(this), assets, deadline, v, r, s);
+        try IERC20Permit(asset()).permit(msg.sender, address(this), assets, deadline, v, r, s) {}
+        catch {
+            if (block.timestamp > deadline) {
+                revert StakedToken__PermitFailed();
+            }
+            if (IERC20(asset()).allowance(msg.sender, address(this)) < assets) {
+                revert StakedToken__PermitFailed();
+            }
+        }
         return deposit(assets, receiver);
     }
 
