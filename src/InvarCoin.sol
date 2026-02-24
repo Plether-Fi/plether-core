@@ -850,6 +850,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
         emergencyActive = false;
 
+        ICurveGauge gauge = curveGauge;
+        if (address(gauge) != address(0)) {
+            gauge.deposit(lpMinted);
+        }
+
         emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
     }
 
