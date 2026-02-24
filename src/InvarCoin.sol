@@ -295,12 +295,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp > lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev Total LP held: local + gauge-staked. Used by withdrawal paths so staked LP is visible.
+    /// @dev Total LP held: local + gauge-staked. Degrades gracefully if gauge is bricked.
     function _lpBalance() private view returns (uint256) {
         uint256 bal = CURVE_LP_TOKEN.balanceOf(address(this));
         ICurveGauge gauge = curveGauge;
         if (address(gauge) != address(0)) {
-            bal += gauge.balanceOf(address(this));
+            try gauge.balanceOf(address(this)) returns (uint256 gaugeBal) {
+                bal += gaugeBal;
+            } catch {}
         }
         return bal;
     }
@@ -891,6 +893,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (amount == 0) {
             amount = CURVE_LP_TOKEN.balanceOf(address(this));
         }
+        if (amount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
         gauge.deposit(amount);
         emit GaugeStaked(amount);
     }
@@ -906,6 +911,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
         if (amount == 0) {
             amount = gauge.balanceOf(address(this));
+        }
+        if (amount == 0) {
+            revert InvarCoin__ZeroAmount();
         }
         gauge.withdraw(amount);
         emit GaugeUnstaked(amount);
