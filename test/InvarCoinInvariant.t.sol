@@ -337,7 +337,9 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
 
         curve.setPriceMultiplier(1.2e18);
 
-        ic = new InvarCoin(address(usdc), address(bear), address(curveLp), address(curve), address(oracle), address(0));
+        ic = new InvarCoin(
+            address(usdc), address(bear), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
         ic.setStakedInvarCoin(address(sInvar));

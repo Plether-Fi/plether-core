@@ -270,6 +270,20 @@ contract MockCurveGauge {
 
 }
 
+contract MockCrvMinter {
+
+    address public lastGauge;
+    uint256 public mintCallCount;
+
+    function mint(
+        address gauge
+    ) external {
+        lastGauge = gauge;
+        mintCallCount++;
+    }
+
+}
+
 contract MockBrickedGauge {
 
     IERC20 public lpToken;
@@ -340,7 +354,7 @@ contract InvarCoinTest is Test {
         curve.setPriceMultiplier(1.2e18);
 
         ic = new InvarCoin(
-            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
@@ -1201,7 +1215,7 @@ contract InvarCoinTest is Test {
 
     function test_SetStakedInvarCoin_RevertsOnZeroAddress() public {
         InvarCoin fresh = new InvarCoin(
-            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
         fresh.setStakedInvarCoin(address(0));
@@ -1417,7 +1431,9 @@ contract InvarCoinTest is Test {
 
     function test_Constructor_RevertsOnZeroAddress() public {
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
-        new InvarCoin(address(0), address(bearToken), address(curveLp), address(curve), address(oracle), address(0));
+        new InvarCoin(
+            address(0), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
     }
 
     // ==========================================
@@ -2375,7 +2391,7 @@ contract InvarCoinTest is Test {
 
     function test_Deposit_SucceedsWithoutStakedInvarCoin() public {
         InvarCoin freshIc = new InvarCoin(
-            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
 
         vm.prank(alice);
@@ -2603,7 +2619,7 @@ contract InvarCoinGaugeTest is Test {
         curve.setPriceMultiplier(1.2e18);
 
         ic = new InvarCoin(
-            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
@@ -2980,6 +2996,43 @@ contract InvarCoinGaugeTest is Test {
     }
 
     // ==========================================
+    // CRV MINTER (L1 vs L2)
+    // ==========================================
+
+    function test_ClaimGaugeRewards_CallsMinterOnL1() public {
+        MockCrvMinter minter = new MockCrvMinter();
+
+        InvarCoin icL1 = new InvarCoin(
+            address(usdc),
+            address(bearToken),
+            address(curveLp),
+            address(curve),
+            address(oracle),
+            address(0),
+            address(minter)
+        );
+        StakedToken sL1 = new StakedToken(IERC20(address(icL1)), "sINVAR-L1", "sINVAR-L1");
+        icL1.setStakedInvarCoin(address(sL1));
+
+        icL1.proposeGauge(address(gauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        icL1.finalizeGauge();
+
+        icL1.claimGaugeRewards();
+
+        assertEq(minter.mintCallCount(), 1, "Minter.mint should be called once");
+        assertEq(minter.lastGauge(), address(gauge), "Minter.mint should target the gauge");
+    }
+
+    function test_ClaimGaugeRewards_SkipsMinterOnL2() public {
+        assertEq(address(ic.CRV_MINTER()), address(0), "L2 minter should be zero");
+
+        _setupGauge();
+        ic.claimGaugeRewards();
+    }
+
+    // ==========================================
     // RESCUE TOKEN: GAUGE BLACKLIST
     // ==========================================
 
@@ -3334,7 +3387,7 @@ contract InvarCoinPermitTest is Test {
         curve.setPriceMultiplier(1.2e18);
 
         ic = new InvarCoin(
-            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0)
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");

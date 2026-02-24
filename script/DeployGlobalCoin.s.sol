@@ -23,6 +23,7 @@ contract DeployInvarCoin is Script {
     address constant CURVE_POOL = 0x95D51D6F312DbE66BACC2ed677aD64790f48aa87;
     address constant BASKET_ORACLE = 0x4f798422388484F2139717A8cE0115De3B06b1DF;
     address constant SEQUENCER_UPTIME_FEED = address(0); // L1: no sequencer feed
+    address constant CRV_MINTER = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0; // L1 Curve Minter
 
     function run() external {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
@@ -35,7 +36,9 @@ contract DeployInvarCoin is Script {
 
         vm.startBroadcast(privateKey);
 
-        InvarCoin ic = new InvarCoin(USDC, PLDXY_BEAR, CURVE_LP_TOKEN, CURVE_POOL, BASKET_ORACLE, SEQUENCER_UPTIME_FEED);
+        InvarCoin ic = new InvarCoin(
+            USDC, PLDXY_BEAR, CURVE_LP_TOKEN, CURVE_POOL, BASKET_ORACLE, SEQUENCER_UPTIME_FEED, CRV_MINTER
+        );
 
         StakedToken sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
 

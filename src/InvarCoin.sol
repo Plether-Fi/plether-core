@@ -59,6 +59,14 @@ interface ICurveGauge {
 
 }
 
+interface ICurveMinter {
+
+    function mint(
+        address gauge
+    ) external;
+
+}
+
 /// @title InvarCoin (INVAR)
 /// @custom:security-contact contact@plether.com
 /// @notice Global purchasing power token backed 50/50 by USDC + plDXY-BEAR via Curve LP.
@@ -98,6 +106,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     AggregatorV3Interface public immutable BASKET_ORACLE;
     /// @notice L2 sequencer uptime feed for staleness protection (address(0) on L1).
     AggregatorV3Interface public immutable SEQUENCER_UPTIME_FEED;
+    /// @notice Curve Minter for CRV emissions on L1 (address(0) on L2 where claim_rewards handles CRV).
+    ICurveMinter public immutable CRV_MINTER;
 
     uint256 public constant BUFFER_TARGET_BPS = 200; // 2% target buffer
     uint256 public constant DEPLOY_THRESHOLD = 1000e6; // Min $1000 to deploy
@@ -174,13 +184,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @param _curvePool Curve twocrypto-ng pool address.
     /// @param _oracle BasketOracle address (Chainlink AggregatorV3Interface).
     /// @param _sequencerUptimeFeed L2 sequencer uptime feed (address(0) on L1).
+    /// @param _crvMinter Curve Minter for CRV emissions (address(0) on L2).
     constructor(
         address _usdc,
         address _bear,
         address _curveLpToken,
         address _curvePool,
         address _oracle,
-        address _sequencerUptimeFeed
+        address _sequencerUptimeFeed,
+        address _crvMinter
     ) ERC20("InvarCoin", "INVAR") ERC20Permit("InvarCoin") Ownable(msg.sender) {
         if (
             _usdc == address(0) || _bear == address(0) || _curveLpToken == address(0) || _curvePool == address(0)
@@ -195,6 +207,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         CURVE_POOL = ICurveTwocrypto(_curvePool);
         BASKET_ORACLE = AggregatorV3Interface(_oracle);
         SEQUENCER_UPTIME_FEED = AggregatorV3Interface(_sequencerUptimeFeed);
+        CRV_MINTER = ICurveMinter(_crvMinter);
 
         USDC.safeIncreaseAllowance(_curvePool, type(uint256).max);
         BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
@@ -923,10 +936,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Claim CRV + extra rewards from the gauge. Use rescueToken() to sweep reward tokens.
+    /// @dev On L1, CRV is minted via the Curve Minter (not claim_rewards). On L2, claim_rewards handles CRV.
     function claimGaugeRewards() external onlyOwner {
         ICurveGauge gauge = curveGauge;
         if (address(gauge) == address(0)) {
             revert InvarCoin__NoGauge();
+        }
+        if (address(CRV_MINTER) != address(0)) {
+            CRV_MINTER.mint(address(gauge));
         }
         gauge.claim_rewards();
         emit GaugeRewardsClaimed();

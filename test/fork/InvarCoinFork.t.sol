@@ -38,7 +38,7 @@ contract InvarCoinForkTest is BaseForkTest {
         _mintInitialTokens(10_000_000e18);
         _deployCurvePool(10_000_000e18);
 
-        ic = new InvarCoin(USDC, bearToken, curvePool, curvePool, address(basketOracle), address(0));
+        ic = new InvarCoin(USDC, bearToken, curvePool, curvePool, address(basketOracle), address(0), address(0));
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
         ic.setStakedInvarCoin(address(sInvar));
