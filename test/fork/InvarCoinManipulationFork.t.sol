@@ -299,13 +299,13 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
     // TEST 9: lpDeposit manipulation - pessimistic pricing protects
     // ==========================================
 
-    function test_LpDeposit_Manipulation_PessimisticPricingProtects() public {
+    function test_LpDeposit_Manipulation_RevertsOnSpotPremium() public {
         deal(USDC, alice, 500_000e6);
         deal(bearToken, alice, 500_000e18);
         vm.startPrank(alice);
         IERC20(USDC).approve(address(ic), type(uint256).max);
         IERC20(bearToken).approve(address(ic), type(uint256).max);
-        uint256 aliceShares = ic.lpDeposit(500_000e6, 500_000e18, alice, 0);
+        ic.lpDeposit(500_000e6, 500_000e18, alice, 0);
         vm.stopPrank();
 
         _dumpBear(5_000_000e18);
@@ -315,18 +315,9 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         vm.startPrank(bob);
         IERC20(USDC).approve(address(ic), type(uint256).max);
         IERC20(bearToken).approve(address(ic), type(uint256).max);
-        uint256 bobShares = ic.lpDeposit(500_000e6, 500_000e18, bob, 0);
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.lpDeposit(500_000e6, 500_000e18, bob, 0);
         vm.stopPrank();
-
-        uint256 advantage = ((bobShares - aliceShares) * 10_000) / aliceShares;
-        emit log_named_uint("Bob share advantage (bps)", advantage);
-
-        // Pessimistic pricing limits LP minting efficiency advantage to <10%
-        assertLe(
-            bobShares,
-            (aliceShares * 110) / 100,
-            "Manipulated lpDeposit should not yield >10% more shares than honest deposit"
-        );
     }
 
     // ==========================================

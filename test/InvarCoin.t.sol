@@ -77,6 +77,7 @@ contract MockCurvePool {
     uint256 public priceMultiplier = 1e18;
     uint256 public swapFeeBps;
     uint256 public spotDiscountBps;
+    uint256 public spotPremiumBps;
 
     constructor(
         address _usdc,
@@ -98,6 +99,12 @@ contract MockCurvePool {
         uint256 _discountBps
     ) external {
         spotDiscountBps = _discountBps;
+    }
+
+    function setSpotPremiumBps(
+        uint256 _premiumBps
+    ) external {
+        spotPremiumBps = _premiumBps;
     }
 
     function setBearBalance(
@@ -201,6 +208,9 @@ contract MockCurvePool {
         uint256 lp = totalUsdc * 1e30 / _lpPrice();
         if (spotDiscountBps > 0) {
             lp = lp * (10_000 - spotDiscountBps) / 10_000;
+        }
+        if (spotPremiumBps > 0) {
+            lp = lp * (10_000 + spotPremiumBps) / 10_000;
         }
         return lp;
     }
@@ -2277,6 +2287,19 @@ contract InvarCoinTest is Test {
         ic.lpDeposit(10_000e6, 0, alice, 0);
 
         curve.setSpotDiscountBps(0);
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+
+        vm.stopPrank();
+    }
+
+    function test_LpDeposit_SpotPremiumReverts() public {
+        vm.startPrank(alice);
+
+        curve.setSpotPremiumBps(51);
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.lpDeposit(10_000e6, 0, alice, 0);
+
+        curve.setSpotPremiumBps(0);
         ic.lpDeposit(10_000e6, 0, alice, 0);
 
         vm.stopPrank();
