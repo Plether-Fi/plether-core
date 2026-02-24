@@ -495,6 +495,10 @@ contract SyntheticSplitter is ISyntheticSplitter, Ownable2Step, Pausable, Reentr
         }
 
         uint256 excess = localBalance - targetBuffer;
+        uint256 maxDep = yieldAdapter.maxDeposit(address(this));
+        if (excess > maxDep) {
+            excess = maxDep;
+        }
         if (excess < MIN_DEPLOY_AMOUNT) {
             return;
         }
