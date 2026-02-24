@@ -172,9 +172,10 @@ If migration fails the loss check, it reverts with `Splitter__MigrationLostFunds
 - **Mechanism**: BasketOracle compares the theoretical plDXY-BEAR price (derived from Chainlink feeds) against Curve's internal EMA oracle (`price_oracle()`)
 - **Threshold**: Maximum 2% deviation (configurable via `MAX_DEVIATION_BPS` at deployment)
 - **Behavior**: If deviation exceeds threshold, `latestRoundData()` reverts with `BasketOracle__PriceDeviation(theoretical, spot)`
-- **Affected Operations**: Minting, liquidation trigger, and leverage operations (via Morpho oracle). Burns are NOT affected—users can always exit.
+- **Affected Operations**: Minting, liquidation trigger, leverage operations, and **Morpho liquidations** (via MorphoOracle → StakedOracle). Burns are NOT affected—users can always exit.
 - **Rationale**: Detects oracle manipulation (Chainlink compromise) or market manipulation (Curve pool attack). Also catches stale oracle data if Chainlink stops updating but Curve continues trading.
 - **User Impact**: Minting and leverage operations temporarily halt until prices converge. This is a protective circuit breaker.
+- **Morpho Liquidation Impact (Acknowledged)**: Because MorphoOracle and StakedOracle depend on BasketOracle's `latestRoundData()`, a deviation revert also freezes Morpho liquidations. This is intentional: large divergence between Chainlink and Curve EMA signals either a compromised feed or a manipulated pool, and freezing all price-dependent operations (including liquidations) is safer than acting on potentially bad data. Undercollateralized Morpho positions cannot be liquidated during this window, but the freeze is temporary—prices typically converge within minutes as arbitrageurs trade the discrepancy.
 - **Recovery**: Prices typically converge within minutes as arbitrageurs trade the discrepancy. No admin intervention required.
 - **Note**: Uses Curve's `price_oracle()` (time-weighted EMA) rather than `get_dy()` (instantaneous spot) to resist flash loan manipulation
 
@@ -550,6 +551,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-02-24 | Acknowledged BasketOracle deviation check freezing Morpho liquidations as intentional circuit breaker |
 | 2026-02-13 | Added Cantina audit results (8 findings: 0 critical, 0 high, 2 medium, 5 low, 1 informational; 7 fixed, 1 acknowledged); added coverage gaps table |
 | 2026-02-11 | Added VaultAdapter.claimRewards() security model, EIP-2612 permit support documentation, deployToAdapter()/distributeRewards() as permissionless operations; clarified Chainlink+Pyth dependency |
 | 2026-02-11 | Replaced MorphoAdapter with VaultAdapter (Morpho Vault) for yield; updated trust assumptions, rescue docs, and liquidity risk sections |

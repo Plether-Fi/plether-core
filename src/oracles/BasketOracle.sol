@@ -211,6 +211,11 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     }
 
     /// @dev Validates basket price against Curve spot. Reverts on excessive deviation.
+    ///      Intentionally acts as a global circuit breaker: if Chainlink and Curve EMA diverge
+    ///      beyond MAX_DEVIATION_BPS, all consumers (SyntheticSplitter, MorphoOracle, StakedOracle)
+    ///      are frozen — including Morpho liquidations. This is the desired behavior: large divergence
+    ///      signals either a compromised feed or a manipulated pool, and freezing is safer than
+    ///      acting on potentially bad price data.
     /// @param theoreticalDxy8Dec Computed basket price (8 decimals).
     function _checkDeviation(
         uint256 theoreticalDxy8Dec
