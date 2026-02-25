@@ -189,7 +189,14 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         callerReward = (usdcBalance * CALLER_REWARD_BPS) / 10_000;
         uint256 distributableUsdc = usdcBalance - callerReward;
 
-        (uint256 bearPct, uint256 bullPct) = _calculateSplit();
+        (, int256 rawPrice,, uint256 updatedAt,) = ORACLE.latestRoundData();
+        OracleLib.checkStaleness(updatedAt, ORACLE_TIMEOUT);
+        if (rawPrice <= 0) {
+            revert RewardDistributor__InvalidPrice();
+        }
+        uint256 absBasketPrice = uint256(rawPrice);
+
+        (uint256 bearPct, uint256 bullPct) = _calculateSplit(absBasketPrice);
 
         uint256 bearUsdc;
         uint256 bullUsdc;
@@ -202,7 +209,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         }
 
         uint256 invarUsdcAmount;
-        (uint256 stakedBearUsdc, uint256 invarUsdc) = _splitBearAllocation(bearUsdc);
+        (uint256 stakedBearUsdc, uint256 invarUsdc) = _splitBearAllocation(bearUsdc, absBasketPrice);
         if (invarUsdc > 0) {
             try INVAR_COIN.donateUsdc(invarUsdc) {
                 invarUsdcAmount = invarUsdc;
@@ -211,7 +218,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             }
         }
 
-        (uint256 bearAmount, uint256 bullAmount) = _acquireTokens(stakedBearUsdc, bullUsdc);
+        (uint256 bearAmount, uint256 bullAmount) = _acquireTokens(stakedBearUsdc, bullUsdc, absBasketPrice);
 
         if (bearAmount > 0) {
             STAKED_BEAR.donateYield(bearAmount);
@@ -256,16 +263,22 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     {
         usdcBalance = USDC.balanceOf(address(this));
         callerReward = (usdcBalance * CALLER_REWARD_BPS) / 10_000;
-        (bearPct, bullPct) = _calculateSplit();
+        (, int256 rawPrice,, uint256 updatedAt,) = ORACLE.latestRoundData();
+        OracleLib.checkStaleness(updatedAt, ORACLE_TIMEOUT);
+        if (rawPrice <= 0) {
+            revert RewardDistributor__InvalidPrice();
+        }
+        (bearPct, bullPct) = _calculateSplit(uint256(rawPrice));
     }
 
     /// @dev Calculates reward split based on price discrepancy.
+    /// @param absBasketPrice Validated basket price (8 decimals, positive).
     /// @return bearPct Percentage for BEAR stakers (basis points).
     /// @return bullPct Percentage for BULL stakers (basis points).
-    function _calculateSplit() internal view returns (uint256 bearPct, uint256 bullPct) {
-        (, int256 basketPrice,, uint256 updatedAt,) = ORACLE.latestRoundData();
-        OracleLib.checkStaleness(updatedAt, ORACLE_TIMEOUT);
-        uint256 theoreticalBear18 = uint256(basketPrice) * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+    function _calculateSplit(
+        uint256 absBasketPrice
+    ) internal view returns (uint256 bearPct, uint256 bullPct) {
+        uint256 theoreticalBear18 = absBasketPrice * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         uint256 spotBear18 = CURVE_POOL.price_oracle();
 
@@ -297,15 +310,14 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @dev Acquires tokens using optimal combination of minting and swapping/zapping.
     /// @param bearUsdc USDC allocated to BEAR acquisition.
     /// @param bullUsdc USDC allocated to BULL acquisition.
+    /// @param absBasketPrice Validated basket price (8 decimals, positive).
     /// @return bearAmount Amount of plDXY-BEAR acquired.
     /// @return bullAmount Amount of plDXY-BULL acquired.
     function _acquireTokens(
         uint256 bearUsdc,
-        uint256 bullUsdc
+        uint256 bullUsdc,
+        uint256 absBasketPrice
     ) internal returns (uint256 bearAmount, uint256 bullAmount) {
-        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
-        uint256 absBasketPrice = uint256(basketPrice);
-
         uint256 mintUsdc = 2 * (bearUsdc < bullUsdc ? bearUsdc : bullUsdc);
 
         if (bearUsdc >= bullUsdc) {
@@ -353,8 +365,11 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     }
 
     /// @dev Splits BEAR-side USDC allocation between StakedBear and InvarCoin proportional to BEAR exposure.
+    /// @param bearUsdc Total USDC allocated to the BEAR side.
+    /// @param absBasketPrice Validated basket price (8 decimals, positive).
     function _splitBearAllocation(
-        uint256 bearUsdc
+        uint256 bearUsdc,
+        uint256 absBasketPrice
     ) internal view returns (uint256 stakedUsdc, uint256 invarUsdc) {
         if (address(INVAR_COIN) == address(0)) {
             return (bearUsdc, 0);
@@ -367,9 +382,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             return (bearUsdc, 0);
         }
 
-        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
         uint256 stakedBearAssets = STAKED_BEAR.totalAssets();
-        uint256 invarBearExposure = (invarAssets * 1e20) / (2 * uint256(basketPrice));
+        uint256 invarBearExposure = (invarAssets * 1e20) / (2 * absBasketPrice);
 
         uint256 total = stakedBearAssets + invarBearExposure;
         if (total == 0) {

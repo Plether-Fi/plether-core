@@ -31,6 +31,9 @@ interface IRewardDistributor {
     /// @notice Thrown when ETH refund to caller fails.
     error RewardDistributor__RefundFailed();
 
+    /// @notice Thrown when oracle returns zero or negative price.
+    error RewardDistributor__InvalidPrice();
+
     /// @notice Permissionless function to distribute accumulated USDC rewards.
     /// @dev Calculates price discrepancy, acquires tokens, and donates to vaults.
     /// @return callerReward Amount of USDC sent to caller as incentive.

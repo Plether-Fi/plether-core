@@ -462,9 +462,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return deposit(usdcAmount, receiver, minSharesOut);
     }
 
-    /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn + BEAR swap.
-    /// @dev Burns the user's pro-rata share of local USDC, Curve LP (single-sided to USDC),
-    ///      and any raw BEAR balance (swapped to USDC via Curve).
+    /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
+    /// @dev Burns the user's pro-rata share of local USDC and Curve LP (single-sided to USDC).
+    ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
     ///      Blocked during emergencyActive since single-sided LP exit may be unavailable.
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param receiver Address that receives the withdrawn USDC.
@@ -752,8 +752,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__StakingNotSet();
         }
 
+        _harvest();
+
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+
         uint256 supply = totalSupply();
-        uint256 assetsBefore = totalAssets();
+        uint256 assetsBefore = _totalAssetsOptimistic(oraclePrice);
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
 
