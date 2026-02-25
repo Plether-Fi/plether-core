@@ -206,10 +206,8 @@ contract LeverageRouter is LeverageRouterBase {
         // Calculate minimum USDC output based on REAL MARKET PRICE
         // Convert staked shares to underlying BEAR amount (shares have 1000x offset)
         uint256 plDxyBearAmount = STAKED_PLDXY_BEAR.previewRedeem(collateralToWithdraw);
-        // Apply exchange rate buffer (conservative estimate for drift protection)
-        uint256 bufferedDxyBearAmount = (plDxyBearAmount * (10_000 - EXCHANGE_RATE_BUFFER_BPS)) / 10_000;
         // Use get_dy to find real market expectation
-        uint256 expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, bufferedDxyBearAmount);
+        uint256 expectedUSDC = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, plDxyBearAmount);
         uint256 minUsdcOut = (expectedUSDC * (10_000 - maxSlippageBps)) / 10_000;
 
         if (debtToRepay > 0) {
