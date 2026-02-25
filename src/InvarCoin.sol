@@ -162,7 +162,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event GaugeStaked(uint256 amount);
     event GaugeUnstaked(uint256 amount);
     event GaugeRewardsClaimed();
+    event UsdcDonated(address indexed donor, uint256 usdcAmount, uint256 invarMinted);
     error InvarCoin__ZeroAmount();
+    error InvarCoin__StakingNotSet();
     error InvarCoin__ZeroAddress();
     error InvarCoin__SlippageExceeded();
     error InvarCoin__NothingToDeploy();
@@ -460,9 +462,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return deposit(usdcAmount, receiver, minSharesOut);
     }
 
-    /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
-    /// @dev Burns the user's pro-rata share of local USDC and Curve LP (single-sided to USDC).
-    ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
+    /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn + BEAR swap.
+    /// @dev Burns the user's pro-rata share of local USDC, Curve LP (single-sided to USDC),
+    ///      and any raw BEAR balance (swapped to USDC via Curve).
     ///      Blocked during emergencyActive since single-sided LP exit may be unavailable.
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param receiver Address that receives the withdrawn USDC.
@@ -736,6 +738,35 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         stakedInvarCoin.donateYield(donated);
 
         emit YieldHarvested(donated, 0, donated);
+    }
+
+    /// @notice Accepts USDC donations from RewardDistributor, mints proportional INVAR, and donates to sINVAR.
+    /// @param usdcAmount Amount of USDC to donate (6 decimals).
+    function donateUsdc(
+        uint256 usdcAmount
+    ) external nonReentrant whenNotPaused {
+        if (usdcAmount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
+        if (address(stakedInvarCoin) == address(0)) {
+            revert InvarCoin__StakingNotSet();
+        }
+
+        uint256 supply = totalSupply();
+        uint256 assetsBefore = totalAssets();
+
+        USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        uint256 invarMinted = Math.mulDiv(usdcAmount, supply + VIRTUAL_SHARES, assetsBefore + VIRTUAL_ASSETS);
+        if (invarMinted == 0) {
+            return;
+        }
+
+        _mint(address(this), invarMinted);
+        IERC20(this).approve(address(stakedInvarCoin), invarMinted);
+        stakedInvarCoin.donateYield(invarMinted);
+
+        emit UsdcDonated(msg.sender, usdcAmount, invarMinted);
     }
 
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.

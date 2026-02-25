@@ -541,7 +541,8 @@ contract DeployToTest is Script {
             d.curvePool,
             address(d.zapRouter),
             address(d.basketOracle),
-            address(d.pythAdapter)
+            address(d.pythAdapter),
+            address(0)
         );
         console.log("RewardDistributor:", address(d.rewardDistributor));
     }

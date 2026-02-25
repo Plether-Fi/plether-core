@@ -52,6 +52,7 @@ contract YieldIntegrationForkTest is BaseForkTest {
             curvePool,
             address(zapRouter),
             address(basketOracle),
+            address(0),
             address(0)
         );
 

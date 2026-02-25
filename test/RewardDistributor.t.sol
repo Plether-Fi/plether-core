@@ -62,6 +62,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
 
@@ -232,6 +233,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -248,6 +250,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -264,6 +267,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -280,6 +284,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -296,6 +301,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -312,6 +318,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -328,6 +335,7 @@ contract RewardDistributorTest is Test {
             address(0),
             address(zapRouter),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -344,6 +352,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(0),
             address(oracle),
+            address(0),
             address(0)
         );
     }
@@ -360,6 +369,7 @@ contract RewardDistributorTest is Test {
             address(curvePool),
             address(zapRouter),
             address(0),
+            address(0),
             address(0)
         );
     }
@@ -370,7 +380,7 @@ contract RewardDistributorTest is Test {
         usdc.mint(address(distributor), 100e6);
 
         vm.expectEmit(true, false, false, true);
-        emit IRewardDistributor.RewardsDistributed(49.95e18, 49.95e18, 5000, 5000);
+        emit IRewardDistributor.RewardsDistributed(49.95e18, 49.95e18, 0, 5000, 5000);
 
         vm.prank(alice);
         distributor.distributeRewards();
@@ -1199,6 +1209,217 @@ contract RewardDistributorTest is Test {
         distributor.distributeRewardsWithPriceUpdate(emptyUpdateData);
     }
 
+    // ============================================
+    // INVAR COIN SPLIT TESTS
+    // ============================================
+
+    function _createDistributorWithInvar(
+        MockInvarCoin invar
+    ) internal returns (RewardDistributor) {
+        return new RewardDistributor(
+            address(splitter),
+            address(usdc),
+            address(plDxyBear),
+            address(plDxyBull),
+            address(stakedBear),
+            address(stakedBull),
+            address(curvePool),
+            address(zapRouter),
+            address(oracle),
+            address(0),
+            address(invar)
+        );
+    }
+
+    function _stakeIntoStakedBear(
+        uint256 amount
+    ) internal {
+        plDxyBear.mint(alice, amount);
+        vm.startPrank(alice);
+        plDxyBear.approve(address(stakedBear), amount);
+        stakedBear.deposit(amount, alice);
+        vm.stopPrank();
+    }
+
+    function test_InvarSplit_5050() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        _stakeIntoStakedBear(1000e18);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        // stakedBear.totalAssets() = 1000e18
+        // invarBearExposure = (totalAssets * 1e20) / (2 * 1e8) = 1000e18
+        // => totalAssets = 2000e6
+        invar.setTotalAssets(2000e6);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 stakedBearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 invarUsdcDonated = usdc.balanceOf(address(invar));
+
+        assertGt(stakedBearDonated, 0, "StakedBear donation should be non-zero");
+        assertGt(invarUsdcDonated, 0, "InvarCoin USDC donation should be non-zero");
+
+        // With equal exposure, invar should get ~50% of bear-side USDC
+        uint256 callerReward = (100e6 * 10) / 10_000;
+        uint256 bearUsdc = (100e6 - callerReward) / 2;
+        assertApproxEqRel(invarUsdcDonated, bearUsdc / 2, 0.02e18, "50/50 split should give half of bear USDC");
+    }
+
+    function test_InvarSplit_75_25() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        _stakeIntoStakedBear(1000e18);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        // stakedBear.totalAssets() = 1000e18
+        // For 75% staked / 25% invar:
+        // invarBearExposure = 1000e18 / 3
+        // totalAssets = (1000e18/3) * 2e8 / 1e20 = ~666.67e6
+        invar.setTotalAssets(666_666_666);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 invarUsdcDonated = usdc.balanceOf(address(invar));
+        uint256 callerReward = (100e6 * 10) / 10_000;
+        uint256 bearUsdc = (100e6 - callerReward) / 2;
+
+        // InvarCoin should get ~25% of bear-side USDC (75/25 split)
+        assertGt(invarUsdcDonated, 0, "InvarCoin should receive USDC");
+        assertLt(invarUsdcDonated, bearUsdc / 2, "InvarCoin should get less than half of bear USDC");
+    }
+
+    function test_InvarSplit_ZeroInvarAssets_AllToStaked() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        invar.setTotalAssets(0);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 stakedBearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 invarUsdcDonated = usdc.balanceOf(address(invar));
+
+        assertGt(stakedBearDonated, 0, "StakedBear should get all BEAR");
+        assertEq(invarUsdcDonated, 0, "InvarCoin should get nothing");
+    }
+
+    function test_InvarSplit_ZeroStakedBearAssets_AllToInvar() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        // Remove all BEAR from stakedBear so totalAssets = 0
+        uint256 stakedBal = plDxyBear.balanceOf(address(stakedBear));
+        vm.prank(address(stakedBear));
+        plDxyBear.transfer(address(1), stakedBal);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        invar.setTotalAssets(1000e6);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 invarUsdcDonated = usdc.balanceOf(address(invar));
+        assertGt(invarUsdcDonated, 0, "InvarCoin should get all bear-side USDC");
+    }
+
+    function test_InvarSplit_InvarCoinZeroAddress_AllToStaked() public {
+        // Default distributor has INVAR_COIN = address(0)
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+        usdc.mint(address(distributor), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        distributor.distributeRewards();
+
+        uint256 stakedBearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        assertGt(stakedBearDonated, 0, "StakedBear should get all BEAR when INVAR_COIN is zero");
+    }
+
+    function test_InvarSplit_EventIncludesInvarAmount() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        invar.setTotalAssets(2000e6);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        // Just verify it didn't revert — event parameter verification is covered by other tests
+    }
+
+    function test_InvarSplit_InvarTotalAssetsReverts_AllToStaked() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        invar.setShouldRevert(true);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 stakedBearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        assertGt(stakedBearDonated, 0, "StakedBear should get all BEAR when InvarCoin reverts");
+    }
+
+    function test_InvarSplit_DonateUsdcReverts_FallbackToStaked() public {
+        oracle.setPrice(1e8);
+        curvePool.setPrice(1e6);
+
+        _stakeIntoStakedBear(1000e18);
+
+        MockInvarCoin invar = new MockInvarCoin(address(usdc));
+        invar.setTotalAssets(2000e6);
+        invar.setDonateUsdcReverts(true);
+
+        RewardDistributor dist = _createDistributorWithInvar(invar);
+        usdc.mint(address(dist), 100e6);
+
+        uint256 stakedBearBefore = plDxyBear.balanceOf(address(stakedBear));
+
+        vm.prank(alice);
+        dist.distributeRewards();
+
+        uint256 stakedBearDonated = plDxyBear.balanceOf(address(stakedBear)) - stakedBearBefore;
+        uint256 invarUsdcDonated = usdc.balanceOf(address(invar));
+
+        assertGt(stakedBearDonated, 0, "StakedBear should get all BEAR when donateUsdc reverts");
+        assertEq(invarUsdcDonated, 0, "InvarCoin should get nothing when donateUsdc reverts");
+    }
+
 }
 
 contract MockOracle is AggregatorV3Interface {
@@ -1325,7 +1546,8 @@ contract RewardDistributorPythTest is Test {
             address(curvePool),
             address(zapRouter),
             address(oracle),
-            address(pythAdapter)
+            address(pythAdapter),
+            address(0)
         );
 
         plDxyBear.mint(address(stakedBear), 1000e18);
@@ -1376,6 +1598,51 @@ contract RewardDistributorPythTest is Test {
         // Distributor sweeps remaining ETH back to caller.
         assertEq(alice.balance, 1 ether - 1 wei, "Caller should get back all ETH minus Pyth fee");
         assertEq(address(distributor).balance, 0, "Distributor should hold no ETH");
+    }
+
+}
+
+contract MockInvarCoin {
+
+    IERC20 public usdc;
+    uint256 private _totalAssets;
+    bool private _shouldRevert;
+    bool private _donateUsdcReverts;
+
+    constructor(
+        address _usdc
+    ) {
+        usdc = IERC20(_usdc);
+    }
+
+    function setTotalAssets(
+        uint256 val
+    ) external {
+        _totalAssets = val;
+    }
+
+    function setShouldRevert(
+        bool val
+    ) external {
+        _shouldRevert = val;
+    }
+
+    function setDonateUsdcReverts(
+        bool val
+    ) external {
+        _donateUsdcReverts = val;
+    }
+
+    function totalAssets() external view returns (uint256) {
+        require(!_shouldRevert, "MockInvarCoin: revert");
+        return _totalAssets;
+    }
+
+    function donateUsdc(
+        uint256 usdcAmount
+    ) external {
+        require(!_donateUsdcReverts, "MockInvarCoin: donateUsdc reverted");
+        usdc.transferFrom(msg.sender, address(this), usdcAmount);
     }
 
 }

@@ -47,7 +47,8 @@ contract DeployRewardDistributor is Script {
             CURVE_POOL,
             ZAP_ROUTER,
             BASKET_ORACLE,
-            PYTH_ADAPTER
+            PYTH_ADAPTER,
+            address(0) // InvarCoin — update when deployed
         );
 
         console.log("RewardDistributor:", address(distributor));
