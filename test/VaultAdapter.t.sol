@@ -2,21 +2,13 @@
 pragma solidity ^0.8.20;
 
 import {VaultAdapter} from "../src/VaultAdapter.sol";
+import {MockUSDC as MockUSDC6} from "./mocks/MockUSDC.sol";
 import {MockERC20} from "./utils/MockAave.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {Test} from "forge-std/Test.sol";
-
-contract MockUSDC6 is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-}
 
 contract MockERC4626Vault is ERC4626 {
 
@@ -338,7 +330,7 @@ contract VaultAdapterTest is Test {
         adapter.deposit(50 * 1e6, splitter);
 
         usdc.approve(address(adapter), 1e6);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, splitter, 1e6, 0));
         adapter.deposit(1e6, splitter);
         vm.stopPrank();
     }
@@ -349,7 +341,7 @@ contract VaultAdapterTest is Test {
 
     function test_ClaimRewards_OnlyOwner() public {
         vm.prank(hacker);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, hacker));
         adapter.claimRewards(address(0xDEAD), "");
     }
 

@@ -2,9 +2,14 @@
 pragma solidity ^0.8.30;
 
 import {LeverageRouter} from "../src/LeverageRouter.sol";
+import {FlashLoanBase} from "../src/base/FlashLoanBase.sol";
 import {LeverageRouterBase} from "../src/base/LeverageRouterBase.sol";
 import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
+import {MockCurvePool} from "./mocks/MockCurvePool.sol";
+import {MockMorpho} from "./mocks/MockMorpho.sol";
+import {MockStakedToken} from "./mocks/MockStakedToken.sol";
+import {MockToken} from "./mocks/MockToken.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -26,8 +31,8 @@ contract LeverageRouterTest is Test {
     address alice = address(0xA11ce);
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
-        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        usdc = new MockToken("USDC", "USDC", 18);
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR", 18);
         stakedPlDxyBear = new MockStakedToken(address(plDxyBear));
         curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
         morpho = new MockMorpho(address(usdc), address(stakedPlDxyBear));
@@ -471,7 +476,7 @@ contract LeverageRouterTest is Test {
         // Try to call onMorphoFlashLoan directly (not from Morpho)
         bytes memory data = abi.encode(uint8(1), alice, block.timestamp + 1 hours, uint256(1000e6), uint256(1000e18));
 
-        vm.expectRevert(); // Should revert with InvalidLender
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         router.onMorphoFlashLoan(1000e6, data);
     }
 
@@ -792,316 +797,6 @@ contract LeverageRouterTest is Test {
 }
 
 // ==========================================
-// MOCKS
-// ==========================================
-
-contract MockToken is ERC20 {
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-}
-
-contract MockStakedToken is ERC20 {
-
-    MockToken public underlying;
-
-    constructor(
-        address _underlying
-    ) ERC20("Staked Token", "sTKN") {
-        underlying = MockToken(_underlying);
-    }
-
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) external returns (uint256 shares) {
-        underlying.transferFrom(msg.sender, address(this), assets);
-        shares = assets; // 1:1 for simplicity
-        _mint(receiver, shares);
-    }
-
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) external returns (uint256 assets) {
-        if (msg.sender != owner) {
-            _spendAllowance(owner, msg.sender, shares);
-        }
-        _burn(owner, shares);
-        assets = shares; // 1:1 for simplicity
-        underlying.transfer(receiver, assets);
-    }
-
-    function previewRedeem(
-        uint256 shares
-    ) external pure returns (uint256) {
-        return shares; // 1:1 for simplicity
-    }
-
-    function previewDeposit(
-        uint256 assets
-    ) external pure returns (uint256) {
-        return assets; // 1:1 for simplicity
-    }
-
-}
-
-contract MockCurvePool is ICurvePool {
-
-    address public token0; // USDC
-    address public token1; // plDxyBear
-    uint256 public bearPrice = 1e6;
-    uint256 public slippageBps = 0; // Simulated slippage in basis points
-
-    constructor(
-        address _token0,
-        address _token1
-    ) {
-        token0 = _token0;
-        token1 = _token1;
-    }
-
-    function setPrice(
-        uint256 _price
-    ) external {
-        bearPrice = _price;
-    }
-
-    /// @notice Set slippage to simulate MEV attacks
-    /// @param _slippageBps Slippage in basis points (100 = 1%)
-    function setSlippage(
-        uint256 _slippageBps
-    ) external {
-        slippageBps = _slippageBps;
-    }
-
-    function get_dy(
-        uint256 i,
-        uint256 j,
-        uint256 dx
-    ) external view override returns (uint256) {
-        // get_dy returns the "quoted" price without slippage
-        if (i == 1 && j == 0) {
-            return (dx * bearPrice) / 1e18;
-        }
-        if (i == 0 && j == 1) {
-            return (dx * 1e18) / bearPrice;
-        }
-        return 0;
-    }
-
-    function exchange(
-        uint256 i,
-        uint256 j,
-        uint256 dx,
-        uint256 min_dy
-    ) external payable override returns (uint256 dy) {
-        // exchange applies slippage to simulate MEV/price movement
-        uint256 quotedDy = this.get_dy(i, j, dx);
-        dy = (quotedDy * (10_000 - slippageBps)) / 10_000; // Apply slippage
-        require(dy >= min_dy, "Too little received");
-        address tokenIn = i == 0 ? token0 : token1;
-        address tokenOut = j == 0 ? token0 : token1;
-
-        // Correct Transfer Logic
-        MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
-        MockToken(tokenOut).mint(msg.sender, dy);
-        return dy;
-    }
-
-    function price_oracle() external view override returns (uint256) {
-        return bearPrice * 1e12; // Scale 6 decimals to 18 decimals
-    }
-
-}
-
-contract MockMorpho is IMorpho {
-
-    address public usdc;
-    address public stakedToken; // splDXY-BEAR
-    mapping(address => uint256) public collateralBalance;
-    mapping(address => uint256) public borrowBalance;
-    mapping(address => mapping(address => bool)) public _isAuthorized;
-
-    constructor(
-        address _usdc,
-        address _stakedToken
-    ) {
-        usdc = _usdc;
-        stakedToken = _stakedToken;
-    }
-
-    function setAuthorization(
-        address authorized,
-        bool newIsAuthorized
-    ) external override {
-        _isAuthorized[msg.sender][authorized] = newIsAuthorized;
-    }
-
-    function isAuthorized(
-        address authorizer,
-        address authorized
-    ) external view override returns (bool) {
-        return _isAuthorized[authorizer][authorized];
-    }
-
-    function createMarket(
-        MarketParams memory
-    ) external override {}
-
-    function idToMarketParams(
-        bytes32
-    ) external pure override returns (MarketParams memory) {
-        return MarketParams(address(0), address(0), address(0), address(0), 0);
-    }
-
-    // Flash loan (fee-free like real Morpho)
-    function flashLoan(
-        address token,
-        uint256 assets,
-        bytes calldata data
-    ) external override {
-        // Mint tokens to borrower (simulating flash loan)
-        MockToken(token).mint(msg.sender, assets);
-
-        // Call the borrower's callback
-        IMorphoFlashLoanCallback(msg.sender).onMorphoFlashLoan(assets, data);
-
-        // Verify repayment (pull and burn tokens)
-        IERC20(token).transferFrom(msg.sender, address(this), assets);
-        MockToken(token).burn(address(this), assets);
-    }
-
-    // Lending functions (supply/withdraw loan tokens)
-    function supply(
-        MarketParams memory,
-        uint256 assets,
-        uint256,
-        address,
-        bytes calldata
-    ) external override returns (uint256, uint256) {
-        return (assets, 0);
-    }
-
-    function withdraw(
-        MarketParams memory,
-        uint256 assets,
-        uint256,
-        address,
-        address
-    ) external override returns (uint256, uint256) {
-        return (assets, 0);
-    }
-
-    // Collateral functions
-    function supplyCollateral(
-        MarketParams memory,
-        uint256 assets,
-        address onBehalfOf,
-        bytes calldata
-    ) external override {
-        IERC20(stakedToken).transferFrom(msg.sender, address(this), assets);
-        collateralBalance[onBehalfOf] += assets;
-    }
-
-    function withdrawCollateral(
-        MarketParams memory,
-        uint256 assets,
-        address onBehalfOf,
-        address receiver
-    ) external override {
-        if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
-        }
-        collateralBalance[onBehalfOf] -= assets;
-        IERC20(stakedToken).transfer(receiver, assets);
-    }
-
-    function borrow(
-        MarketParams memory,
-        uint256 assets,
-        uint256,
-        address onBehalfOf,
-        address receiver
-    ) external override returns (uint256, uint256) {
-        if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
-        }
-        MockToken(usdc).mint(receiver, assets);
-        borrowBalance[onBehalfOf] += assets;
-        return (assets, 0);
-    }
-
-    function repay(
-        MarketParams memory,
-        uint256 assets,
-        uint256 shares,
-        address onBehalfOf,
-        bytes calldata
-    ) external override returns (uint256, uint256) {
-        // Support both assets-based and shares-based repayment
-        // In this mock, borrowBalance == borrowShares (1:1 ratio)
-        uint256 repayAmount = assets > 0 ? assets : shares;
-        MockToken(usdc).transferFrom(msg.sender, address(this), repayAmount);
-        borrowBalance[onBehalfOf] -= repayAmount;
-        return (repayAmount, shares > 0 ? shares : repayAmount);
-    }
-
-    function position(
-        bytes32,
-        address user
-    ) external view override returns (uint256, uint128, uint128) {
-        // Return (supplyShares, borrowShares, collateral)
-        // We use borrowBalance as borrowShares for simplicity (1:1 ratio)
-        return (0, uint128(borrowBalance[user]), uint128(collateralBalance[user]));
-    }
-
-    function market(
-        bytes32
-    ) external view override returns (uint128, uint128, uint128, uint128, uint128, uint128) {
-        // Return (totalSupplyAssets, totalSupplyShares, totalBorrowAssets, totalBorrowShares, lastUpdate, fee)
-        // For simplicity, use 1:1 ratio for shares:assets
-        uint128 totalBorrow = 0;
-        // Sum all borrows (simplified - in real tests we'd track this properly)
-        // For now just return a large enough value that division works
-        return (0, 0, type(uint128).max, type(uint128).max, 0, 0);
-    }
-
-    function accrueInterest(
-        MarketParams memory
-    ) external override {}
-
-    function liquidate(
-        MarketParams memory,
-        address,
-        uint256,
-        uint256,
-        bytes calldata
-    ) external pure override returns (uint256, uint256) {
-        return (0, 0);
-    }
-
-}
-
-// ==========================================
 // MOCK WITH OFFSET (like real StakedToken)
 // ==========================================
 
@@ -1167,8 +862,8 @@ contract LeverageRouterOffsetTest is Test {
     address alice = address(0xA11ce);
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
-        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        usdc = new MockToken("USDC", "USDC", 18);
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR", 18);
         stakedPlDxyBear = new MockStakedTokenWithOffset(address(plDxyBear)); // Uses offset mock!
         curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
         morpho = new MockMorpho(address(usdc), address(stakedPlDxyBear));
@@ -1466,8 +1161,8 @@ contract LeverageRouterInterestAccrualTest is Test {
     address alice = makeAddr("alice");
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
-        plDxyBear = new MockToken("plDXY-BEAR", "BEAR");
+        usdc = new MockToken("USDC", "USDC", 18);
+        plDxyBear = new MockToken("plDXY-BEAR", "BEAR", 18);
         curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
         stakedPlDxyBear = new MockStakedTokenWithOffset(address(plDxyBear));
         morpho = new MockMorphoWithInterest(address(usdc), address(stakedPlDxyBear));

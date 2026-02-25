@@ -3,12 +3,13 @@ pragma solidity ^0.8.30;
 
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {FlashLoanBase} from "../src/base/FlashLoanBase.sol";
-import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
-import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {MockCurvePool} from "./mocks/MockCurvePool.sol";
+import {MockFlashToken} from "./mocks/MockFlashToken.sol";
+import {MockSplitter} from "./mocks/MockSplitter.sol";
+import {MockToken} from "./mocks/MockToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Test, console} from "forge-std/Test.sol";
+import {Test, console, stdError} from "forge-std/Test.sol";
 
 contract ZapRouterTest is Test {
 
@@ -25,7 +26,7 @@ contract ZapRouterTest is Test {
 
     function setUp() public {
         // 1. Deploy Mocks
-        usdc = new MockToken("USDC", "USDC");
+        usdc = new MockToken("USDC", "USDC", 18);
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
         plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
         splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
@@ -454,7 +455,7 @@ contract ZapRouterTest is Test {
         vm.startPrank(alice);
         plDxyBull.approve(address(zapRouter), 100 * 1e18);
 
-        vm.expectRevert(); // Division by zero or "Pool liquidity error"
+        vm.expectRevert(stdError.divisionError);
         zapRouter.zapBurn(100 * 1e18, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -802,263 +803,14 @@ contract ZapRouterTest is Test {
 
 }
 
-// ==========================================
-// MOCKS (Updated for $2 CAP and correct transfer logic)
-// ==========================================
+contract MockCurvePoolWithMEV is MockCurvePool {
 
-contract MockToken is ERC20 {
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract MockFlashToken is ERC20, IERC3156FlashLender {
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-    uint256 public feeBps = 0;
-
-    function setFeeBps(
-        uint256 _feeBps
-    ) external {
-        feeBps = _feeBps;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-    function maxFlashLoan(
-        address
-    ) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(
-        address,
-        uint256 amount
-    ) public view override returns (uint256) {
-        return (amount * feeBps) / 10_000;
-    }
-
-    function flashLoan(
-        IERC3156FlashBorrower receiver,
-        address token,
-        uint256 amount,
-        bytes calldata data
-    ) external override returns (bool) {
-        uint256 fee = flashFee(token, amount);
-        _mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        _burn(address(receiver), amount + fee);
-        return true;
-    }
-
-}
-
-contract MockCurvePool is ICurvePool {
-
-    address public token0; // USDC
-    address public token1; // plDxyBear
-    uint256 public bearPrice = 1e6; // Price of 1 BEAR in USDC (6 decimals). Default $1.00
+    uint256 public mevExtractionBps;
 
     constructor(
         address _token0,
         address _token1
-    ) {
-        token0 = _token0;
-        token1 = _token1;
-    }
-
-    function setPrice(
-        uint256 _price
-    ) external {
-        bearPrice = _price;
-    }
-
-    function get_dy(
-        uint256 i,
-        uint256 j,
-        uint256 dx
-    ) external view override returns (uint256) {
-        if (i == 1 && j == 0) {
-            return (dx * bearPrice) / 1e18;
-        }
-        if (i == 0 && j == 1) {
-            return (dx * 1e18) / bearPrice;
-        }
-        return 0;
-    }
-
-    function get_dx(
-        uint256 i,
-        uint256 j,
-        uint256 dy
-    ) external view returns (uint256) {
-        // Inverse of get_dy (not in ICurvePool interface but useful for testing)
-        if (i == 1 && j == 0) {
-            return (dy * 1e18) / bearPrice;
-        }
-        if (i == 0 && j == 1) {
-            return (dy * bearPrice) / 1e18;
-        }
-        return 0;
-    }
-
-    function exchange(
-        uint256 i,
-        uint256 j,
-        uint256 dx,
-        uint256 min_dy
-    ) external payable override returns (uint256 dy) {
-        dy = this.get_dy(i, j, dx);
-        require(dy >= min_dy, "Too little received");
-
-        address tokenIn = i == 0 ? token0 : token1;
-        address tokenOut = j == 0 ? token0 : token1;
-
-        // CRITICAL FIX: Simulate Transfer. Take tokens from sender.
-        MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
-        MockToken(tokenOut).mint(msg.sender, dy);
-
-        return dy;
-    }
-
-    function price_oracle() external view override returns (uint256) {
-        return bearPrice * 1e12; // Scale 6 decimals to 18 decimals
-    }
-
-}
-
-contract MockSplitter is ISyntheticSplitter {
-
-    address public tA; // BEAR
-    address public tB; // BULL
-    address public usdc;
-    Status private _status = Status.ACTIVE;
-    uint256 public constant CAP = 2e8; // $2.00 in 8 decimals
-
-    constructor(
-        address _tA,
-        address _tB
-    ) {
-        tA = _tA;
-        tB = _tB;
-    }
-
-    function setUsdc(
-        address _usdc
-    ) external {
-        usdc = _usdc;
-    }
-
-    function setStatus(
-        Status newStatus
-    ) external {
-        _status = newStatus;
-    }
-
-    function mint(
-        uint256 amount
-    ) external override {
-        // amount is in 18-decimal token units
-        // Calculate USDC cost (6 decimals): usdc = amount (18 dec) * CAP (8 dec) / 1e20
-        // For CAP = 2e8: 1 token = $2, so 100 tokens = $200 = 200e6 USDC
-        // Example: amount=100e18, CAP=2e8 -> usdcCost = 100e18 * 2e8 / 1e20 = 200e6 ✓
-        uint256 usdcCost = (amount * CAP) / 1e20;
-        // Consume USDC from caller
-        MockToken(usdc).transferFrom(msg.sender, address(this), usdcCost);
-        // Mint BEAR and BULL to caller
-        MockFlashToken(tA).mint(msg.sender, amount);
-        MockFlashToken(tB).mint(msg.sender, amount);
-    }
-
-    function burn(
-        uint256 amount
-    ) external override {
-        // Real Splitter burns directly from caller (SyntheticToken gives Splitter burn rights)
-        // Simulate this by calling burn on the MockFlashToken
-        MockFlashToken(tA).burn(msg.sender, amount);
-        MockFlashToken(tB).burn(msg.sender, amount);
-
-        // Return USDC to caller: amount (18 dec) * CAP (8 dec) / 1e20 = USDC (6 dec)
-        // Example: amount=100e18, CAP=2e8 -> usdcOut = 100e18 * 2e8 / 1e20 = 200e6 ✓
-        uint256 usdcOut = (amount * CAP) / 1e20;
-        // Mint USDC to caller (mock is self-sufficient, no need for pre-funding)
-        MockToken(usdc).mint(msg.sender, usdcOut);
-    }
-
-    function emergencyRedeem(
-        uint256
-    ) external override {}
-
-    function mintWithPermit(
-        uint256,
-        uint256,
-        uint8,
-        bytes32,
-        bytes32
-    ) external override {}
-
-    function currentStatus() external view override returns (Status) {
-        return _status;
-    }
-
-    function treasury() external view returns (address) {
-        return address(this);
-    }
-
-    function liquidationTimestamp() external pure returns (uint256) {
-        return 0;
-    }
-
-}
-
-contract MockCurvePoolWithMEV is ICurvePool {
-
-    address public token0; // USDC
-    address public token1; // plDxyBear
-    uint256 public bearPrice = 1e6;
-    uint256 public mevExtractionBps = 0; // MEV bot extracts this % during exchange
-
-    constructor(
-        address _token0,
-        address _token1
-    ) {
-        token0 = _token0;
-        token1 = _token1;
-    }
-
-    function setPrice(
-        uint256 _price
-    ) external {
-        bearPrice = _price;
-    }
+    ) MockCurvePool(_token0, _token1) {}
 
     function setMevExtraction(
         uint256 _bps
@@ -1066,28 +818,12 @@ contract MockCurvePoolWithMEV is ICurvePool {
         mevExtractionBps = _bps;
     }
 
-    function get_dy(
-        uint256 i,
-        uint256 j,
-        uint256 dx
-    ) external view override returns (uint256) {
-        // Returns "expected" output - what user sees before sandwich
-        if (i == 1 && j == 0) {
-            return (dx * bearPrice) / 1e18;
-        }
-        if (i == 0 && j == 1) {
-            return (dx * 1e18) / bearPrice;
-        }
-        return 0;
-    }
-
     function exchange(
         uint256 i,
         uint256 j,
         uint256 dx,
         uint256 min_dy
     ) external payable override returns (uint256 dy) {
-        // MEV bot sandwiches: actual output is reduced
         uint256 expectedDy = this.get_dy(i, j, dx);
         dy = (expectedDy * (10_000 - mevExtractionBps)) / 10_000;
 
@@ -1098,12 +834,6 @@ contract MockCurvePoolWithMEV is ICurvePool {
 
         MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
         MockToken(tokenOut).mint(msg.sender, dy);
-
-        return dy;
-    }
-
-    function price_oracle() external view override returns (uint256) {
-        return bearPrice * 1e12;
     }
 
 }
@@ -1123,7 +853,7 @@ contract ZapRouterMutationTest is Test {
     address alice = address(0xA11ce);
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
+        usdc = new MockToken("USDC", "USDC", 18);
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
         plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
         splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
@@ -1243,7 +973,7 @@ contract ZapRouterMutationTest is Test {
         vm.startPrank(alice);
         plDxyBull.approve(address(zapRouter), 100e18);
 
-        vm.expectRevert();
+        vm.expectRevert(stdError.divisionError);
         zapRouter.zapBurn(100e18, 0, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -1414,7 +1144,7 @@ contract ZapRouterMEVTest is Test {
     address mevBot = address(0xB07);
 
     function setUp() public {
-        usdc = new MockToken("USDC", "USDC");
+        usdc = new MockToken("USDC", "USDC", 18);
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
         plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
         splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));

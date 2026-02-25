@@ -155,15 +155,12 @@ contract LiquidationForkTest is BaseForkTest {
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
         vm.startPrank(alice);
-        // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
-            (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
-            assertEq(collateralAfter, 0, "Collateral should be 0");
-            assertEq(borrowSharesAfter, 0, "Debt should be 0");
-        } catch {
-            fail("Close should succeed after 180 days of interest");
-        }
+        leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours);
         vm.stopPrank();
+
+        (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
+        assertEq(collateralAfter, 0, "Collateral should be 0");
+        assertEq(borrowSharesAfter, 0, "Debt should be 0");
     }
 
     function test_Liquidation_UnhealthyPositionCanBeLiquidated() public {
@@ -226,7 +223,7 @@ contract LiquidationForkTest is BaseForkTest {
         vm.startPrank(liquidator);
         IERC20(USDC).approve(MORPHO, 1_000_000e6);
 
-        vm.expectRevert();
+        vm.expectRevert("position is healthy");
         IMorpho(MORPHO).liquidate(bearMarketParams, alice, collateral / 2, 0, "");
         vm.stopPrank();
     }
@@ -251,15 +248,12 @@ contract LiquidationForkTest is BaseForkTest {
         IMorpho(MORPHO).accrueInterest(bearMarketParams);
 
         vm.startPrank(alice);
-        // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
-            (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
-            assertEq(collateralAfter, 0, "Should be fully closed");
-            assertEq(borrowSharesAfter, 0, "Debt should be 0");
-        } catch {
-            fail("User should be able to close before liquidation");
-        }
+        leverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours);
         vm.stopPrank();
+
+        (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
+        assertEq(collateralAfter, 0, "Should be fully closed");
+        assertEq(borrowSharesAfter, 0, "Debt should be 0");
     }
 
     function test_BullLiquidation_InterestAccrual() public {
@@ -282,14 +276,11 @@ contract LiquidationForkTest is BaseForkTest {
         IMorpho(MORPHO).accrueInterest(bullMarketParams);
 
         vm.startPrank(alice);
-        // Use vm.getBlockTimestamp() instead of block.timestamp due to via-ir optimization bug
-        try bullLeverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours) {
-            (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
-            assertEq(collateralAfter, 0, "Position should be closed");
-        } catch {
-            fail("Bull close should succeed after 180 days of interest");
-        }
+        bullLeverageRouter.closeLeverage(collateral, 100, 0, vm.getBlockTimestamp() + 1 hours);
         vm.stopPrank();
+
+        (, uint128 borrowSharesAfter, uint128 collateralAfter) = IMorpho(MORPHO).position(marketId, alice);
+        assertEq(collateralAfter, 0, "Position should be closed");
     }
 
     function _calculateLTV(

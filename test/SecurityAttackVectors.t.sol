@@ -4,29 +4,13 @@ pragma solidity ^0.8.30;
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {BasketOracle} from "../src/oracles/BasketOracle.sol";
 import {MorphoOracle} from "../src/oracles/MorphoOracle.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
-
-contract MockUSDC is ERC20 {
-
-    constructor() ERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
 
 contract MockCurvePool {
 

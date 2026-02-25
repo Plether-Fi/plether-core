@@ -8,8 +8,10 @@ import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol
 import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IMorpho, IMorphoFlashLoanCallback, MarketParams} from "../src/interfaces/IMorpho.sol";
 import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
+import {MockFlashToken} from "./mocks/MockFlashToken.sol";
+import {MockStakedToken} from "./mocks/MockStakedToken.sol";
+import {MockToken} from "./mocks/MockToken.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
-import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -1200,144 +1202,6 @@ contract BullLeverageRouterTest is Test {
 // ==========================================
 // MOCK CONTRACTS
 // ==========================================
-
-contract MockToken is ERC20 {
-
-    uint8 private _decimals;
-
-    constructor(
-        string memory name,
-        string memory symbol,
-        uint8 dec
-    ) ERC20(name, symbol) {
-        _decimals = dec;
-    }
-
-    function decimals() public view override returns (uint8) {
-        return _decimals;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-}
-
-contract MockStakedToken is ERC20 {
-
-    MockToken public underlying;
-
-    constructor(
-        address _underlying
-    ) ERC20("Staked Token", "sTKN") {
-        underlying = MockToken(_underlying);
-    }
-
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) external returns (uint256 shares) {
-        underlying.transferFrom(msg.sender, address(this), assets);
-        shares = assets; // 1:1 for simplicity
-        _mint(receiver, shares);
-    }
-
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) external returns (uint256 assets) {
-        if (msg.sender != owner) {
-            _spendAllowance(owner, msg.sender, shares);
-        }
-        _burn(owner, shares);
-        assets = shares; // 1:1 for simplicity
-        underlying.transfer(receiver, assets);
-    }
-
-    function previewRedeem(
-        uint256 shares
-    ) external pure returns (uint256) {
-        return shares; // 1:1 for simplicity
-    }
-
-    function previewDeposit(
-        uint256 assets
-    ) external pure returns (uint256) {
-        return assets; // 1:1 for simplicity
-    }
-
-}
-
-contract MockFlashToken is ERC20, IERC3156FlashLender {
-
-    uint256 private _feeBps = 0;
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-    function setFeeBps(
-        uint256 bps
-    ) external {
-        _feeBps = bps;
-    }
-
-    function maxFlashLoan(
-        address
-    ) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(
-        address,
-        uint256 amount
-    ) public view override returns (uint256) {
-        return (amount * _feeBps) / 10_000;
-    }
-
-    function flashLoan(
-        IERC3156FlashBorrower receiver,
-        address token,
-        uint256 amount,
-        bytes calldata data
-    ) external override returns (bool) {
-        uint256 fee = flashFee(token, amount);
-        _mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        _burn(address(receiver), amount + fee);
-        return true;
-    }
-
-}
 
 contract MockCurvePool is ICurvePool {
 

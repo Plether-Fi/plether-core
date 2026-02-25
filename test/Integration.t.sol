@@ -5,6 +5,7 @@ import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {SyntheticToken} from "../src/SyntheticToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
 import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -462,23 +463,6 @@ contract IntegrationTest is Test {
 // ==========================================
 // MOCKS
 // ==========================================
-
-contract MockUSDC is ERC20 {
-
-    constructor() ERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
 
 contract MockOracle is AggregatorV3Interface {
 

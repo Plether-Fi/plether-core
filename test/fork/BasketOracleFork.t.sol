@@ -593,7 +593,7 @@ contract DeviationCheckForkTest is Test {
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
-        vm.expectRevert();
+        vm.expectRevert(BasketOracle.BasketOracle__PriceDeviation.selector);
         basketOracle.latestRoundData();
     }
 
@@ -602,7 +602,7 @@ contract DeviationCheckForkTest is Test {
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
-        vm.expectRevert();
+        vm.expectRevert(BasketOracle.BasketOracle__PriceDeviation.selector);
         basketOracle.latestRoundData();
     }
 
@@ -615,7 +615,7 @@ contract DeviationCheckForkTest is Test {
         // Approve max since previewMint will also revert
         IERC20(USDC).approve(address(splitter), type(uint256).max);
 
-        vm.expectRevert();
+        vm.expectRevert(BasketOracle.BasketOracle__PriceDeviation.selector);
         splitter.mint(mintAmount);
     }
 
@@ -624,7 +624,7 @@ contract DeviationCheckForkTest is Test {
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
-        vm.expectRevert();
+        vm.expectRevert(BasketOracle.BasketOracle__PriceDeviation.selector);
         splitter.previewMint(100e18);
     }
 
@@ -655,7 +655,7 @@ contract DeviationCheckForkTest is Test {
         curvePool = _deployCurvePoolAtPrice(deviatedPrice);
         basketOracle.setCurvePool(curvePool);
 
-        vm.expectRevert();
+        vm.expectRevert(BasketOracle.BasketOracle__PriceDeviation.selector);
         basketOracle.latestRoundData();
 
         MockCurvePoolForOracleBasket(curvePool).setPrice(bearPrice18);

@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockAToken, MockERC20, MockPool} from "./utils/MockAave.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
@@ -10,19 +11,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test, console} from "forge-std/Test.sol";
-
-// ==========================================
-// MOCK USDC (6 decimals)
-// ==========================================
-contract MockUSDC is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-}
 
 // ==========================================
 // HANDLER CONTRACT
@@ -68,13 +56,6 @@ contract SplitterHandler is Test {
     bytes4 constant ERR_SEQUENCER_GRACE = OracleLib.OracleLib__SequencerGracePeriod.selector;
     bytes4 constant ERR_NO_SURPLUS = SyntheticSplitter.Splitter__NoSurplus.selector;
     bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
-    bytes4 constant ERR_INSOLVENT = SyntheticSplitter.Splitter__Insolvent.selector;
-
-    function _bubbleRevert(
-        bytes memory reason
-    ) internal pure {
-        assembly { revert(add(reason, 32), mload(reason)) }
-    }
 
     modifier useActor(
         uint256 actorSeed
@@ -143,13 +124,9 @@ contract SplitterHandler is Test {
             ghost_totalUsdcFairPrice += usdcFair;
             mintCalls++;
         } catch (bytes memory reason) {
-            if (reason.length < 4) {
-                _bubbleRevert(reason);
-            }
-            bytes4 sel;
-            assembly { sel := mload(add(reason, 0x20)) }
+            bytes4 sel = bytes4(reason);
             if (sel != ERR_STALE_PRICE && sel != ERR_SEQUENCER_DOWN && sel != ERR_SEQUENCER_GRACE) {
-                _bubbleRevert(reason);
+                assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
     }
@@ -188,13 +165,9 @@ contract SplitterHandler is Test {
                 ghost_burnedAfterLiquidation += amount;
             }
         } catch (bytes memory reason) {
-            if (reason.length < 4) {
-                _bubbleRevert(reason);
-            }
-            bytes4 sel;
-            assembly { sel := mload(add(reason, 0x20)) }
-            if (sel != ERR_ZERO_AMOUNT && sel != ERR_INSOLVENT) {
-                _bubbleRevert(reason);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT) {
+                assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
     }
@@ -210,13 +183,9 @@ contract SplitterHandler is Test {
         try splitter.harvestYield() {
             harvestCalls++;
         } catch (bytes memory reason) {
-            if (reason.length < 4) {
-                _bubbleRevert(reason);
-            }
-            bytes4 sel;
-            assembly { sel := mload(add(reason, 0x20)) }
+            bytes4 sel = bytes4(reason);
             if (sel != ERR_NO_SURPLUS && sel != ERR_INSUFFICIENT_HARVEST) {
-                _bubbleRevert(reason);
+                assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
     }
@@ -267,13 +236,9 @@ contract SplitterHandler is Test {
                 ghost_wasEverLiquidated = true;
                 ghost_supplyAtLiquidation = splitter.BEAR().totalSupply();
             } catch (bytes memory reason) {
-                if (reason.length < 4) {
-                    _bubbleRevert(reason);
-                }
-                bytes4 sel;
-                assembly { sel := mload(add(reason, 0x20)) }
+                bytes4 sel = bytes4(reason);
                 if (sel != ERR_LIQUIDATION_ACTIVE) {
-                    _bubbleRevert(reason);
+                    assembly { revert(add(reason, 32), mload(reason)) }
                 }
             }
         }

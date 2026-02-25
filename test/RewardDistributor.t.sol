@@ -5,11 +5,12 @@ import {RewardDistributor} from "../src/RewardDistributor.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
-import {ICurvePool} from "../src/interfaces/ICurvePool.sol";
 import {IRewardDistributor} from "../src/interfaces/IRewardDistributor.sol";
 import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
-import {IERC3156FlashBorrower, IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {MockCurvePool} from "./mocks/MockCurvePool.sol";
+import {MockFlashToken} from "./mocks/MockFlashToken.sol";
+import {MockSplitter} from "./mocks/MockSplitter.sol";
+import {MockToken} from "./mocks/MockToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test, console} from "forge-std/Test.sol";
 
@@ -35,7 +36,7 @@ contract RewardDistributorTest is Test {
     function setUp() public {
         vm.warp(25 hours); // Must be > 24 hours to avoid underflow in staleness check
 
-        usdc = new MockToken("USDC", "USDC");
+        usdc = new MockToken("USDC", "USDC", 18);
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
         plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
         splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
@@ -1200,204 +1201,6 @@ contract RewardDistributorTest is Test {
 
 }
 
-contract MockToken is ERC20 {
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract MockFlashToken is ERC20, IERC3156FlashLender {
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-    function maxFlashLoan(
-        address
-    ) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(
-        address,
-        uint256
-    ) public pure override returns (uint256) {
-        return 0;
-    }
-
-    function flashLoan(
-        IERC3156FlashBorrower receiver,
-        address token,
-        uint256 amount,
-        bytes calldata data
-    ) external override returns (bool) {
-        _mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, 0, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        _burn(address(receiver), amount);
-        return true;
-    }
-
-}
-
-contract MockCurvePool is ICurvePool {
-
-    address public token0;
-    address public token1;
-    uint256 public bearPrice = 1e6;
-
-    constructor(
-        address _token0,
-        address _token1
-    ) {
-        token0 = _token0;
-        token1 = _token1;
-    }
-
-    function setPrice(
-        uint256 _price
-    ) external {
-        bearPrice = _price;
-    }
-
-    function get_dy(
-        uint256 i,
-        uint256 j,
-        uint256 dx
-    ) external view override returns (uint256) {
-        if (i == 1 && j == 0) {
-            return (dx * bearPrice) / 1e18;
-        }
-        if (i == 0 && j == 1) {
-            return (dx * 1e18) / bearPrice;
-        }
-        return 0;
-    }
-
-    function exchange(
-        uint256 i,
-        uint256 j,
-        uint256 dx,
-        uint256 min_dy
-    ) external payable override returns (uint256 dy) {
-        dy = this.get_dy(i, j, dx);
-        require(dy >= min_dy, "Too little received");
-
-        address tokenIn = i == 0 ? token0 : token1;
-        address tokenOut = j == 0 ? token0 : token1;
-
-        MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
-        MockToken(tokenOut).mint(msg.sender, dy);
-
-        return dy;
-    }
-
-    function price_oracle() external view override returns (uint256) {
-        return bearPrice * 1e12;
-    }
-
-}
-
-contract MockSplitter is ISyntheticSplitter {
-
-    address public tA;
-    address public tB;
-    address public usdc;
-    Status private _status = Status.ACTIVE;
-
-    uint256 public constant CAP = 2e8;
-
-    constructor(
-        address _tA,
-        address _tB
-    ) {
-        tA = _tA;
-        tB = _tB;
-    }
-
-    function setUsdc(
-        address _usdc
-    ) external {
-        usdc = _usdc;
-    }
-
-    function setStatus(
-        Status newStatus
-    ) external {
-        _status = newStatus;
-    }
-
-    function mint(
-        uint256 amount
-    ) external override {
-        uint256 usdcCost = (amount * CAP) / 1e20;
-        MockToken(usdc).transferFrom(msg.sender, address(this), usdcCost);
-        MockFlashToken(tA).mint(msg.sender, amount);
-        MockFlashToken(tB).mint(msg.sender, amount);
-    }
-
-    function burn(
-        uint256 amount
-    ) external override {
-        MockFlashToken(tA).burn(msg.sender, amount);
-        MockFlashToken(tB).burn(msg.sender, amount);
-        uint256 usdcOut = (amount * CAP) / 1e20;
-        MockToken(usdc).mint(msg.sender, usdcOut);
-    }
-
-    function emergencyRedeem(
-        uint256
-    ) external override {}
-
-    function mintWithPermit(
-        uint256,
-        uint256,
-        uint8,
-        bytes32,
-        bytes32
-    ) external override {}
-
-    function currentStatus() external view override returns (Status) {
-        return _status;
-    }
-
-    function treasury() external view returns (address) {
-        return address(this);
-    }
-
-    function liquidationTimestamp() external pure returns (uint256) {
-        return 0;
-    }
-
-}
-
 contract MockOracle is AggregatorV3Interface {
 
     int256 private _price;
@@ -1494,7 +1297,7 @@ contract RewardDistributorPythTest is Test {
     function setUp() public {
         vm.warp(25 hours);
 
-        usdc = new MockToken("USDC", "USDC");
+        usdc = new MockToken("USDC", "USDC", 18);
         plDxyBear = new MockFlashToken("plDxyBear", "plDxyBear");
         plDxyBull = new MockFlashToken("plDxyBull", "plDxyBull");
         splitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
