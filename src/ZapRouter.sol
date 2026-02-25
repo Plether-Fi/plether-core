@@ -163,6 +163,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
     ) external nonReentrant whenNotPaused {
         try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s) {}
         catch {
+            if (block.timestamp > deadline) {
+                revert ZapRouter__PermitFailed();
+            }
             if (USDC.allowance(msg.sender, address(this)) < usdcAmount) {
                 revert ZapRouter__PermitFailed();
             }
@@ -242,6 +245,9 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
     ) external nonReentrant whenNotPaused {
         try IERC20Permit(address(PLDXY_BULL)).permit(msg.sender, address(this), bullAmount, deadline, v, r, s) {}
         catch {
+            if (block.timestamp > deadline) {
+                revert ZapRouter__PermitFailed();
+            }
             if (IERC20(address(PLDXY_BULL)).allowance(msg.sender, address(this)) < bullAmount) {
                 revert ZapRouter__PermitFailed();
             }

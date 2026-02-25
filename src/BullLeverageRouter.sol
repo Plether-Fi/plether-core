@@ -241,6 +241,9 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) external nonReentrant whenNotPaused {
         try IERC20Permit(address(USDC)).permit(msg.sender, address(this), principal, deadline, v, r, s) {}
         catch {
+            if (block.timestamp > deadline) {
+                revert LeverageRouterBase__PermitFailed();
+            }
             if (USDC.allowance(msg.sender, address(this)) < principal) {
                 revert LeverageRouterBase__PermitFailed();
             }
@@ -404,6 +407,9 @@ contract BullLeverageRouter is LeverageRouterBase {
     ) external nonReentrant whenNotPaused {
         try IERC20Permit(address(USDC)).permit(msg.sender, address(this), usdcAmount, deadline, v, r, s) {}
         catch {
+            if (block.timestamp > deadline) {
+                revert LeverageRouterBase__PermitFailed();
+            }
             if (USDC.allowance(msg.sender, address(this)) < usdcAmount) {
                 revert LeverageRouterBase__PermitFailed();
             }
