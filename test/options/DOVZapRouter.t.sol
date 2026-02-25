@@ -430,7 +430,7 @@ contract DOVZapRouterTest is Test {
 
         uint256 baselineOptions = 1000e18; // from INITIAL_STAKED alone
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         (, uint256 bearOpts,,,,,) = bearDov.epochs(1);
         (, uint256 bullOpts,,,,,) = bullDov.epochs(1);
@@ -445,7 +445,7 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bearDov), 10_000e6);
         usdc.mint(address(bullDov), 8000e6);
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(usdc.balanceOf(address(router)), 0, "no USDC left in router");
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
@@ -456,7 +456,7 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bearDov), 5000e6);
         usdc.mint(address(bullDov), 10_000e6);
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(usdc.balanceOf(address(router)), 0, "no USDC left in router");
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
@@ -480,7 +480,7 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bearDov), 5000e6);
         uint256 baselineOptions = 1000e18;
 
-        bearOnlyRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        bearOnlyRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         (, uint256 bearOpts,,,,,) = bearDov.epochs(1);
         assertGt(bearOpts, baselineOptions, "bear DOV should mint more options than baseline");
@@ -504,7 +504,7 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bullDov), 5000e6);
         uint256 baselineOptions = 1000e18;
 
-        bullOnlyRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        bullOnlyRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         (, uint256 bullOpts,,,,,) = bullDov.epochs(1);
         assertGt(bullOpts, baselineOptions, "bull DOV should mint more options than baseline");
@@ -512,7 +512,7 @@ contract DOVZapRouterTest is Test {
     }
 
     function test_CoordinatedZap_ZeroUsdc() public {
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
         assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
@@ -522,7 +522,7 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bearDov), 10_000e6);
 
         vm.expectRevert("slippage");
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), type(uint256).max);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), type(uint256).max, 0);
     }
 
     function test_CoordinatedZap_SolvencyBreach() public {
@@ -547,18 +547,43 @@ contract DOVZapRouterTest is Test {
         usdc.mint(address(bullDov), 10_000e6);
 
         vm.expectRevert(DOVZapRouter.DOVZapRouter__SolvencyBreach.selector);
-        badRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        badRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
     }
 
     function test_CoordinatedZap_StartsEpochAuctions() public {
         usdc.mint(address(bearDov), 5000e6);
         usdc.mint(address(bullDov), 5000e6);
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(bearDov.currentEpochId(), 1);
         assertEq(bullDov.currentEpochId(), 1);
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+        assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+    }
+
+    function test_CoordinatedZap_MaxSlippageOnUnusedBullPath() public {
+        usdc.mint(address(bearDov), 10_000e6);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, type(uint256).max);
+        assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+    }
+
+    function test_CoordinatedZap_MaxSlippageOnUnusedBearPath() public {
+        DOVZapRouter bullOnlyRouter = new DOVZapRouter(
+            address(splitter),
+            address(curvePool),
+            address(usdc),
+            address(bearToken),
+            address(bullToken),
+            address(stakedBear),
+            address(stakedBull),
+            address(0),
+            address(bullDov)
+        );
+        bullDov.setZapKeeper(address(bullOnlyRouter));
+
+        usdc.mint(address(bullDov), 10_000e6);
+        bullOnlyRouter.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), type(uint256).max, 0);
         assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
     }
 

@@ -620,6 +620,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             uint256 existingSplDXY = postZapBalance - depositSplDXY;
             if (existingSplDXY > 0) {
                 sharesToMint = (depositSplDXY * supply) / existingSplDXY;
+            } else {
+                sharesToMint = STAKED_TOKEN.convertToAssets(depositSplDXY);
             }
         }
 

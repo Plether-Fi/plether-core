@@ -14,6 +14,7 @@ library OracleLib {
     error OracleLib__StalePrice();
     error OracleLib__InvalidPrice();
     error OracleLib__NoPriceAtExpiry();
+    error OracleLib__InsufficientGas();
 
     /// @notice Check if the L2 sequencer is up and grace period has passed.
     /// @param sequencerFeed The Chainlink sequencer uptime feed.
@@ -106,7 +107,11 @@ library OracleLib {
                     foundNextValid = true;
                     break;
                 }
-            } catch {}
+            } catch {
+                if (gasleft() < 10_000) {
+                    revert OracleLib__InsufficientGas();
+                }
+            }
             searchRoundId++;
         }
 
@@ -123,6 +128,9 @@ library OracleLib {
                             foundNextValid = true;
                         }
                     } catch {
+                        if (gasleft() < 10_000) {
+                            revert OracleLib__InsufficientGas();
+                        }
                         continue;
                     }
                 }

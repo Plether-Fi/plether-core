@@ -1271,4 +1271,49 @@ contract PletherDOVTest is Test {
         assertEq(usdcBalance, 0, "pending deposits excluded");
     }
 
+    // ==========================================
+    // M-2: ZERO-SHARE MINTING WHEN VAULT DRAINED
+    // ==========================================
+
+    function test_AUDIT_M2_MintDepositShares_WhenVaultDrained() public {
+        dov.initializeShares();
+        assertGt(dov.totalSupply(), 0);
+
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        deal(address(stakedToken), address(dov), 0);
+        assertEq(stakedToken.balanceOf(address(dov)), 0, "DOV splDXY drained (deep ITM)");
+        assertGt(dov.totalSupply(), 0, "shares still outstanding");
+
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        _mockZap();
+        assertGt(stakedToken.balanceOf(address(dov)), 0, "zap deposited splDXY");
+
+        _startAuction();
+
+        uint256 alicePending = dov.pendingSharesOf(alice);
+        assertEq(alicePending, 1000e18, "shares = convertToAssets(depositSplDXY)");
+
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(2, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        vm.prank(alice);
+        dov.claimShares();
+        assertEq(dov.balanceOf(alice), alicePending);
+
+        uint256 aliceShares = dov.balanceOf(alice);
+        uint256 aliceSplDXYBefore = stakedToken.balanceOf(alice);
+        vm.prank(alice);
+        dov.withdraw(aliceShares);
+        assertGt(stakedToken.balanceOf(alice), aliceSplDXYBefore, "alice withdraws splDXY");
+    }
+
 }

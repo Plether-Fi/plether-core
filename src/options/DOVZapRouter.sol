@@ -84,7 +84,8 @@ contract DOVZapRouter is FlashLoanBase, ReentrancyGuard, Ownable2Step {
     function coordinatedZapAndStartEpochs(
         EpochParams calldata bearParams,
         EpochParams calldata bullParams,
-        uint256 minSwapOut
+        uint256 minBearSwapOut,
+        uint256 minBullSwapOut
     ) external onlyOwner nonReentrant {
         uint256 bearUsdc;
         uint256 bullUsdc;
@@ -109,12 +110,12 @@ contract DOVZapRouter is FlashLoanBase, ReentrancyGuard, Ownable2Step {
         uint256 bullExcess = bullUsdc - matched;
 
         if (bearExcess > 0) {
-            uint256 bearReceived = CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, bearExcess, minSwapOut);
+            uint256 bearReceived = CURVE_POOL.exchange(USDC_INDEX, PLDXY_BEAR_INDEX, bearExcess, minBearSwapOut);
             STAKED_BEAR.deposit(bearReceived, address(BEAR_DOV));
         }
 
         if (bullExcess > 0) {
-            _flashZapBull(bullExcess, minSwapOut);
+            _flashZapBull(bullExcess, minBullSwapOut);
         }
 
         if (address(BEAR_DOV) != address(0)) {

@@ -105,7 +105,7 @@ contract DOVZapRouterForkTest is BaseForkTest {
 
         uint256 seedBaseline = 10_000e18;
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
         assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
@@ -121,7 +121,7 @@ contract DOVZapRouterForkTest is BaseForkTest {
         deal(USDC, address(bearDov), 10_000e6);
         deal(USDC, address(bullDov), 10_000e6);
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
         assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
@@ -134,7 +134,7 @@ contract DOVZapRouterForkTest is BaseForkTest {
 
         uint256 seedBaseline = 10_000e18;
 
-        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0);
+        router.coordinatedZapAndStartEpochs(_defaultBearParams(), _defaultBullParams(), 0, 0);
 
         assertEq(uint256(bearDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
         assertEq(uint256(bullDov.currentState()), uint256(PletherDOV.State.AUCTIONING));
