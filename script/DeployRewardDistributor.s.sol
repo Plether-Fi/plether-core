@@ -17,16 +17,16 @@ import "forge-std/Script.sol";
  */
 contract DeployRewardDistributor is Script {
 
-    address constant SPLITTER = 0x45c1135fab0A0532cC2945f6b0b31eA12B54A2f9;
+    address constant SPLITTER = 0x3A8dAF1f0ccf9675eDE5fE312Ec2E13311e0BBc4;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address constant PLDXY_BEAR = 0x5503FB45370a03909dFfEB207483a2832A9171aD;
-    address constant PLDXY_BULL = 0xf5aeecdF9778a5801C0873088d25E4d7E3Bf07Ab;
-    address constant STAKED_BEAR = 0xDC7366b8BB83f9ABa2B4F989194D6c03D0A20DE9;
-    address constant STAKED_BULL = 0x8dbcF452799f50D3382105a19FdBfA57B7f29C73;
-    address constant CURVE_POOL = 0x95D51D6F312DbE66BACC2ed677aD64790f48aa87;
-    address constant ZAP_ROUTER = 0xb0623D89ae73D177cf201bCA09C51d84502A8d80;
-    address constant BASKET_ORACLE = 0x4f798422388484F2139717A8cE0115De3B06b1DF;
-    address constant PYTH_ADAPTER = 0x5f4859A2aCcf3b6Ca9eeD9799676Cc7a77B7bEb5;
+    address constant PLDXY_BEAR = 0xea1c5882863a2D7686dCd4a9ac4E493674f18265;
+    address constant PLDXY_BULL = 0xA7760821fdFA93779C6C296403d25Be21F957Cb8;
+    address constant STAKED_BEAR = 0x603a694eaB6E684d56531e32d0B2EE12578b026F;
+    address constant STAKED_BULL = 0x2e00857D69A0e6E5ae8463099e17DC3E83E2061C;
+    address constant CURVE_POOL = 0x1270e2E6e39132D614a09ef167bc949D5E223151;
+    address constant ZAP_ROUTER = 0x66e3980e0fB77f45d58572c9BaFEF15777097602;
+    address constant BASKET_ORACLE = 0x797BE08864F04b5240D9FbA742bb3f5D888246Ee;
+    address constant PYTH_ADAPTER = 0xB440cEA2964234303a1b610682c6850393F87caa;
 
     function run() external {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
@@ -48,7 +48,7 @@ contract DeployRewardDistributor is Script {
             ZAP_ROUTER,
             BASKET_ORACLE,
             PYTH_ADAPTER,
-            address(0) // InvarCoin — update when deployed
+            0x91D242d9ef6C50109F1A59884dABbac1606961A0 // InvarCoin
         );
 
         console.log("RewardDistributor:", address(distributor));
