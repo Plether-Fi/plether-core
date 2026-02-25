@@ -404,25 +404,6 @@ contract LeverageRouterHandler is Test {
     bytes4 private constant ERR_INSUFFICIENT_OUTPUT =
         LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
     bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
-    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
-
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
-    ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
-        assembly {
-            revert(add(reason, 32), mload(reason))
-        }
-    }
 
     modifier useActor(
         uint256 actorSeed
@@ -482,11 +463,10 @@ contract LeverageRouterHandler is Test {
             ghost_totalPrincipalDeposited += principal;
             hasPosition[currentActor] = true;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -511,11 +491,10 @@ contract LeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -550,11 +529,10 @@ contract LeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -939,25 +917,6 @@ contract BullLeverageRouterHandler is Test {
         LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
     bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
     bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector;
-    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
-
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
-    ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
-        assembly {
-            revert(add(reason, 32), mload(reason))
-        }
-    }
 
     modifier useActor(
         uint256 actorSeed
@@ -1019,12 +978,10 @@ contract BullLeverageRouterHandler is Test {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -1047,12 +1004,10 @@ contract BullLeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -1085,12 +1040,10 @@ contract BullLeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 

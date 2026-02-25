@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockAToken, MockERC20, MockPool} from "./utils/MockAave.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
@@ -10,19 +11,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test, console} from "forge-std/Test.sol";
-
-// ==========================================
-// MOCK USDC (6 decimals)
-// ==========================================
-contract MockUSDC is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-}
 
 // ==========================================
 // HANDLER CONTRACT
@@ -68,26 +56,6 @@ contract SplitterHandler is Test {
     bytes4 constant ERR_SEQUENCER_GRACE = OracleLib.OracleLib__SequencerGracePeriod.selector;
     bytes4 constant ERR_NO_SURPLUS = SyntheticSplitter.Splitter__NoSurplus.selector;
     bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
-
-    /// @dev Reverts if error selector is not in the allowed list
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
-    ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
-        // Not an expected error - propagate it
-        assembly {
-            revert(add(reason, 32), mload(reason))
-        }
-    }
 
     modifier useActor(
         uint256 actorSeed
@@ -156,12 +124,10 @@ contract SplitterHandler is Test {
             ghost_totalUsdcFairPrice += usdcFair;
             mintCalls++;
         } catch (bytes memory reason) {
-            // Only allow oracle-related errors (price can change between check and call)
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_STALE_PRICE;
-            allowed[1] = ERR_SEQUENCER_DOWN;
-            allowed[2] = ERR_SEQUENCER_GRACE;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_STALE_PRICE && sel != ERR_SEQUENCER_DOWN && sel != ERR_SEQUENCER_GRACE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -199,24 +165,10 @@ contract SplitterHandler is Test {
                 ghost_burnedAfterLiquidation += amount;
             }
         } catch (bytes memory reason) {
-            if (reason.length >= 4) {
-                bytes4 selector = bytes4(reason);
-                // String error selector: Error(string) = 0x08c379a0
-                // Expected for "Paused & Insolvent" solvency check
-                if (selector == bytes4(0x08c379a0)) {
-                    return;
-                }
-                // ERR_ZERO_AMOUNT shouldn't happen (we bound > 0) but allow it
-                if (selector == ERR_ZERO_AMOUNT) {
-                    return;
-                }
-                // Any other error is unexpected - propagate it
-                assembly {
-                    revert(add(reason, 32), mload(reason))
-                }
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT) {
+                assembly { revert(add(reason, 32), mload(reason)) }
             }
-            // Malformed error (< 4 bytes) - propagate
-            revert("Unknown error");
         }
     }
 
@@ -231,10 +183,10 @@ contract SplitterHandler is Test {
         try splitter.harvestYield() {
             harvestCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = ERR_NO_SURPLUS;
-            allowed[1] = ERR_INSUFFICIENT_HARVEST;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_NO_SURPLUS && sel != ERR_INSUFFICIENT_HARVEST) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -284,10 +236,10 @@ contract SplitterHandler is Test {
                 ghost_wasEverLiquidated = true;
                 ghost_supplyAtLiquidation = splitter.BEAR().totalSupply();
             } catch (bytes memory reason) {
-                // Only expected error: already liquidated
-                bytes4[] memory allowed = new bytes4[](1);
-                allowed[0] = ERR_LIQUIDATION_ACTIVE;
-                _assertExpectedError(reason, allowed);
+                bytes4 sel = bytes4(reason);
+                if (sel != ERR_LIQUIDATION_ACTIVE) {
+                    assembly { revert(add(reason, 32), mload(reason)) }
+                }
             }
         }
     }

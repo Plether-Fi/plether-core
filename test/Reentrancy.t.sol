@@ -5,12 +5,14 @@ import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {ZapRouter} from "../src/ZapRouter.sol";
+import {FlashLoanBase} from "../src/base/FlashLoanBase.sol";
 import {IMorpho, MarketParams} from "../src/interfaces/IMorpho.sol";
+import {MockCurvePool} from "./mocks/MockCurvePool.sol";
+import {MockFlashToken} from "./mocks/MockFlashToken.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
-import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
-import {IERC3156FlashLender} from "@openzeppelin/contracts/interfaces/IERC3156FlashLender.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Test} from "forge-std/Test.sol";
 
 /**
@@ -34,8 +36,8 @@ contract ReentrancyTest is Test {
     MockFlashToken public plDxyBull;
 
     // Mocks
-    MockOracle public oracle;
-    MockOracle public sequencer;
+    SimpleOracle public oracle;
+    SimpleOracle public sequencer;
     MockCurvePool public curvePool;
 
     address owner = address(0x1);
@@ -53,8 +55,8 @@ contract ReentrancyTest is Test {
         plDxyBull = new MockFlashToken("plDXY-BULL", "plDXY-BULL");
 
         // Deploy oracles
-        oracle = new MockOracle(100_000_000, block.timestamp, block.timestamp);
-        sequencer = new MockOracle(0, block.timestamp - 2 hours, block.timestamp);
+        oracle = new SimpleOracle(100_000_000, block.timestamp, block.timestamp);
+        sequencer = new SimpleOracle(0, block.timestamp - 2 hours, block.timestamp);
 
         // Deploy Curve pool mock
         curvePool = new MockCurvePool(address(usdc), address(plDxyBear));
@@ -74,7 +76,7 @@ contract ReentrancyTest is Test {
         vm.stopPrank();
 
         // Deploy ZapRouter with mock splitter for flash loan tests
-        MockSplitter mockSplitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
+        ReentrancyMockSplitter mockSplitter = new ReentrancyMockSplitter(address(plDxyBear), address(plDxyBull));
         mockSplitter.setUsdc(address(usdc));
         zapRouter = new ZapRouter(
             address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(curvePool)
@@ -94,16 +96,14 @@ contract ReentrancyTest is Test {
     // ==========================================
 
     function test_ZapRouter_OnFlashLoan_RejectsExternalCalls() public {
-        // Try calling onFlashLoan directly from a random address
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidLender.selector);
         zapRouter.onFlashLoan(address(zapRouter), address(plDxyBear), 100, 0, "");
     }
 
     function test_ZapRouter_OnFlashLoan_RejectsWrongInitiator() public {
-        // Try calling from the correct lender but wrong initiator
         vm.prank(address(plDxyBear));
-        vm.expectRevert();
+        vm.expectRevert(FlashLoanBase.FlashLoan__InvalidInitiator.selector);
         zapRouter.onFlashLoan(alice, address(plDxyBear), 100, 0, "");
     }
 
@@ -116,7 +116,7 @@ contract ReentrancyTest is Test {
         MaliciousCurvePool maliciousPool = new MaliciousCurvePool(address(usdc), address(plDxyBear));
 
         // Create new ZapRouter with malicious pool
-        MockSplitter mockSplitter = new MockSplitter(address(plDxyBear), address(plDxyBull));
+        ReentrancyMockSplitter mockSplitter = new ReentrancyMockSplitter(address(plDxyBear), address(plDxyBull));
         mockSplitter.setUsdc(address(usdc));
         ZapRouter maliciousRouter = new ZapRouter(
             address(mockSplitter), address(plDxyBear), address(plDxyBull), address(usdc), address(maliciousPool)
@@ -130,9 +130,9 @@ contract ReentrancyTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(maliciousRouter), type(uint256).max);
 
-        // Malicious pool calls maliciousRouter.zapMint during exchange,
-        // which reverts because nonReentrant is already locked
-        vm.expectRevert();
+        // Reverts before reaching reentrancy: malicious pool returns 1e18 from get_dy
+        // (token scale), which exceeds CAP_PRICE (USDC scale), triggering BearPriceAboveCap
+        vm.expectRevert(ZapRouter.ZapRouter__BearPriceAboveCap.selector);
         maliciousRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
@@ -190,87 +190,10 @@ contract MaliciousCurvePool {
 }
 
 // ==========================================
-// MOCKS
+// MOCKS (kept inline: specialized or behaviorally different from shared mocks)
 // ==========================================
 
-contract MockUSDC is ERC20 {
-
-    constructor() ERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract MockFlashToken is ERC20, IERC3156FlashLender {
-
-    uint256 public feeBps = 0;
-
-    constructor(
-        string memory name,
-        string memory symbol
-    ) ERC20(name, symbol) {}
-
-    function setFeeBps(
-        uint256 _feeBps
-    ) external {
-        feeBps = _feeBps;
-    }
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-    function burn(
-        address from,
-        uint256 amount
-    ) external {
-        _burn(from, amount);
-    }
-
-    function maxFlashLoan(
-        address
-    ) external pure override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function flashFee(
-        address,
-        uint256 amount
-    ) public view override returns (uint256) {
-        return (amount * feeBps) / 10_000;
-    }
-
-    function flashLoan(
-        IERC3156FlashBorrower receiver,
-        address token,
-        uint256 amount,
-        bytes calldata data
-    ) external override returns (bool) {
-        uint256 fee = flashFee(token, amount);
-        _mint(address(receiver), amount);
-        require(
-            receiver.onFlashLoan(msg.sender, token, amount, fee, data) == keccak256("ERC3156FlashBorrower.onFlashLoan"),
-            "Callback failed"
-        );
-        _burn(address(receiver), amount + fee);
-        return true;
-    }
-
-}
-
-contract MockOracle {
+contract SimpleOracle {
 
     int256 public price;
     uint256 public startedAt;
@@ -296,65 +219,7 @@ contract MockOracle {
 
 }
 
-contract MockCurvePool {
-
-    address public token0;
-    address public token1;
-    uint256 public bearPrice = 1e6;
-
-    constructor(
-        address _token0,
-        address _token1
-    ) {
-        token0 = _token0;
-        token1 = _token1;
-    }
-
-    function setPrice(
-        uint256 _price
-    ) external {
-        bearPrice = _price;
-    }
-
-    function get_dy(
-        uint256 i,
-        uint256 j,
-        uint256 dx
-    ) external view returns (uint256) {
-        if (i == 1 && j == 0) {
-            return (dx * bearPrice) / 1e18;
-        }
-        if (i == 0 && j == 1) {
-            return (dx * 1e18) / bearPrice;
-        }
-        return 0;
-    }
-
-    function exchange(
-        uint256 i,
-        uint256 j,
-        uint256 dx,
-        uint256 min_dy
-    ) external payable returns (uint256 dy) {
-        dy = this.get_dy(i, j, dx);
-        require(dy >= min_dy, "Too little received");
-
-        address tokenIn = i == 0 ? token0 : token1;
-        address tokenOut = j == 0 ? token0 : token1;
-
-        ERC20(tokenIn).transferFrom(msg.sender, address(this), dx);
-        MockFlashToken(tokenOut).mint(msg.sender, dy);
-
-        return dy;
-    }
-
-    function price_oracle() external view returns (uint256) {
-        return bearPrice * 1e12;
-    }
-
-}
-
-contract MockSplitter {
+contract ReentrancyMockSplitter {
 
     address public tA;
     address public tB;

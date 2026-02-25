@@ -361,7 +361,7 @@ contract InvarCoinForkTest is BaseForkTest {
         require(s, "attacker swap failed");
         vm.stopPrank();
 
-        vm.expectRevert();
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.replenishBuffer(0);
     }
 
@@ -380,7 +380,7 @@ contract InvarCoinForkTest is BaseForkTest {
         require(s, "attacker swap failed");
         vm.stopPrank();
 
-        vm.expectRevert();
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
         ic.deployToCurve(0);
     }
 

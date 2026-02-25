@@ -2,22 +2,13 @@
 pragma solidity ^0.8.20;
 
 import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockAToken, MockERC20, MockPool} from "./utils/MockAave.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Test, console} from "forge-std/Test.sol";
-
-contract MockUSDC is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-}
 
 contract SyntheticSplitterFuzzTest is Test {
 

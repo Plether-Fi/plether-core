@@ -5,9 +5,11 @@ import {InvarCoin} from "../src/InvarCoin.sol";
 import {StakedToken} from "../src/StakedToken.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -415,7 +417,7 @@ contract InvarCoinTest is Test {
     function test_Deposit_RevertsWhenPaused() public {
         ic.pause();
 
-        vm.expectRevert();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vm.prank(alice);
         ic.deposit(100e6, alice, 0);
     }
@@ -542,7 +544,7 @@ contract InvarCoinTest is Test {
 
     function test_RedeployToCurve_OnlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.redeployToCurve(0);
     }
 
@@ -567,7 +569,7 @@ contract InvarCoinTest is Test {
         ic.pause();
 
         uint256 bal = ic.balanceOf(alice);
-        vm.expectRevert();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vm.prank(alice);
         ic.withdraw(bal, alice, 0);
     }
@@ -660,7 +662,7 @@ contract InvarCoinTest is Test {
 
         ic.pause();
 
-        vm.expectRevert();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         ic.deployToCurve(0);
     }
 
@@ -1155,7 +1157,7 @@ contract InvarCoinTest is Test {
 
     function test_EmergencyWithdraw_OnlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.emergencyWithdrawFromCurve();
     }
 
@@ -1403,7 +1405,7 @@ contract InvarCoinTest is Test {
     function test_LpDeposit_RevertsWhenPaused() public {
         ic.pause();
 
-        vm.expectRevert();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         vm.prank(alice);
         ic.lpDeposit(1000e6, 0, alice, 0);
     }
@@ -2052,7 +2054,7 @@ contract InvarCoinTest is Test {
 
     function test_SetEmergencyMode_OnlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.setEmergencyMode();
     }
 
@@ -2777,7 +2779,7 @@ contract InvarCoinGaugeTest is Test {
 
     function test_ProposeGauge_OnlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.proposeGauge(address(gauge));
     }
 
@@ -2808,7 +2810,7 @@ contract InvarCoinGaugeTest is Test {
         vm.warp(block.timestamp + 7 days);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.finalizeGauge();
     }
 
@@ -2918,7 +2920,7 @@ contract InvarCoinGaugeTest is Test {
         _setupGauge();
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.stakeToGauge(0);
     }
 
@@ -2946,7 +2948,7 @@ contract InvarCoinGaugeTest is Test {
         _setupGauge();
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.unstakeFromGauge(0);
     }
 
@@ -2968,7 +2970,7 @@ contract InvarCoinGaugeTest is Test {
         _setupGauge();
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.claimGaugeRewards();
     }
 

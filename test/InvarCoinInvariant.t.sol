@@ -46,24 +46,6 @@ contract InvarCoinHandler is Test {
     bytes4 constant ERR_STALE_PRICE = OracleLib.OracleLib__StalePrice.selector;
     bytes4 constant ERR_SPOT_DEVIATION = InvarCoin.InvarCoin__SpotDeviationTooHigh.selector;
 
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
-    ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
-        assembly {
-            revert(add(reason, 32), mload(reason))
-        }
-    }
-
     modifier useActor(
         uint256 actorSeed
     ) {
@@ -117,10 +99,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             depositCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = ERR_ZERO_AMOUNT;
-            allowed[1] = ERR_STALE_PRICE;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT && sel != ERR_STALE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -152,11 +134,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore;
             withdrawCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_ZERO_AMOUNT;
-            allowed[1] = ERR_SLIPPAGE;
-            allowed[2] = ERR_STALE_PRICE;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT && sel != ERR_SLIPPAGE && sel != ERR_STALE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -188,11 +169,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore2;
             lpWithdrawCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_ZERO_AMOUNT;
-            allowed[1] = ERR_SLIPPAGE;
-            allowed[2] = ERR_STALE_PRICE;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT && sel != ERR_SLIPPAGE && sel != ERR_STALE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -206,10 +186,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             deployToCurveCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = ERR_NOTHING_TO_DEPLOY;
-            allowed[1] = ERR_SPOT_DEVIATION;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SPOT_DEVIATION) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -223,10 +203,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore;
             replenishBufferCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = ERR_NOTHING_TO_DEPLOY;
-            allowed[1] = ERR_SPOT_DEVIATION;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_NOTHING_TO_DEPLOY && sel != ERR_SPOT_DEVIATION) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -241,11 +221,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += supplyAfter - supplyBefore;
             harvestCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_NO_YIELD;
-            allowed[1] = InvarCoin.InvarCoin__ZeroAddress.selector;
-            allowed[2] = ERR_STALE_PRICE;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_NO_YIELD && sel != InvarCoin.InvarCoin__ZeroAddress.selector && sel != ERR_STALE_PRICE) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 
@@ -305,11 +284,10 @@ contract InvarCoinHandler is Test {
             ghost_totalInvarMinted += ic.totalSupply() - supplyBefore3;
             lpDepositCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_ZERO_AMOUNT;
-            allowed[1] = ERR_STALE_PRICE;
-            allowed[2] = ERR_SPOT_DEVIATION;
-            _assertExpectedError(reason, allowed);
+            bytes4 sel = bytes4(reason);
+            if (sel != ERR_ZERO_AMOUNT && sel != ERR_STALE_PRICE && sel != ERR_SPOT_DEVIATION) {
+                assembly { revert(add(reason, 32), mload(reason)) }
+            }
         }
     }
 

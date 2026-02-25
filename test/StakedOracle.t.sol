@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {StakedToken} from "../src/StakedToken.sol";
 import {IOracle, StakedOracle} from "../src/oracles/StakedOracle.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockERC20} from "./utils/MockAave.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -245,17 +246,6 @@ contract StakedOracleTest is Test {
 
         // Price should remain same (no yield added)
         assertEq(priceAfterAlice, priceAfterBob);
-    }
-
-}
-
-/// @notice Mock USDC with 6 decimals
-contract MockUSDC is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
     }
 
 }

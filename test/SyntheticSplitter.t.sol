@@ -5,24 +5,15 @@ import {SyntheticSplitter} from "../src/SyntheticSplitter.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {ISyntheticSplitter} from "../src/interfaces/ISyntheticSplitter.sol";
 import {OracleLib} from "../src/libraries/OracleLib.sol";
+import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockAToken, MockERC20, MockPool} from "./utils/MockAave.sol";
 import {MockOracle} from "./utils/MockOracle.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
-
-// 6 Decimal USDC Mock
-contract MockUSDC is MockERC20 {
-
-    constructor() MockERC20("USDC", "USDC") {}
-
-    function decimals() public pure override returns (uint8) {
-        return 6;
-    }
-
-}
 
 contract SyntheticSplitterTest is Test {
 
@@ -293,8 +284,7 @@ contract SyntheticSplitterTest is Test {
         vm.startPrank(alice);
 
         // 3. Try Mint -> SHOULD REVERT (Entry is blocked)
-        // We use generic check: "Just make sure it fails"
-        vm.expectRevert();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         splitter.mint(10 * 1e18);
         // 4. Try Burn -> SHOULD SUCCEED (Exit is open)
         // No expectRevert here. If this fails, the test fails automatically.
@@ -961,8 +951,8 @@ contract SyntheticSplitterTest is Test {
             address(adapter), abi.encodeWithSelector(IERC4626.redeem.selector), abi.encode("ADAPTER_COMPLETELY_BROKEN")
         );
 
-        // 3. Owner tries to eject - should fail
-        vm.expectRevert();
+        // 3. Owner tries to eject - should fail (mock redeem bubbles up raw revert)
+        vm.expectRevert(abi.encode("ADAPTER_COMPLETELY_BROKEN"));
         splitter.ejectLiquidity();
 
         // 4. Funds are stuck in adapter
@@ -1125,7 +1115,7 @@ contract SyntheticSplitterTest is Test {
 
     function test_EjectLiquidity_OnlyOwner() public {
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         splitter.ejectLiquidity();
     }
 
@@ -1723,7 +1713,7 @@ contract SyntheticSplitterTest is Test {
         randomToken.mint(address(splitter), 1000 * 1e18);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         splitter.rescueToken(address(randomToken), alice);
     }
 

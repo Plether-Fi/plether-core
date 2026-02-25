@@ -200,7 +200,8 @@ contract VaultAdapterForkTest is BaseForkTest {
             abi.encode(uint80(1), clPrice, uint256(0), block.timestamp, uint80(1))
         );
 
-        // Harvest reverts because all liquidity is borrowed
+        // Harvest reverts: either NoSurplus (unaccrued interest) or InsufficientHarvest (can't withdraw)
+        // Exact error depends on whether Morpho vault auto-accrues during view calls
         vm.expectRevert();
         splitter.harvestYield();
 
