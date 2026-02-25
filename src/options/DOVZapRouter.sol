@@ -180,6 +180,8 @@ contract DOVZapRouter is FlashLoanBase, ReentrancyGuard, Ownable2Step {
             STAKED_BEAR.deposit(bearSurplus, address(BEAR_DOV));
         }
 
+        PLDXY_BEAR.safeIncreaseAllowance(msg.sender, repayAmount);
+
         return CALLBACK_SUCCESS;
     }
 
