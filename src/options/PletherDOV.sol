@@ -82,6 +82,19 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     mapping(address => uint256) public userUsdcDeposits;
     mapping(address => uint256) public userDepositEpoch;
 
+    // Share Accounting
+    struct EpochDeposits {
+        uint256 totalUsdc;
+        uint256 sharesMinted;
+    }
+
+    mapping(uint256 => EpochDeposits) public epochDeposits;
+
+    uint256 internal _preZapSplDXYBalance;
+    uint256 internal _preZapDepositUsdc;
+    uint256 internal _preZapPremiumUsdc;
+    bool internal _zapSnapshotTaken;
+
     event DepositQueued(address indexed user, uint256 amount);
     event DepositWithdrawn(address indexed user, uint256 amount);
     event EpochRolled(uint256 indexed epochId, uint256 seriesId, uint256 optionsMinted);
@@ -90,6 +103,10 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     event EpochSettled(uint256 indexed epochId, uint256 collateralReturned);
     event EmergencyWithdraw(address indexed token, uint256 amount);
     event ZapKeeperSet(address indexed keeper);
+    event SharesInitialized(address indexed owner, uint256 shares);
+    event DepositSharesMinted(uint256 indexed epochId, uint256 totalShares, uint256 totalDepositsUsdc);
+    event SharesClaimed(address indexed user, uint256 shares);
+    event Withdrawn(address indexed user, uint256 shares, uint256 splDXYAmount, uint256 usdcAmount);
 
     error PletherDOV__WrongState();
     error PletherDOV__ZeroAmount();
@@ -100,6 +117,10 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     error PletherDOV__InsufficientDeposit();
     error PletherDOV__DepositProcessed();
     error PletherDOV__Unauthorized();
+    error PletherDOV__AlreadyInitialized();
+    error PletherDOV__NotInitialized();
+    error PletherDOV__DepositsNotZapped();
+    error PletherDOV__NothingToClaim();
 
     constructor(
         string memory _name,
@@ -118,16 +139,38 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     // ==========================================
+    // SHARE INITIALIZATION
+    // ==========================================
+
+    /// @notice Mints initial shares to the owner for seed capital already held by the vault.
+    /// @dev Must be called before the first epoch if the vault holds pre-seeded splDXY.
+    function initializeShares() external onlyOwner {
+        if (totalSupply() > 0) {
+            revert PletherDOV__AlreadyInitialized();
+        }
+        uint256 balance = STAKED_TOKEN.balanceOf(address(this));
+        if (balance == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+        uint256 assets = STAKED_TOKEN.convertToAssets(balance);
+        _mint(msg.sender, assets);
+        emit SharesInitialized(msg.sender, assets);
+    }
+
+    // ==========================================
     // RETAIL QUEUE
     // ==========================================
 
     /// @notice Queue USDC to be deposited into the DOV at the start of the next epoch.
+    /// @dev Auto-claims shares from any previous epoch deposit before recording the new one.
     function deposit(
         uint256 amount
     ) external nonReentrant {
         if (amount == 0) {
             revert PletherDOV__ZeroAmount();
         }
+
+        _claimShares(msg.sender);
 
         if (userDepositEpoch[msg.sender] < currentEpochId) {
             userUsdcDeposits[msg.sender] = 0;
@@ -162,6 +205,49 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         emit DepositWithdrawn(msg.sender, amount);
     }
 
+    /// @notice Claims DOV shares earned from a previous epoch's processed deposit.
+    function claimShares() external nonReentrant {
+        uint256 before = balanceOf(msg.sender);
+        _claimShares(msg.sender);
+        if (balanceOf(msg.sender) == before) {
+            revert PletherDOV__NothingToClaim();
+        }
+    }
+
+    /// @notice Redeems vault shares for proportional splDXY (and any premium USDC).
+    /// @dev Only callable during UNLOCKED. Auto-claims pending deposit shares first.
+    function withdraw(
+        uint256 shares
+    ) external nonReentrant {
+        if (currentState != State.UNLOCKED) {
+            revert PletherDOV__WrongState();
+        }
+        if (shares == 0) {
+            revert PletherDOV__ZeroAmount();
+        }
+
+        _claimShares(msg.sender);
+
+        uint256 supply = totalSupply();
+        uint256 splDXYBalance = STAKED_TOKEN.balanceOf(address(this));
+        uint256 splDXYOut = (splDXYBalance * shares) / supply;
+
+        uint256 usdcBal = USDC.balanceOf(address(this));
+        uint256 redeemableUsdc = usdcBal > pendingUsdcDeposits ? usdcBal - pendingUsdcDeposits : 0;
+        uint256 usdcOut = supply > 0 ? (redeemableUsdc * shares) / supply : 0;
+
+        _burn(msg.sender, shares);
+
+        if (splDXYOut > 0) {
+            IERC20(address(STAKED_TOKEN)).safeTransfer(msg.sender, splDXYOut);
+        }
+        if (usdcOut > 0) {
+            USDC.safeTransfer(msg.sender, usdcOut);
+        }
+
+        emit Withdrawn(msg.sender, shares, splDXYOut, usdcOut);
+    }
+
     // ==========================================
     // ZAP KEEPER
     // ==========================================
@@ -174,6 +260,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Releases all USDC held by this DOV to the caller (zapKeeper only).
+    /// @dev Snapshots pre-zap state for share calculation in startEpochAuction.
     function releaseUsdcForZap() external returns (uint256 amount) {
         if (msg.sender != zapKeeper) {
             revert PletherDOV__Unauthorized();
@@ -181,7 +268,14 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (currentState != State.UNLOCKED) {
             revert PletherDOV__WrongState();
         }
+
+        _preZapSplDXYBalance = STAKED_TOKEN.balanceOf(address(this));
+        _preZapDepositUsdc = pendingUsdcDeposits;
+
         amount = USDC.balanceOf(address(this));
+        _preZapPremiumUsdc = amount > pendingUsdcDeposits ? amount - pendingUsdcDeposits : 0;
+        _zapSnapshotTaken = true;
+
         if (amount > 0) {
             USDC.safeTransfer(msg.sender, amount);
         }
@@ -192,6 +286,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     // ==========================================
 
     /// @notice Step 1: Rolls the vault into a new epoch, mints options, starts Dutch Auction.
+    /// @dev If deposits are pending, releaseUsdcForZap must have been called first to snapshot
+    ///      pre-zap state. Deposit shares are minted proportionally based on the zap conversion.
     function startEpochAuction(
         uint256 strike,
         uint256 expiry,
@@ -208,6 +304,9 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         if (duration == 0 || minPremium == 0 || minPremium > maxPremium) {
             revert PletherDOV__InvalidParams();
         }
+        if (pendingUsdcDeposits > 0 && !_zapSnapshotTaken) {
+            revert PletherDOV__DepositsNotZapped();
+        }
 
         if (currentEpochId > 0) {
             Epoch storage prev = epochs[currentEpochId];
@@ -220,6 +319,11 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         }
 
         currentEpochId++;
+
+        if (_zapSnapshotTaken) {
+            _mintDepositShares();
+            _zapSnapshotTaken = false;
+        }
         pendingUsdcDeposits = 0;
 
         uint256 sharesBalance = STAKED_TOKEN.balanceOf(address(this));
@@ -419,6 +523,111 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         }
         token.safeTransfer(msg.sender, balance);
         emit EmergencyWithdraw(address(token), balance);
+    }
+
+    // ==========================================
+    // VIEW FUNCTIONS
+    // ==========================================
+
+    /// @notice Returns the number of shares a user can claim from a processed deposit.
+    function pendingSharesOf(
+        address user
+    ) external view returns (uint256) {
+        uint256 depositEpoch = userDepositEpoch[user];
+        uint256 depositAmount = userUsdcDeposits[user];
+
+        if (depositAmount == 0 || depositEpoch >= currentEpochId) {
+            return 0;
+        }
+
+        uint256 claimEpoch = depositEpoch + 1;
+        EpochDeposits storage ed = epochDeposits[claimEpoch];
+
+        if (ed.sharesMinted == 0 || ed.totalUsdc == 0) {
+            return 0;
+        }
+
+        return (depositAmount * ed.sharesMinted) / ed.totalUsdc;
+    }
+
+    /// @notice Returns the vault's total assets excluding pending deposits.
+    function totalVaultAssets() external view returns (uint256 splDXYShares, uint256 usdcBalance) {
+        splDXYShares = STAKED_TOKEN.balanceOf(address(this));
+        uint256 usdcBal = USDC.balanceOf(address(this));
+        usdcBalance = usdcBal > pendingUsdcDeposits ? usdcBal - pendingUsdcDeposits : 0;
+    }
+
+    // ==========================================
+    // INTERNAL
+    // ==========================================
+
+    /// @dev Claims DOV shares for a user whose deposit was processed in a previous epoch.
+    function _claimShares(
+        address user
+    ) internal {
+        uint256 depositEpoch = userDepositEpoch[user];
+        uint256 depositAmount = userUsdcDeposits[user];
+
+        if (depositAmount == 0 || depositEpoch >= currentEpochId) {
+            return;
+        }
+
+        uint256 claimEpoch = depositEpoch + 1;
+        EpochDeposits storage ed = epochDeposits[claimEpoch];
+
+        if (ed.totalUsdc == 0) {
+            return;
+        }
+
+        uint256 shares = (depositAmount * ed.sharesMinted) / ed.totalUsdc;
+
+        userUsdcDeposits[user] = 0;
+        userDepositEpoch[user] = currentEpochId;
+
+        if (shares > 0) {
+            _transfer(address(this), user, shares);
+            emit SharesClaimed(user, shares);
+        }
+    }
+
+    /// @dev Computes and mints aggregate shares for all depositors whose USDC was zapped.
+    ///      Uses the pre-zap snapshot from releaseUsdcForZap to attribute splDXY proportionally
+    ///      between existing shareholders (premium) and new depositors (deposit USDC).
+    function _mintDepositShares() internal {
+        uint256 totalDeposits = _preZapDepositUsdc;
+        if (totalDeposits == 0) {
+            return;
+        }
+
+        uint256 postZapBalance = STAKED_TOKEN.balanceOf(address(this));
+        uint256 deltaSplDXY = postZapBalance - _preZapSplDXYBalance;
+        uint256 totalZappedUsdc = totalDeposits + _preZapPremiumUsdc;
+
+        uint256 depositSplDXY;
+        if (totalZappedUsdc > 0) {
+            depositSplDXY = (deltaSplDXY * totalDeposits) / totalZappedUsdc;
+        }
+
+        uint256 sharesToMint;
+        uint256 supply = totalSupply();
+
+        if (supply == 0) {
+            if (_preZapSplDXYBalance > 0) {
+                revert PletherDOV__NotInitialized();
+            }
+            sharesToMint = STAKED_TOKEN.convertToAssets(postZapBalance);
+        } else {
+            uint256 existingSplDXY = postZapBalance - depositSplDXY;
+            if (existingSplDXY > 0) {
+                sharesToMint = (depositSplDXY * supply) / existingSplDXY;
+            }
+        }
+
+        if (sharesToMint > 0) {
+            _mint(address(this), sharesToMint);
+            epochDeposits[currentEpochId] = EpochDeposits({totalUsdc: totalDeposits, sharesMinted: sharesToMint});
+            emit DepositSharesMinted(currentEpochId, sharesToMint, totalDeposits);
+        }
     }
 
 }

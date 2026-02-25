@@ -268,6 +268,17 @@ contract PletherDOVTest is Test {
         epochId = dov.currentEpochId();
     }
 
+    /// @dev Simulates the zap flow: release USDC, convert to splDXY, deposit back.
+    ///      Mock conversion: 1 USDC (6 dec) = 1e15 splDXY shares (21 dec) = 1e12 assets (18 dec).
+    function _mockZap() internal {
+        dov.setZapKeeper(address(this));
+        uint256 released = dov.releaseUsdcForZap();
+        if (released > 0) {
+            stakedToken.mint(address(dov), released * 1e15);
+        }
+        dov.setZapKeeper(keeper);
+    }
+
     // ==========================================
     // deposit
     // ==========================================
@@ -760,6 +771,8 @@ contract PletherDOVTest is Test {
         vm.prank(alice);
         dov.deposit(1000e6);
 
+        dov.initializeShares();
+        _mockZap();
         _startAuction();
 
         vm.prank(alice);
@@ -768,10 +781,13 @@ contract PletherDOVTest is Test {
     }
 
     function test_Deposit_ResetsStaleBalanceOnNewEpoch() public {
+        dov.initializeShares();
+
         vm.prank(alice);
         dov.deposit(500e6);
         assertEq(dov.userUsdcDeposits(alice), 500e6);
 
+        _mockZap();
         _startAuction();
         vm.prank(maker);
         dov.fillAuction();
@@ -913,6 +929,346 @@ contract PletherDOVTest is Test {
 
         assertEq(dov.currentEpochId(), 1);
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.AUCTIONING));
+    }
+
+    // ==========================================
+    // SHARE INITIALIZATION
+    // ==========================================
+
+    function test_InitializeShares_MintsSharesForSeedCapital() public {
+        uint256 expectedShares = stakedToken.convertToAssets(INITIAL_STAKED);
+        dov.initializeShares();
+
+        assertEq(dov.totalSupply(), expectedShares);
+        assertEq(dov.balanceOf(address(this)), expectedShares);
+    }
+
+    function test_InitializeShares_RevertsIfAlreadyInitialized() public {
+        dov.initializeShares();
+        vm.expectRevert(PletherDOV.PletherDOV__AlreadyInitialized.selector);
+        dov.initializeShares();
+    }
+
+    function test_InitializeShares_RevertsIfNoBalance() public {
+        PletherDOV emptyDov =
+            new PletherDOV("EMPTY", "EMPTY", address(marginEngine), address(stakedToken), address(usdc), false);
+        vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
+        emptyDov.initializeShares();
+    }
+
+    function test_InitializeShares_RevertsFromNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        dov.initializeShares();
+    }
+
+    // ==========================================
+    // CLAIM SHARES
+    // ==========================================
+
+    function test_ClaimShares_AfterDepositZapAndEpochStart() public {
+        dov.initializeShares();
+        uint256 ownerShares = dov.balanceOf(address(this));
+
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        _mockZap();
+        _startAuction();
+
+        uint256 pending = dov.pendingSharesOf(alice);
+        assertGt(pending, 0, "alice should have pending shares");
+
+        vm.prank(alice);
+        dov.claimShares();
+
+        assertEq(dov.balanceOf(alice), pending, "alice received correct shares");
+        assertEq(dov.userUsdcDeposits(alice), 0, "deposit cleared after claim");
+        assertGt(dov.totalSupply(), ownerShares, "total supply increased");
+    }
+
+    function test_ClaimShares_AutoClaimsOnNewDeposit() public {
+        dov.initializeShares();
+
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        _mockZap();
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        uint256 pending = dov.pendingSharesOf(alice);
+        assertGt(pending, 0);
+
+        vm.prank(alice);
+        dov.deposit(500e6);
+
+        assertEq(dov.balanceOf(alice), pending, "auto-claimed from previous epoch");
+        assertEq(dov.userUsdcDeposits(alice), 500e6, "new deposit recorded");
+    }
+
+    function test_ClaimShares_RevertsIfNothingToClaim() public {
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__NothingToClaim.selector);
+        dov.claimShares();
+    }
+
+    function test_ClaimShares_MultipleDepositors() public {
+        dov.initializeShares();
+
+        address bob = address(0x4);
+        usdc.mint(bob, USDC_BALANCE);
+        vm.prank(bob);
+        usdc.approve(address(dov), type(uint256).max);
+
+        vm.prank(alice);
+        dov.deposit(1000e6);
+        vm.prank(bob);
+        dov.deposit(3000e6);
+
+        _mockZap();
+        _startAuction();
+
+        uint256 alicePending = dov.pendingSharesOf(alice);
+        uint256 bobPending = dov.pendingSharesOf(bob);
+
+        assertApproxEqRel(bobPending, alicePending * 3, 1e14, "bob deposited 3x alice");
+
+        vm.prank(alice);
+        dov.claimShares();
+        vm.prank(bob);
+        dov.claimShares();
+
+        assertEq(dov.balanceOf(alice), alicePending);
+        assertEq(dov.balanceOf(bob), bobPending);
+    }
+
+    // ==========================================
+    // DEPOSITS NOT ZAPPED GUARD
+    // ==========================================
+
+    function test_StartEpochAuction_RevertsIfDepositsNotZapped() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        vm.expectRevert(PletherDOV.PletherDOV__DepositsNotZapped.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    function test_StartEpochAuction_SucceedsWithoutDepositsAndWithoutZap() public {
+        _startAuction();
+        assertEq(dov.currentEpochId(), 1);
+    }
+
+    // ==========================================
+    // WITHDRAW
+    // ==========================================
+
+    function test_Withdraw_RedeemsSplDXYDuringUnlocked() public {
+        dov.initializeShares();
+        uint256 shares = dov.balanceOf(address(this));
+        uint256 halfShares = shares / 2;
+
+        uint256 dovSplDXYBefore = stakedToken.balanceOf(address(dov));
+        uint256 expectedSplDXY = (dovSplDXYBefore * halfShares) / dov.totalSupply();
+
+        dov.withdraw(halfShares);
+
+        assertEq(dov.balanceOf(address(this)), shares - halfShares);
+        assertEq(stakedToken.balanceOf(address(this)), expectedSplDXY);
+        assertEq(stakedToken.balanceOf(address(dov)), dovSplDXYBefore - expectedSplDXY);
+    }
+
+    function test_Withdraw_IncludesPremiumUsdc() public {
+        dov.initializeShares();
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        uint256 premiumUsdc = usdc.balanceOf(address(dov));
+        assertGt(premiumUsdc, 0, "DOV should hold premium USDC");
+
+        uint256 shares = dov.balanceOf(address(this));
+        uint256 supply = dov.totalSupply();
+        uint256 expectedUsdc = (premiumUsdc * shares) / supply;
+
+        uint256 usdcBefore = usdc.balanceOf(address(this));
+        dov.withdraw(shares);
+
+        assertEq(usdc.balanceOf(address(this)) - usdcBefore, expectedUsdc, "received proportional USDC");
+    }
+
+    function test_Withdraw_RevertsIfNotUnlocked() public {
+        dov.initializeShares();
+        _startAuction();
+
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.withdraw(1);
+    }
+
+    function test_Withdraw_RevertsOnZeroShares() public {
+        vm.expectRevert(PletherDOV.PletherDOV__ZeroAmount.selector);
+        dov.withdraw(0);
+    }
+
+    function test_Withdraw_ExcludesPendingDepositsFromUsdc() public {
+        dov.initializeShares();
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        uint256 premiumUsdc = usdc.balanceOf(address(dov));
+
+        vm.prank(alice);
+        dov.deposit(2000e6);
+
+        uint256 shares = dov.balanceOf(address(this));
+        uint256 supply = dov.totalSupply();
+        uint256 expectedUsdc = (premiumUsdc * shares) / supply;
+
+        uint256 usdcBefore = usdc.balanceOf(address(this));
+        dov.withdraw(shares);
+
+        assertEq(usdc.balanceOf(address(this)) - usdcBefore, expectedUsdc, "pending deposits excluded");
+        assertEq(usdc.balanceOf(address(dov)), 2000e6, "alice deposit untouched");
+    }
+
+    // ==========================================
+    // SHARE ACCOUNTING: MULTI-EPOCH LIFECYCLE
+    // ==========================================
+
+    function test_ShareAccounting_PremiumAccruesToExistingShareholders() public {
+        dov.initializeShares();
+        uint256 ownerShares = dov.balanceOf(address(this));
+
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        uint256 splDXYAfter = stakedToken.balanceOf(address(dov));
+        uint256 premiumUsdc = usdc.balanceOf(address(dov));
+
+        assertEq(dov.balanceOf(address(this)), ownerShares, "no share dilution without deposits");
+        assertGt(premiumUsdc, 0, "premium accrued");
+        assertGt(splDXYAfter, 0, "residual collateral returned");
+    }
+
+    function test_ShareAccounting_FullLifecycleWithDepositsAndWithdrawals() public {
+        dov.initializeShares();
+        uint256 ownerShares = dov.balanceOf(address(this));
+        uint256 initialSplDXY = stakedToken.balanceOf(address(dov));
+
+        // Epoch 1: deposit + auction
+        vm.prank(alice);
+        dov.deposit(1000e6);
+        _mockZap();
+
+        uint256 postZapSplDXY = stakedToken.balanceOf(address(dov));
+        assertGt(postZapSplDXY, initialSplDXY, "zap added splDXY");
+
+        _startAuction();
+        vm.prank(maker);
+        dov.fillAuction();
+        marginEngine.settle(1, new uint80[](0));
+        dov.settleEpoch(new uint80[](0));
+
+        // Alice claims shares
+        vm.prank(alice);
+        dov.claimShares();
+        uint256 aliceShares = dov.balanceOf(alice);
+        assertGt(aliceShares, 0, "alice got shares");
+
+        uint256 totalShares = dov.totalSupply();
+        assertEq(totalShares, ownerShares + aliceShares, "total = owner + alice");
+
+        // Alice withdraws half
+        uint256 aliceHalf = aliceShares / 2;
+        uint256 aliceSplDXYBefore = stakedToken.balanceOf(alice);
+        vm.prank(alice);
+        dov.withdraw(aliceHalf);
+
+        assertEq(dov.balanceOf(alice), aliceShares - aliceHalf);
+        assertGt(stakedToken.balanceOf(alice), aliceSplDXYBefore, "alice received splDXY");
+    }
+
+    function test_ShareAccounting_NoDepositsNoSharesMinted() public {
+        dov.initializeShares();
+        uint256 supplyBefore = dov.totalSupply();
+
+        _startAuction();
+
+        (uint256 totalUsdc, uint256 sharesMinted) = dov.epochDeposits(1);
+        assertEq(totalUsdc, 0);
+        assertEq(sharesMinted, 0);
+        assertEq(dov.totalSupply(), supplyBefore, "supply unchanged with no deposits");
+    }
+
+    function test_ShareAccounting_BootstrapWithoutSeedCapital() public {
+        PletherDOV freshDov =
+            new PletherDOV("FRESH", "FRESH", address(marginEngine), address(stakedToken), address(usdc), false);
+
+        usdc.mint(alice, 5000e6);
+        vm.prank(alice);
+        usdc.approve(address(freshDov), type(uint256).max);
+
+        vm.prank(alice);
+        freshDov.deposit(5000e6);
+
+        freshDov.setZapKeeper(address(this));
+        uint256 released = freshDov.releaseUsdcForZap();
+        stakedToken.mint(address(freshDov), released * 1e15);
+
+        freshDov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+
+        uint256 pending = freshDov.pendingSharesOf(alice);
+        assertGt(pending, 0, "alice has pending shares on fresh vault");
+
+        vm.prank(alice);
+        freshDov.claimShares();
+        assertEq(freshDov.balanceOf(alice), pending);
+        assertEq(freshDov.totalSupply(), pending, "all shares belong to alice");
+    }
+
+    function test_ShareAccounting_NotInitializedRevertsIfSeedExists() public {
+        dov.setZapKeeper(address(this));
+
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        dov.releaseUsdcForZap();
+        stakedToken.mint(address(dov), 1000e6 * 1e15);
+
+        vm.expectRevert(PletherDOV.PletherDOV__NotInitialized.selector);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+    }
+
+    // ==========================================
+    // VIEW FUNCTIONS
+    // ==========================================
+
+    function test_PendingSharesOf_ReturnsZeroBeforeProcessing() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        assertEq(dov.pendingSharesOf(alice), 0, "no pending shares before epoch start");
+    }
+
+    function test_TotalVaultAssets_ExcludesPendingDeposits() public {
+        vm.prank(alice);
+        dov.deposit(1000e6);
+
+        (uint256 splDXYShares, uint256 usdcBalance) = dov.totalVaultAssets();
+        assertEq(splDXYShares, INITIAL_STAKED);
+        assertEq(usdcBalance, 0, "pending deposits excluded");
     }
 
 }
