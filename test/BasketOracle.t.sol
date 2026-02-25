@@ -381,6 +381,19 @@ contract BasketOracleTest is Test {
         newBasket.setCurvePool(address(curvePool));
     }
 
+    function test_FinalizeCurvePool_CanSetToZeroAddress() public {
+        basket.proposeCurvePool(address(0));
+        vm.warp(block.timestamp + 7 days);
+        basket.finalizeCurvePool();
+
+        assertEq(address(basket.curvePool()), address(0));
+
+        // Deviation check is now disabled — any price passes
+        feedEUR.updatePrice(500_000_000); // extreme price
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertTrue(answer > 0);
+    }
+
     // ==========================================
     // TIMESTAMP TRACKING TESTS
     // ==========================================

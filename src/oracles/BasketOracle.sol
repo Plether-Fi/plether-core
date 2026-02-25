@@ -35,6 +35,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @notice Pending Curve pool for timelock-protected updates.
     address public pendingCurvePool;
 
+    /// @notice Whether a proposal is active (needed because address(0) is a valid proposal).
+    bool public hasPendingProposal;
+
     /// @notice Timestamp when pending Curve pool can be finalized.
     uint256 public curvePoolActivationTime;
 
@@ -150,13 +153,14 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         }
         // slither-disable-next-line missing-zero-check
         pendingCurvePool = _newPool;
+        hasPendingProposal = true;
         curvePoolActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit CurvePoolProposed(_newPool, curvePoolActivationTime);
     }
 
     /// @notice Finalizes the Curve pool update after timelock expires.
     function finalizeCurvePool() external onlyOwner {
-        if (pendingCurvePool == address(0)) {
+        if (!hasPendingProposal) {
             revert BasketOracle__InvalidProposal();
         }
         if (block.timestamp < curvePoolActivationTime) {
@@ -167,6 +171,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         curvePool = ICurvePool(pendingCurvePool);
         emit CurvePoolUpdated(oldPool, pendingCurvePool);
         pendingCurvePool = address(0);
+        hasPendingProposal = false;
     }
 
     /// @notice Returns the aggregated basket price from all component feeds.
