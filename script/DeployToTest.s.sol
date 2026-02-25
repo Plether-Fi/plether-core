@@ -263,7 +263,7 @@ contract DeployToTest is Script {
         (address[] memory feeds, uint256[] memory quantities, uint256[] memory basePrices) = _deployMockFeeds();
 
         // Step 3: Deploy BasketOracle (without Curve pool - will be set later)
-        deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, deployer);
+        deployed.basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, deployer);
         console.log("BasketOracle deployed:", address(deployed.basketOracle));
 
         // Step 4: Deploy Adapter + Splitter (creates plDXY-BEAR/BULL)

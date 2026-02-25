@@ -158,7 +158,7 @@ abstract contract BaseForkTest is Test {
         basePrices[0] = BASE_EUR;
 
         address tempCurvePool = address(new MockCurvePoolForOracle(bearPrice));
-        basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, address(this));
+        basketOracle = new BasketOracle(feeds, qtys, basePrices, 200, 2e8, address(this));
         basketOracle.setCurvePool(tempCurvePool);
 
         uint64 currentNonce = vm.getNonce(address(this));

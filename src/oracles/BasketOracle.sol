@@ -44,6 +44,9 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @notice Maximum allowed deviation from Curve spot (basis points).
     uint256 public immutable MAX_DEVIATION_BPS;
 
+    /// @notice Protocol CAP price (8 decimals). Theoretical price is clamped to this before deviation check.
+    uint256 public immutable CAP;
+
     /// @notice Thrown when a component feed returns invalid price.
     error BasketOracle__InvalidPrice(address feed);
 
@@ -83,12 +86,14 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
     /// @param _quantities Array of basket weights (1e18 precision).
     /// @param _basePrices Array of base prices for normalization (8 decimals).
     /// @param _maxDeviationBps Maximum deviation from Curve (e.g., 200 = 2%).
+    /// @param _cap Protocol CAP price (8 decimals). Clamps theoretical price in deviation check.
     /// @param _owner Admin address for Curve pool management.
     constructor(
         address[] memory _feeds,
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         uint256 _maxDeviationBps,
+        uint256 _cap,
         address _owner
     ) Ownable(_owner) {
         if (_feeds.length != _quantities.length) {
@@ -120,6 +125,7 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
         }
 
         MAX_DEVIATION_BPS = _maxDeviationBps;
+        CAP = _cap;
     }
 
     /// @notice Sets the Curve pool for deviation validation (initial setup only).
@@ -225,9 +231,8 @@ contract BasketOracle is AggregatorV3Interface, Ownable2Step {
             return;
         }
 
-        // BEAR tracks basket directly (not CAP - basket)
-        // When USD weakens, basket UP, BEAR UP
-        uint256 theoreticalBear18 = theoreticalDxy8Dec * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+        uint256 clamped = theoreticalDxy8Dec > CAP ? CAP : theoreticalDxy8Dec;
+        uint256 theoreticalBear18 = clamped * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
 
         uint256 spotBear18 = pool.price_oracle();
         if (spotBear18 == 0) {

@@ -339,7 +339,7 @@ contract DeployToMainnet is Script {
         basePrices[4] = 10_860_000; // SEK: $0.1086
         basePrices[5] = 126_100_000; // CHF: $1.2610
 
-        return new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, owner);
+        return new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP, owner);
     }
 
     function _deployCurvePool(

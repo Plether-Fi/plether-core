@@ -180,7 +180,7 @@ contract BasketOracleForkTest is Test {
         basePrices[4] = BASE_SEK;
         basePrices[5] = BASE_CHF;
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
         basketOracle.setCurvePool(tempCurvePool);
     }
 
@@ -270,7 +270,7 @@ contract BasketOracleForkTest is Test {
         uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -308,7 +308,7 @@ contract BasketOracleForkTest is Test {
         uint256 expectedBearPrice = calculatedBasketPrice * 1e10;
         address tempPool = address(new MockCurvePoolForOracleBasket(expectedBearPrice));
 
-        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, address(this));
+        BasketOracle newOracle = new BasketOracle(feeds, quantities, basePrices, 500, CAP, address(this));
         newOracle.setCurvePool(tempPool);
 
         (, int256 priceAfter,,,) = newOracle.latestRoundData();
@@ -364,7 +364,7 @@ contract BasketOracleForkTest is Test {
 
         uint256[] memory basePrices = _getBasePrices();
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
         basketOracle.setCurvePool(curvePool);
 
         (, int256 price,,,) = basketOracle.latestRoundData();
@@ -672,7 +672,7 @@ contract DeviationCheckForkTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, address(this));
+        basketOracle = new BasketOracle(feeds, quantities, basePrices, MAX_DEVIATION_BPS, CAP_8DEC, address(this));
 
         uint64 nonce = vm.getNonce(address(this));
         address predictedSplitter = vm.computeCreateAddress(address(this), nonce + 1);

@@ -38,6 +38,8 @@ contract BasketOracleTest is Test {
     MockOracle public feedEUR;
     MockOracle public feedJPY;
 
+    uint256 constant CAP = 200_000_000; // $2.00 (8 decimals)
+
     // Base prices for normalization (8 decimals)
     uint256 constant BASE_EUR = 110_000_000; // $1.10
     uint256 constant BASE_JPY = 1_000_000; // $0.01
@@ -69,7 +71,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         // 200 bps = 2% max deviation, CAP = $2.00
-        basket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        basket = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
         basket.setCurvePool(address(curvePool));
     }
 
@@ -117,7 +119,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](2);
 
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     function test_Components() public view {
@@ -139,7 +141,7 @@ contract BasketOracleTest is Test {
         basePrices[0] = 0; // Invalid: zero base price
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidBasePrice.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     function test_Revert_WeightsSumTooLow() public {
@@ -156,7 +158,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     function test_Revert_WeightsSumTooHigh() public {
@@ -173,7 +175,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     function test_Revert_AllZeroWeights() public {
@@ -190,7 +192,7 @@ contract BasketOracleTest is Test {
         basePrices[1] = BASE_JPY;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidWeights.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     function test_Revert_InvalidDecimals() public {
@@ -209,7 +211,7 @@ contract BasketOracleTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(BasketOracle.BasketOracle__InvalidPrice.selector, address(wrongDecimalFeed))
         );
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
     // ==========================================
@@ -226,7 +228,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
         newBasket.setCurvePool(address(curvePool));
 
         vm.expectRevert(BasketOracle.BasketOracle__AlreadySet.selector);
@@ -243,7 +245,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
         // Don't set curvePool - deviation check should be skipped
         // Normalized: 1.0 * (121_000_000 / 110_000_000) = 1.1 = 110_000_000
         (, int256 answer,,,) = newBasket.latestRoundData();
@@ -295,7 +297,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidProposal.selector);
         newBasket.proposeCurvePool(address(curvePool));
@@ -371,7 +373,7 @@ contract BasketOracleTest is Test {
         uint256[] memory basePrices = new uint256[](1);
         basePrices[0] = BASE_EUR;
 
-        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        BasketOracle newBasket = new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
 
         vm.expectEmit(true, true, false, false);
         emit BasketOracle.CurvePoolUpdated(address(0), address(curvePool));
@@ -508,6 +510,45 @@ contract BasketOracleTest is Test {
     }
 
     // ==========================================
+    // CAP CLAMP IN DEVIATION CHECK
+    // ==========================================
+
+    function test_DeviationCheck_ClampsTheoreticalToCAP() public {
+        // Push basket price above CAP ($2.00) by setting EUR very high
+        // EUR = $3.30 (3x base of $1.10), JPY stays at $0.01
+        // basket = 0.5 * (3.30/1.10) + 0.5 * (0.01/0.01) = 0.5 * 3.0 + 0.5 = 2.0
+        feedEUR.updatePrice(330_000_000);
+        // Curve EMA plateaus at CAP = $2.00
+        curvePool.setPrice(2.0 ether);
+
+        // Without the clamp, theoreticalBear18 = 2.0e18 and spotBear18 = 2.0e18 → no deviation → passes
+        // With CAP exactly at basket, it should pass
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertEq(answer, 200_000_000);
+    }
+
+    function test_DeviationCheck_AboveCAPDoesNotDOS() public {
+        // Push basket price 10% ABOVE CAP: $2.20
+        // EUR = $3.74 → basket = 0.5 * (3.74/1.10) + 0.5 * (0.01/0.01) = 0.5 * 3.4 + 0.5 = 2.20
+        feedEUR.updatePrice(374_000_000);
+        // Curve EMA stays at CAP (rational market won't pay more than CAP for BEAR)
+        curvePool.setPrice(2.0 ether);
+
+        // Without clamp: theoretical = $2.20, spot = $2.00, diff = 10% → REVERTS (> 2% threshold)
+        // With clamp: theoretical clamped to $2.00, diff = 0% → PASSES
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertEq(answer, 220_000_000);
+    }
+
+    function test_DeviationCheck_BelowCAPUnaffectedByClamp() public {
+        // basket = $1.05 (already set in setUp), well below CAP = $2.00
+        // Clamp should not activate — deviation check behaves normally
+        curvePool.setPrice(1.04 ether); // 1% deviation, within 2% threshold
+        (, int256 answer,,,) = basket.latestRoundData();
+        assertEq(answer, 105_000_000);
+    }
+
+    // ==========================================
     // GETROUNDDATA TESTS
     // ==========================================
 
@@ -564,7 +605,7 @@ contract BasketOracleTest is Test {
         basePrices[0] = BASE_EUR;
 
         vm.expectRevert(BasketOracle.BasketOracle__InvalidDeviation.selector);
-        new BasketOracle(feeds, quantities, basePrices, 0, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 0, CAP, address(this));
     }
 
     function test_Revert_LengthMismatch_BasePrices() public {
@@ -580,7 +621,7 @@ contract BasketOracleTest is Test {
         basePrices[0] = BASE_EUR;
 
         vm.expectRevert(BasketOracle.BasketOracle__LengthMismatch.selector);
-        new BasketOracle(feeds, quantities, basePrices, 200, address(this));
+        new BasketOracle(feeds, quantities, basePrices, 200, CAP, address(this));
     }
 
 }
