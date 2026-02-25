@@ -7,11 +7,14 @@ pragma solidity 0.8.33;
 interface IRewardDistributor {
 
     /// @notice Emitted when rewards are distributed to staking vaults.
-    /// @param bearAmount Amount of plDXY-BEAR donated to StakedToken.
-    /// @param bullAmount Amount of plDXY-BULL donated to StakedToken.
+    /// @param bearAmount Amount of plDXY-BEAR donated to StakedBear.
+    /// @param bullAmount Amount of plDXY-BULL donated to StakedBull.
+    /// @param invarBearAmount Amount of plDXY-BEAR donated to InvarCoin.
     /// @param bearPct Percentage of rewards allocated to BEAR stakers (basis points).
     /// @param bullPct Percentage of rewards allocated to BULL stakers (basis points).
-    event RewardsDistributed(uint256 bearAmount, uint256 bullAmount, uint256 bearPct, uint256 bullPct);
+    event RewardsDistributed(
+        uint256 bearAmount, uint256 bullAmount, uint256 invarBearAmount, uint256 bearPct, uint256 bullPct
+    );
 
     /// @notice Thrown when distribution is attempted before cooldown expires.
     error RewardDistributor__DistributionTooSoon();

@@ -162,7 +162,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event GaugeStaked(uint256 amount);
     event GaugeUnstaked(uint256 amount);
     event GaugeRewardsClaimed();
+    event BearDonated(address indexed donor, uint256 bearAmount, uint256 invarMinted);
     error InvarCoin__ZeroAmount();
+    error InvarCoin__StakingNotSet();
     error InvarCoin__ZeroAddress();
     error InvarCoin__SlippageExceeded();
     error InvarCoin__NothingToDeploy();
@@ -736,6 +738,39 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         stakedInvarCoin.donateYield(donated);
 
         emit YieldHarvested(donated, 0, donated);
+    }
+
+    /// @notice Accepts BEAR donations from RewardDistributor, mints proportional INVAR, and donates to sINVAR.
+    /// @param bearAmount Amount of plDXY-BEAR to donate (18 decimals).
+    function donateBear(
+        uint256 bearAmount
+    ) external nonReentrant whenNotPaused {
+        if (bearAmount == 0) {
+            revert InvarCoin__ZeroAmount();
+        }
+        if (address(stakedInvarCoin) == address(0)) {
+            revert InvarCoin__StakingNotSet();
+        }
+
+        uint256 supply = totalSupply();
+        uint256 assetsBefore = totalAssets();
+
+        BEAR.safeTransferFrom(msg.sender, address(this), bearAmount);
+
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 bearUsdcValue = (bearAmount * oraclePrice) / 1e20;
+
+        uint256 invarMinted = Math.mulDiv(bearUsdcValue, supply + VIRTUAL_SHARES, assetsBefore + VIRTUAL_ASSETS);
+        if (invarMinted == 0) {
+            return;
+        }
+
+        _mint(address(this), invarMinted);
+        IERC20(this).approve(address(stakedInvarCoin), invarMinted);
+        stakedInvarCoin.donateYield(invarMinted);
+
+        emit BearDonated(msg.sender, bearAmount, invarMinted);
     }
 
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.

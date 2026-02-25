@@ -8,6 +8,7 @@ import {StakedToken} from "./StakedToken.sol";
 import {ZapRouter} from "./ZapRouter.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
+import {IInvarCoin} from "./interfaces/IInvarCoin.sol";
 import {IRewardDistributor} from "./interfaces/IRewardDistributor.sol";
 import {ISyntheticSplitter} from "./interfaces/ISyntheticSplitter.sol";
 import {DecimalConstants} from "./libraries/DecimalConstants.sol";
@@ -78,6 +79,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @notice Optional PythAdapter for SEK/USD price updates (address(0) if not used).
     PythAdapter public immutable PYTH_ADAPTER;
 
+    /// @notice Optional InvarCoin vault that receives a share of BEAR rewards (address(0) if not used).
+    IInvarCoin public immutable INVAR_COIN;
+
     /// @notice Protocol CAP price (8 decimals).
     uint256 public immutable CAP;
 
@@ -95,6 +99,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     /// @param _zapRouter ZapRouter for BULL acquisition.
     /// @param _oracle BasketOracle for price data.
     /// @param _pythAdapter Optional PythAdapter for SEK/USD updates (address(0) if not used).
+    /// @param _invarCoin Optional InvarCoin vault for BEAR reward split (address(0) if not used).
     constructor(
         address _splitter,
         address _usdc,
@@ -105,7 +110,8 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         address _curvePool,
         address _zapRouter,
         address _oracle,
-        address _pythAdapter
+        address _pythAdapter,
+        address _invarCoin
     ) {
         if (_splitter == address(0)) {
             revert RewardDistributor__ZeroAddress();
@@ -145,6 +151,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         ZAP_ROUTER = ZapRouter(_zapRouter);
         ORACLE = AggregatorV3Interface(_oracle);
         PYTH_ADAPTER = PythAdapter(_pythAdapter);
+        INVAR_COIN = IInvarCoin(_invarCoin);
 
         CAP = ISyntheticSplitter(_splitter).CAP();
 
@@ -153,6 +160,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         USDC.safeIncreaseAllowance(_zapRouter, type(uint256).max);
         IERC20(_plDxyBear).safeIncreaseAllowance(_stakedBear, type(uint256).max);
         IERC20(_plDxyBull).safeIncreaseAllowance(_stakedBull, type(uint256).max);
+        if (_invarCoin != address(0)) {
+            IERC20(_plDxyBear).safeIncreaseAllowance(_invarCoin, type(uint256).max);
+        }
     }
 
     receive() external payable {}
@@ -182,8 +192,17 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         (uint256 bearPct, uint256 bullPct) = _calculateSplit();
         (uint256 bearAmount, uint256 bullAmount) = _acquireTokens(distributableUsdc, bearPct, bullPct);
 
+        uint256 invarBearAmount;
         if (bearAmount > 0) {
-            STAKED_BEAR.donateYield(bearAmount);
+            (uint256 stakedBearShare, uint256 invarShare) = _splitBear(bearAmount);
+            if (stakedBearShare > 0) {
+                STAKED_BEAR.donateYield(stakedBearShare);
+            }
+            if (invarShare > 0) {
+                INVAR_COIN.donateBear(invarShare);
+            }
+            invarBearAmount = invarShare;
+            bearAmount = stakedBearShare;
         }
         if (bullAmount > 0) {
             STAKED_BULL.donateYield(bullAmount);
@@ -192,7 +211,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         lastDistributionTime = block.timestamp;
         USDC.safeTransfer(msg.sender, callerReward);
 
-        emit RewardsDistributed(bearAmount, bullAmount, bearPct, bullPct);
+        emit RewardsDistributed(bearAmount, bullAmount, invarBearAmount, bearPct, bullPct);
     }
 
     /// @notice Distributes rewards after updating the Pyth oracle price.
@@ -326,6 +345,34 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             revert RewardDistributor__NoRewards();
         }
         USDC.safeTransfer(SPLITTER.treasury(), balance);
+    }
+
+    /// @dev Splits BEAR rewards between StakedBear and InvarCoin proportional to BEAR exposure.
+    function _splitBear(
+        uint256 bearAmount
+    ) internal view returns (uint256 stakedShare, uint256 invarShare) {
+        if (address(INVAR_COIN) == address(0)) {
+            return (bearAmount, 0);
+        }
+
+        uint256 invarAssets;
+        try INVAR_COIN.totalAssets() returns (uint256 assets) {
+            invarAssets = assets;
+        } catch {
+            return (bearAmount, 0);
+        }
+
+        (, int256 basketPrice,,,) = ORACLE.latestRoundData();
+        uint256 stakedBearAssets = STAKED_BEAR.totalAssets();
+        uint256 invarBearExposure = (invarAssets * 1e20) / (2 * uint256(basketPrice));
+
+        uint256 total = stakedBearAssets + invarBearExposure;
+        if (total == 0) {
+            return (bearAmount, 0);
+        }
+
+        invarShare = (bearAmount * invarBearExposure) / total;
+        stakedShare = bearAmount - invarShare;
     }
 
     /// @dev Converts USDC amount to 18-decimal mint amount.
