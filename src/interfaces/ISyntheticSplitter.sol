@@ -93,4 +93,10 @@ interface ISyntheticSplitter {
      */
     function liquidationTimestamp() external view returns (uint256);
 
+    /**
+     * @notice Returns the treasury address.
+     * @return The treasury address.
+     */
+    function treasury() external view returns (address);
+
 }

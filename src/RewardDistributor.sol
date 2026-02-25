@@ -315,6 +315,19 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         }
     }
 
+    /// @notice Rescues USDC trapped after protocol liquidation.
+    /// @dev Only callable when Splitter is SETTLED. Sends full USDC balance to Splitter treasury.
+    function rescueUsdc() external {
+        if (SPLITTER.currentStatus() != ISyntheticSplitter.Status.SETTLED) {
+            revert RewardDistributor__SplitterNotActive();
+        }
+        uint256 balance = USDC.balanceOf(address(this));
+        if (balance == 0) {
+            revert RewardDistributor__NoRewards();
+        }
+        USDC.safeTransfer(SPLITTER.treasury(), balance);
+    }
+
     /// @dev Converts USDC amount to 18-decimal mint amount.
     /// @param usdcAmount USDC amount (6 decimals).
     /// @return mintAmount Token amount to mint (18 decimals).

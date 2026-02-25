@@ -696,6 +696,10 @@ contract InvariantMockSplitter is ISyntheticSplitter {
         return Status.ACTIVE;
     }
 
+    function treasury() external view returns (address) {
+        return address(this);
+    }
+
     function mint(
         uint256 tokenAmount
     ) external override {

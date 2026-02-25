@@ -186,6 +186,10 @@ contract InvMockSplitter is ISyntheticSplitter {
         return _status;
     }
 
+    function treasury() external view returns (address) {
+        return address(this);
+    }
+
     function setStatus(
         Status newStatus
     ) external {

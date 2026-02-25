@@ -1687,6 +1687,10 @@ contract MockSplitter is ISyntheticSplitter {
         return _status;
     }
 
+    function treasury() external view returns (address) {
+        return address(this);
+    }
+
     function liquidationTimestamp() external pure returns (uint256) {
         return 0;
     }
