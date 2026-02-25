@@ -73,6 +73,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
 
     State public currentState = State.UNLOCKED;
     uint256 public currentEpochId = 0;
+    address public zapKeeper;
 
     mapping(uint256 => Epoch) public epochs;
 
@@ -88,6 +89,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     event AuctionCancelled(uint256 indexed epochId);
     event EpochSettled(uint256 indexed epochId, uint256 collateralReturned);
     event EmergencyWithdraw(address indexed token, uint256 amount);
+    event ZapKeeperSet(address indexed keeper);
 
     error PletherDOV__WrongState();
     error PletherDOV__ZeroAmount();
@@ -97,6 +99,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     error PletherDOV__InvalidParams();
     error PletherDOV__InsufficientDeposit();
     error PletherDOV__DepositProcessed();
+    error PletherDOV__Unauthorized();
 
     constructor(
         string memory _name,
@@ -160,17 +163,45 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     }
 
     // ==========================================
+    // ZAP KEEPER
+    // ==========================================
+
+    function setZapKeeper(
+        address _keeper
+    ) external onlyOwner {
+        zapKeeper = _keeper;
+        emit ZapKeeperSet(_keeper);
+    }
+
+    /// @notice Releases all USDC held by this DOV to the caller (zapKeeper only).
+    function releaseUsdcForZap() external returns (uint256 amount) {
+        if (msg.sender != zapKeeper) {
+            revert PletherDOV__Unauthorized();
+        }
+        if (currentState != State.UNLOCKED) {
+            revert PletherDOV__WrongState();
+        }
+        amount = USDC.balanceOf(address(this));
+        if (amount > 0) {
+            USDC.safeTransfer(msg.sender, amount);
+        }
+    }
+
+    // ==========================================
     // EPOCH KEEPER LOGIC (Friday Operations)
     // ==========================================
 
-    /// @notice Step 1: Rolls the vault into a new epoch, mints options, and starts the Dutch Auction.
+    /// @notice Step 1: Rolls the vault into a new epoch, mints options, starts Dutch Auction.
     function startEpochAuction(
         uint256 strike,
         uint256 expiry,
         uint256 maxPremium,
         uint256 minPremium,
         uint256 duration
-    ) external onlyOwner nonReentrant {
+    ) external nonReentrant {
+        if (msg.sender != owner() && msg.sender != zapKeeper) {
+            revert PletherDOV__Unauthorized();
+        }
         if (currentState != State.UNLOCKED) {
             revert PletherDOV__WrongState();
         }
@@ -191,13 +222,8 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
         currentEpochId++;
         pendingUsdcDeposits = 0;
 
-        // 1. (External Zap Logic Goes Here)
-        // Convert all USDC (queued deposits + last week's premium) into splDXY.
-
-        // 2. Calculate Active Collateral
         uint256 sharesBalance = STAKED_TOKEN.balanceOf(address(this));
 
-        // MarginEngine requires underlying asset amounts. Convert our ERC4626 shares to assets.
         uint256 optionsToMint = STAKED_TOKEN.previewRedeem(sharesBalance);
 
         if (optionsToMint == 0) {
@@ -211,7 +237,6 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             optionsToMint -= 1;
         }
 
-        // 3. Create Option Series & Mint
         uint256 seriesId = MARGIN_ENGINE.createSeries(IS_BULL, strike, expiry, "Plether DOV Option", "oDOV");
         MARGIN_ENGINE.mintOptions(seriesId, optionsToMint);
 

@@ -17,3 +17,16 @@
 - [x] Tests for all fixes
 
 ## Test Results: 125/125 pass (was 102)
+
+---
+
+## PletherDOV Completion (pre-audit)
+
+### Missing Features
+- [x] **USDC → splDXY zap** — Extracted to `DOVZapRouter`. Coordinates BEAR+BULL DOVs: matched minting via Splitter (zero slippage), excess via Curve/flash. PletherDOV gains `zapKeeper` role + `releaseUsdcForZap()`.
+- [ ] **Vault share accounting** — ERC20 inherited but `_mint()` never called. Depositors need shares on deposit, redemption mechanism after epoch settles. Decide: ERC4626 with epoch-locked withdrawals vs simpler pro-rata queue.
+
+### Decisions Required
+- [ ] Include PletherDOV in audit scope or defer to second audit? (MarginEngine/SettlementOracle/OptionToken are audit-ready independently)
+- [x] Zap strategy for USDC → splDXY conversion (DOVZapRouter with coordinated minting)
+- [ ] Vault share model (ERC4626 vs custom pro-rata)

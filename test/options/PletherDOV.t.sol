@@ -95,6 +95,7 @@ contract MockStakedTokenForDOV is ERC20 {
 
 contract MockSplitterForDOV {
 
+    uint256 public constant CAP = 2e8;
     uint256 public liquidationTimestamp;
     ISyntheticSplitter.Status private _status = ISyntheticSplitter.Status.ACTIVE;
 
@@ -232,6 +233,7 @@ contract PletherDOVTest is Test {
 
     address alice = address(0x1); // depositor
     address maker = address(0x2); // market maker
+    address keeper = address(0x3);
 
     uint256 constant INITIAL_STAKED = 1000e21; // 1000 assets worth of staked tokens (21 dec)
     uint256 constant USDC_BALANCE = 100_000e6;
@@ -239,18 +241,15 @@ contract PletherDOVTest is Test {
     function setUp() public {
         vm.warp(1_735_689_600);
 
-        stakedToken = new MockStakedTokenForDOV("splDXY-BEAR", "splBEAR");
         usdc = new MockUSDCPermit();
+        stakedToken = new MockStakedTokenForDOV("splDXY-BEAR", "splBEAR");
         splitter = new MockSplitterForDOV();
-
         marginEngine = new MockMarginEngine(address(stakedToken), address(splitter));
 
         dov = new PletherDOV("BEAR DOV", "bDOV", address(marginEngine), address(stakedToken), address(usdc), false);
 
-        // Fund DOV with staked tokens
         stakedToken.mint(address(dov), INITIAL_STAKED);
 
-        // Fund users
         usdc.mint(alice, USDC_BALANCE);
         usdc.mint(maker, USDC_BALANCE);
 
@@ -372,7 +371,7 @@ contract PletherDOVTest is Test {
 
     function test_StartEpochAuction_RevertsFromNonOwner() public {
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        vm.expectRevert(PletherDOV.PletherDOV__Unauthorized.selector);
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
     }
 
@@ -438,10 +437,8 @@ contract PletherDOVTest is Test {
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.LOCKED));
 
-        // Maker paid USDC premium
         assertEq(makerUsdcBefore - usdc.balanceOf(maker), expectedPremium);
 
-        // Maker received option tokens
         (,,, address optAddr,,,) = marginEngine.series(1);
         assertEq(IERC20(optAddr).balanceOf(maker), optionsMinted);
     }
@@ -468,7 +465,6 @@ contract PletherDOVTest is Test {
         dov.cancelAuction();
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
 
-        // Settle previous epoch's series before starting new one (M-5 fix)
         marginEngine.settle(1, new uint80[](0));
         dov.exerciseUnsoldOptions(1);
         dov.reclaimCollateral(1);
@@ -500,7 +496,6 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         dov.fillAuction();
 
-        // Settle the series in the margin engine first
         marginEngine.settle(1, new uint80[](0));
 
         uint256 stakedBefore = stakedToken.balanceOf(address(dov));
@@ -563,8 +558,6 @@ contract PletherDOVTest is Test {
 
         marginEngine.settle(1, new uint80[](0));
 
-        // Should revert: epoch was filled (winningMaker != address(0)),
-        // only settleEpoch should be able to unlock this collateral.
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.reclaimCollateral(1);
     }
@@ -628,7 +621,6 @@ contract PletherDOVTest is Test {
         dov.cancelAuction();
 
         marginEngine.settle(1, new uint80[](0));
-        // Force OTM: settlement price below strike
         marginEngine.setSettlementPrice(1, 80_000_000);
 
         (,,, address optAddr,,,) = marginEngine.series(1);
@@ -706,7 +698,6 @@ contract PletherDOVTest is Test {
         vm.prank(maker);
         dov.fillAuction();
 
-        // Do NOT call marginEngine.settle() separately — settleEpoch should handle it
         dov.settleEpoch(new uint80[](0));
 
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
@@ -720,10 +711,8 @@ contract PletherDOVTest is Test {
     function test_CancelAuction_AllowsEarlyCancelOnLiquidation() public {
         _startAuction();
 
-        // Liquidation happens mid-auction, before duration expires
         splitter.setStatus(ISyntheticSplitter.Status.SETTLED);
 
-        // Should succeed despite auction not expired
         dov.cancelAuction();
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
     }
@@ -783,14 +772,12 @@ contract PletherDOVTest is Test {
         dov.deposit(500e6);
         assertEq(dov.userUsdcDeposits(alice), 500e6);
 
-        // Process epoch 0 → epoch 1
         _startAuction();
         vm.prank(maker);
         dov.fillAuction();
         marginEngine.settle(1, new uint80[](0));
         dov.settleEpoch(new uint80[](0));
 
-        // Deposit again in the new epoch — stale balance should be cleared
         vm.prank(alice);
         dov.deposit(200e6);
 
@@ -805,7 +792,6 @@ contract PletherDOVTest is Test {
         marginEngine.settle(1, new uint80[](0));
         dov.settleEpoch(new uint80[](0));
 
-        // Deposit after epoch started — this is a fresh deposit in the current epoch
         vm.prank(alice);
         dov.deposit(1000e6);
 
@@ -828,13 +814,8 @@ contract PletherDOVTest is Test {
 
         marginEngine.settle(1, new uint80[](0));
 
-        // Drain shares so unlockCollateral will revert (transfer fails with 0 balance)
-        uint256 locked = marginEngine.sharesLocked(1);
         marginEngine.unlockCollateral(1);
-        // Re-lock nothing — the mock now has 0 shares for series 1
-        // so the DOV's settleEpoch call to unlockCollateral will transfer 0 (no-op after drain)
 
-        // settleEpoch should still transition to UNLOCKED even if unlock returned nothing
         dov.settleEpoch(new uint80[](0));
         assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.UNLOCKED));
     }
@@ -848,7 +829,6 @@ contract PletherDOVTest is Test {
         vm.warp(block.timestamp + 2 hours);
         dov.cancelAuction();
 
-        // Do NOT settle the cancelled series — next epoch should be blocked
         vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
         dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
     }
@@ -878,6 +858,61 @@ contract PletherDOVTest is Test {
 
         vm.expectRevert(MockMarginEngine.MarginEngine__NotSettled.selector);
         dov.settleEpoch(new uint80[](0));
+    }
+
+    // ==========================================
+    // ZAP KEEPER
+    // ==========================================
+
+    function test_SetZapKeeper_SetsAddress() public {
+        dov.setZapKeeper(keeper);
+        assertEq(dov.zapKeeper(), keeper);
+    }
+
+    function test_SetZapKeeper_RevertsFromNonOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", alice));
+        dov.setZapKeeper(keeper);
+    }
+
+    function test_ReleaseUsdcForZap_TransfersUsdc() public {
+        dov.setZapKeeper(keeper);
+        usdc.mint(address(dov), 5000e6);
+
+        vm.prank(keeper);
+        uint256 released = dov.releaseUsdcForZap();
+
+        assertEq(released, 5000e6);
+        assertEq(usdc.balanceOf(keeper), 5000e6);
+        assertEq(usdc.balanceOf(address(dov)), 0);
+    }
+
+    function test_ReleaseUsdcForZap_RevertsFromNonKeeper() public {
+        dov.setZapKeeper(keeper);
+        usdc.mint(address(dov), 5000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(PletherDOV.PletherDOV__Unauthorized.selector);
+        dov.releaseUsdcForZap();
+    }
+
+    function test_ReleaseUsdcForZap_RevertsIfNotUnlocked() public {
+        dov.setZapKeeper(keeper);
+        _startAuction();
+
+        vm.prank(keeper);
+        vm.expectRevert(PletherDOV.PletherDOV__WrongState.selector);
+        dov.releaseUsdcForZap();
+    }
+
+    function test_StartEpochAuction_CallableByKeeper() public {
+        dov.setZapKeeper(keeper);
+
+        vm.prank(keeper);
+        dov.startEpochAuction(90e6, block.timestamp + 7 days, 1e6, 100_000, 1 hours);
+
+        assertEq(dov.currentEpochId(), 1);
+        assertEq(uint256(dov.currentState()), uint256(PletherDOV.State.AUCTIONING));
     }
 
 }
