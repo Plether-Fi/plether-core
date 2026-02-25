@@ -1401,8 +1401,7 @@ contract MockCurvePool is ICurvePool {
         dy = (dy * (10_000 - slippageBps)) / 10_000;
 
         require(dy >= min_dy, "Too little received");
-        // Burn input tokens and mint output tokens
-        MockToken(tokenIn).burn(msg.sender, dx);
+        MockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
         MockToken(tokenOut).mint(msg.sender, dy);
         return dy;
     }
