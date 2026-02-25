@@ -98,6 +98,20 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
         return ownerShares < maxSharesByVault ? ownerShares : maxSharesByVault;
     }
 
+    /// @notice Maximum USDC depositable, capped by Morpho vault's remaining capacity.
+    function maxDeposit(
+        address
+    ) public view override returns (uint256) {
+        return VAULT.maxDeposit(address(this));
+    }
+
+    /// @notice Maximum adapter shares mintable, capped by Morpho vault's remaining capacity.
+    function maxMint(
+        address
+    ) public view override returns (uint256) {
+        return VAULT.maxMint(address(this));
+    }
+
     /// @notice Returns total USDC value of this adapter's vault position.
     /// @return Total assets held in the Morpho vault, converted from vault shares.
     function totalAssets() public view override returns (uint256) {

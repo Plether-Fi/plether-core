@@ -21,11 +21,13 @@ contract MockUSDC6 is MockERC20 {
 contract MockERC4626Vault is ERC4626 {
 
     uint256 internal _liquidityCap;
+    uint256 internal _depositCap;
 
     constructor(
         IERC20 _asset
     ) ERC4626(_asset) ERC20("Mock Vault", "mVault") {
         _liquidityCap = type(uint256).max;
+        _depositCap = type(uint256).max;
     }
 
     function simulateYield(
@@ -38,6 +40,26 @@ contract MockERC4626Vault is ERC4626 {
         uint256 cap
     ) external {
         _liquidityCap = cap;
+    }
+
+    function setDepositCap(
+        uint256 cap
+    ) external {
+        _depositCap = cap;
+    }
+
+    function maxDeposit(
+        address
+    ) public view override returns (uint256) {
+        uint256 currentAssets = totalAssets();
+        return currentAssets >= _depositCap ? 0 : _depositCap - currentAssets;
+    }
+
+    function maxMint(
+        address
+    ) public view override returns (uint256) {
+        uint256 maxDep = maxDeposit(address(0));
+        return maxDep == 0 ? 0 : convertToShares(maxDep);
     }
 
     function maxWithdraw(
@@ -277,7 +299,52 @@ contract VaultAdapterTest is Test {
     }
 
     // ==========================================
-    // 8. Claim Rewards
+    // 8. maxDeposit / maxMint Passthrough
+    // ==========================================
+
+    function test_MaxDeposit_PassesThroughVaultCap() public {
+        vault.setDepositCap(200 * 1e6);
+        assertEq(adapter.maxDeposit(splitter), 200 * 1e6);
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), 100 * 1e6);
+        adapter.deposit(100 * 1e6, splitter);
+        vm.stopPrank();
+
+        assertEq(adapter.maxDeposit(splitter), 100 * 1e6);
+    }
+
+    function test_MaxDeposit_ZeroWhenVaultFull() public {
+        vault.setDepositCap(50 * 1e6);
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), 50 * 1e6);
+        adapter.deposit(50 * 1e6, splitter);
+        vm.stopPrank();
+
+        assertEq(adapter.maxDeposit(splitter), 0);
+        assertEq(adapter.maxMint(splitter), 0);
+    }
+
+    function test_MaxDeposit_UnlimitedByDefault() public {
+        assertEq(adapter.maxDeposit(splitter), type(uint256).max);
+    }
+
+    function test_Deposit_RevertsWhenVaultCapped() public {
+        vault.setDepositCap(50 * 1e6);
+
+        vm.startPrank(splitter);
+        usdc.approve(address(adapter), 50 * 1e6);
+        adapter.deposit(50 * 1e6, splitter);
+
+        usdc.approve(address(adapter), 1e6);
+        vm.expectRevert();
+        adapter.deposit(1e6, splitter);
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // 9. Claim Rewards
     // ==========================================
 
     function test_ClaimRewards_OnlyOwner() public {
