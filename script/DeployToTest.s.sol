@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {BullLeverageRouter} from "../src/BullLeverageRouter.sol";
+import {InvarCoin} from "../src/InvarCoin.sol";
 import {LeverageRouter} from "../src/LeverageRouter.sol";
 import {RewardDistributor} from "../src/RewardDistributor.sol";
 import {StakedToken} from "../src/StakedToken.sol";
@@ -207,7 +208,7 @@ contract DeployToTest is Script {
     }
 
     function _getNonceOffset() internal pure virtual returns (uint64) {
-        return 37;
+        return 40;
     }
 
     function _getPythAddress() internal virtual returns (address) {
@@ -238,6 +239,8 @@ contract DeployToTest is Script {
         MockPyth mockPyth;
         PythAdapter pythAdapter;
         RewardDistributor rewardDistributor;
+        InvarCoin invarCoin;
+        StakedToken stakedInvarCoin;
     }
 
     function run() external returns (DeployedContracts memory deployed) {
@@ -308,10 +311,26 @@ contract DeployToTest is Script {
             address(deployed.morphoOracleBull)
         );
 
-        // Step 12: Deploy Routers and create Morpho markets
+        // Step 12: Deploy InvarCoin + sINVAR
+        // For twocrypto-ng, pool address IS the LP token
+        deployed.invarCoin = new InvarCoin(
+            address(deployed.usdc),
+            address(deployed.plDxyBear),
+            deployed.curvePool,
+            deployed.curvePool,
+            address(deployed.basketOracle),
+            address(0),
+            address(0)
+        );
+        deployed.stakedInvarCoin = new StakedToken(IERC20(address(deployed.invarCoin)), "Staked InvarCoin", "sINVAR");
+        deployed.invarCoin.setStakedInvarCoin(address(deployed.stakedInvarCoin));
+        console.log("InvarCoin:", address(deployed.invarCoin));
+        console.log("sINVAR:", address(deployed.stakedInvarCoin));
+
+        // Step 13: Deploy Routers and create Morpho markets
         _deployRoutersAndMarkets(deployed, deployer);
 
-        // Step 13: Mint USDC to deployer for testing
+        // Step 14: Mint USDC to deployer for testing
         deployed.usdc.mint(deployer, 100_000 * 1e6);
         console.log("Minted 100,000 USDC to deployer");
 
@@ -542,7 +561,7 @@ contract DeployToTest is Script {
             address(d.zapRouter),
             address(d.basketOracle),
             address(d.pythAdapter),
-            address(0)
+            address(d.invarCoin)
         );
         console.log("RewardDistributor:", address(d.rewardDistributor));
     }
@@ -621,6 +640,10 @@ contract DeployToTest is Script {
         console.log("Pyth Oracle:");
         console.log("  MockPyth:            ", address(d.mockPyth));
         console.log("  PythAdapter (SEK):   ", address(d.pythAdapter));
+        console.log("");
+        console.log("InvarCoin:");
+        console.log("  InvarCoin (INVAR):   ", address(d.invarCoin));
+        console.log("  sINVAR:              ", address(d.stakedInvarCoin));
         console.log("");
         console.log("Rewards:");
         console.log("  RewardDistributor:   ", address(d.rewardDistributor));
