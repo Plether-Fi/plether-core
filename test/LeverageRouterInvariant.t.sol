@@ -54,6 +54,9 @@ contract InvariantMockToken is ERC20 {
 /// @notice Mock plDXY-BEAR with ERC3156 flash mint support
 contract InvariantMockFlashToken is ERC20, IERC3156FlashLender {
 
+    error MockFlashToken__InvalidToken();
+    error MockFlashToken__CallbackFailed();
+
     uint8 private _decimals;
     bytes32 public constant CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
 
@@ -94,7 +97,9 @@ contract InvariantMockFlashToken is ERC20, IERC3156FlashLender {
         address token,
         uint256
     ) external view override returns (uint256) {
-        require(token == address(this), "Invalid token");
+        if (token != address(this)) {
+            revert MockFlashToken__InvalidToken();
+        }
         return 0; // Fee-free flash mint
     }
 
@@ -104,9 +109,13 @@ contract InvariantMockFlashToken is ERC20, IERC3156FlashLender {
         uint256 amount,
         bytes calldata data
     ) external override returns (bool) {
-        require(token == address(this), "Invalid token");
+        if (token != address(this)) {
+            revert MockFlashToken__InvalidToken();
+        }
         _mint(address(receiver), amount);
-        require(receiver.onFlashLoan(msg.sender, token, amount, 0, data) == CALLBACK_SUCCESS, "Callback failed");
+        if (receiver.onFlashLoan(msg.sender, token, amount, 0, data) != CALLBACK_SUCCESS) {
+            revert MockFlashToken__CallbackFailed();
+        }
         _burn(address(receiver), amount);
         return true;
     }
@@ -155,6 +164,8 @@ contract InvariantMockStakedToken is ERC20 {
 
 contract InvariantMockCurvePool is ICurvePool {
 
+    error MockCurvePool__InsufficientOutput();
+
     address public token0; // USDC
     address public token1; // plDxyBear
     uint256 public bearPrice = 1e6; // 1:1 with USDC
@@ -194,7 +205,9 @@ contract InvariantMockCurvePool is ICurvePool {
         uint256 min_dy
     ) external payable override returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
-        require(dy >= min_dy, "Too little received");
+        if (dy < min_dy) {
+            revert MockCurvePool__InsufficientOutput();
+        }
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;
         InvariantMockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
@@ -209,6 +222,8 @@ contract InvariantMockCurvePool is ICurvePool {
 }
 
 contract InvariantMockMorpho is IMorpho {
+
+    error MockMorpho__Unauthorized();
 
     address public usdc;
     address public stakedToken;
@@ -298,7 +313,9 @@ contract InvariantMockMorpho is IMorpho {
         address receiver
     ) external override {
         if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+            if (!_isAuthorized[onBehalfOf][msg.sender]) {
+                revert MockMorpho__Unauthorized();
+            }
         }
         collateralBalance[onBehalfOf] -= assets;
         IERC20(stakedToken).transfer(receiver, assets);
@@ -312,7 +329,9 @@ contract InvariantMockMorpho is IMorpho {
         address receiver
     ) external override returns (uint256, uint256) {
         if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+            if (!_isAuthorized[onBehalfOf][msg.sender]) {
+                revert MockMorpho__Unauthorized();
+            }
         }
         InvariantMockToken(usdc).mint(receiver, assets);
         borrowBalance[onBehalfOf] += assets;
@@ -404,21 +423,13 @@ contract LeverageRouterHandler is Test {
     bytes4 private constant ERR_INSUFFICIENT_OUTPUT =
         LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
     bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
-    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+    bytes4 private constant ERR_MOCK_INSUFFICIENT_OUTPUT =
+        InvariantMockCurvePool.MockCurvePool__InsufficientOutput.selector;
+    bytes4 private constant ERR_MOCK_UNAUTHORIZED = InvariantMockMorpho.MockMorpho__Unauthorized.selector;
 
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
+    function _bubbleRevert(
+        bytes memory reason
     ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
         assembly {
             revert(add(reason, 32), mload(reason))
         }
@@ -482,11 +493,17 @@ contract LeverageRouterHandler is Test {
             ghost_totalPrincipalDeposited += principal;
             hasPosition[currentActor] = true;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+                    && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -511,11 +528,17 @@ contract LeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+                    && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -550,11 +573,17 @@ contract LeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+                    && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -746,6 +775,8 @@ contract InvariantMockSplitter is ISyntheticSplitter {
 /// @notice Mock Morpho that supports both splDXY-BEAR and splDXY-BULL as collateral
 contract InvariantMockMorphoBull is IMorpho {
 
+    error MockMorpho__Unauthorized();
+
     address public usdc;
     address public stakedBear;
     address public stakedBull;
@@ -838,7 +869,9 @@ contract InvariantMockMorphoBull is IMorpho {
         address receiver
     ) external override {
         if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+            if (!_isAuthorized[onBehalfOf][msg.sender]) {
+                revert MockMorpho__Unauthorized();
+            }
         }
         collateralBalance[onBehalfOf] -= assets;
         IERC20(params.collateralToken).transfer(receiver, assets);
@@ -852,7 +885,9 @@ contract InvariantMockMorphoBull is IMorpho {
         address receiver
     ) external override returns (uint256, uint256) {
         if (msg.sender != onBehalfOf) {
-            require(_isAuthorized[onBehalfOf][msg.sender], "Not authorized");
+            if (!_isAuthorized[onBehalfOf][msg.sender]) {
+                revert MockMorpho__Unauthorized();
+            }
         }
         InvariantMockToken(usdc).mint(receiver, assets);
         borrowBalance[onBehalfOf] += assets;
@@ -939,21 +974,13 @@ contract BullLeverageRouterHandler is Test {
         LeverageRouterBase.LeverageRouterBase__InsufficientOutput.selector;
     bytes4 private constant ERR_INVALID_CURVE_PRICE = LeverageRouterBase.LeverageRouterBase__InvalidCurvePrice.selector;
     bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = LeverageRouterBase.LeverageRouterBase__SplitterNotActive.selector;
-    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+    bytes4 private constant ERR_MOCK_INSUFFICIENT_OUTPUT =
+        InvariantMockCurvePool.MockCurvePool__InsufficientOutput.selector;
+    bytes4 private constant ERR_MOCK_UNAUTHORIZED = InvariantMockMorphoBull.MockMorpho__Unauthorized.selector;
 
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
+    function _bubbleRevert(
+        bytes memory reason
     ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
         assembly {
             revert(add(reason, 32), mload(reason))
         }
@@ -1019,12 +1046,17 @@ contract BullLeverageRouterHandler is Test {
             ghost_totalOpened++;
             ghost_totalPrincipalDeposited += principal;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE
+                    && sel != ERR_MOCK_INSUFFICIENT_OUTPUT && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -1047,12 +1079,17 @@ contract BullLeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE
+                    && sel != ERR_MOCK_INSUFFICIENT_OUTPUT && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -1085,12 +1122,17 @@ contract BullLeverageRouterHandler is Test {
                 ghost_totalFullyClosed++;
             }
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](4);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_INVALID_CURVE_PRICE;
-            allowed[2] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[3] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_INVALID_CURVE_PRICE && sel != ERR_SPLITTER_NOT_ACTIVE
+                    && sel != ERR_MOCK_INSUFFICIENT_OUTPUT && sel != ERR_MOCK_UNAUTHORIZED
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 

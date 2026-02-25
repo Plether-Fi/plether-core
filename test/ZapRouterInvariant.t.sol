@@ -47,6 +47,9 @@ contract InvMockToken is ERC20 {
 
 contract InvMockFlashToken is ERC20, IERC3156FlashLender {
 
+    error MockFlashToken__InvalidToken();
+    error MockFlashToken__CallbackFailed();
+
     uint8 private _decimals;
     bytes32 public constant CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
 
@@ -86,7 +89,9 @@ contract InvMockFlashToken is ERC20, IERC3156FlashLender {
         address token,
         uint256
     ) external view override returns (uint256) {
-        require(token == address(this), "Invalid token");
+        if (token != address(this)) {
+            revert MockFlashToken__InvalidToken();
+        }
         return 0;
     }
 
@@ -96,9 +101,13 @@ contract InvMockFlashToken is ERC20, IERC3156FlashLender {
         uint256 amount,
         bytes calldata data
     ) external override returns (bool) {
-        require(token == address(this), "Invalid token");
+        if (token != address(this)) {
+            revert MockFlashToken__InvalidToken();
+        }
         _mint(address(receiver), amount);
-        require(receiver.onFlashLoan(msg.sender, token, amount, 0, data) == CALLBACK_SUCCESS, "Callback failed");
+        if (receiver.onFlashLoan(msg.sender, token, amount, 0, data) != CALLBACK_SUCCESS) {
+            revert MockFlashToken__CallbackFailed();
+        }
         _burn(address(receiver), amount);
         return true;
     }
@@ -106,6 +115,8 @@ contract InvMockFlashToken is ERC20, IERC3156FlashLender {
 }
 
 contract InvMockCurvePool is ICurvePool {
+
+    error MockCurvePool__InsufficientOutput();
 
     address public token0; // USDC
     address public token1; // plDxyBear
@@ -146,7 +157,9 @@ contract InvMockCurvePool is ICurvePool {
         uint256 min_dy
     ) external payable override returns (uint256 dy) {
         dy = this.get_dy(i, j, dx);
-        require(dy >= min_dy, "Too little received");
+        if (dy < min_dy) {
+            revert MockCurvePool__InsufficientOutput();
+        }
         address tokenIn = i == 0 ? token0 : token1;
         address tokenOut = j == 0 ? token0 : token1;
         InvMockToken(tokenIn).transferFrom(msg.sender, address(this), dx);
@@ -262,21 +275,11 @@ contract ZapRouterHandler is Test {
     bytes4 private constant ERR_SOLVENCY_BREACH = ZapRouter.ZapRouter__SolvencyBreach.selector;
     bytes4 private constant ERR_BEAR_PRICE_ABOVE_CAP = ZapRouter.ZapRouter__BearPriceAboveCap.selector;
     bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = ZapRouter.ZapRouter__SplitterNotActive.selector;
-    bytes4 private constant ERR_STRING = 0x08c379a0; // Error(string) from require()
+    bytes4 private constant ERR_MOCK_INSUFFICIENT_OUTPUT = InvMockCurvePool.MockCurvePool__InsufficientOutput.selector;
 
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
+    function _bubbleRevert(
+        bytes memory reason
     ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
         assembly {
             revert(add(reason, 32), mload(reason))
         }
@@ -339,13 +342,19 @@ contract ZapRouterHandler is Test {
             uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](5);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_SOLVENCY_BREACH;
-            allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
-            allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[4] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly {
+                sel := mload(add(reason, 0x20))
+            }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
+                    && sel != ERR_SPLITTER_NOT_ACTIVE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -371,13 +380,19 @@ contract ZapRouterHandler is Test {
             uint256 usdcReceived = usdc.balanceOf(currentActor) - usdcBefore;
             ghost_totalUsdcReturned += usdcReceived;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](5);
-            allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-            allowed[1] = ERR_SOLVENCY_BREACH;
-            allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
-            allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
-            allowed[4] = ERR_STRING;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly {
+                sel := mload(add(reason, 0x20))
+            }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
+                    && sel != ERR_SPLITTER_NOT_ACTIVE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -395,21 +410,12 @@ contract ZapRouterHandler is Test {
         uint256 bullBefore = plDxyBull.balanceOf(currentActor);
         uint256 usdcBefore = usdc.balanceOf(currentActor);
 
-        bytes4[] memory allowed = new bytes4[](5);
-        allowed[0] = ERR_INSUFFICIENT_OUTPUT;
-        allowed[1] = ERR_SOLVENCY_BREACH;
-        allowed[2] = ERR_BEAR_PRICE_ABOVE_CAP;
-        allowed[3] = ERR_SPLITTER_NOT_ACTIVE;
-        allowed[4] = ERR_STRING;
-
-        // Mint
         try router.zapMint(usdcAmount, 0, 100, block.timestamp + 1 hours) {
             ghost_totalZapMints++;
             ghost_totalUsdcDeposited += usdcAmount;
             uint256 bullReceived = plDxyBull.balanceOf(currentActor) - bullBefore;
             ghost_totalBullMinted += bullReceived;
 
-            // Immediately burn
             if (bullReceived > 0) {
                 try router.zapBurn(bullReceived, 0, block.timestamp + 1 hours) {
                     ghost_totalZapBurns++;
@@ -417,11 +423,35 @@ contract ZapRouterHandler is Test {
                     uint256 usdcReturned = usdc.balanceOf(currentActor) - (usdcBefore - usdcAmount);
                     ghost_totalUsdcReturned += usdcReturned;
                 } catch (bytes memory reason) {
-                    _assertExpectedError(reason, allowed);
+                    if (reason.length < 4) {
+                        _bubbleRevert(reason);
+                    }
+                    bytes4 sel;
+                    assembly {
+                        sel := mload(add(reason, 0x20))
+                    }
+                    if (
+                        sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
+                            && sel != ERR_SPLITTER_NOT_ACTIVE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+                    ) {
+                        _bubbleRevert(reason);
+                    }
                 }
             }
         } catch (bytes memory reason) {
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly {
+                sel := mload(add(reason, 0x20))
+            }
+            if (
+                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
+                    && sel != ERR_SPLITTER_NOT_ACTIVE && sel != ERR_MOCK_INSUFFICIENT_OUTPUT
+            ) {
+                _bubbleRevert(reason);
+            }
         }
     }
 

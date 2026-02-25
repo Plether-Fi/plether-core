@@ -68,25 +68,12 @@ contract SplitterHandler is Test {
     bytes4 constant ERR_SEQUENCER_GRACE = OracleLib.OracleLib__SequencerGracePeriod.selector;
     bytes4 constant ERR_NO_SURPLUS = SyntheticSplitter.Splitter__NoSurplus.selector;
     bytes4 constant ERR_INSUFFICIENT_HARVEST = SyntheticSplitter.Splitter__InsufficientHarvest.selector;
+    bytes4 constant ERR_INSOLVENT = SyntheticSplitter.Splitter__Insolvent.selector;
 
-    /// @dev Reverts if error selector is not in the allowed list
-    function _assertExpectedError(
-        bytes memory reason,
-        bytes4[] memory allowed
+    function _bubbleRevert(
+        bytes memory reason
     ) internal pure {
-        if (reason.length < 4) {
-            revert("Unknown error (no selector)");
-        }
-        bytes4 selector = bytes4(reason);
-        for (uint256 i = 0; i < allowed.length; i++) {
-            if (selector == allowed[i]) {
-                return;
-            }
-        }
-        // Not an expected error - propagate it
-        assembly {
-            revert(add(reason, 32), mload(reason))
-        }
+        assembly { revert(add(reason, 32), mload(reason)) }
     }
 
     modifier useActor(
@@ -156,12 +143,14 @@ contract SplitterHandler is Test {
             ghost_totalUsdcFairPrice += usdcFair;
             mintCalls++;
         } catch (bytes memory reason) {
-            // Only allow oracle-related errors (price can change between check and call)
-            bytes4[] memory allowed = new bytes4[](3);
-            allowed[0] = ERR_STALE_PRICE;
-            allowed[1] = ERR_SEQUENCER_DOWN;
-            allowed[2] = ERR_SEQUENCER_GRACE;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (sel != ERR_STALE_PRICE && sel != ERR_SEQUENCER_DOWN && sel != ERR_SEQUENCER_GRACE) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -199,24 +188,14 @@ contract SplitterHandler is Test {
                 ghost_burnedAfterLiquidation += amount;
             }
         } catch (bytes memory reason) {
-            if (reason.length >= 4) {
-                bytes4 selector = bytes4(reason);
-                // String error selector: Error(string) = 0x08c379a0
-                // Expected for "Paused & Insolvent" solvency check
-                if (selector == bytes4(0x08c379a0)) {
-                    return;
-                }
-                // ERR_ZERO_AMOUNT shouldn't happen (we bound > 0) but allow it
-                if (selector == ERR_ZERO_AMOUNT) {
-                    return;
-                }
-                // Any other error is unexpected - propagate it
-                assembly {
-                    revert(add(reason, 32), mload(reason))
-                }
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
             }
-            // Malformed error (< 4 bytes) - propagate
-            revert("Unknown error");
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (sel != ERR_ZERO_AMOUNT && sel != ERR_INSOLVENT) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -231,10 +210,14 @@ contract SplitterHandler is Test {
         try splitter.harvestYield() {
             harvestCalls++;
         } catch (bytes memory reason) {
-            bytes4[] memory allowed = new bytes4[](2);
-            allowed[0] = ERR_NO_SURPLUS;
-            allowed[1] = ERR_INSUFFICIENT_HARVEST;
-            _assertExpectedError(reason, allowed);
+            if (reason.length < 4) {
+                _bubbleRevert(reason);
+            }
+            bytes4 sel;
+            assembly { sel := mload(add(reason, 0x20)) }
+            if (sel != ERR_NO_SURPLUS && sel != ERR_INSUFFICIENT_HARVEST) {
+                _bubbleRevert(reason);
+            }
         }
     }
 
@@ -284,10 +267,14 @@ contract SplitterHandler is Test {
                 ghost_wasEverLiquidated = true;
                 ghost_supplyAtLiquidation = splitter.BEAR().totalSupply();
             } catch (bytes memory reason) {
-                // Only expected error: already liquidated
-                bytes4[] memory allowed = new bytes4[](1);
-                allowed[0] = ERR_LIQUIDATION_ACTIVE;
-                _assertExpectedError(reason, allowed);
+                if (reason.length < 4) {
+                    _bubbleRevert(reason);
+                }
+                bytes4 sel;
+                assembly { sel := mload(add(reason, 0x20)) }
+                if (sel != ERR_LIQUIDATION_ACTIVE) {
+                    _bubbleRevert(reason);
+                }
             }
         }
     }
