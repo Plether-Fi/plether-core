@@ -384,4 +384,96 @@ contract InvarCoinForkTest is BaseForkTest {
         ic.deployToCurve(0);
     }
 
+    // ==========================================
+    // PHASE 5: FULL LIFECYCLE
+    // ==========================================
+
+    function test_fullLifecycle_depositToWithdrawal() public {
+        uint256 aliceDeposit = 500_000e6;
+        uint256 bobDeposit = 100_000e6;
+        uint256 totalDeposit = aliceDeposit + bobDeposit;
+
+        // 1. Deposits: Alice 500k, Bob 100k USDC
+        uint256 aliceShares = _depositAs(alice, aliceDeposit);
+        uint256 bobShares = _depositAs(bob, bobDeposit);
+
+        assertApproxEqRel(ic.totalAssets(), totalDeposit, 0.01e18, "totalAssets should reflect deposits");
+        assertApproxEqRel(
+            aliceShares * bobDeposit, bobShares * aliceDeposit, 0.001e18, "Share ratio matches deposit ratio"
+        );
+
+        // 2. Keeper deploys excess USDC to Curve LP (98% deployed, 2% buffer)
+        vm.prank(keeper);
+        ic.deployToCurve(0);
+
+        uint256 bufferAfterDeploy = IERC20(USDC).balanceOf(address(ic));
+        uint256 expectedBuffer = ic.totalAssets() * 200 / 10_000;
+        assertApproxEqRel(bufferAfterDeploy, expectedBuffer, 0.1e18, "Buffer ~2% of NAV");
+        assertApproxEqRel(ic.totalAssets(), totalDeposit, 0.02e18, "No value leaked during deploy");
+
+        // 3. Alice stakes all INVAR → sINVAR (1000x decimal offset)
+        vm.startPrank(alice);
+        ic.approve(address(sInvar), aliceShares);
+        uint256 sInvarShares = sInvar.deposit(aliceShares, alice);
+        vm.stopPrank();
+
+        assertEq(sInvarShares, aliceShares * 1000, "1000x decimal offset on initial stake");
+
+        // 4. Curve trading generates fees (virtual price growth)
+        uint256 vpBefore = ICurveTwocrypto(curvePool).get_virtual_price();
+        _generateCurveFees(50_000e6, 10);
+        uint256 vpAfter = ICurveTwocrypto(curvePool).get_virtual_price();
+        assertGt(vpAfter, vpBefore, "Trading fees grow virtual price");
+
+        _warpAndRefreshOracle(1 days);
+
+        // 5. Harvest: mints new INVAR from fee yield, donates to sINVAR stakers
+        uint256 supplyBeforeHarvest = ic.totalSupply();
+        uint256 sInvarBalBefore = ic.balanceOf(address(sInvar));
+
+        vm.prank(keeper);
+        ic.harvest();
+
+        uint256 newInvarMinted = ic.totalSupply() - supplyBeforeHarvest;
+        uint256 yieldDonated = ic.balanceOf(address(sInvar)) - sInvarBalBefore;
+        assertEq(newInvarMinted, yieldDonated, "All minted yield goes to sINVAR");
+
+        // 6. Wait for full yield stream vesting (1 hour)
+        _warpAndRefreshOracle(1 hours);
+
+        uint256 aliceRedeemable = sInvar.previewRedeem(sInvarShares);
+        assertGt(aliceRedeemable, aliceShares, "Staked position grew from vested yield");
+
+        // 7. Alice unstakes sINVAR → INVAR (yield increased her position)
+        vm.startPrank(alice);
+        uint256 invarRedeemed = sInvar.redeem(sInvarShares, alice, alice);
+        vm.stopPrank();
+
+        assertGt(invarRedeemed, aliceShares, "Staking yield grew alice's INVAR balance");
+
+        // 8. Alice does balanced exit via lpWithdraw (USDC + BEAR)
+        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+        uint256 aliceBearBefore = IERC20(bearToken).balanceOf(alice);
+        vm.prank(alice);
+        (uint256 aliceUsdc, uint256 aliceBear) = ic.lpWithdraw(invarRedeemed, 0, 0);
+
+        assertEq(IERC20(USDC).balanceOf(alice) - aliceUsdcBefore, aliceUsdc, "Alice USDC transfer matches");
+        assertEq(IERC20(bearToken).balanceOf(alice) - aliceBearBefore, aliceBear, "Alice BEAR transfer matches");
+
+        (, int256 bearPrice8,,,) = AggregatorV3Interface(CL_EUR).latestRoundData();
+        uint256 aliceTotalValue = aliceUsdc + (aliceBear * uint256(bearPrice8)) / 1e20;
+        assertGt(aliceTotalValue, aliceDeposit * 99 / 100, "Alice recovers >99% (balanced exit, minimal slippage)");
+
+        // 9. Bob does single-sided withdraw (USDC only via buffer + JIT LP burn)
+        uint256 bobUsdcBefore = IERC20(USDC).balanceOf(bob);
+        vm.prank(bob);
+        uint256 bobUsdcOut = ic.withdraw(bobShares, bob, 0);
+
+        assertEq(IERC20(USDC).balanceOf(bob) - bobUsdcBefore, bobUsdcOut, "Bob USDC transfer matches");
+        assertGt(bobUsdcOut, bobDeposit * 99 / 100, "Bob recovers >99% (small position, low slippage)");
+
+        // 10. Vault fully drained
+        assertLe(ic.totalSupply(), 1, "At most 1 wei rounding dust remains");
+    }
+
 }

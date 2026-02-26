@@ -108,7 +108,6 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         shares = _depositAs(alice, depositAmount);
         ic.deployToCurve(0);
         _proposeAndFinalizeGauge();
-        ic.stakeToGauge(0);
     }
 
     // ==========================================
@@ -137,13 +136,16 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         ic.deployToCurve(0);
         _proposeAndFinalizeGauge();
 
-        uint256 lpBal = IERC20(curvePool).balanceOf(address(ic));
-        assertGt(lpBal, 0, "Should have LP before staking");
+        uint256 gaugeBal = gauge.balanceOf(address(ic));
+        assertGt(gaugeBal, 0, "finalizeGauge should auto-stake LP");
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "No local LP after auto-stake");
+
+        ic.unstakeFromGauge(0);
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), gaugeBal, "LP returned after unstake");
 
         ic.stakeToGauge(0);
-
-        assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "All local LP should be staked");
-        assertEq(gauge.balanceOf(address(ic)), lpBal, "Gauge balance should match staked amount");
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), 0, "All local LP re-staked");
+        assertEq(gauge.balanceOf(address(ic)), gaugeBal, "Gauge balance restored");
     }
 
     function test_unstakeFromGauge_realGauge() public {
@@ -151,12 +153,12 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         ic.deployToCurve(0);
         _proposeAndFinalizeGauge();
 
-        uint256 lpBal = IERC20(curvePool).balanceOf(address(ic));
-        ic.stakeToGauge(0);
+        uint256 gaugeBal = gauge.balanceOf(address(ic));
+        assertGt(gaugeBal, 0, "LP should be auto-staked by finalizeGauge");
 
         ic.unstakeFromGauge(0);
 
-        assertEq(IERC20(curvePool).balanceOf(address(ic)), lpBal, "LP should return to InvarCoin");
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), gaugeBal, "LP should return to InvarCoin");
         assertEq(gauge.balanceOf(address(ic)), 0, "Gauge balance should be zero");
     }
 
@@ -165,13 +167,16 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         ic.deployToCurve(0);
         _proposeAndFinalizeGauge();
 
-        uint256 lpBal = IERC20(curvePool).balanceOf(address(ic));
-        ic.stakeToGauge(0);
-        assertEq(gauge.balanceOf(address(ic)), lpBal);
+        uint256 gaugeBal = gauge.balanceOf(address(ic));
+        assertGt(gaugeBal, 0, "LP auto-staked by finalizeGauge");
 
         ic.unstakeFromGauge(0);
-        assertEq(IERC20(curvePool).balanceOf(address(ic)), lpBal);
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), gaugeBal);
         assertEq(gauge.balanceOf(address(ic)), 0);
+
+        ic.stakeToGauge(0);
+        assertEq(gauge.balanceOf(address(ic)), gaugeBal);
+        assertEq(IERC20(curvePool).balanceOf(address(ic)), 0);
     }
 
     // ==========================================
@@ -257,7 +262,6 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         uint256 assetsBefore = ic.totalAssets();
 
         _proposeAndFinalizeGauge();
-        ic.stakeToGauge(0);
 
         uint256 assetsAfter = ic.totalAssets();
 
@@ -275,7 +279,6 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         ic.deployToCurve(0);
 
         _proposeAndFinalizeGauge();
-        ic.stakeToGauge(0);
 
         _generateCurveFees(50_000e6, 10);
         _warpAndRefreshOracle(1 days);
@@ -294,7 +297,6 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         ic.deployToCurve(0);
 
         _proposeAndFinalizeGauge();
-        ic.stakeToGauge(0);
 
         uint256 gaugeBalBefore = gauge.balanceOf(address(ic));
 
@@ -322,39 +324,18 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
     // GAUGE MIGRATION
     // ==========================================
 
-    function test_gaugeRotation() public {
+    function test_gaugeRemoval() public {
         _setupWithLpInGauge(1_000_000e6);
 
         uint256 stakedBefore = gauge.balanceOf(address(ic));
         assertGt(stakedBefore, 0, "LP should be in old gauge");
 
-        // Curve factory only allows one gauge per pool, so deploy a second pool to get a new gauge.
-        // The new gauge still accepts the same LP token deposits via transferFrom.
-        address secondPool = ICurveCryptoFactory(CURVE_CRYPTO_FACTORY)
-            .deploy_pool(
-                "USDC/plDXY-BEAR Pool 2",
-                "USDC-plDXY-BEAR-2",
-                [USDC, bearToken],
-                0,
-                CURVE_A,
-                CURVE_GAMMA,
-                CURVE_MID_FEE,
-                CURVE_OUT_FEE,
-                CURVE_FEE_GAMMA,
-                CURVE_ALLOWED_EXTRA_PROFIT,
-                CURVE_ADJUSTMENT_STEP,
-                CURVE_MA_HALF_TIME,
-                bearPrice
-            );
-        address newGaugeAddr = ICurveCryptoFactory(CURVE_CRYPTO_FACTORY).deploy_gauge(secondPool);
-        ICurveGauge newGauge = ICurveGauge(newGaugeAddr);
-
-        ic.proposeGauge(address(newGauge));
+        ic.proposeGauge(address(0));
         _warpAndRefreshOracle(7 days);
         ic.finalizeGauge();
 
         assertEq(gauge.balanceOf(address(ic)), 0, "Old gauge should be emptied");
-        assertEq(address(ic.curveGauge()), address(newGauge), "New gauge should be active");
+        assertEq(address(ic.curveGauge()), address(0), "Gauge should be cleared");
 
         uint256 localLp = IERC20(curvePool).balanceOf(address(ic));
         assertEq(localLp, stakedBefore, "LP should be back with InvarCoin");

@@ -291,8 +291,8 @@ contract RewardDistributorForkTest is BaseForkTest {
 
         uint256 distributable = awkwardAmount - callerReward;
         uint256 expectedPerSide = (distributable * 1e12) / 2;
-        assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within 1e10 of expected");
-        assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within 1e10 of expected");
+        assertApproxEqAbs(bearReceived, expectedPerSide, 1e12, "BEAR within 1e12 of expected");
+        assertApproxEqAbs(bullReceived, expectedPerSide, 1e12, "BULL within 1e12 of expected");
 
         uint256 keeperAfter = IERC20(USDC).balanceOf(keeper);
         assertEq(keeperAfter - keeperBefore, callerReward, "Keeper received exact reward");
@@ -352,8 +352,8 @@ contract RewardDistributorForkTest is BaseForkTest {
         uint256 distributable = usdcAmount - callerReward;
         if (distributable > 0) {
             uint256 expectedPerSide = (distributable * 1e12) / 2;
-            assertApproxEqAbs(bearReceived, expectedPerSide, 1e10, "BEAR within tolerance");
-            assertApproxEqAbs(bullReceived, expectedPerSide, 1e10, "BULL within tolerance");
+            assertApproxEqAbs(bearReceived, expectedPerSide, 1e12, "BEAR within tolerance");
+            assertApproxEqAbs(bullReceived, expectedPerSide, 1e12, "BULL within tolerance");
         }
 
         assertEq(IERC20(USDC).balanceOf(address(distributor)), 0, "No USDC left in distributor");
