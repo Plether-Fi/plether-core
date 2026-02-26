@@ -1,25 +1,25 @@
 {
   "network": "mainnet",
   "chainId": 1,
-  "deployedAt": "2026-02-25",
-  "commit": "a7df4dd",
+  "deployedAt": "2026-02-26",
+  "commit": "207c1f1",
   "contracts": {
     "core": {
-      "SyntheticSplitter": "0x3A8dAF1f0ccf9675eDE5fE312Ec2E13311e0BBc4",
-      "plDXY-BEAR": "0xea1c5882863a2D7686dCd4a9ac4E493674f18265",
-      "plDXY-BULL": "0xA7760821fdFA93779C6C296403d25Be21F957Cb8"
+      "SyntheticSplitter": "0x81D7f6eE951f5272043de05E6EE25c58a440c2DF",
+      "plDXY-BEAR": "0xEDE56A22771c7fDA8b80Cc1A1fa2B54420cD4A5d",
+      "plDXY-BULL": "0xF20D4E93ee2F3948E4aE998F7C3A5Ec9E0aBD4c4"
     },
     "staking": {
-      "StakedBear": "0x603a694eaB6E684d56531e32d0B2EE12578b026F",
-      "StakedBull": "0x2e00857D69A0e6E5ae8463099e17DC3E83E2061C"
+      "StakedBear": "0x4f7310E8bDa646A7DA4b8F1bBE83073380C5Dc53",
+      "StakedBull": "0x3B859C74d628dAe76C95fA3b2A9d1A50aB153E2D"
     },
     "oracles": {
-      "BasketOracle": "0x797BE08864F04b5240D9FbA742bb3f5D888246Ee",
-      "MorphoOracleBear": "0x62a46363eFf0dB43721a451ADF12f65E8EFA412a",
-      "MorphoOracleBull": "0x9A7E7E77523518e61a75Cd41B2FBD1A97cFBdD88",
-      "StakedOracleBear": "0x418Bf98F4FD173E727969A855DcF187269ee0140",
-      "StakedOracleBull": "0x22fC502B1112B31c4690CD7a83E62e45d61755cf",
-      "PythAdapterSEK": "0xB440cEA2964234303a1b610682c6850393F87caa",
+      "BasketOracle": "0xfFc35FD33C2acF241F6e46625C7571D64f8AddbD",
+      "MorphoOracleBear": "0xE1f9c47b103fF0248ee037E0c6Eac2a21f16e4fA",
+      "MorphoOracleBull": "0x5742Aee0FE88cA2079C0782231b8140cFEaB1652",
+      "StakedOracleBear": "0x7e22eEc2506aE777b5093F030de69dF04b2c4c93",
+      "StakedOracleBull": "0x18770Dff1fa9c38a78b3F2ae48de5b65FC5859bD",
+      "PythAdapterSEK": "0xEf0e44465a18f848165Bf1A007BE51f628a6FC06",
       "ChainlinkEUR": "0xb49f677943BC038e9857d61E7d053CaA2C1734C1",
       "ChainlinkJPY": "0xBcE206caE7f0ec07b545EddE332A47C2F75bbeb3",
       "ChainlinkGBP": "0x5c0Ab2d9b5a7ed9f470386e82BB36A3613cDd4b5",
@@ -27,48 +27,50 @@
       "ChainlinkCHF": "0x449d117117838fFA61263B61dA6301AA2a88B13A"
     },
     "routers": {
-      "ZapRouter": "0x66e3980e0fB77f45d58572c9BaFEF15777097602",
-      "LeverageRouter": "0xEDE1c12E20A4E8F5ad1f0F464E868C54943191C3",
-      "BullLeverageRouter": "0xf4B28eBf61B30c01Dd25955982b6160D2bB21A0b"
+      "ZapRouter": "0x96bEEF7872c9bFD746359aD51bE35f1A8e3C99dE",
+      "LeverageRouter": "0x72D0687ADeC9E16D188DFeD6c6C756De94ea7434",
+      "BullLeverageRouter": "0xd73794c7DeEb80b30c46E6A11b2d0CF071e6a8D0"
+    },
+    "adapter": {
+      "VaultAdapter": "0x9945E377e59ABB5B84e6bfeD240F0d3599F96c88"
     },
     "rewards": {
-      "RewardDistributor": "0xe45e87945B782e4249d576A5a5e39F22350214b5"
+      "RewardDistributor": "0x34558F6eC05F91773b7d269f50ce0bbeC4403760"
     },
     "invarCoin": {
-      "InvarCoin": "0x91D242d9ef6C50109F1A59884dABbac1606961A0",
-      "sINVAR": "0xfD689CFEf1a042e7A6e19860A76A7B753FC02D93"
+      "InvarCoin": "0x125B1F77Ef927eFf08EDd362c00BF059FFD9d3E6",
+      "sINVAR": "0xa99477f3d822dFa1b7E51832565C1f89fE3608D9"
     },
     "external": {
       "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       "Morpho": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
       "MorphoIRM": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
       "MetaMorphoVault": "0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e",
-      "VaultAdapter": "0xc04f1AEa484F50C2A9753B174307950Ea50b600F",
-      "CurvePool": "0x1270e2E6e39132D614a09ef167bc949D5E223151",
+      "CurvePool": "0x2354579380cAd0518C6518e5Ee2A66d30d0149bE",
       "Pyth": "0x4305FB66699C3B2702D4d05CF36551390A4c69C6",
-      "MorphoMarketBear": "0xc5ad34acfcef462c86adfe72c4e9d946d69e52729e877c3dc4b42e1e30906d49",
-      "MorphoMarketBull": "0xfde34db2170a451e0be725e4d12a9b37c26437feeb57246ab373a2acafd6c455"
+      "MorphoMarketBear": "0x8b01286c2c38d7d9fcdb14ab71d9a86b231f56a3f741ddf4e763d181eb6d9072",
+      "MorphoMarketBull": "0x297e31709fe6a1bd93134a75593b8df840f6747fc947ecf2430c0cd807df827d"
     }
   },
   "etherscan": {
-    "SyntheticSplitter": "https://etherscan.io/address/0x3A8dAF1f0ccf9675eDE5fE312Ec2E13311e0BBc4",
-    "plDXY-BEAR": "https://etherscan.io/address/0xea1c5882863a2D7686dCd4a9ac4E493674f18265",
-    "plDXY-BULL": "https://etherscan.io/address/0xA7760821fdFA93779C6C296403d25Be21F957Cb8",
-    "StakedBear": "https://etherscan.io/address/0x603a694eaB6E684d56531e32d0B2EE12578b026F",
-    "StakedBull": "https://etherscan.io/address/0x2e00857D69A0e6E5ae8463099e17DC3E83E2061C",
-    "BasketOracle": "https://etherscan.io/address/0x797BE08864F04b5240D9FbA742bb3f5D888246Ee",
-    "MorphoOracleBear": "https://etherscan.io/address/0x62a46363eFf0dB43721a451ADF12f65E8EFA412a",
-    "MorphoOracleBull": "https://etherscan.io/address/0x9A7E7E77523518e61a75Cd41B2FBD1A97cFBdD88",
-    "StakedOracleBear": "https://etherscan.io/address/0x418Bf98F4FD173E727969A855DcF187269ee0140",
-    "StakedOracleBull": "https://etherscan.io/address/0x22fC502B1112B31c4690CD7a83E62e45d61755cf",
-    "PythAdapterSEK": "https://etherscan.io/address/0xB440cEA2964234303a1b610682c6850393F87caa",
-    "VaultAdapter": "https://etherscan.io/address/0xc04f1AEa484F50C2A9753B174307950Ea50b600F",
-    "ZapRouter": "https://etherscan.io/address/0x66e3980e0fB77f45d58572c9BaFEF15777097602",
-    "LeverageRouter": "https://etherscan.io/address/0xEDE1c12E20A4E8F5ad1f0F464E868C54943191C3",
-    "BullLeverageRouter": "https://etherscan.io/address/0xf4B28eBf61B30c01Dd25955982b6160D2bB21A0b",
-    "InvarCoin": "https://etherscan.io/address/0x91D242d9ef6C50109F1A59884dABbac1606961A0",
-    "sINVAR": "https://etherscan.io/address/0xfD689CFEf1a042e7A6e19860A76A7B753FC02D93",
-    "RewardDistributor": "https://etherscan.io/address/0xe45e87945B782e4249d576A5a5e39F22350214b5",
-    "CurvePool": "https://etherscan.io/address/0x1270e2E6e39132D614a09ef167bc949D5E223151"
+    "SyntheticSplitter": "https://etherscan.io/address/0x81D7f6eE951f5272043de05E6EE25c58a440c2DF",
+    "plDXY-BEAR": "https://etherscan.io/address/0xEDE56A22771c7fDA8b80Cc1A1fa2B54420cD4A5d",
+    "plDXY-BULL": "https://etherscan.io/address/0xF20D4E93ee2F3948E4aE998F7C3A5Ec9E0aBD4c4",
+    "StakedBear": "https://etherscan.io/address/0x4f7310E8bDa646A7DA4b8F1bBE83073380C5Dc53",
+    "StakedBull": "https://etherscan.io/address/0x3B859C74d628dAe76C95fA3b2A9d1A50aB153E2D",
+    "BasketOracle": "https://etherscan.io/address/0xfFc35FD33C2acF241F6e46625C7571D64f8AddbD",
+    "MorphoOracleBear": "https://etherscan.io/address/0xE1f9c47b103fF0248ee037E0c6Eac2a21f16e4fA",
+    "MorphoOracleBull": "https://etherscan.io/address/0x5742Aee0FE88cA2079C0782231b8140cFEaB1652",
+    "StakedOracleBear": "https://etherscan.io/address/0x7e22eEc2506aE777b5093F030de69dF04b2c4c93",
+    "StakedOracleBull": "https://etherscan.io/address/0x18770Dff1fa9c38a78b3F2ae48de5b65FC5859bD",
+    "PythAdapterSEK": "https://etherscan.io/address/0xEf0e44465a18f848165Bf1A007BE51f628a6FC06",
+    "VaultAdapter": "https://etherscan.io/address/0x9945E377e59ABB5B84e6bfeD240F0d3599F96c88",
+    "ZapRouter": "https://etherscan.io/address/0x96bEEF7872c9bFD746359aD51bE35f1A8e3C99dE",
+    "LeverageRouter": "https://etherscan.io/address/0x72D0687ADeC9E16D188DFeD6c6C756De94ea7434",
+    "BullLeverageRouter": "https://etherscan.io/address/0xd73794c7DeEb80b30c46E6A11b2d0CF071e6a8D0",
+    "CurvePool": "https://etherscan.io/address/0x2354579380cAd0518C6518e5Ee2A66d30d0149bE",
+    "InvarCoin": "https://etherscan.io/address/0x125B1F77Ef927eFf08EDd362c00BF059FFD9d3E6",
+    "sINVAR": "https://etherscan.io/address/0xa99477f3d822dFa1b7E51832565C1f89fE3608D9",
+    "RewardDistributor": "https://etherscan.io/address/0x34558F6eC05F91773b7d269f50ce0bbeC4403760"
   }
 }
