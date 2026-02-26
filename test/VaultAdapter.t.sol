@@ -234,51 +234,7 @@ contract VaultAdapterTest is Test {
     // 7. maxWithdraw / maxRedeem Liquidity Cap
     // ==========================================
 
-    function test_MaxWithdraw_CappedByVaultLiquidity() public {
-        uint256 amount = 100 * 1e6;
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), amount);
-        adapter.deposit(amount, splitter);
-        vm.stopPrank();
-
-        assertEq(adapter.maxWithdraw(splitter), amount);
-
-        vault.setLiquidityCap(30 * 1e6);
-
-        assertEq(adapter.maxWithdraw(splitter), 30 * 1e6);
-    }
-
-    function test_MaxRedeem_CappedByVaultLiquidity() public {
-        uint256 amount = 100 * 1e6;
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), amount);
-        adapter.deposit(amount, splitter);
-        vm.stopPrank();
-
-        assertEq(adapter.maxRedeem(splitter), amount);
-
-        vault.setLiquidityCap(30 * 1e6);
-
-        assertEq(adapter.maxRedeem(splitter), 30 * 1e6);
-    }
-
-    function test_MaxWithdraw_ZeroWhenVaultIlliquid() public {
-        uint256 amount = 100 * 1e6;
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), amount);
-        adapter.deposit(amount, splitter);
-        vm.stopPrank();
-
-        vault.setLiquidityCap(0);
-
-        assertEq(adapter.maxWithdraw(splitter), 0);
-        assertEq(adapter.maxRedeem(splitter), 0);
-    }
-
-    function test_MaxWithdraw_UnlimitedVaultReturnsOwnerPosition() public {
+    function test_MaxWithdraw_ReturnsOwnerPosition() public {
         uint256 amount = 100 * 1e6;
 
         vm.startPrank(splitter);
@@ -294,45 +250,9 @@ contract VaultAdapterTest is Test {
     // 8. maxDeposit / maxMint Passthrough
     // ==========================================
 
-    function test_MaxDeposit_PassesThroughVaultCap() public {
-        vault.setDepositCap(200 * 1e6);
-        assertEq(adapter.maxDeposit(splitter), 200 * 1e6);
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), 100 * 1e6);
-        adapter.deposit(100 * 1e6, splitter);
-        vm.stopPrank();
-
-        assertEq(adapter.maxDeposit(splitter), 100 * 1e6);
-    }
-
-    function test_MaxDeposit_ZeroWhenVaultFull() public {
-        vault.setDepositCap(50 * 1e6);
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), 50 * 1e6);
-        adapter.deposit(50 * 1e6, splitter);
-        vm.stopPrank();
-
-        assertEq(adapter.maxDeposit(splitter), 0);
-        assertEq(adapter.maxMint(splitter), 0);
-    }
-
-    function test_MaxDeposit_UnlimitedByDefault() public {
+    function test_MaxDeposit_AlwaysUnlimited() public {
         assertEq(adapter.maxDeposit(splitter), type(uint256).max);
-    }
-
-    function test_Deposit_RevertsWhenVaultCapped() public {
-        vault.setDepositCap(50 * 1e6);
-
-        vm.startPrank(splitter);
-        usdc.approve(address(adapter), 50 * 1e6);
-        adapter.deposit(50 * 1e6, splitter);
-
-        usdc.approve(address(adapter), 1e6);
-        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, splitter, 1e6, 0));
-        adapter.deposit(1e6, splitter);
-        vm.stopPrank();
+        assertEq(adapter.maxMint(splitter), type(uint256).max);
     }
 
     // ==========================================

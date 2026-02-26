@@ -182,11 +182,8 @@ contract VaultAdapterForkTest is BaseForkTest {
         // idle markets whose IRM is address(0).
         _drainVaultLiquidity();
 
-        // Adapter must reflect the crunch
-        assertEq(vaultAdapter.maxWithdraw(address(splitter)), 0, "maxWithdraw should be 0 after drain");
-        assertEq(vaultAdapter.maxRedeem(address(splitter)), 0, "maxRedeem should be 0 after drain");
-
-        // totalAssets still reports the accounting value — funds exist, just illiquid
+        // maxWithdraw reports position value (not vault liquidity — Morpho V2 returns 0 for max*)
+        assertGt(vaultAdapter.maxWithdraw(address(splitter)), 0, "maxWithdraw reports position value");
         assertGt(vaultAdapter.totalAssets(), 0, "totalAssets should still report position value");
 
         // Warp 30 days so yield accrues — harvest will find surplus but can't withdraw it

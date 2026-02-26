@@ -75,41 +75,37 @@ contract VaultAdapter is ERC4626, Ownable2Step, IYieldAdapter {
     // ERC-4626 OVERRIDES
     // ==========================================
 
-    /// @notice Maximum USDC withdrawable, capped by Morpho vault's available liquidity.
-    /// @param owner Owner of adapter shares.
-    /// @return Minimum of the owner's position value and what Morpho vault can actually service.
+    /// @notice Maximum USDC withdrawable by owner.
+    /// @dev Does not cap by VAULT.maxWithdraw() — Morpho Vault V2 returns 0 for all max*
+    ///      functions due to its gate system. Actual liquidity is enforced at withdrawal time.
     function maxWithdraw(
         address owner
     ) public view override returns (uint256) {
-        uint256 ownerAssets = previewRedeem(balanceOf(owner));
-        uint256 vaultMax = VAULT.maxWithdraw(address(this));
-        return ownerAssets < vaultMax ? ownerAssets : vaultMax;
+        return previewRedeem(balanceOf(owner));
     }
 
-    /// @notice Maximum adapter shares redeemable, capped by Morpho vault's available liquidity.
-    /// @param owner Owner of adapter shares.
-    /// @return Minimum of the owner's share balance and what Morpho vault liquidity supports.
+    /// @notice Maximum adapter shares redeemable by owner.
+    /// @dev See maxWithdraw for rationale on not delegating to vault.
     function maxRedeem(
         address owner
     ) public view override returns (uint256) {
-        uint256 ownerShares = balanceOf(owner);
-        uint256 maxAssets = VAULT.maxWithdraw(address(this));
-        uint256 maxSharesByVault = convertToShares(maxAssets);
-        return ownerShares < maxSharesByVault ? ownerShares : maxSharesByVault;
+        return balanceOf(owner);
     }
 
-    /// @notice Maximum USDC depositable, capped by Morpho vault's remaining capacity.
+    /// @notice Maximum USDC depositable.
+    /// @dev See maxWithdraw for rationale on not delegating to vault.
     function maxDeposit(
         address
     ) public view override returns (uint256) {
-        return VAULT.maxDeposit(address(this));
+        return type(uint256).max;
     }
 
-    /// @notice Maximum adapter shares mintable, capped by Morpho vault's remaining capacity.
+    /// @notice Maximum adapter shares mintable.
+    /// @dev See maxWithdraw for rationale on not delegating to vault.
     function maxMint(
         address
     ) public view override returns (uint256) {
-        return VAULT.maxMint(address(this));
+        return type(uint256).max;
     }
 
     /// @notice Returns total USDC value of this adapter's vault position.
