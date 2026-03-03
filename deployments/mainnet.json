@@ -27,7 +27,7 @@
       "ChainlinkCHF": "0x449d117117838fFA61263B61dA6301AA2a88B13A"
     },
     "routers": {
-      "ZapRouter": "0x96bEEF7872c9bFD746359aD51bE35f1A8e3C99dE",
+      "ZapRouter": "0xb0f4041Bed9517A2b200DeBC65B302C3767A7929",
       "LeverageRouter": "0x72D0687ADeC9E16D188DFeD6c6C756De94ea7434",
       "BullLeverageRouter": "0xd73794c7DeEb80b30c46E6A11b2d0CF071e6a8D0"
     },
@@ -65,7 +65,7 @@
     "StakedOracleBull": "https://etherscan.io/address/0x18770Dff1fa9c38a78b3F2ae48de5b65FC5859bD",
     "PythAdapterSEK": "https://etherscan.io/address/0xEf0e44465a18f848165Bf1A007BE51f628a6FC06",
     "VaultAdapter": "https://etherscan.io/address/0x9945E377e59ABB5B84e6bfeD240F0d3599F96c88",
-    "ZapRouter": "https://etherscan.io/address/0x96bEEF7872c9bFD746359aD51bE35f1A8e3C99dE",
+    "ZapRouter": "https://etherscan.io/address/0xb0f4041Bed9517A2b200DeBC65B302C3767A7929",
     "LeverageRouter": "https://etherscan.io/address/0x72D0687ADeC9E16D188DFeD6c6C756De94ea7434",
     "BullLeverageRouter": "https://etherscan.io/address/0xd73794c7DeEb80b30c46E6A11b2d0CF071e6a8D0",
     "CurvePool": "https://etherscan.io/address/0x2354579380cAd0518C6518e5Ee2A66d30d0149bE",
