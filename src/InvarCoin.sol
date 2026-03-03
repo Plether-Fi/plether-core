@@ -14,58 +14,10 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {StakedToken} from "./StakedToken.sol";
 import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
+import {ICurveGauge} from "./interfaces/ICurveGauge.sol";
+import {ICurveMinter} from "./interfaces/ICurveMinter.sol";
+import {ICurveTwocrypto} from "./interfaces/ICurveTwocrypto.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
-
-interface ICurveTwocrypto {
-
-    function add_liquidity(
-        uint256[2] calldata amounts,
-        uint256 min_mint_amount
-    ) external returns (uint256);
-    function remove_liquidity_one_coin(
-        uint256 token_amount,
-        uint256 i,
-        uint256 min_amount
-    ) external returns (uint256);
-    function remove_liquidity(
-        uint256 amount,
-        uint256[2] calldata min_amounts
-    ) external returns (uint256[2] memory);
-    function get_virtual_price() external view returns (uint256);
-    function lp_price() external view returns (uint256);
-    function calc_token_amount(
-        uint256[2] calldata amounts,
-        bool deposit
-    ) external view returns (uint256);
-    function calc_withdraw_one_coin(
-        uint256 token_amount,
-        uint256 i
-    ) external view returns (uint256);
-
-}
-
-interface ICurveGauge {
-
-    function deposit(
-        uint256 amount
-    ) external;
-    function withdraw(
-        uint256 amount
-    ) external;
-    function claim_rewards() external;
-    function balanceOf(
-        address
-    ) external view returns (uint256);
-
-}
-
-interface ICurveMinter {
-
-    function mint(
-        address gauge
-    ) external;
-
-}
 
 /// @title InvarCoin (INVAR)
 /// @custom:security-contact contact@plether.com
