@@ -66,7 +66,12 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
     /// @notice Emitted when user acquires plDXY-BULL via zapMint.
     event ZapMint(
-        address indexed user, uint256 usdcIn, uint256 tokensOut, uint256 maxSlippageBps, uint256 actualSwapOut
+        address indexed user,
+        uint256 usdcIn,
+        uint256 tokensOut,
+        uint256 maxSlippageBps,
+        uint256 actualSwapOut,
+        uint256 usdcRefund
     );
 
     /// @notice Emitted when user sells plDXY-BULL via zapBurn.
@@ -374,7 +379,7 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         }
         PLDXY_BULL.safeTransfer(user, tokensOut);
 
-        emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc);
+        emit ZapMint(user, usdcAmount, tokensOut, maxSlippageBps, swappedUsdc, 0);
     }
 
     /// @dev Executes burn operation within flash loan callback.
@@ -457,7 +462,7 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
             USDC.safeTransfer(msg.sender, usdcRefund);
         }
 
-        emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, actualSwapOut);
+        emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, actualSwapOut, usdcRefund);
     }
 
     // ==========================================
