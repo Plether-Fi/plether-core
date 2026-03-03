@@ -4,7 +4,7 @@ pragma solidity 0.8.33;
 import {StakedToken} from "../../src/StakedToken.sol";
 import {ZapRouter} from "../../src/ZapRouter.sol";
 import {StakedOracle} from "../../src/oracles/StakedOracle.sol";
-import {BaseForkTest, MockCurvePoolForOracle} from "./BaseForkTest.sol";
+import {BaseForkTest, ICurvePoolExtended, MockCurvePoolForOracle} from "./BaseForkTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
 
@@ -89,6 +89,76 @@ contract ZapRouterForkTest is BaseForkTest {
         // Threshold: <1.5% allows for larger trades or worse pool conditions
         assertGt(usdcReturned, (amountIn * 985) / 1000, "Should return >98.5% of original USDC");
         assertEq(IERC20(bullToken).balanceOf(address(this)), bullBefore, "All minted BULL burned");
+    }
+
+}
+
+/// @title ZapRouter Direct Path Fork Tests
+/// @notice Reproduces the exact mainnet failure (BEAR ~$1.001 on 25k pool) and verifies the fix
+contract ZapRouterDirectPathForkTest is Test {
+
+    address constant _USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant SPLITTER = 0x81D7f6eE951f5272043de05E6EE25c58a440c2DF;
+    address constant BEAR = 0xEDE56A22771c7fDA8b80Cc1A1fa2B54420cD4A5d;
+    address constant BULL = 0xF20D4E93ee2F3948E4aE998F7C3A5Ec9E0aBD4c4;
+    address constant CURVE_POOL = 0x2354579380cAd0518C6518e5Ee2A66d30d0149bE;
+    address constant OLD_ZAP_ROUTER = 0x96bEEF7872c9bFD746359aD51bE35f1A8e3C99dE;
+
+    address user;
+
+    function setUp() public {
+        try vm.envString("MAINNET_RPC_URL") returns (string memory url) {
+            vm.createSelectFork(url);
+        } catch {
+            revert("Missing MAINNET_RPC_URL in .env");
+        }
+        user = makeAddr("user");
+    }
+
+    function test_zapMint_600USDC_fails_on_mainnet_fork() public {
+        uint256 bearPrice = ICurvePoolExtended(CURVE_POOL).get_dy(1, 0, 1e18);
+        console.log("Current BEAR price (6 dec):", bearPrice);
+
+        if (bearPrice <= 1_000_000) {
+            console.log("BEAR not overpriced, bug only manifests when BEAR > $1.00, skipping");
+            return;
+        }
+
+        deal(_USDC, user, 600e6);
+
+        vm.startPrank(user);
+        IERC20(_USDC).approve(OLD_ZAP_ROUTER, 600e6);
+
+        vm.expectRevert();
+        ZapRouter(OLD_ZAP_ROUTER).zapMint(600e6, 0, 100, block.timestamp + 1 hours);
+        vm.stopPrank();
+    }
+
+    function test_zapMint_600USDC_succeeds_after_fix() public {
+        uint256 bearPrice = ICurvePoolExtended(CURVE_POOL).get_dy(1, 0, 1e18);
+        console.log("Current BEAR price (6 dec):", bearPrice);
+
+        ZapRouter newRouter = new ZapRouter(SPLITTER, BEAR, BULL, _USDC, CURVE_POOL);
+
+        deal(_USDC, user, 600e6);
+
+        vm.startPrank(user);
+        IERC20(_USDC).approve(address(newRouter), 600e6);
+
+        uint256 bullBefore = IERC20(BULL).balanceOf(user);
+        newRouter.zapMint(600e6, 0, 100, block.timestamp + 1 hours);
+        uint256 bullReceived = IERC20(BULL).balanceOf(user) - bullBefore;
+        vm.stopPrank();
+
+        console.log("BULL received:", bullReceived);
+        assertGt(bullReceived, 0, "Should receive BULL tokens");
+
+        (uint256 flashAmount,,, uint256 expectedTokensOut,) = newRouter.previewZapMint(600e6);
+        if (flashAmount == 0) {
+            console.log("Direct path used -preview tokens:", expectedTokensOut);
+        } else {
+            console.log("Flash path used -preview tokens:", expectedTokensOut);
+        }
     }
 
 }

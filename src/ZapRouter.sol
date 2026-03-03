@@ -17,7 +17,9 @@ import {DecimalConstants} from "./libraries/DecimalConstants.sol";
 /// @title ZapRouter
 /// @custom:security-contact contact@plether.com
 /// @notice Efficient router for acquiring plDXY-BULL tokens using flash mints.
-/// @dev Flash mints plDXY-BEAR → swaps to USDC via Curve → mints pairs → keeps plDXY-BULL.
+/// @dev Primary path: flash mints plDXY-BEAR → swaps to USDC via Curve → mints pairs → keeps plDXY-BULL.
+///      Fallback (direct) path: when BEAR is overpriced on Curve and the flash path can't close,
+///      mints pairs with user USDC → sells all BEAR on Curve → sends BULL + USDC refund to user.
 ///      For plDXY-BEAR, users should swap directly on Curve instead.
 contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
 
@@ -75,7 +77,6 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
     error ZapRouter__Expired();
     error ZapRouter__SlippageExceedsMax();
     error ZapRouter__SplitterNotActive();
-    error ZapRouter__BearPriceAboveCap();
     error ZapRouter__InsufficientOutput();
     error ZapRouter__SolvencyBreach();
     error ZapRouter__PermitFailed();
@@ -193,8 +194,10 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         }
 
         uint256 priceBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
+
         if (priceBear >= CAP_PRICE) {
-            revert ZapRouter__BearPriceAboveCap();
+            _zapMintDirect(usdcAmount, minAmountOut, maxSlippageBps);
+            return;
         }
 
         uint256 priceBull = CAP_PRICE - priceBear;
@@ -203,6 +206,13 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 flashAmount = (theoreticalFlash * (10_000 - SAFETY_BUFFER_BPS)) / 10_000;
 
         uint256 expectedSwapOut = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, flashAmount);
+        uint256 expectedMint = ((usdcAmount + expectedSwapOut) * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+
+        if (expectedMint < flashAmount) {
+            _zapMintDirect(usdcAmount, minAmountOut, maxSlippageBps);
+            return;
+        }
+
         uint256 minSwapOut = (expectedSwapOut * (10_000 - maxSlippageBps)) / 10_000;
 
         USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
@@ -420,18 +430,50 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         emit ZapBurn(user, bullAmount, remainingUsdc);
     }
 
+    /// @dev Mints pairs, sells BEAR on Curve, sends BULL + USDC refund to user.
+    /// @dev Used when the flash path can't close (BEAR overpriced or high price impact).
+    function _zapMintDirect(
+        uint256 usdcAmount,
+        uint256 minAmountOut,
+        uint256 maxSlippageBps
+    ) private {
+        USDC.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        uint256 mintAmount = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        SPLITTER.mint(mintAmount);
+
+        uint256 expectedSwapOut = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, mintAmount);
+        uint256 minSwapOut = (expectedSwapOut * (10_000 - maxSlippageBps)) / 10_000;
+        uint256 actualSwapOut = CURVE_POOL.exchange(PLDXY_BEAR_INDEX, USDC_INDEX, mintAmount, minSwapOut);
+
+        uint256 tokensOut = PLDXY_BULL.balanceOf(address(this));
+        if (tokensOut < minAmountOut) {
+            revert ZapRouter__InsufficientOutput();
+        }
+        PLDXY_BULL.safeTransfer(msg.sender, tokensOut);
+
+        uint256 usdcRefund = USDC.balanceOf(address(this));
+        if (usdcRefund > 0) {
+            USDC.safeTransfer(msg.sender, usdcRefund);
+        }
+
+        emit ZapMint(msg.sender, usdcAmount, tokensOut, maxSlippageBps, actualSwapOut);
+    }
+
     // ==========================================
     // VIEW FUNCTIONS (for frontend)
     // ==========================================
 
     /**
      * @notice Preview the result of a zapMint operation.
+     * @dev When flashAmount == 0, the direct path is used: expectedSwapOut is the USDC refund
+     *      from selling minted BEAR, and totalUSDC equals usdcAmount (no flash leverage).
      * @param usdcAmount The amount of USDC the user will send.
-     * @return flashAmount Amount of plDXY-BEAR to flash mint.
-     * @return expectedSwapOut Expected USDC from selling flash-minted plDXY-BEAR.
-     * @return totalUSDC Total USDC for minting pairs (user + swap).
+     * @return flashAmount Amount of plDXY-BEAR to flash mint (0 signals direct path).
+     * @return expectedSwapOut Expected USDC from swap (flash: contributes to minting; direct: refund to user).
+     * @return totalUSDC Total USDC for minting pairs (flash: user + swap; direct: user only).
      * @return expectedTokensOut Expected plDXY-BULL tokens to receive.
-     * @return flashFee Flash mint fee (if any).
+     * @return flashFee Flash mint fee (0 for direct path).
      */
     function previewZapMint(
         uint256 usdcAmount
@@ -447,21 +489,30 @@ contract ZapRouter is FlashLoanBase, Ownable2Step, Pausable, ReentrancyGuard {
         )
     {
         uint256 priceBear = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, DecimalConstants.ONE_WAD);
+
         if (priceBear >= CAP_PRICE) {
-            return (0, 0, 0, 0, 0);
+            expectedTokensOut = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+            expectedSwapOut = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, expectedTokensOut);
+            totalUSDC = usdcAmount;
+            return (0, expectedSwapOut, totalUSDC, expectedTokensOut, 0);
         }
 
-        // Calculate Bull Price
         uint256 priceBull = CAP_PRICE - priceBear;
-
-        // Calculate Dynamic Flash Amount (matches execution logic)
         uint256 theoreticalFlash = (usdcAmount * DecimalConstants.ONE_WAD) / priceBull;
         flashAmount = (theoreticalFlash * (10_000 - SAFETY_BUFFER_BPS)) / 10_000;
 
         expectedSwapOut = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, flashAmount);
-        totalUSDC = usdcAmount + expectedSwapOut;
+        uint256 expectedMint = ((usdcAmount + expectedSwapOut) * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
 
-        expectedTokensOut = (totalUSDC * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+        if (expectedMint < flashAmount) {
+            expectedTokensOut = (usdcAmount * DecimalConstants.USDC_TO_TOKEN_SCALE) / CAP;
+            expectedSwapOut = CURVE_POOL.get_dy(PLDXY_BEAR_INDEX, USDC_INDEX, expectedTokensOut);
+            totalUSDC = usdcAmount;
+            return (0, expectedSwapOut, totalUSDC, expectedTokensOut, 0);
+        }
+
+        totalUSDC = usdcAmount + expectedSwapOut;
+        expectedTokensOut = expectedMint;
 
         flashFee = IERC3156FlashLender(address(PLDXY_BEAR)).flashFee(address(PLDXY_BEAR), flashAmount);
     }

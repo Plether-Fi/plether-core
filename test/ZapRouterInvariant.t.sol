@@ -260,7 +260,6 @@ contract ZapRouterHandler is Test {
     // Expected error selectors
     bytes4 private constant ERR_INSUFFICIENT_OUTPUT = ZapRouter.ZapRouter__InsufficientOutput.selector;
     bytes4 private constant ERR_SOLVENCY_BREACH = ZapRouter.ZapRouter__SolvencyBreach.selector;
-    bytes4 private constant ERR_BEAR_PRICE_ABOVE_CAP = ZapRouter.ZapRouter__BearPriceAboveCap.selector;
     bytes4 private constant ERR_SPLITTER_NOT_ACTIVE = ZapRouter.ZapRouter__SplitterNotActive.selector;
 
     modifier useActor(
@@ -321,10 +320,7 @@ contract ZapRouterHandler is Test {
             ghost_totalBullMinted += bullReceived;
         } catch (bytes memory reason) {
             bytes4 sel = bytes4(reason);
-            if (
-                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
-                    && sel != ERR_SPLITTER_NOT_ACTIVE
-            ) {
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_SPLITTER_NOT_ACTIVE) {
                 assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
@@ -353,10 +349,7 @@ contract ZapRouterHandler is Test {
             ghost_totalUsdcReturned += usdcReceived;
         } catch (bytes memory reason) {
             bytes4 sel = bytes4(reason);
-            if (
-                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
-                    && sel != ERR_SPLITTER_NOT_ACTIVE
-            ) {
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_SPLITTER_NOT_ACTIVE) {
                 assembly { revert(add(reason, 32), mload(reason)) }
             }
         }
@@ -392,20 +385,15 @@ contract ZapRouterHandler is Test {
                     ghost_totalUsdcReturned += usdcReturned;
                 } catch (bytes memory reason) {
                     bytes4 sel = bytes4(reason);
-                    if (
-                        sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
-                            && sel != ERR_SPLITTER_NOT_ACTIVE
-                    ) {
+                    if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_SPLITTER_NOT_ACTIVE)
+                    {
                         assembly { revert(add(reason, 32), mload(reason)) }
                     }
                 }
             }
         } catch (bytes memory reason) {
             bytes4 sel = bytes4(reason);
-            if (
-                sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_BEAR_PRICE_ABOVE_CAP
-                    && sel != ERR_SPLITTER_NOT_ACTIVE
-            ) {
+            if (sel != ERR_INSUFFICIENT_OUTPUT && sel != ERR_SOLVENCY_BREACH && sel != ERR_SPLITTER_NOT_ACTIVE) {
                 assembly { revert(add(reason, 32), mload(reason)) }
             }
         }

@@ -130,9 +130,9 @@ contract ReentrancyTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(maliciousRouter), type(uint256).max);
 
-        // Reverts before reaching reentrancy: malicious pool returns 1e18 from get_dy
-        // (token scale), which exceeds CAP_PRICE (USDC scale), triggering BearPriceAboveCap
-        vm.expectRevert(ZapRouter.ZapRouter__BearPriceAboveCap.selector);
+        // Malicious pool returns 1e18 from get_dy (exceeds CAP_PRICE), triggering direct path.
+        // Direct path calls exchange(), where reentrancy attack is blocked by nonReentrant.
+        vm.expectRevert(ReentrancyGuard.ReentrancyGuardReentrantCall.selector);
         maliciousRouter.zapMint(100e6, 0, 100, block.timestamp + 1 hours);
         vm.stopPrank();
     }
