@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {ICfdEngine} from "./ICfdEngine.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-interface ICfdEngine {
-
-    function globalBullMaxProfit() external view returns (uint256);
-    function globalBearMaxProfit() external view returns (uint256);
-    function globalMargin() external view returns (uint256);
-
-}
 
 /// @title CfdVault
 /// @notice The House Pool. Holds all USDC and strictly protects trader solvency.

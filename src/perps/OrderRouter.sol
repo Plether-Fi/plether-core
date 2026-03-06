@@ -2,31 +2,10 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "./CfdTypes.sol";
+import {ICfdEngine} from "./ICfdEngine.sol";
+import {ICfdVault} from "./ICfdVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-interface ICfdEngine {
-
-    function processOrder(
-        CfdTypes.Order memory order,
-        uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc
-    ) external returns (int256 settlementUsdc);
-
-}
-
-interface ICfdVault {
-
-    function totalAssets() external view returns (uint256);
-    function routeToVault(
-        uint256 amountUsdc
-    ) external;
-    function routeToTrader(
-        address trader,
-        uint256 amountUsdc
-    ) external;
-
-}
 
 interface IPyth {
 
