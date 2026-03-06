@@ -19,6 +19,9 @@ contract CfdEngine {
     uint256 public globalBullMaxProfit;
     uint256 public globalBearMaxProfit;
 
+    // Aggregate user margin held by the engine (6 decimals)
+    uint256 public globalMargin;
+
     // Open Interest in Notional Size (18 decimals)
     uint256 public bullOI;
     uint256 public bearOI;
@@ -163,11 +166,14 @@ contract CfdEngine {
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
                 pos.margin += uint256(pendingFunding);
+                globalMargin += uint256(pendingFunding);
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 if (pos.margin >= loss) {
                     pos.margin -= loss;
+                    globalMargin -= loss;
                 } else {
+                    globalMargin -= pos.margin;
                     pos.margin = 0; // Liquidatable
                 }
             }
@@ -223,10 +229,12 @@ contract CfdEngine {
 
         if (netMarginChange > 0) {
             pos.margin += uint256(netMarginChange);
+            globalMargin += uint256(netMarginChange);
         } else {
             uint256 deficit = uint256(-netMarginChange);
             require(pos.margin >= deficit, "CfdEngine: Margin drained by fees and VPI");
             pos.margin -= deficit;
+            globalMargin -= deficit;
         }
 
         emit PositionOpened(order.accountId, order.side, order.sizeDelta, price, order.marginDelta);
@@ -250,6 +258,7 @@ contract CfdEngine {
         // Free proportionate margin
         uint256 marginToFree = (pos.margin * order.sizeDelta) / pos.size;
         pos.margin -= marginToFree;
+        globalMargin -= marginToFree;
         pos.size -= order.sizeDelta;
 
         // Free up Vault Capacity
