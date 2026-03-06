@@ -12,7 +12,15 @@ contract CfdEngineTest is Test {
 
     function setUp() public {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
-            vpiFactor: 0.0005e18, maxSkewRatio: 0.4e18, kinkSkewRatio: 0.25e18, baseApy: 0.15e18, maxApy: 3.0e18
+            vpiFactor: 0.0005e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
         });
 
         engine = new CfdEngine(CAP_PRICE, params);

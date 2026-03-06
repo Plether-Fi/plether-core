@@ -42,6 +42,10 @@ library CfdTypes {
         uint256 kinkSkewRatio; // [18 dec WAD] Inflection point e.g., 25% (0.25e18)
         uint256 baseApy; // [18 dec WAD] Rate at the kink e.g., 15% (0.15e18)
         uint256 maxApy; // [18 dec WAD] Rate at the wall e.g., 300% (3.00e18)
+        uint256 maintMarginBps; // e.g., 100 (1%)
+        uint256 fadMarginBps; // e.g., 300 (3%)
+        uint256 minBountyUsdc; // e.g., 5_000_000 ($5 USDC floor)
+        uint256 bountyBps; // e.g., 15 (0.15% of Notional Size)
     }
 
 }

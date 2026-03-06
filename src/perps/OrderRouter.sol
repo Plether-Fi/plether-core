@@ -262,4 +262,55 @@ contract OrderRouter {
         return rawPrice / (10 ** uint32(-8 - expo));
     }
 
+    // ==========================================
+    // ATOMIC LIQUIDATIONS
+    // ==========================================
+
+    /// @notice Liquidates an underwater position in a single atomic transaction
+    function executeLiquidation(
+        bytes32 accountId,
+        bytes[] calldata pythUpdateData
+    ) external payable {
+        uint256 pythFee = 0;
+        uint256 executionPrice;
+
+        // 1. Instantly fetch the absolute latest Pyth price (No Commit Delay)
+        if (address(pyth) != address(0)) {
+            if (pythUpdateData.length > 0) {
+                pythFee = pyth.getUpdateFee(pythUpdateData);
+                require(msg.value >= pythFee, "OrderRouter: Insufficient Pyth fee");
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            }
+            IPyth.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+
+            require(block.timestamp - pythData.publishTime <= 15, "MEV: Oracle price too stale");
+            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
+        } else {
+            // MOCK MODE FOR LOCAL TESTING: Decode price directly from payload
+            if (pythUpdateData.length > 0) {
+                executionPrice = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                executionPrice = 1e8;
+            }
+        }
+
+        uint256 vaultDepth = vault.totalAssets();
+
+        // 2. Engine reverts if the position is healthy. We want it to revert
+        // so Keepers don't waste our gas or emit false logs spamming liquidations.
+        uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth);
+
+        // 3. Vault pays the Keeper their USDC bounty directly
+        if (keeperBountyUsdc > 0) {
+            vault.routeToTrader(msg.sender, keeperBountyUsdc);
+        }
+
+        // 4. Refund excess ETH provided for Pyth update
+        uint256 refund = msg.value - pythFee;
+        if (refund > 0) {
+            (bool success,) = payable(msg.sender).call{value: refund}("");
+            require(success, "OrderRouter: Pyth refund failed");
+        }
+    }
+
 }

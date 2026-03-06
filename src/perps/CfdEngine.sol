@@ -47,6 +47,9 @@ contract CfdEngine {
         bytes32 indexed accountId, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
     );
     event PositionClosed(bytes32 indexed accountId, CfdTypes.Side side, uint256 sizeDelta, uint256 price, int256 pnl);
+    event PositionLiquidated(
+        bytes32 indexed accountId, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
+    );
 
     modifier onlyRouter() {
         require(msg.sender == orderRouter, "CfdEngine: Unauthorized");
@@ -320,6 +323,83 @@ contract CfdEngine {
             globalBearMaxProfit -= maxProfitUsdc;
             bearOI -= sizeDelta;
         }
+    }
+
+    // ==========================================
+    // LIQUIDATIONS & FAD
+    // ==========================================
+
+    /// @notice Determines if the Friday Auto-Deleverage (FAD) is active
+    /// @dev Friday 19:00 UTC to Sunday 22:00 UTC
+    function isFadWindow() public view returns (bool) {
+        // Unix epoch 0 (Jan 1 1970) was a Thursday (Day 4)
+        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
+        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
+
+        if (dayOfWeek == 5 && hourOfDay >= 19) {
+            return true; // Friday >= 19:00 UTC
+        }
+        if (dayOfWeek == 6) {
+            return true; // Saturday all day
+        }
+        if (dayOfWeek == 0 && hourOfDay < 22) {
+            return true; // Sunday < 22:00 UTC
+        }
+
+        return false;
+    }
+
+    /// @notice Returns required Maintenance Margin in USDC (6 dec)
+    function getMaintenanceMarginUsdc(
+        uint256 size,
+        uint256 currentOraclePrice
+    ) public view returns (uint256) {
+        uint256 notionalUsdc = (size * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        return (notionalUsdc * requiredBps) / 10_000;
+    }
+
+    /// @notice Forcefully closes an undercollateralized position
+    /// @return keeperBountyUsdc The USDC reward sent to the Liquidator
+    function liquidatePosition(
+        bytes32 accountId,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc
+    ) external onlyRouter returns (uint256 keeperBountyUsdc) {
+        uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
+        updateFunding(price, vaultDepthUsdc);
+
+        CfdTypes.Position storage pos = positions[accountId];
+        require(pos.size > 0, "CfdEngine: No position to liquidate");
+
+        // 1. Calculate Account Equity
+        int256 pendingFunding = getPendingFunding(pos);
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
+
+        int256 equityUsdc = int256(pos.margin) + pendingFunding;
+        equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
+
+        // 2. Evaluate Liquidation Condition
+        uint256 mmUsdc = getMaintenanceMarginUsdc(pos.size, price);
+        require(equityUsdc < int256(mmUsdc), "CfdEngine: Position is solvent");
+
+        // 3. Free up global liability caps and margin lock
+        uint256 maxProfitReduction = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
+        _reduceGlobalLiability(pos.side, maxProfitReduction, pos.size);
+        globalMargin -= pos.margin; // Clear isolated margin from Vault lock tracker
+
+        // 4. Calculate Keeper Bounty (Proportional for L2 gas wars)
+        uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
+
+        if (keeperBountyUsdc < riskParams.minBountyUsdc) {
+            keeperBountyUsdc = riskParams.minBountyUsdc; // Minimum $5 gas floor
+        }
+
+        emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
+
+        // 5. Delete Position
+        delete positions[accountId];
     }
 
 }

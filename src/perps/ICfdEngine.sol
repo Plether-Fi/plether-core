@@ -11,6 +11,12 @@ interface ICfdEngine {
         uint256 vaultDepthUsdc
     ) external returns (int256 settlementUsdc);
 
+    function liquidatePosition(
+        bytes32 accountId,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc
+    ) external returns (uint256 keeperBountyUsdc);
+
     function globalBullMaxProfit() external view returns (uint256);
     function globalBearMaxProfit() external view returns (uint256);
     function globalMargin() external view returns (uint256);

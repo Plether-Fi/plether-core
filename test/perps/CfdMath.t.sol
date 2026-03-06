@@ -19,7 +19,11 @@ contract CfdMathTest is Test {
             maxSkewRatio: 0.4e18, // 40% Hard wall
             kinkSkewRatio: 0.25e18, // 25% Inflection point
             baseApy: 0.15e18, // 15% APY at the kink
-            maxApy: 3.0e18 // 300% APY at the wall
+            maxApy: 3.0e18, // 300% APY at the wall
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
         });
     }
 
