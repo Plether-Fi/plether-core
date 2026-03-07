@@ -272,6 +272,12 @@ contract PerpInvariantTest is Test {
         assertLe(claimed, bal, "Claimed equity cannot exceed pool balance");
     }
 
+    function invariant_FeesWithinVault() public {
+        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 poolBalance = pool.totalAssets();
+        assertLe(fees, poolBalance, "Accumulated fees must not exceed vault balance");
+    }
+
     function invariant_AggregateOIMatchesPositions() public {
         uint256 sumBullSize;
         uint256 sumBearSize;

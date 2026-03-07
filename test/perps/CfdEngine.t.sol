@@ -422,4 +422,82 @@ contract CfdEngineTest is Test {
         assertEq(size, 0, "Position should be wiped");
     }
 
+    function test_Unauthorized_Caller_Reverts() public {
+        bytes32 accountId = bytes32(uint256(1));
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 500 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert("CfdEngine: Unauthorized");
+        engine.processOrder(order, 1e8, 1_000_000 * 1e6);
+
+        vm.prank(address(0xDEAD));
+        vm.expectRevert("CfdEngine: Unauthorized");
+        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
+    }
+
+    function test_CloseSize_ExceedsPosition_Reverts() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 20_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        vm.expectRevert("CfdEngine: Close size exceeds open position");
+        engine.processOrder(closeOrder, 1e8, vaultDepth);
+    }
+
+    function test_MarginDrained_ByFees_Reverts() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 50 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.expectRevert("CfdEngine: Margin drained by fees and VPI");
+        engine.processOrder(order, 1e8, vaultDepth);
+    }
+
+    function test_Liquidate_EmptyPosition_Reverts() public {
+        bytes32 accountId = bytes32(uint256(1));
+        vm.expectRevert("CfdEngine: No position to liquidate");
+        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
+    }
+
 }

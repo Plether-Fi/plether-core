@@ -46,10 +46,18 @@ contract MockPyth {
         return IPyth.Price({price: mockPrice, conf: 0, expo: mockExpo, publishTime: mockPublishTime});
     }
 
+    uint256 public mockFee;
+
+    function setFee(
+        uint256 _fee
+    ) external {
+        mockFee = _fee;
+    }
+
     function getUpdateFee(
         bytes[] calldata
-    ) external pure returns (uint256) {
-        return 0;
+    ) external view returns (uint256) {
+        return mockFee;
     }
 
     function updatePriceFeeds(
@@ -160,6 +168,23 @@ contract OrderRouterTest is Test {
 
         uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
+    }
+
+    function test_ZeroSizeCommit_Reverts() public {
+        vm.prank(alice);
+        vm.expectRevert("OrderRouter: Size must be > 0");
+        router.commitOrder(CfdTypes.Side.BULL, 0, 500 * 1e6, 1e8, false);
+    }
+
+    function test_ExecuteNonPendingOrder_Reverts() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.expectRevert("OrderRouter: Order not pending");
+        router.executeOrder(2, empty);
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
@@ -274,6 +299,45 @@ contract OrderRouterPythTest is Test {
         assertEq(
             clearinghouse.balances(accountId, address(usdc)), 10_000 * 1e6, "Balance untouched after slippage cancel"
         );
+    }
+
+    function test_InsufficientPythFee_Reverts() public {
+        vm.warp(1000);
+        mockPyth.setFee(1 ether);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory data = new bytes[](1);
+        data[0] = hex"00";
+
+        vm.warp(1050);
+        vm.expectRevert("OrderRouter: Insufficient Pyth fee");
+        router.executeOrder(1, data);
+    }
+
+    function test_LiquidationStaleness_15SecBoundary() public {
+        vm.warp(1000);
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 2000);
+
+        vm.warp(2016);
+        vm.expectRevert("MEV: Oracle price too stale");
+        router.executeLiquidation(accountId, empty);
+
+        vm.warp(2015);
+        vm.expectRevert("CfdEngine: Position is solvent");
+        router.executeLiquidation(accountId, empty);
     }
 
     function test_Slippage_CloseOrders_Bypass() public {

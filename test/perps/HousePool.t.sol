@@ -383,4 +383,27 @@ contract HousePoolTest is Test {
         assertGt(aliceAssets, bobAssets, "Early depositor's shares should be worth more");
     }
 
+    function test_SetOrderRouter_Twice_Reverts() public {
+        vm.expectRevert("HousePool: Router already set");
+        pool.setOrderRouter(address(0x999));
+    }
+
+    function test_SetSeniorVault_Twice_Reverts() public {
+        vm.expectRevert("HousePool: Senior vault already set");
+        pool.setSeniorVault(address(0x999));
+    }
+
+    function test_SetJuniorVault_Twice_Reverts() public {
+        vm.expectRevert("HousePool: Junior vault already set");
+        pool.setJuniorVault(address(0x999));
+    }
+
+    function test_PayOut_Unauthorized_Reverts() public {
+        _fundJunior(alice, 100_000 * 1e6);
+
+        vm.prank(alice);
+        vm.expectRevert("HousePool: Unauthorized");
+        pool.payOut(alice, 1000 * 1e6);
+    }
+
 }

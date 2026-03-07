@@ -209,4 +209,15 @@ contract MarginClearinghouseTest is Test {
         assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Locked margin should be zero after defensive unlock");
     }
 
+    function test_SupportAsset_InvalidLTV_Reverts() public {
+        vm.expectRevert("Invalid LTV");
+        clearinghouse.supportAsset(address(0xBEEF), 18, 10_001, address(0));
+    }
+
+    function test_Deposit_ZeroAmount_Reverts() public {
+        vm.prank(alice);
+        vm.expectRevert("Clearinghouse: Zero amount");
+        clearinghouse.deposit(aliceId, address(usdc), 0);
+    }
+
 }
