@@ -3,7 +3,8 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
+import {JuniorVault} from "../../src/perps/JuniorVault.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -27,7 +28,8 @@ contract LiquidationTest is Test {
 
     MockUSDC usdc;
     CfdEngine engine;
-    CfdVault vault;
+    HousePool pool;
+    JuniorVault juniorVault;
     OrderRouter router;
     MarginClearinghouse clearinghouse;
 
@@ -58,16 +60,20 @@ contract LiquidationTest is Test {
         clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        vault = new CfdVault(IERC20(address(usdc)), address(engine));
-        engine.setVault(address(vault));
-        router = new OrderRouter(address(engine), address(vault), address(0), bytes32(0));
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new JuniorVault(IERC20(address(usdc)), address(pool));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(address(engine), address(pool), address(0), bytes32(0));
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
 
-        usdc.mint(address(vault), 1_000_000 * 1e6);
+        usdc.mint(address(this), 1_000_000 * 1e6);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(1_000_000 * 1e6, address(this));
 
         // Fund trader via clearinghouse
         usdc.mint(alice, 10_000 * 1e6);

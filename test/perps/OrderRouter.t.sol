@@ -3,7 +3,8 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
+import {JuniorVault} from "../../src/perps/JuniorVault.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -29,7 +30,8 @@ contract OrderRouterTest is Test {
 
     MockUSDC usdc;
     CfdEngine engine;
-    CfdVault vault;
+    HousePool pool;
+    JuniorVault juniorVault;
     OrderRouter router;
     MarginClearinghouse clearinghouse;
 
@@ -56,21 +58,23 @@ contract OrderRouterTest is Test {
         clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        vault = new CfdVault(IERC20(address(usdc)), address(engine));
-        engine.setVault(address(vault));
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new JuniorVault(IERC20(address(usdc)), address(pool));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
 
-        router = new OrderRouter(address(engine), address(vault), address(0), bytes32(0));
+        router = new OrderRouter(address(engine), address(pool), address(0), bytes32(0));
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
-        vault.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
 
         // Fund LP (Bob) with $1 Million
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
-        usdc.approve(address(vault), type(uint256).max);
-        vault.deposit(1_000_000 * 1e6, bob);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(1_000_000 * 1e6, bob);
         vm.stopPrank();
 
         // Fund Trader (Alice): deposit to clearinghouse
@@ -85,7 +89,7 @@ contract OrderRouterTest is Test {
     function test_UnbrickableQueue_OnEngineRevert() public {
         // Bob withdraws all Vault funds so Solvency check will fail
         vm.prank(bob);
-        vault.withdraw(1_000_000 * 1e6, bob, bob);
+        juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
 
         // Alice commits a trade (no USDC escrowed, just the order)
         vm.prank(alice);
@@ -115,12 +119,12 @@ contract OrderRouterTest is Test {
         router.executeOrder(1, empty);
 
         uint256 maxLiability = engine.globalBullMaxProfit();
-        uint256 freeUsdc = vault.getFreeUSDC();
+        uint256 freeUsdc = pool.getFreeUSDC();
 
-        assertEq(freeUsdc, vault.totalAssets() - maxLiability, "Firewall locks only Max Liability");
+        assertEq(freeUsdc, pool.totalAssets() - maxLiability, "Firewall locks only Max Liability");
         assertEq(maxLiability, 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
-        uint256 bobMaxWithdraw = vault.maxWithdraw(bob);
+        uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
     }
 

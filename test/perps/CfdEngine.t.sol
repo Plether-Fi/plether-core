@@ -3,7 +3,8 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
+import {JuniorVault} from "../../src/perps/JuniorVault.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -26,7 +27,8 @@ contract CfdEngineTest is Test {
 
     MockUSDC usdc;
     CfdEngine engine;
-    CfdVault vault;
+    HousePool pool;
+    JuniorVault juniorVault;
     MarginClearinghouse clearinghouse;
 
     uint256 constant CAP_PRICE = 2e8;
@@ -50,14 +52,17 @@ contract CfdEngineTest is Test {
         clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        vault = new CfdVault(IERC20(address(usdc)), address(engine));
-        engine.setVault(address(vault));
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new JuniorVault(IERC20(address(usdc)), address(pool));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
 
         clearinghouse.setOperator(address(engine), true);
         engine.setOrderRouter(address(this));
 
-        // Fund vault with LP depth for solvency + payouts
-        usdc.mint(address(vault), 1_000_000 * 1e6);
+        usdc.mint(address(this), 1_000_000 * 1e6);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(1_000_000 * 1e6, address(this));
     }
 
     function _depositToClearinghouse(
