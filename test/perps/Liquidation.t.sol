@@ -57,7 +57,7 @@ contract LiquidationTest is Test {
         clearinghouse = new MarginClearinghouse();
         clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), address(0), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         vault = new CfdVault(IERC20(address(usdc)), address(engine));
         engine.setVault(address(vault));
         router = new OrderRouter(address(engine), address(vault), address(0), bytes32(0));

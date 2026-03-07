@@ -64,13 +64,11 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     constructor(
         address _usdc,
         address _clearinghouse,
-        address _vault,
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams
     ) Ownable(msg.sender) {
         usdc = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
-        vault = ICfdVault(_vault);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
         lastFundingTime = uint64(block.timestamp);
