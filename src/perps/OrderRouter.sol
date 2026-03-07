@@ -41,6 +41,7 @@ contract OrderRouter {
 
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
+    mapping(address => uint256) public claimableEth;
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -163,18 +164,23 @@ contract OrderRouter {
         delete keeperFees[orderId];
         delete orders[orderId];
 
-        if (fee > 0) {
-            (bool success,) = payable(msg.sender).call{value: fee}("");
-            require(success, "OrderRouter: Keeper fee transfer failed");
-        }
-
-        uint256 refund = msg.value - pythFee;
-        if (refund > 0) {
-            (bool success,) = payable(msg.sender).call{value: refund}("");
-            require(success, "OrderRouter: Pyth refund failed");
-        }
-
         nextExecuteId++;
+
+        uint256 totalOut = fee + (msg.value - pythFee);
+        if (totalOut > 0) {
+            (bool success,) = payable(msg.sender).call{value: totalOut}("");
+            if (!success) {
+                claimableEth[msg.sender] += totalOut;
+            }
+        }
+    }
+
+    function claimEth() external {
+        uint256 amount = claimableEth[msg.sender];
+        require(amount > 0, "OrderRouter: Nothing to claim");
+        claimableEth[msg.sender] = 0;
+        (bool success,) = payable(msg.sender).call{value: amount}("");
+        require(success, "OrderRouter: ETH transfer failed");
     }
 
     function _checkSlippage(
@@ -245,7 +251,9 @@ contract OrderRouter {
         uint256 refund = msg.value - pythFee;
         if (refund > 0) {
             (bool success,) = payable(msg.sender).call{value: refund}("");
-            require(success, "OrderRouter: Pyth refund failed");
+            if (!success) {
+                claimableEth[msg.sender] += refund;
+            }
         }
     }
 
