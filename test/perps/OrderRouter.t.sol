@@ -198,6 +198,93 @@ contract OrderRouterTest is Test {
         router.executeOrder(2, empty);
     }
 
+    function test_BatchExecution_AllSucceed() public {
+        address carol = address(0x333);
+        usdc.mint(carol, 10_000 * 1e6);
+        vm.deal(carol, 10 ether);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(carol);
+        router.commitOrder{value: 0.02 ether}(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        uint256 keeperBefore = address(this).balance;
+        router.executeOrderBatch(3, empty);
+
+        assertEq(router.nextExecuteId(), 4, "All 3 orders should be processed");
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 aliceSize,,,,,) = engine.positions(aliceId);
+        assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
+
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        (uint256 carolSize,,,,,) = engine.positions(carolId);
+        assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
+
+        uint256 keeperAfter = address(this).balance;
+        assertEq(keeperAfter - keeperBefore, 0.04 ether, "Keeper should receive all keeper fees");
+    }
+
+    function test_BatchExecution_MixedResults() public {
+        // Order 1: Valid BULL
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        // Order 2: BULL with bad slippage (targetPrice $0.50, execution at $1.00)
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.5e8, false);
+
+        // Order 3: Another valid BULL
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        router.executeOrderBatch(3, empty);
+
+        assertEq(router.nextExecuteId(), 4, "All 3 should be consumed");
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,) = engine.positions(aliceId);
+        assertEq(size, 15_000 * 1e18, "Orders 1 and 3 succeed, order 2 cancelled");
+    }
+
+    function test_BatchExecution_NoOrders_Reverts() public {
+        bytes[] memory empty;
+        vm.expectRevert("OrderRouter: No orders to execute");
+        router.executeOrderBatch(0, empty);
+    }
+
+    function test_BatchExecution_UncommittedMaxId_Reverts() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.expectRevert("OrderRouter: maxOrderId not committed");
+        router.executeOrderBatch(5, empty);
+    }
+
+    function test_BatchExecution_SingleETHTransfer() public {
+        vm.prank(alice);
+        router.commitOrder{value: 0.05 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.prank(alice);
+        router.commitOrder{value: 0.05 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        uint256 keeperBefore = address(this).balance;
+        router.executeOrderBatch{value: 0.1 ether}(2, empty);
+        uint256 keeperAfter = address(this).balance;
+
+        // Keeper sent 0.1 ETH msg.value, gets back 0.1 ETH + 0.1 ETH keeper fees
+        assertEq(keeperAfter - keeperBefore, 0.1 ether, "Keeper receives all keeper fees + msg.value refund");
+    }
+
 }
 
 contract OrderRouterPythTest is Test {
@@ -368,6 +455,45 @@ contract OrderRouterPythTest is Test {
 
         (size,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Close should be rejected by slippage check");
+    }
+
+    function test_BatchExecution_MEVCheckPerOrder() public {
+        vm.warp(1000);
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 1005);
+
+        // Order 1: committed at t=1000, price published at t=1005 → valid (1005 > 1000)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1010);
+
+        // Order 2: committed at t=1010, price published at t=1005 → stale (1005 <= 1010)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+
+        bytes[] memory empty;
+        router.executeOrderBatch(2, empty);
+
+        assertEq(router.nextExecuteId(), 3, "Both orders consumed");
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "Only order 1 should execute, order 2 MEV-cancelled");
+    }
+
+    function test_BatchExecution_StalePrice_Reverts() public {
+        vm.warp(1000);
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 900);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1000);
+        bytes[] memory empty;
+        vm.expectRevert("OrderRouter: Oracle price too stale");
+        router.executeOrderBatch(1, empty);
     }
 
 }

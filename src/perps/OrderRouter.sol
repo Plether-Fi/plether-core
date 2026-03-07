@@ -152,9 +152,97 @@ contract OrderRouter {
         _finalizeExecution(orderId, pythFee);
     }
 
+    /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
+    ///         Updates Pyth once, then loops through the FIFO queue. Refunds all keeper
+    ///         fees and excess ETH in a single transfer at the end.
+    function executeOrderBatch(
+        uint64 maxOrderId,
+        bytes[] calldata pythUpdateData
+    ) external payable {
+        require(maxOrderId >= nextExecuteId, "OrderRouter: No orders to execute");
+        require(maxOrderId < nextCommitId, "OrderRouter: maxOrderId not committed");
+
+        uint256 pythFee;
+        uint256 executionPrice;
+        uint256 pricePublishTime;
+
+        if (address(pyth) != address(0)) {
+            if (pythUpdateData.length > 0) {
+                pythFee = pyth.getUpdateFee(pythUpdateData);
+                require(msg.value >= pythFee, "OrderRouter: Insufficient Pyth fee");
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            }
+
+            IPyth.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+            require(block.timestamp - pythData.publishTime <= 60, "OrderRouter: Oracle price too stale");
+            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
+            pricePublishTime = pythData.publishTime;
+        } else {
+            require(block.chainid == 31_337, "OrderRouter: Mock mode disabled on live networks");
+            if (pythUpdateData.length > 0) {
+                executionPrice = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                executionPrice = 1e8;
+            }
+        }
+
+        uint256 totalKeeperFees;
+
+        while (nextExecuteId <= maxOrderId) {
+            uint64 orderId = nextExecuteId;
+            CfdTypes.Order memory order = orders[orderId];
+
+            if (order.sizeDelta == 0) {
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
+                emit OrderFailed(orderId, "MEV: Oracle price is stale");
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            if (!_checkSlippage(order, executionPrice)) {
+                emit OrderFailed(orderId, "Slippage tolerance exceeded");
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            uint256 vaultDepth = vault.totalAssets();
+
+            try engine.processOrder(order, executionPrice, vaultDepth) {
+                emit OrderExecuted(orderId, executionPrice);
+            } catch Error(string memory reason) {
+                emit OrderFailed(orderId, reason);
+            } catch {
+                emit OrderFailed(orderId, "Engine Math Panic");
+            }
+
+            totalKeeperFees += _cleanupOrder(orderId);
+        }
+
+        uint256 totalOut = totalKeeperFees + (msg.value - pythFee);
+        if (totalOut > 0) {
+            (bool success,) = payable(msg.sender).call{value: totalOut}("");
+            if (!success) {
+                claimableEth[msg.sender] += totalOut;
+            }
+        }
+    }
+
     // ==========================================
     // INTERNAL HELPERS
     // ==========================================
+
+    function _cleanupOrder(
+        uint64 orderId
+    ) internal returns (uint256 keeperFee) {
+        keeperFee = keeperFees[orderId];
+        delete keeperFees[orderId];
+        delete orders[orderId];
+        nextExecuteId++;
+    }
 
     function _cancelOrder(
         uint64 orderId,
