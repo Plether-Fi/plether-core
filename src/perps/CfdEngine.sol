@@ -7,11 +7,12 @@ import {ICfdVault} from "./ICfdVault.sol";
 import {IMarginClearinghouse} from "./IMarginClearinghouse.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title CfdEngine
 /// @notice The core mathematical ledger for Plether CFDs.
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
-contract CfdEngine is Ownable {
+contract CfdEngine is Ownable, ReentrancyGuard {
 
     uint256 public immutable CAP_PRICE;
 
@@ -155,7 +156,7 @@ contract CfdEngine is Ownable {
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
-    ) external onlyRouter returns (int256) {
+    ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
 
         _updateFunding(price, vaultDepthUsdc);
@@ -385,7 +386,7 @@ contract CfdEngine is Ownable {
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
-    ) external onlyRouter returns (uint256 keeperBountyUsdc) {
+    ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(price, vaultDepthUsdc);
 
