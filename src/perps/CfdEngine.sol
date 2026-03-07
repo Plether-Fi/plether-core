@@ -90,6 +90,15 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         orderRouter = _router;
     }
 
+    function withdrawFees(
+        address recipient
+    ) external onlyOwner {
+        uint256 fees = accumulatedFeesUsdc;
+        require(fees > 0, "CfdEngine: No fees to withdraw");
+        accumulatedFeesUsdc = 0;
+        vault.payOut(recipient, fees);
+    }
+
     // ==========================================
     // 1. CONTINUOUS FUNDING SYSTEM
     // ==========================================
