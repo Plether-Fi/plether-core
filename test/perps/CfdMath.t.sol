@@ -233,4 +233,9 @@ contract CfdMathTest is Test {
         assertEq(vpi, 0, "VPI should be zero when depth is zero");
     }
 
+    function test_MaxProfit_BearAtCap_IsZero() public pure {
+        uint256 maxProfit = CfdMath.calculateMaxProfit(100_000 * 1e18, CAP_PRICE, CfdTypes.Side.BEAR, CAP_PRICE);
+        assertEq(maxProfit, 0, "BEAR at CAP entry has zero max profit");
+    }
+
 }

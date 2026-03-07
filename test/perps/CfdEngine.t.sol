@@ -204,4 +204,144 @@ contract CfdEngineTest is Test {
         assertEq(lockedAfterAdd, marginAfterAdd, "lockedMargin == pos.margin after funding settlement");
     }
 
+    function test_WithdrawFees() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(order, 1e8, 1_000_000 * 1e6);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertTrue(fees > 0, "Fees should accrue after trade");
+
+        address treasury = address(0xBEEF);
+        engine.withdrawFees(treasury);
+
+        assertEq(engine.accumulatedFeesUsdc(), 0, "Fees should reset to zero");
+        assertEq(usdc.balanceOf(treasury), fees, "Treasury receives exact fee amount");
+
+        vm.expectRevert("CfdEngine: No fees to withdraw");
+        engine.withdrawFees(treasury);
+    }
+
+    function test_OpposingPosition_Reverts() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 10_000 * 1e6);
+
+        CfdTypes.Order memory bearOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        engine.processOrder(bearOrder, 0.8e8, 1_000_000 * 1e6);
+
+        CfdTypes.Order memory bullOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.expectRevert("CfdEngine: Must explicitly close opposing position first");
+        engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6);
+    }
+
+    function test_FundingSettlement_PartialMarginDrain() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 500 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        (, uint256 marginAfterOpen,,,,) = engine.positions(accountId);
+
+        // Warp long enough for funding to exceed margin
+        vm.warp(block.timestamp + 365 days);
+
+        // Add to position — triggers funding settlement
+        CfdTypes.Order memory addOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(addOrder, 1e8, vaultDepth);
+
+        // Margin should have been drained by funding but not go negative
+        (, uint256 marginAfterSettle,,,,) = engine.positions(accountId);
+        // The funding loss was larger than original margin, so after settlement
+        // pos.margin was capped at 0, then new margin added
+        assertTrue(marginAfterSettle < marginAfterOpen + 1000 * 1e6, "Margin should reflect funding drain");
+    }
+
+    function test_EntryPriceAveraging() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 10_000 * 1e6);
+
+        // Open 10k tokens at $0.80
+        CfdTypes.Order memory first = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(first, 0.8e8, vaultDepth);
+
+        (,, uint256 entryAfterFirst,,,) = engine.positions(accountId);
+        assertEq(entryAfterFirst, 0.8e8, "Entry should be $0.80");
+
+        // Add 30k tokens at $1.20 → weighted avg = (10k*0.80 + 30k*1.20) / 40k = $1.10
+        CfdTypes.Order memory second = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 30_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1.2e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(second, 1.2e8, vaultDepth);
+
+        (uint256 totalSize,, uint256 avgEntry,,,) = engine.positions(accountId);
+        assertEq(totalSize, 40_000 * 1e18, "Total size should be 40k");
+        assertEq(avgEntry, 1.1e8, "Weighted avg entry should be $1.10");
+    }
+
 }

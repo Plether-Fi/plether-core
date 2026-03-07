@@ -195,4 +195,18 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.withdraw(aliceId, address(usdc), 500 * 1e6);
     }
 
+    function test_UnlockMargin_DefensiveUnderflow() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 5000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockMargin(aliceId, 1000 * 1e6);
+
+        // Unlock more than locked — should defensively set to 0
+        vm.prank(engine);
+        clearinghouse.unlockMargin(aliceId, 2000 * 1e6);
+
+        assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Locked margin should be zero after defensive unlock");
+    }
+
 }

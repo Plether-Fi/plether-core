@@ -210,4 +210,69 @@ contract LiquidationTest is Test {
         assertEq(bounty, 5 * 1e6, "Keeper bounty should be minimum floor of $5");
     }
 
+    function test_LiquidationEquity_IncludesFunding() public {
+        // Enable funding (setUp has baseApy=0)
+        engine.setRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 0.15e18,
+                maxApy: 3.0e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+
+        vm.warp(WEDNESDAY_NOON);
+
+        // Alice opens a lone BULL — will accumulate negative funding
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        // Without funding, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
+        vm.expectRevert("CfdEngine: Position is solvent");
+        router.executeLiquidation(accountId, empty);
+
+        // Warp 180 days — massive negative funding drains equity below MMR
+        vm.warp(WEDNESDAY_NOON + 180 days);
+
+        // Now liquidatable due to funding erosion (no price change needed)
+        uint256 keeperBal = usdc.balanceOf(keeper);
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, empty);
+
+        (uint256 size,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position liquidated by funding drain alone");
+        assertTrue(usdc.balanceOf(keeper) > keeperBal, "Keeper received bounty");
+    }
+
+    function test_FadWindow_ExactBoundaries() public {
+        // Friday 18:59:59 UTC → NOT FAD
+        vm.warp(1_729_277_999);
+        assertFalse(engine.isFadWindow(), "Friday 18:59 is not FAD");
+
+        // Friday 19:00:00 UTC → FAD begins
+        vm.warp(1_729_278_000);
+        assertTrue(engine.isFadWindow(), "Friday 19:00 is FAD");
+
+        // Saturday midday → FAD (all Saturday is FAD)
+        vm.warp(1_729_278_000 + 17 hours);
+        assertTrue(engine.isFadWindow(), "Saturday is FAD");
+
+        // Sunday 21:59:59 UTC → still FAD
+        vm.warp(1_729_461_599);
+        assertTrue(engine.isFadWindow(), "Sunday 21:59 is FAD");
+
+        // Sunday 22:00:00 UTC → FAD ends
+        vm.warp(1_729_461_600);
+        assertFalse(engine.isFadWindow(), "Sunday 22:00 is not FAD");
+    }
+
 }
