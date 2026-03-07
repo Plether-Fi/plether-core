@@ -29,6 +29,10 @@ contract TrancheVault is ERC4626 {
         IS_SENIOR = _isSenior;
     }
 
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 3;
+    }
+
     function totalAssets() public view override returns (uint256) {
         return IS_SENIOR ? pool.seniorPrincipal() : pool.juniorPrincipal();
     }
