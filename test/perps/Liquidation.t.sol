@@ -253,6 +253,36 @@ contract LiquidationTest is Test {
         assertTrue(usdc.balanceOf(keeper) > keeperBal, "Keeper received bounty");
     }
 
+    function test_KeeperBounty_PaidFromVault() public {
+        vm.warp(WEDNESDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (, uint256 posMargin,,,,) = engine.positions(accountId);
+
+        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+
+        bytes[] memory pythData = new bytes[](1);
+        pythData[0] = abi.encode(1.015e8);
+
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, pythData);
+
+        uint256 bounty = usdc.balanceOf(keeper);
+        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 poolAfter = usdc.balanceOf(address(pool));
+
+        uint256 userSeized = chBefore - chAfter;
+        assertEq(
+            poolAfter, poolBefore + userSeized - bounty, "Vault intermediates: receives seized margin, pays bounty"
+        );
+    }
+
     function test_FadWindow_ExactBoundaries() public {
         // Friday 18:59:59 UTC → NOT FAD
         vm.warp(1_729_277_999);

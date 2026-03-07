@@ -344,4 +344,82 @@ contract CfdEngineTest is Test {
         assertEq(avgEntry, 1.1e8, "Weighted avg entry should be $1.10");
     }
 
+    function test_FundingSettlement_OnClose() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+
+        vm.warp(block.timestamp + 90 days);
+
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        engine.processOrder(closeOrder, 1e8, vaultDepth);
+
+        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        assertLt(chAfter, chBefore, "Funding drain should reduce clearinghouse balance on close");
+    }
+
+    function test_SetRiskParams_MakesPositionLiquidatable() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(order, 1e8, vaultDepth);
+
+        vm.expectRevert("CfdEngine: Position is solvent");
+        engine.liquidatePosition(accountId, 1e8, vaultDepth);
+
+        engine.setRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0.0005e18,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 0.15e18,
+                maxApy: 3.0e18,
+                maintMarginBps: 300,
+                fadMarginBps: 500,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+
+        uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth);
+        assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
+
+        (uint256 size,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position should be wiped");
+    }
+
 }

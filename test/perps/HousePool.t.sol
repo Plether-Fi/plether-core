@@ -365,4 +365,22 @@ contract HousePoolTest is Test {
         assertTrue(juniorSharePrice > 1e6, "Junior share price should increase");
     }
 
+    function test_SharePrice_NoFreeDilution() public {
+        _fundJunior(alice, 100_000 * 1e6);
+        uint256 aliceShares = juniorVault.balanceOf(alice);
+
+        usdc.mint(address(pool), 20_000 * 1e6);
+        vm.warp(block.timestamp + 365 days);
+        pool.reconcile();
+
+        _fundJunior(bob, 100_000 * 1e6);
+        uint256 bobShares = juniorVault.balanceOf(bob);
+
+        assertGt(aliceShares, bobShares, "Late depositor should receive fewer shares");
+
+        uint256 aliceAssets = juniorVault.convertToAssets(aliceShares);
+        uint256 bobAssets = juniorVault.convertToAssets(bobShares);
+        assertGt(aliceAssets, bobAssets, "Early depositor's shares should be worth more");
+    }
+
 }

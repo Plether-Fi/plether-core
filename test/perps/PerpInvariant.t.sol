@@ -272,6 +272,27 @@ contract PerpInvariantTest is Test {
         assertLe(claimed, bal, "Claimed equity cannot exceed pool balance");
     }
 
+    function invariant_AggregateOIMatchesPositions() public {
+        uint256 sumBullSize;
+        uint256 sumBearSize;
+
+        for (uint256 i = 0; i < 3; i++) {
+            address trader = handler.traders(i);
+            bytes32 accountId = bytes32(uint256(uint160(trader)));
+            (uint256 size,,,, CfdTypes.Side side,) = engine.positions(accountId);
+            if (size > 0) {
+                if (side == CfdTypes.Side.BULL) {
+                    sumBullSize += size;
+                } else {
+                    sumBearSize += size;
+                }
+            }
+        }
+
+        assertEq(engine.bullOI(), sumBullSize, "Bull OI must match sum of bull positions");
+        assertEq(engine.bearOI(), sumBearSize, "Bear OI must match sum of bear positions");
+    }
+
     function invariant_PositionMarginsBackedByClearinghouse() public {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);

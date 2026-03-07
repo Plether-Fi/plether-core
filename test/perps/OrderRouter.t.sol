@@ -307,3 +307,44 @@ contract OrderRouterPythTest is Test {
     }
 
 }
+
+contract NormalizePythHarness is OrderRouter {
+
+    constructor() OrderRouter(address(1), address(1), address(0), bytes32(0)) {}
+
+    function normalizePythPrice(
+        int64 price,
+        int32 expo
+    ) external pure returns (uint256) {
+        return _normalizePythPrice(price, expo);
+    }
+
+}
+
+contract NormalizePythFuzzTest is Test {
+
+    NormalizePythHarness harness;
+
+    function setUp() public {
+        harness = new NormalizePythHarness();
+    }
+
+    function testFuzz_NormalizePythPrice(
+        int64 rawPrice,
+        int32 expo
+    ) public view {
+        vm.assume(rawPrice > 0);
+        expo = int32(bound(int256(expo), -18, 18));
+
+        uint256 result = harness.normalizePythPrice(rawPrice, expo);
+
+        if (expo == -8) {
+            assertEq(result, uint256(uint64(rawPrice)), "Identity at expo=-8");
+        }
+
+        if (expo > -8) {
+            assertGe(result, uint256(uint64(rawPrice)), "Upscaling must not shrink value");
+        }
+    }
+
+}
