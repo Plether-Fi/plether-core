@@ -6,13 +6,14 @@ import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdVault} from "./ICfdVault.sol";
 import {IMarginClearinghouse} from "./IMarginClearinghouse.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title CfdEngine
 /// @notice The core mathematical ledger for Plether CFDs.
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
-contract CfdEngine is Ownable, ReentrancyGuard {
+contract CfdEngine is Ownable2Step, ReentrancyGuard {
 
     uint256 public immutable CAP_PRICE;
 

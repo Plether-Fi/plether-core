@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -14,7 +16,7 @@ interface IAssetOracle {
 /// @title MarginClearinghouse
 /// @notice Universal cross-margin account manager for Plether.
 /// @dev Calculates total Account Equity using LTV haircuts. V1 strictly uses USDC.
-contract MarginClearinghouse {
+contract MarginClearinghouse is Ownable2Step {
 
     using SafeERC20 for IERC20;
 
@@ -37,7 +39,6 @@ contract MarginClearinghouse {
 
     // Authorized protocol contracts (Router / Engine)
     mapping(address => bool) public isProtocolOperator;
-    address public owner;
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
@@ -45,19 +46,12 @@ contract MarginClearinghouse {
     event MarginUnlocked(bytes32 indexed accountId, uint256 amountUsdc);
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Clearinghouse: Unauthorized");
-        _;
-    }
-
     modifier onlyOperator() {
         require(isProtocolOperator[msg.sender], "Clearinghouse: Not Protocol Operator");
         _;
     }
 
-    constructor() {
-        owner = msg.sender;
-    }
+    constructor() Ownable(msg.sender) {}
 
     // ==========================================
     // CONFIGURATION

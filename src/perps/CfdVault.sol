@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {ICfdEngine} from "./ICfdEngine.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -10,7 +11,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /// @title CfdVault
 /// @notice The House Pool. Holds all USDC and strictly protects trader solvency.
-contract CfdVault is ERC4626, Ownable {
+contract CfdVault is ERC4626, Ownable2Step {
 
     using SafeERC20 for IERC20;
 
