@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "./CfdTypes.sol";
+import {CfdTypes} from "../CfdTypes.sol";
 
 interface ICfdEngine {
 

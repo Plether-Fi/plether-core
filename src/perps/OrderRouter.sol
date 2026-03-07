@@ -1,34 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdEngine} from "./ICfdEngine.sol";
-import {ICfdVault} from "./ICfdVault.sol";
-
-interface IPyth {
-
-    struct Price {
-        int64 price;
-        uint64 conf;
-        int32 expo;
-        uint256 publishTime;
-    }
-
-    function getPriceUnsafe(
-        bytes32 id
-    ) external view returns (Price memory price);
-    function updatePriceFeeds(
-        bytes[] calldata updateData
-    ) external payable;
-    function getUpdateFee(
-        bytes[] calldata updateData
-    ) external view returns (uint256 feeAmount);
-
-}
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdVault} from "./interfaces/ICfdVault.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev No longer holds margin escrow. Users deposit to MarginClearinghouse directly.
+/// @custom:security-contact contact@plether.com
 contract OrderRouter {
 
     ICfdEngine public engine;
@@ -42,6 +23,19 @@ contract OrderRouter {
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(address => uint256) public claimableEth;
+
+    error OrderRouter__ZeroSize();
+    error OrderRouter__FIFOViolation();
+    error OrderRouter__OrderNotPending();
+    error OrderRouter__InsufficientPythFee();
+    error OrderRouter__MockModeDisabled();
+    error OrderRouter__NoOrdersToExecute();
+    error OrderRouter__MaxOrderIdNotCommitted();
+    error OrderRouter__OraclePriceTooStale();
+    error OrderRouter__NothingToClaim();
+    error OrderRouter__EthTransferFailed();
+    error OrderRouter__OraclePriceNegative();
+    error OrderRouter__MevOraclePriceTooStale();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -72,7 +66,9 @@ contract OrderRouter {
         uint256 targetPrice,
         bool isClose
     ) external payable {
-        require(sizeDelta > 0, "OrderRouter: Size must be > 0");
+        if (sizeDelta == 0) {
+            revert OrderRouter__ZeroSize();
+        }
 
         uint64 orderId = nextCommitId++;
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
@@ -104,9 +100,13 @@ contract OrderRouter {
         uint64 orderId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        require(orderId == nextExecuteId, "OrderRouter: Strict FIFO violation");
+        if (orderId != nextExecuteId) {
+            revert OrderRouter__FIFOViolation();
+        }
         CfdTypes.Order memory order = orders[orderId];
-        require(order.sizeDelta > 0, "OrderRouter: Order not pending");
+        if (order.sizeDelta == 0) {
+            revert OrderRouter__OrderNotPending();
+        }
 
         uint256 pythFee = 0;
         uint256 executionPrice;
@@ -114,11 +114,13 @@ contract OrderRouter {
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length > 0) {
                 pythFee = pyth.getUpdateFee(pythUpdateData);
-                require(msg.value >= pythFee, "OrderRouter: Insufficient Pyth fee");
+                if (msg.value < pythFee) {
+                    revert OrderRouter__InsufficientPythFee();
+                }
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
 
-            IPyth.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
 
             if (pythData.publishTime <= order.commitTime) {
                 _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
@@ -130,7 +132,9 @@ contract OrderRouter {
             }
             executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
-            require(block.chainid == 31_337, "OrderRouter: Mock mode disabled on live networks");
+            if (block.chainid != 31_337) {
+                revert OrderRouter__MockModeDisabled();
+            }
             if (pythUpdateData.length > 0) {
                 executionPrice = abi.decode(pythUpdateData[0], (uint256));
             } else {
@@ -158,9 +162,107 @@ contract OrderRouter {
         _finalizeExecution(orderId, pythFee);
     }
 
+    /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
+    ///         Updates Pyth once, then loops through the FIFO queue. Refunds all keeper
+    ///         fees and excess ETH in a single transfer at the end.
+    function executeOrderBatch(
+        uint64 maxOrderId,
+        bytes[] calldata pythUpdateData
+    ) external payable {
+        if (maxOrderId < nextExecuteId) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
+        if (maxOrderId >= nextCommitId) {
+            revert OrderRouter__MaxOrderIdNotCommitted();
+        }
+
+        uint256 pythFee;
+        uint256 executionPrice;
+        uint256 pricePublishTime;
+
+        if (address(pyth) != address(0)) {
+            if (pythUpdateData.length > 0) {
+                pythFee = pyth.getUpdateFee(pythUpdateData);
+                if (msg.value < pythFee) {
+                    revert OrderRouter__InsufficientPythFee();
+                }
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            }
+
+            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+            if (block.timestamp - pythData.publishTime > 60) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
+            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
+            pricePublishTime = pythData.publishTime;
+        } else {
+            if (block.chainid != 31_337) {
+                revert OrderRouter__MockModeDisabled();
+            }
+            if (pythUpdateData.length > 0) {
+                executionPrice = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                executionPrice = 1e8;
+            }
+        }
+
+        uint256 totalKeeperFees;
+
+        while (nextExecuteId <= maxOrderId) {
+            uint64 orderId = nextExecuteId;
+            CfdTypes.Order memory order = orders[orderId];
+
+            if (order.sizeDelta == 0) {
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
+                emit OrderFailed(orderId, "MEV: Oracle price is stale");
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            if (!_checkSlippage(order, executionPrice)) {
+                emit OrderFailed(orderId, "Slippage tolerance exceeded");
+                totalKeeperFees += _cleanupOrder(orderId);
+                continue;
+            }
+
+            uint256 vaultDepth = vault.totalAssets();
+
+            try engine.processOrder(order, executionPrice, vaultDepth) {
+                emit OrderExecuted(orderId, executionPrice);
+            } catch Error(string memory reason) {
+                emit OrderFailed(orderId, reason);
+            } catch {
+                emit OrderFailed(orderId, "Engine Math Panic");
+            }
+
+            totalKeeperFees += _cleanupOrder(orderId);
+        }
+
+        uint256 totalOut = totalKeeperFees + (msg.value - pythFee);
+        if (totalOut > 0) {
+            (bool success,) = payable(msg.sender).call{value: totalOut}("");
+            if (!success) {
+                claimableEth[msg.sender] += totalOut;
+            }
+        }
+    }
+
     // ==========================================
     // INTERNAL HELPERS
     // ==========================================
+
+    function _cleanupOrder(
+        uint64 orderId
+    ) internal returns (uint256 keeperFee) {
+        keeperFee = keeperFees[orderId];
+        delete keeperFees[orderId];
+        delete orders[orderId];
+        nextExecuteId++;
+    }
 
     function _cancelOrder(
         uint64 orderId,
@@ -193,10 +295,14 @@ contract OrderRouter {
     /// @notice Claims ETH stuck from failed keeper refund transfers
     function claimEth() external {
         uint256 amount = claimableEth[msg.sender];
-        require(amount > 0, "OrderRouter: Nothing to claim");
+        if (amount == 0) {
+            revert OrderRouter__NothingToClaim();
+        }
         claimableEth[msg.sender] = 0;
         (bool success,) = payable(msg.sender).call{value: amount}("");
-        require(success, "OrderRouter: ETH transfer failed");
+        if (!success) {
+            revert OrderRouter__EthTransferFailed();
+        }
     }
 
     /// @dev BULL slippage: execution price must be ≤ target (buying low is good).
@@ -220,7 +326,9 @@ contract OrderRouter {
         int64 price,
         int32 expo
     ) internal pure returns (uint256) {
-        require(price > 0, "Oracle price negative");
+        if (price <= 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
         uint256 rawPrice = uint256(uint64(price));
         if (expo == -8) {
             return rawPrice;
@@ -247,15 +355,21 @@ contract OrderRouter {
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length > 0) {
                 pythFee = pyth.getUpdateFee(pythUpdateData);
-                require(msg.value >= pythFee, "OrderRouter: Insufficient Pyth fee");
+                if (msg.value < pythFee) {
+                    revert OrderRouter__InsufficientPythFee();
+                }
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
-            IPyth.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
 
-            require(block.timestamp - pythData.publishTime <= 15, "MEV: Oracle price too stale");
+            if (block.timestamp - pythData.publishTime > 15) {
+                revert OrderRouter__MevOraclePriceTooStale();
+            }
             executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
-            require(block.chainid == 31_337, "OrderRouter: Mock mode disabled on live networks");
+            if (block.chainid != 31_337) {
+                revert OrderRouter__MockModeDisabled();
+            }
             if (pythUpdateData.length > 0) {
                 executionPrice = abi.decode(pythUpdateData[0], (uint256));
             } else {

@@ -16,6 +16,7 @@ interface IAssetOracle {
 /// @title MarginClearinghouse
 /// @notice Universal cross-margin account manager for Plether.
 /// @dev Calculates total Account Equity using LTV haircuts. V1 strictly uses USDC.
+/// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is Ownable2Step {
 
     using SafeERC20 for IERC20;
@@ -23,22 +24,28 @@ contract MarginClearinghouse is Ownable2Step {
     struct AssetConfig {
         bool isSupported;
         uint8 decimals;
-        uint16 ltvBps; // e.g., 9500 = 95% Loan-to-Value haircut
-        address oracle; // Address of the pricing oracle (address(0) for USDC)
+        uint16 ltvBps;
+        address oracle;
     }
 
-    // Asset Whitelist
     mapping(address => AssetConfig) public assetConfigs;
     address[] public supportedAssetsList;
 
-    // accountId => (asset => amount)
     mapping(bytes32 => mapping(address => uint256)) public balances;
 
-    // Total buying power currently locked by active CFD positions (in 6-decimal USDC)
     mapping(bytes32 => uint256) public lockedMarginUsdc;
 
-    // Authorized protocol contracts (Router / Engine)
     mapping(address => bool) public isProtocolOperator;
+
+    error MarginClearinghouse__NotOperator();
+    error MarginClearinghouse__InvalidLTV();
+    error MarginClearinghouse__NotAccountOwner();
+    error MarginClearinghouse__AssetNotSupported();
+    error MarginClearinghouse__ZeroAmount();
+    error MarginClearinghouse__InsufficientBalance();
+    error MarginClearinghouse__InsufficientFreeEquity();
+    error MarginClearinghouse__InsufficientUsdcForSettlement();
+    error MarginClearinghouse__InsufficientAssetToSeize();
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
@@ -47,7 +54,9 @@ contract MarginClearinghouse is Ownable2Step {
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
     modifier onlyOperator() {
-        require(isProtocolOperator[msg.sender], "Clearinghouse: Not Protocol Operator");
+        if (!isProtocolOperator[msg.sender]) {
+            revert MarginClearinghouse__NotOperator();
+        }
         _;
     }
 
@@ -70,7 +79,9 @@ contract MarginClearinghouse is Ownable2Step {
         uint16 ltvBps,
         address oracle
     ) external onlyOwner {
-        require(ltvBps <= 10_000, "Invalid LTV");
+        if (ltvBps > 10_000) {
+            revert MarginClearinghouse__InvalidLTV();
+        }
 
         if (!assetConfigs[asset].isSupported) {
             supportedAssetsList.push(asset);
@@ -90,8 +101,15 @@ contract MarginClearinghouse is Ownable2Step {
         address asset,
         uint256 amount
     ) external {
-        require(assetConfigs[asset].isSupported, "Clearinghouse: Asset not supported");
-        require(amount > 0, "Clearinghouse: Zero amount");
+        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+            revert MarginClearinghouse__NotAccountOwner();
+        }
+        if (!assetConfigs[asset].isSupported) {
+            revert MarginClearinghouse__AssetNotSupported();
+        }
+        if (amount == 0) {
+            revert MarginClearinghouse__ZeroAmount();
+        }
 
         uint256 balBefore = IERC20(asset).balanceOf(address(this));
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
@@ -108,16 +126,19 @@ contract MarginClearinghouse is Ownable2Step {
         address asset,
         uint256 amount
     ) external {
-        // V1: Enforce strict identity mapping (msg.sender == accountId)
-        require(bytes32(uint256(uint160(msg.sender))) == accountId, "Clearinghouse: Not account owner");
-        require(balances[accountId][asset] >= amount, "Clearinghouse: Insufficient balance");
+        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+            revert MarginClearinghouse__NotAccountOwner();
+        }
+        if (balances[accountId][asset] < amount) {
+            revert MarginClearinghouse__InsufficientBalance();
+        }
 
-        // Optimistically deduct balance to check resulting buying power
         balances[accountId][asset] -= amount;
 
-        // Ensure withdrawal doesn't push equity below locked margin requirements
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
-        require(remainingEquity >= lockedMarginUsdc[accountId], "Clearinghouse: Insufficient free equity");
+        if (remainingEquity < lockedMarginUsdc[accountId]) {
+            revert MarginClearinghouse__InsufficientFreeEquity();
+        }
 
         IERC20(asset).safeTransfer(msg.sender, amount);
         emit Withdraw(accountId, asset, amount);
@@ -141,20 +162,13 @@ contract MarginClearinghouse is Ownable2Step {
                 AssetConfig memory config = assetConfigs[asset];
                 uint256 usdValue;
 
-                // Fast-path for Pristine USDC (1:1 valuation, no oracle needed)
                 if (config.oracle == address(0)) {
-                    // Assuming asset is 6 decimals like USDC
                     usdValue = bal;
                 } else {
-                    // Fetch oracle price (8 decimals)
                     uint256 price8 = IAssetOracle(config.oracle).getPriceUnsafe();
-
-                    // Normalize to 6-decimal USD Value
-                    // Decimal Math: Token(D) * Price(8) / 10^(D + 8 - 6) => USDC(6)
                     usdValue = (bal * price8) / (10 ** (uint256(config.decimals) + 2));
                 }
 
-                // Apply LTV Haircut (e.g., 9500 = 95%)
                 uint256 discountedValue = (usdValue * config.ltvBps) / 10_000;
                 totalEquityUsdc += discountedValue;
             }
@@ -179,7 +193,9 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
-        require(getFreeBuyingPowerUsdc(accountId) >= amountUsdc, "Clearinghouse: Insufficient free equity");
+        if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
+            revert MarginClearinghouse__InsufficientFreeEquity();
+        }
         lockedMarginUsdc[accountId] += amountUsdc;
         emit MarginLocked(accountId, amountUsdc);
     }
@@ -208,7 +224,9 @@ contract MarginClearinghouse is Ownable2Step {
             balances[accountId][usdc] += uint256(amount);
         } else if (amount < 0) {
             uint256 loss = uint256(-amount);
-            require(balances[accountId][usdc] >= loss, "Clearinghouse: Insufficient USDC for settlement");
+            if (balances[accountId][usdc] < loss) {
+                revert MarginClearinghouse__InsufficientUsdcForSettlement();
+            }
             balances[accountId][usdc] -= loss;
         }
     }
@@ -220,7 +238,9 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 amount,
         address recipient
     ) external onlyOperator {
-        require(balances[accountId][asset] >= amount, "Clearinghouse: Insufficient asset balance to seize");
+        if (balances[accountId][asset] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
 
         balances[accountId][asset] -= amount;
         IERC20(asset).safeTransfer(recipient, amount);

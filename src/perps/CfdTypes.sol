@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 /// @title CfdTypes
 /// @notice Core data structures for the Plether CFD Engine
+/// @custom:security-contact contact@plether.com
 library CfdTypes {
 
     /// @dev BULL profits when USD strengthens (oracle price drops).

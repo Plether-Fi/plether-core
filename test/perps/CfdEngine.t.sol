@@ -69,9 +69,12 @@ contract CfdEngineTest is Test {
         bytes32 accountId,
         uint256 amount
     ) internal {
-        usdc.mint(address(this), amount);
+        address user = address(uint160(uint256(accountId)));
+        usdc.mint(user, amount);
+        vm.startPrank(user);
         usdc.approve(address(clearinghouse), amount);
         clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
     }
 
     function test_OpenPosition_SolvencyCheck() public {
@@ -90,7 +93,7 @@ contract CfdEngineTest is Test {
             isClose: false
         });
 
-        vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
+        vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
         engine.processOrder(tooLarge, 1e8, 1_000_000 * 1e6);
 
         CfdTypes.Order memory order = CfdTypes.Order({
@@ -106,7 +109,7 @@ contract CfdEngineTest is Test {
 
         // Withdraw LP to reduce vault to $50k — solvency check should fail
         juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
-        vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
+        vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
         engine.processOrder(order, 1e8, 0);
 
         // Re-deposit to allow the trade
@@ -244,7 +247,7 @@ contract CfdEngineTest is Test {
         assertEq(engine.accumulatedFeesUsdc(), 0, "Fees should reset to zero");
         assertEq(usdc.balanceOf(treasury), fees, "Treasury receives exact fee amount");
 
-        vm.expectRevert("CfdEngine: No fees to withdraw");
+        vm.expectRevert(CfdEngine.CfdEngine__NoFeesToWithdraw.selector);
         engine.withdrawFees(treasury);
     }
 
@@ -274,7 +277,7 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert("CfdEngine: Must explicitly close opposing position first");
+        vm.expectRevert(CfdEngine.CfdEngine__MustCloseOpposingPosition.selector);
         engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6);
     }
 
@@ -307,7 +310,7 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert("CfdEngine: Funding exceeds margin, liquidate position");
+        vm.expectRevert(CfdEngine.CfdEngine__FundingExceedsMargin.selector);
         engine.processOrder(addOrder, 1e8, vaultDepth);
     }
 
@@ -404,7 +407,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(order, 1e8, vaultDepth);
 
-        vm.expectRevert("CfdEngine: Position is solvent");
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         engine.liquidatePosition(accountId, 1e8, vaultDepth);
 
         engine.setRiskParams(
@@ -442,11 +445,11 @@ contract CfdEngineTest is Test {
         });
 
         vm.prank(address(0xDEAD));
-        vm.expectRevert("CfdEngine: Unauthorized");
+        vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
         engine.processOrder(order, 1e8, 1_000_000 * 1e6);
 
         vm.prank(address(0xDEAD));
-        vm.expectRevert("CfdEngine: Unauthorized");
+        vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
     }
 
@@ -477,7 +480,7 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: true
         });
-        vm.expectRevert("CfdEngine: Close size exceeds open position");
+        vm.expectRevert(CfdEngine.CfdEngine__CloseSizeExceedsPosition.selector);
         engine.processOrder(closeOrder, 1e8, vaultDepth);
     }
 
@@ -496,13 +499,13 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert("CfdEngine: Margin drained by fees and VPI");
+        vm.expectRevert(CfdEngine.CfdEngine__MarginDrainedByFees.selector);
         engine.processOrder(order, 1e8, vaultDepth);
     }
 
     function test_Liquidate_EmptyPosition_Reverts() public {
         bytes32 accountId = bytes32(uint256(1));
-        vm.expectRevert("CfdEngine: No position to liquidate");
+        vm.expectRevert(CfdEngine.CfdEngine__NoPositionToLiquidate.selector);
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
     }
 

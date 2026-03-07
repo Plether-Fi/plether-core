@@ -5,6 +5,7 @@ import {CfdTypes} from "./CfdTypes.sol";
 
 /// @title CfdMath
 /// @notice Pure stateless math library for PnL, Price Impact, and Funding
+/// @custom:security-contact contact@plether.com
 library CfdMath {
 
     uint256 internal constant WAD = 1e18;

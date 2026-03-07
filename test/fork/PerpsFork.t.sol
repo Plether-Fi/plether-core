@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {IPyth, OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Test.sol";
@@ -28,8 +29,8 @@ contract ControllablePyth {
 
     function getPriceUnsafe(
         bytes32
-    ) external view returns (IPyth.Price memory) {
-        return IPyth.Price({price: mockPrice, conf: 0, expo: mockExpo, publishTime: mockPublishTime});
+    ) external view returns (PythStructs.Price memory) {
+        return PythStructs.Price({price: mockPrice, conf: 0, expo: mockExpo, publishTime: mockPublishTime});
     }
 
     function getUpdateFee(
@@ -223,7 +224,7 @@ contract PerpsForkTest is Test {
 
     function test_PythAbiCompatibility_RealContract() public {
         // Direct call to real Pyth — verify no ABI decode error
-        IPyth.Price memory priceData = IPyth(REAL_PYTH).getPriceUnsafe(EUR_USD_FEED_ID);
+        PythStructs.Price memory priceData = IPyth(REAL_PYTH).getPriceUnsafe(EUR_USD_FEED_ID);
         assertTrue(priceData.price != 0 || priceData.publishTime != 0, "Pyth should return data");
 
         // getUpdateFee with empty array
