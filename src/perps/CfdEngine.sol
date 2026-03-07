@@ -209,6 +209,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
         }
 
+        _assertPostSolvency();
         pos.lastUpdateTime = uint64(block.timestamp);
         return 0;
     }
@@ -225,7 +226,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         uint256 vaultDepthUsdc
     ) internal {
         uint256 newMaxProfit = CfdMath.calculateMaxProfit(order.sizeDelta, price, order.side, CAP_PRICE);
-        _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta, vaultDepthUsdc);
+        _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta);
 
         if (pos.size == 0) {
             pos.entryPrice = price;
@@ -336,8 +337,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     function _addGlobalLiability(
         CfdTypes.Side side,
         uint256 maxProfitUsdc,
-        uint256 sizeDelta,
-        uint256 vaultDepthUsdc
+        uint256 sizeDelta
     ) internal {
         if (side == CfdTypes.Side.BULL) {
             globalBullMaxProfit += maxProfitUsdc;
@@ -347,7 +347,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             bearOI += sizeDelta;
         }
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        require(vaultDepthUsdc >= maxLiability, "CfdEngine: Vault Solvency Capacity Exceeded");
+        require(vault.totalAssets() >= maxLiability, "CfdEngine: Vault Solvency Capacity Exceeded");
     }
 
     function _reduceGlobalLiability(
@@ -454,6 +454,13 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
+
+        _assertPostSolvency();
+    }
+
+    function _assertPostSolvency() internal view {
+        uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+        require(vault.totalAssets() >= maxLiability, "CfdEngine: Post-op solvency breach");
     }
 
 }

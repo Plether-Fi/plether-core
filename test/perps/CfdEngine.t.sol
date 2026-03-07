@@ -89,8 +89,14 @@ contract CfdEngineTest is Test {
             isClose: false
         });
 
+        // Withdraw LP to reduce vault to $50k — solvency check should fail
+        juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
         vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
-        engine.processOrder(order, 1e8, 50_000 * 1e6);
+        engine.processOrder(order, 1e8, 0);
+
+        // Re-deposit to allow the trade
+        usdc.approve(address(juniorVault), 950_000 * 1e6);
+        juniorVault.deposit(950_000 * 1e6, address(this));
 
         int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6);
         assertEq(settlement, 0, "processOrder always returns 0");
