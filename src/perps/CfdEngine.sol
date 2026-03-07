@@ -74,6 +74,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         lastFundingTime = uint64(block.timestamp);
     }
 
+    /// @notice One-time setter for the HousePool vault backing all positions
     function setVault(
         address _vault
     ) external onlyOwner {
@@ -81,6 +82,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         vault = ICfdVault(_vault);
     }
 
+    /// @notice One-time setter for the authorized OrderRouter
     function setOrderRouter(
         address _router
     ) external onlyOwner {
@@ -94,6 +96,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         riskParams = _riskParams;
     }
 
+    /// @notice Withdraws accumulated execution fees from the vault to a recipient
     function withdrawFees(
         address recipient
     ) external onlyOwner {
@@ -151,6 +154,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         emit FundingUpdated(bullFundingIndex, bearFundingIndex, absSkew);
     }
 
+    /// @notice Returns unsettled funding owed to (+) or by (-) a position in USDC (6 decimals)
     function getPendingFunding(
         CfdTypes.Position memory pos
     ) public view returns (int256 fundingUsdc) {
@@ -166,6 +170,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     // 2. ORDER PROCESSING & NETTING
     // ==========================================
 
+    /// @notice Executes an order: settles funding, then increases or decreases the position.
+    ///         Called exclusively by OrderRouter after MEV and slippage checks pass.
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -366,6 +372,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     // LIQUIDATIONS & FAD
     // ==========================================
 
+    /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window.
+    ///         FAD raises maintenance margin (fadMarginBps) during weekend market closure:
+    ///         Friday 19:00 UTC through Sunday 22:00 UTC.
     function isFadWindow() public view returns (bool) {
         uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
         uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
@@ -383,6 +392,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         return false;
     }
 
+    /// @notice Returns the maintenance margin requirement in USDC (6 decimals).
+    ///         Uses fadMarginBps during the FAD window, maintMarginBps otherwise.
     function getMaintenanceMarginUsdc(
         uint256 size,
         uint256 currentOraclePrice
@@ -392,8 +403,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    /// @notice Ethically liquidates an undercollateralized position.
-    ///         Seizes only what's needed; user keeps any surplus equity.
+    /// @notice Liquidates an undercollateralized position.
+    ///         Surplus equity (after bounty) is returned to the user.
+    ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,

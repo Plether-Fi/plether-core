@@ -5,9 +5,8 @@ pragma solidity 0.8.33;
 /// @notice Core data structures for the Plether CFD Engine
 library CfdTypes {
 
-    /// @dev Represents the directional bias of the trade.
-    /// BULL = Long Basket (Profits when Basket/BEAR drops)
-    /// BEAR = Short Basket (Profits when Basket/BEAR rises)
+    /// @dev BULL profits when USD strengthens (oracle price drops).
+    ///      BEAR profits when USD weakens (oracle price rises).
     enum Side {
         BULL,
         BEAR

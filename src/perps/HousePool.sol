@@ -87,10 +87,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     // ICfdVault INTERFACE
     // ==========================================
 
+    /// @notice Total USDC held by the pool, backing all open positions
     function totalAssets() external view returns (uint256) {
         return usdc.balanceOf(address(this));
     }
 
+    /// @notice Transfers USDC from the pool. Callable by CfdEngine (PnL/funding) or OrderRouter (keeper bounties).
     function payOut(
         address recipient,
         uint256 amount
@@ -143,6 +145,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     // WITHDRAWAL LIMITS
     // ==========================================
 
+    /// @notice Returns USDC not reserved for worst-case position payouts (max of bull/bear liability)
     function getFreeUSDC() public view returns (uint256) {
         uint256 bal = usdc.balanceOf(address(this));
         uint256 bullMax = engine.globalBullMaxProfit();
@@ -151,11 +154,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         return bal > maxLiability ? bal - maxLiability : 0;
     }
 
+    /// @notice Max USDC the senior tranche can withdraw (limited by free USDC)
     function getMaxSeniorWithdraw() public view returns (uint256) {
         uint256 free = getFreeUSDC();
         return free < seniorPrincipal ? free : seniorPrincipal;
     }
 
+    /// @notice Max USDC the junior tranche can withdraw (subordinated behind senior)
     function getMaxJuniorWithdraw() public view returns (uint256) {
         uint256 free = getFreeUSDC();
         uint256 subordinated = free > seniorPrincipal ? free - seniorPrincipal : 0;
@@ -166,6 +171,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     // RECONCILIATION (Revenue & Loss Waterfall)
     // ==========================================
 
+    /// @notice Distributes revenue (senior yield first, junior gets surplus) or absorbs losses
+    ///         (junior first-loss, senior last-loss). Called before any deposit/withdrawal.
     function reconcile() external {
         _reconcile();
     }

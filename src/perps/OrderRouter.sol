@@ -63,6 +63,8 @@ contract OrderRouter {
     // STEP 1: THE COMMITMENT (User Intent)
     // ==========================================
 
+    /// @notice Submits a trade intent to the FIFO queue. Attach ETH as keeper incentive.
+    ///         No margin is escrowed here — users deposit to MarginClearinghouse beforehand.
     function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,
@@ -94,6 +96,10 @@ contract OrderRouter {
     // STEP 2: THE REVEAL (Keeper Execution)
     // ==========================================
 
+    /// @notice Keeper executes the next order in strict FIFO sequence.
+    ///         Validates oracle freshness (publishTime > commitTime, age ≤ 60s),
+    ///         checks slippage, then delegates to CfdEngine. On any failure the queue
+    ///         still advances (un-brickable design).
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
@@ -184,6 +190,7 @@ contract OrderRouter {
         }
     }
 
+    /// @notice Claims ETH stuck from failed keeper refund transfers
     function claimEth() external {
         uint256 amount = claimableEth[msg.sender];
         require(amount > 0, "OrderRouter: Nothing to claim");
@@ -192,6 +199,9 @@ contract OrderRouter {
         require(success, "OrderRouter: ETH transfer failed");
     }
 
+    /// @dev BULL slippage: execution price must be ≤ target (buying low is good).
+    ///      BEAR slippage: execution price must be ≥ target (selling high is good).
+    ///      targetPrice == 0 disables the check (market order).
     function _checkSlippage(
         CfdTypes.Order memory order,
         uint256 executionPrice
@@ -205,6 +215,7 @@ contract OrderRouter {
         return executionPrice >= order.targetPrice;
     }
 
+    /// @dev Converts a Pyth price to 8-decimal format. Scales up/down based on exponent difference from -8.
     function _normalizePythPrice(
         int64 price,
         int32 expo
@@ -224,6 +235,8 @@ contract OrderRouter {
     // ATOMIC LIQUIDATIONS
     // ==========================================
 
+    /// @notice Keeper-triggered liquidation with stricter staleness (≤ 15s).
+    ///         Pays the keeper bounty in USDC directly from the vault.
     function executeLiquidation(
         bytes32 accountId,
         bytes[] calldata pythUpdateData

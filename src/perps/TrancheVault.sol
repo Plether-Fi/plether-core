@@ -29,6 +29,7 @@ contract TrancheVault is ERC4626 {
         IS_SENIOR = _isSenior;
     }
 
+    /// @dev Virtual share offset mitigates ERC4626 first-depositor inflation attack
     function _decimalsOffset() internal pure override returns (uint8) {
         return 3;
     }

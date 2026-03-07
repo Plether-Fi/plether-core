@@ -83,6 +83,8 @@ contract MarginClearinghouse is Ownable2Step {
     // USER ACTIONS
     // ==========================================
 
+    /// @notice Deposits a supported asset into the specified margin account.
+    ///         Uses balance-before/after pattern to support fee-on-transfer tokens.
     function deposit(
         bytes32 accountId,
         address asset,
@@ -99,6 +101,8 @@ contract MarginClearinghouse is Ownable2Step {
         emit Deposit(accountId, asset, received);
     }
 
+    /// @notice Withdraws assets from a margin account. Only callable by the account owner.
+    ///         Reverts if withdrawal would push equity below locked margin requirements.
     function withdraw(
         bytes32 accountId,
         address asset,
@@ -193,7 +197,8 @@ contract MarginClearinghouse is Ownable2Step {
         emit MarginUnlocked(accountId, amountUsdc);
     }
 
-    /// @notice Directly alters USDC balances to settle Funding Rates and Realized PnL
+    /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
+    ///         Positive amounts credit the account; negative amounts debit it.
     function settleUsdc(
         bytes32 accountId,
         address usdc,
@@ -208,7 +213,7 @@ contract MarginClearinghouse is Ownable2Step {
         }
     }
 
-    /// @notice Seizes raw assets from the account to pay House Pool bad debt
+    /// @notice Transfers assets from an account to a recipient (losses, fees, VPI charges, or bad debt)
     function seizeAsset(
         bytes32 accountId,
         address asset,

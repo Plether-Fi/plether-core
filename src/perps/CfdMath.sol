@@ -16,6 +16,9 @@ library CfdMath {
     // ==========================================
 
     /// @notice Calculates Unrealized PnL strictly bounded by the protocol CAP
+    /// @param pos The position to evaluate
+    /// @param currentOraclePrice Current oracle price (8 decimals)
+    /// @param capPrice Protocol cap price (8 decimals)
     /// @return isProfit True if the position is in profit
     /// @return pnlUsdc Absolute PnL value in USDC (6 decimals)
     function calculatePnL(
@@ -32,11 +35,11 @@ library CfdMath {
         uint256 priceDiff;
 
         if (pos.side == CfdTypes.Side.BULL) {
-            // BULL profits when BEAR oracle drops
+            // BULL profits when oracle price drops (USD strengthens)
             isProfit = price <= pos.entryPrice;
             priceDiff = isProfit ? (pos.entryPrice - price) : (price - pos.entryPrice);
         } else {
-            // BEAR profits when BEAR oracle rises
+            // BEAR profits when oracle price rises (USD weakens)
             isProfit = price >= pos.entryPrice;
             priceDiff = isProfit ? (price - pos.entryPrice) : (pos.entryPrice - price);
         }
@@ -46,6 +49,11 @@ library CfdMath {
     }
 
     /// @notice Calculates the absolute maximum payout a trade can ever achieve
+    /// @param size Notional size (18 decimals)
+    /// @param entryPrice Entry oracle price (8 decimals)
+    /// @param side BULL or BEAR
+    /// @param capPrice Protocol cap price (8 decimals)
+    /// @return maxProfitUsdc Maximum possible profit in USDC (6 decimals)
     function calculateMaxProfit(
         uint256 size,
         uint256 entryPrice,
@@ -119,7 +127,12 @@ library CfdMath {
     // 3. PROGRESSIVE FUNDING CURVE
     // ==========================================
 
-    /// @notice Returns the annualized funding rate based on the kinked curve
+    /// @notice Returns the annualized funding rate based on the kinked curve.
+    ///         Linear ramp up to kinkSkewRatio, quadratic acceleration above it.
+    /// @param absSkewUsdc Absolute directional imbalance in USDC (6 decimals)
+    /// @param depthUsdc Total pool depth in USDC (6 decimals)
+    /// @param params Risk parameters defining the funding curve shape
+    /// @return annualizedRateWad Annualized rate (18 decimals WAD)
     function getAnnualizedFundingRate(
         uint256 absSkewUsdc,
         uint256 depthUsdc,
