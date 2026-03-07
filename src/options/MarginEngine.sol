@@ -212,10 +212,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         s.settlementPrice = price;
-        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
-        uint256 currentRate = vault.convertToAssets(oneShare);
-        s.settlementShareRate = currentRate > 0 ? currentRate : oneShare;
+        s.settlementShareRate = _snapshotShareRate(s);
         s.isSettled = true;
         settlementTimestamp[seriesId] = block.timestamp;
 
@@ -243,10 +240,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
         }
 
         s.settlementPrice = settlementPrice;
-        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
-        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
-        uint256 currentRate = vault.convertToAssets(oneShare);
-        s.settlementShareRate = currentRate > 0 ? currentRate : oneShare;
+        s.settlementShareRate = _snapshotShareRate(s);
         s.isSettled = true;
         settlementTimestamp[seriesId] = block.timestamp;
 
@@ -292,8 +286,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         totalSeriesExercisedShares[seriesId] += sharePayout;
 
-        IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
-        vault.safeTransfer(msg.sender, sharePayout);
+        _transferVaultShares(s.isBull, msg.sender, sharePayout);
 
         emit OptionsExercised(seriesId, msg.sender, optionsAmount, sharePayout);
     }
@@ -323,23 +316,13 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         uint256 totalMinted = totalSeriesMinted[seriesId];
         uint256 totalShares = totalSeriesShares[seriesId];
-        uint256 globalDebtShares = 0;
-
-        if (s.settlementPrice > s.strike) {
-            uint256 assetPayout = (totalMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
-            uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
-            globalDebtShares = (assetPayout * oneShare) / s.settlementShareRate;
-            if (globalDebtShares > totalShares) {
-                globalDebtShares = totalShares;
-            }
-        }
+        uint256 globalDebtShares = _getGlobalDebtShares(s, totalMinted, totalShares);
 
         uint256 userDebtShares = (globalDebtShares * optionsMinted) / totalMinted;
         uint256 sharesToReturn = lockedShares > userDebtShares ? lockedShares - userDebtShares : 0;
 
         if (sharesToReturn > 0) {
-            IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
-            vault.safeTransfer(msg.sender, sharesToReturn);
+            _transferVaultShares(s.isBull, msg.sender, sharesToReturn);
         }
 
         emit CollateralUnlocked(seriesId, msg.sender, optionsMinted, sharesToReturn);
@@ -360,16 +343,7 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         uint256 totalMinted = totalSeriesMinted[seriesId];
         uint256 totalShares = totalSeriesShares[seriesId];
-        uint256 globalDebtShares = 0;
-
-        if (s.settlementPrice > s.strike) {
-            uint256 assetPayout = (totalMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
-            uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
-            globalDebtShares = (assetPayout * oneShare) / s.settlementShareRate;
-            if (globalDebtShares > totalShares) {
-                globalDebtShares = totalShares;
-            }
-        }
+        uint256 globalDebtShares = _getGlobalDebtShares(s, totalMinted, totalShares);
 
         uint256 unclaimedShares = globalDebtShares - totalSeriesExercisedShares[seriesId];
         if (unclaimedShares == 0) {
@@ -378,10 +352,46 @@ contract MarginEngine is ReentrancyGuard, AccessControl {
 
         totalSeriesExercisedShares[seriesId] += unclaimedShares;
 
-        IERC20 vault = s.isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
-        vault.safeTransfer(msg.sender, unclaimedShares);
+        _transferVaultShares(s.isBull, msg.sender, unclaimedShares);
 
         emit UnclaimedSharesSwept(seriesId, unclaimedShares);
+    }
+
+    // ==========================================
+    // PRIVATE HELPERS
+    // ==========================================
+
+    function _getGlobalDebtShares(
+        Series storage s,
+        uint256 totalMinted,
+        uint256 totalShares
+    ) private view returns (uint256 globalDebtShares) {
+        if (s.settlementPrice > s.strike) {
+            uint256 assetPayout = (totalMinted * (s.settlementPrice - s.strike)) / s.settlementPrice;
+            uint256 oneShare = 10 ** IERC20Metadata(s.isBull ? address(STAKED_BULL) : address(STAKED_BEAR)).decimals();
+            globalDebtShares = (assetPayout * oneShare) / s.settlementShareRate;
+            if (globalDebtShares > totalShares) {
+                globalDebtShares = totalShares;
+            }
+        }
+    }
+
+    function _snapshotShareRate(
+        Series storage s
+    ) private view returns (uint256) {
+        IERC4626 vault = s.isBull ? STAKED_BULL : STAKED_BEAR;
+        uint256 oneShare = 10 ** IERC20Metadata(address(vault)).decimals();
+        uint256 currentRate = vault.convertToAssets(oneShare);
+        return currentRate > 0 ? currentRate : oneShare;
+    }
+
+    function _transferVaultShares(
+        bool isBull,
+        address to,
+        uint256 amount
+    ) private {
+        IERC20 vault = isBull ? IERC20(address(STAKED_BULL)) : IERC20(address(STAKED_BEAR));
+        vault.safeTransfer(to, amount);
     }
 
 }

@@ -4,9 +4,9 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
-import {JuniorVault} from "../../src/perps/JuniorVault.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -29,7 +29,7 @@ contract LiquidationTest is Test {
     MockUSDC usdc;
     CfdEngine engine;
     HousePool pool;
-    JuniorVault juniorVault;
+    TrancheVault juniorVault;
     OrderRouter router;
     MarginClearinghouse clearinghouse;
 
@@ -61,7 +61,7 @@ contract LiquidationTest is Test {
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new JuniorVault(IERC20(address(usdc)), address(pool));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
         router = new OrderRouter(address(engine), address(pool), address(0), bytes32(0));

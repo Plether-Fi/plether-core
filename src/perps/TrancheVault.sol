@@ -8,31 +8,36 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-/// @title SeniorVault
-/// @notice ERC4626 share token for the senior (conservative) tranche.
+/// @title TrancheVault
+/// @notice ERC4626 share token for a HousePool tranche (senior or junior).
 ///         Routes all deposits/withdrawals through HousePool.
-contract SeniorVault is ERC4626 {
+contract TrancheVault is ERC4626 {
 
     using SafeERC20 for IERC20;
 
     IHousePool public immutable pool;
+    bool public immutable IS_SENIOR;
 
     constructor(
         IERC20 _usdc,
-        address _pool
-    ) ERC4626(_usdc) ERC20("Plether Senior LP", "seniorUSDC") {
+        address _pool,
+        bool _isSenior,
+        string memory _name,
+        string memory _symbol
+    ) ERC4626(_usdc) ERC20(_name, _symbol) {
         pool = IHousePool(_pool);
+        IS_SENIOR = _isSenior;
     }
 
     function totalAssets() public view override returns (uint256) {
-        return pool.seniorPrincipal();
+        return IS_SENIOR ? pool.seniorPrincipal() : pool.juniorPrincipal();
     }
 
     function maxWithdraw(
         address _owner
     ) public view override returns (uint256) {
         uint256 ownerAssets = _convertToAssets(balanceOf(_owner), Math.Rounding.Floor);
-        uint256 poolMax = pool.getMaxSeniorWithdraw();
+        uint256 poolMax = IS_SENIOR ? pool.getMaxSeniorWithdraw() : pool.getMaxJuniorWithdraw();
         return ownerAssets < poolMax ? ownerAssets : poolMax;
     }
 
@@ -40,7 +45,7 @@ contract SeniorVault is ERC4626 {
         address _owner
     ) public view override returns (uint256) {
         uint256 ownerShares = balanceOf(_owner);
-        uint256 poolMax = pool.getMaxSeniorWithdraw();
+        uint256 poolMax = IS_SENIOR ? pool.getMaxSeniorWithdraw() : pool.getMaxJuniorWithdraw();
         uint256 maxShares = _convertToShares(poolMax, Math.Rounding.Floor);
         return ownerShares < maxShares ? ownerShares : maxShares;
     }
@@ -53,7 +58,11 @@ contract SeniorVault is ERC4626 {
     ) internal override {
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(pool), assets);
-        pool.depositSenior(assets);
+        if (IS_SENIOR) {
+            pool.depositSenior(assets);
+        } else {
+            pool.depositJunior(assets);
+        }
         _mint(receiver, shares);
         emit Deposit(caller, receiver, assets, shares);
     }
@@ -69,7 +78,11 @@ contract SeniorVault is ERC4626 {
             _spendAllowance(_owner, caller, shares);
         }
         _burn(_owner, shares);
-        pool.withdrawSenior(assets, receiver);
+        if (IS_SENIOR) {
+            pool.withdrawSenior(assets, receiver);
+        } else {
+            pool.withdrawJunior(assets, receiver);
+        }
         emit Withdraw(caller, receiver, _owner, assets, shares);
     }
 
