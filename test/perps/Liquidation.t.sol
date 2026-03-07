@@ -170,4 +170,44 @@ contract LiquidationTest is Test {
         assertTrue(chBalance > 8000 * 1e6, "Alice retains most of her clearinghouse balance");
     }
 
+    function test_SolventPosition_RevertsLiquidation() public {
+        vm.warp(WEDNESDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.expectRevert("CfdEngine: Position is solvent");
+        router.executeLiquidation(accountId, empty);
+    }
+
+    function test_KeeperBounty_MinimumFloor() public {
+        vm.warp(WEDNESDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        // BULL loses when price rises. At $1.095:
+        // PnL = -$95, equity ≈ $4.4, MMR = 1% of $1095 = $10.95 → liquidatable
+        bytes[] memory pythData = new bytes[](1);
+        pythData[0] = abi.encode(1.095e8);
+
+        uint256 keeperBalBefore = usdc.balanceOf(keeper);
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, pythData);
+        uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
+
+        // 0.15% of $1095 = $1.64 → below $5 minimum
+        assertEq(bounty, 5 * 1e6, "Keeper bounty should be minimum floor of $5");
+    }
+
 }

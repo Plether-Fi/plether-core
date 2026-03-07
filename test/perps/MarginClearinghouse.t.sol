@@ -143,4 +143,56 @@ contract MarginClearinghouseTest is Test {
         );
     }
 
+    function test_LtvHaircut_80Percent() public {
+        MockToken weth = new MockToken("Wrapped ETH", "WETH", 18);
+        MockOracle wethOracle = new MockOracle(2000e8);
+        clearinghouse.supportAsset(address(weth), 18, 8000, address(wethOracle));
+
+        weth.mint(alice, 1e18);
+        vm.startPrank(alice);
+        weth.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(aliceId, address(weth), 1e18);
+        vm.stopPrank();
+
+        // 1e18 * 2000e8 / 10^20 = 2000e6 spot value → 80% haircut = 1600e6
+        uint256 equity = clearinghouse.getAccountEquityUsdc(aliceId);
+        assertEq(equity, 1600 * 1e6, "80% LTV should haircut to $1600");
+    }
+
+    function test_BuyingPower_BlockedByActivePositions() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 5000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockMargin(aliceId, 4500 * 1e6);
+
+        uint256 freeBp = clearinghouse.getFreeBuyingPowerUsdc(aliceId);
+        assertEq(freeBp, 500 * 1e6, "Free BP should be $500");
+
+        vm.prank(alice);
+        vm.expectRevert("Clearinghouse: Insufficient free equity");
+        clearinghouse.withdraw(aliceId, address(usdc), 1000 * 1e6);
+    }
+
+    function test_Deposit_UnsupportedAsset_Reverts() public {
+        MockToken randomToken = new MockToken("Random", "RND", 18);
+        randomToken.mint(alice, 1000e18);
+
+        vm.startPrank(alice);
+        randomToken.approve(address(clearinghouse), type(uint256).max);
+        vm.expectRevert("Clearinghouse: Asset not supported");
+        clearinghouse.deposit(aliceId, address(randomToken), 1000e18);
+        vm.stopPrank();
+    }
+
+    function test_Withdraw_WrongOwner_Reverts() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+
+        address bob = address(0x222);
+        vm.prank(bob);
+        vm.expectRevert("Clearinghouse: Not account owner");
+        clearinghouse.withdraw(aliceId, address(usdc), 500 * 1e6);
+    }
+
 }

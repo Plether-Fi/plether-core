@@ -179,4 +179,58 @@ contract CfdMathTest is Test {
         assertEq(apy45, 3.0e18, "45% Skew should clamp to 300% APY");
     }
 
+    // ==========================================
+    // 4. BEAR PNL & EDGE CASES
+    // ==========================================
+
+    function test_CalculatePnL_Bear() public pure {
+        CfdTypes.Position memory pos = CfdTypes.Position({
+            size: 100_000 * 1e18,
+            margin: 2000 * 1e6,
+            entryPrice: 0.8e8,
+            entryFundingIndex: 0,
+            side: CfdTypes.Side.BEAR,
+            lastUpdateTime: 0
+        });
+
+        // Price rises to $0.95 → BEAR profits (profits when oracle rises)
+        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 0.95e8, CAP_PRICE);
+        assertTrue(isProfit);
+        assertEq(pnl, 15_000 * 1e6); // $0.15 * 100k = $15,000
+
+        // Price drops to $0.70 → BEAR loses
+        (isProfit, pnl) = CfdMath.calculatePnL(pos, 0.7e8, CAP_PRICE);
+        assertFalse(isProfit);
+        assertEq(pnl, 10_000 * 1e6); // $0.10 * 100k = $10,000
+    }
+
+    function test_CalculatePnL_ZeroSize() public pure {
+        CfdTypes.Position memory pos = CfdTypes.Position({
+            size: 0, margin: 0, entryPrice: 1e8, entryFundingIndex: 0, side: CfdTypes.Side.BULL, lastUpdateTime: 0
+        });
+
+        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 1.5e8, CAP_PRICE);
+        assertFalse(isProfit);
+        assertEq(pnl, 0);
+    }
+
+    // ==========================================
+    // 5. VPI UNIT TESTS
+    // ==========================================
+
+    function test_VPI_ChargesWhenAddingToSkew() public pure {
+        int256 vpi = CfdMath.calculateVPI(1_000_000 * 1e6, 2_000_000 * 1e6, 10_000_000 * 1e6, 0.0005e18);
+        assertTrue(vpi > 0, "VPI should charge when adding to skew");
+    }
+
+    function test_VPI_RebatesWhenReducingSkew() public pure {
+        int256 vpi = CfdMath.calculateVPI(2_000_000 * 1e6, 1_000_000 * 1e6, 10_000_000 * 1e6, 0.0005e18);
+        assertTrue(vpi < 0, "VPI should rebate when reducing skew");
+    }
+
+    function test_VPI_ZeroDepth() public pure {
+        int256 vpi = CfdMath.calculateVPI(1_000_000 * 1e6, 2_000_000 * 1e6, 0, 0.0005e18);
+        assertEq(vpi, 0, "VPI should be zero when depth is zero");
+    }
+
 }
