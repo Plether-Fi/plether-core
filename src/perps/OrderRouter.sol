@@ -124,7 +124,12 @@ contract OrderRouter {
             }
             executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
-            executionPrice = order.targetPrice;
+            require(block.chainid == 31_337, "OrderRouter: Mock mode disabled on live networks");
+            if (pythUpdateData.length > 0) {
+                executionPrice = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                executionPrice = order.targetPrice;
+            }
         }
 
         if (!_checkSlippage(order, executionPrice)) {
@@ -191,7 +196,7 @@ contract OrderRouter {
         CfdTypes.Order memory order,
         uint256 executionPrice
     ) internal pure returns (bool) {
-        if (order.targetPrice == 0 || order.isClose) {
+        if (order.targetPrice == 0) {
             return true;
         }
         if (order.side == CfdTypes.Side.BULL) {

@@ -78,6 +78,21 @@ contract CfdEngineTest is Test {
         bytes32 accountId = bytes32(uint256(1));
         _depositToClearinghouse(accountId, 5000 * 1e6);
 
+        // maxProfit = 1.2M tokens * $1 entry = $1.2M > vault's $1M balance
+        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1_200_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
+        engine.processOrder(tooLarge, 1e8, 1_000_000 * 1e6);
+
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
@@ -88,9 +103,6 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-
-        vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
-        engine.processOrder(order, 1e8, 50_000 * 1e6);
 
         int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6);
         assertEq(settlement, 0, "processOrder always returns 0");

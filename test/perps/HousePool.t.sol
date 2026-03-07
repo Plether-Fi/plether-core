@@ -352,17 +352,18 @@ contract HousePoolTest is Test {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(bob, 100_000 * 1e6);
 
-        // Simulate revenue
+        uint256 seniorPriceBefore = seniorVault.convertToAssets(1e9);
+        uint256 juniorPriceBefore = juniorVault.convertToAssets(1e9);
+
         usdc.mint(address(pool), 20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
         pool.reconcile();
 
-        // Senior got yield, junior got surplus — share price should reflect this
-        uint256 seniorSharePrice = seniorVault.convertToAssets(1e6);
-        uint256 juniorSharePrice = juniorVault.convertToAssets(1e6);
+        uint256 seniorPriceAfter = seniorVault.convertToAssets(1e9);
+        uint256 juniorPriceAfter = juniorVault.convertToAssets(1e9);
 
-        assertTrue(seniorSharePrice > 1e6, "Senior share price should increase");
-        assertTrue(juniorSharePrice > 1e6, "Junior share price should increase");
+        assertTrue(seniorPriceAfter > seniorPriceBefore, "Senior share price should increase");
+        assertTrue(juniorPriceAfter > juniorPriceBefore, "Junior share price should increase");
     }
 
 }

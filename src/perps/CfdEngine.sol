@@ -193,12 +193,10 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
                 clearinghouse.lockMargin(order.accountId, gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
-                uint256 actualLoss = pos.margin >= loss ? loss : pos.margin;
-                pos.margin -= actualLoss;
-                if (actualLoss > 0) {
-                    clearinghouse.seizeAsset(order.accountId, address(usdc), actualLoss, address(vault));
-                    clearinghouse.unlockMargin(order.accountId, actualLoss);
-                }
+                require(pos.margin >= loss, "CfdEngine: Funding exceeds margin, liquidate position");
+                pos.margin -= loss;
+                clearinghouse.seizeAsset(order.accountId, address(usdc), loss, address(vault));
+                clearinghouse.unlockMargin(order.accountId, loss);
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         }
@@ -225,7 +223,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         uint256 vaultDepthUsdc
     ) internal {
         uint256 newMaxProfit = CfdMath.calculateMaxProfit(order.sizeDelta, price, order.side, CAP_PRICE);
-        _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta, vaultDepthUsdc);
+        _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta);
 
         if (pos.size == 0) {
             pos.entryPrice = price;
@@ -336,8 +334,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     function _addGlobalLiability(
         CfdTypes.Side side,
         uint256 maxProfitUsdc,
-        uint256 sizeDelta,
-        uint256 vaultDepthUsdc
+        uint256 sizeDelta
     ) internal {
         if (side == CfdTypes.Side.BULL) {
             globalBullMaxProfit += maxProfitUsdc;
@@ -347,7 +344,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             bearOI += sizeDelta;
         }
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        require(vaultDepthUsdc >= maxLiability, "CfdEngine: Vault Solvency Capacity Exceeded");
+        require(vault.totalAssets() >= maxLiability, "CfdEngine: Vault Solvency Capacity Exceeded");
     }
 
     function _reduceGlobalLiability(

@@ -173,10 +173,9 @@ contract AuditFindingsTest is Test {
 
     // ==========================================
     // Finding 3: Uncollected funding bad debt
-    // When funding owed exceeds margin, the FULL debt should be collected or
-    // the position should be blocked/liquidated. The vault should not silently
-    // absorb the shortfall as bad debt.
-    // EXPECTED: Vault receives the full funding owed.
+    // When funding owed exceeds margin, orders should be rejected so the
+    // position can be liquidated instead of silently forgiving debt.
+    // EXPECTED: Order on underwater position is cancelled (position unchanged).
     // BUG: Vault only receives min(owed, margin), rest is forgiven.
     // ==========================================
 
@@ -191,45 +190,31 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        (uint256 sizeAfterOpen, uint256 marginAfterOpen,, int256 entryFundingBefore,,) = engine.positions(accountId);
+        (uint256 sizeAfterOpen,,,,,) = engine.positions(accountId);
 
         vm.warp(block.timestamp + 180 days);
-
-        uint256 vaultBalanceBefore = usdc.balanceOf(address(pool));
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 500 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        uint256 vaultBalanceAfter = usdc.balanceOf(address(pool));
+        (uint256 sizeAfterSecond,,,,,) = engine.positions(accountId);
 
-        // Compute the full funding that was owed
-        int256 bullIndexAfter = engine.bullFundingIndex();
-        int256 indexDelta = bullIndexAfter - entryFundingBefore;
-        int256 fundingOwed = (int256(sizeAfterOpen) * indexDelta) / 1e18;
-        uint256 fullFundingLoss = uint256(-fundingOwed);
-
-        // CORRECT BEHAVIOR: The vault should receive the full funding amount owed.
-        // The increase in vault balance from funding settlement should equal the full debt.
-        // (Ignoring fees from the second order for clarity — they only make the
-        // vault balance higher, strengthening this assertion.)
-        assertGe(
-            vaultBalanceAfter - vaultBalanceBefore,
-            fullFundingLoss,
-            "Vault should collect full funding owed, not just available margin"
-        );
+        // CORRECT BEHAVIOR: The order was cancelled because funding > margin.
+        // Position size should be unchanged (no new size added, no bad debt created).
+        assertEq(sizeAfterSecond, sizeAfterOpen, "Order on underwater position should be cancelled");
     }
 
     // ==========================================
     // Finding 4: Stale vault depth solvency check
     // The solvency check should use the vault's ACTUAL balance at the time of
     // the check, not a stale snapshot from before funding settlement.
-    // EXPECTED: Vault balance after trade >= maxLiability (solvency maintained).
-    // BUG: Vault balance can drop below what was checked due to stale snapshot.
+    // EXPECTED: Order rejected when funding settlement drains vault below maxLiability.
+    // BUG: Order passes because solvency check uses stale pre-funding snapshot.
     // ==========================================
 
     function test_Finding4_StaleVaultDepth() public {
-        _fundJunior(bob, 500_000 * 1e6);
+        _fundJunior(bob, 210_000 * 1e6);
 
         address dave = address(0x444);
         _fundTrader(carol, 50_000 * 1e6);
@@ -244,27 +229,28 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        vm.warp(block.timestamp + 90 days);
+        bytes32 carolAccount = bytes32(uint256(uint160(carol)));
+        (uint256 sizeBefore,,,,,) = engine.positions(carolAccount);
 
-        uint256 vaultDepthSnapshot = usdc.balanceOf(address(pool));
+        vm.warp(block.timestamp + 90 days);
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.executeOrder(3, empty);
 
-        uint256 actualVaultBalance = usdc.balanceOf(address(pool));
+        (uint256 sizeAfter,,,,,) = engine.positions(carolAccount);
 
-        // CORRECT BEHAVIOR: The solvency check should use the actual vault balance
-        // at the point of the check, so the snapshot and post-trade balance should
-        // be consistent. If funding moved USDC out during processOrder, the check
-        // should have seen the reduced balance.
-        assertGe(actualVaultBalance, vaultDepthSnapshot, "Vault balance should not drop below what solvency check used");
+        // CORRECT BEHAVIOR: Funding settlement during processOrder drains the vault
+        // below maxLiability. The fresh solvency check catches this and reverts,
+        // causing the router to cancel the order. Position size is unchanged.
+        assertEq(sizeAfter, sizeBefore, "Order should be cancelled: vault insolvent after funding settlement");
     }
 
     // ==========================================
     // Finding 5: Close orders bypass slippage
     // Close orders should respect slippage protection just like opens.
-    // EXPECTED: Close at $0.50 reverts when targetPrice is $0.90.
+    // BULL benefits from low oracle price, so close should reject high prices.
+    // EXPECTED: BULL close at $1.50 rejected when targetPrice is $0.90.
     // BUG: Close executes at any price regardless of targetPrice.
     // ==========================================
 
@@ -277,17 +263,15 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Close with targetPrice = $0.90
+        // Close with targetPrice = $0.90 (BULL wants oracle <= target)
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0.9e8, true);
 
-        // Execute at $0.50 — far below the $0.90 target
+        // Execute at $1.50 — oracle went UP, bad for BULL ($1.50 > $0.90)
         bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(uint256(0.5e8));
+        pythData[0] = abi.encode(uint256(1.5e8));
         router.executeOrder(2, pythData);
 
-        // CORRECT BEHAVIOR: The close should have been cancelled due to slippage.
-        // The position should still be open.
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 size,,,,,) = engine.positions(carolAccount);
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
