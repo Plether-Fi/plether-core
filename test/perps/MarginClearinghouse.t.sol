@@ -128,7 +128,7 @@ contract MarginClearinghouseTest is Test {
 
         // 3. Alice tries to withdraw $2,000. MUST REVERT because it breaches locked margin.
         vm.prank(alice);
-        vm.expectRevert("Clearinghouse: Insufficient free equity");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
         clearinghouse.withdraw(aliceId, address(usdc), 2000 * 1e6);
 
         // 4. Alice withdraws exactly $1,000. MUST SUCCEED.
@@ -170,7 +170,7 @@ contract MarginClearinghouseTest is Test {
         assertEq(freeBp, 500 * 1e6, "Free BP should be $500");
 
         vm.prank(alice);
-        vm.expectRevert("Clearinghouse: Insufficient free equity");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
         clearinghouse.withdraw(aliceId, address(usdc), 1000 * 1e6);
     }
 
@@ -180,7 +180,7 @@ contract MarginClearinghouseTest is Test {
 
         vm.startPrank(alice);
         randomToken.approve(address(clearinghouse), type(uint256).max);
-        vm.expectRevert("Clearinghouse: Asset not supported");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__AssetNotSupported.selector);
         clearinghouse.deposit(aliceId, address(randomToken), 1000e18);
         vm.stopPrank();
     }
@@ -191,7 +191,7 @@ contract MarginClearinghouseTest is Test {
 
         address bob = address(0x222);
         vm.prank(bob);
-        vm.expectRevert("Clearinghouse: Not account owner");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotAccountOwner.selector);
         clearinghouse.withdraw(aliceId, address(usdc), 500 * 1e6);
     }
 
@@ -210,13 +210,13 @@ contract MarginClearinghouseTest is Test {
     }
 
     function test_SupportAsset_InvalidLTV_Reverts() public {
-        vm.expectRevert("Invalid LTV");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
         clearinghouse.supportAsset(address(0xBEEF), 18, 10_001, address(0));
     }
 
     function test_Deposit_ZeroAmount_Reverts() public {
         vm.prank(alice);
-        vm.expectRevert("Clearinghouse: Zero amount");
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ZeroAmount.selector);
         clearinghouse.deposit(aliceId, address(usdc), 0);
     }
 

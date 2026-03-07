@@ -100,7 +100,7 @@ contract LiquidationTest is Test {
 
         // Keeper tries to liquidate immediately. Should REVERT.
         vm.startPrank(keeper);
-        vm.expectRevert("CfdEngine: Position is solvent");
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
         vm.stopPrank();
 
@@ -181,7 +181,7 @@ contract LiquidationTest is Test {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        vm.expectRevert("CfdEngine: Position is solvent");
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
     }
 
@@ -238,7 +238,7 @@ contract LiquidationTest is Test {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         // Without funding, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
-        vm.expectRevert("CfdEngine: Position is solvent");
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
 
         // Warp 180 days — massive negative funding drains equity below MMR

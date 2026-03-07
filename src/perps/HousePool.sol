@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ICfdEngine} from "./ICfdEngine.sol";
-import {ICfdVault} from "./ICfdVault.sol";
-import {IHousePool} from "./IHousePool.sol";
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {IHousePool} from "./interfaces/IHousePool.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -12,12 +12,13 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// @title HousePool
 /// @notice Tranched house pool. Senior tranche gets fixed-rate yield with last-loss protection.
 ///         Junior tranche absorbs first loss but captures surplus revenue.
+/// @custom:security-contact contact@plether.com
 contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable usdc;
-    ICfdEngine public immutable engine;
+    IERC20 public immutable USDC;
+    ICfdEngine public immutable ENGINE;
 
     address public orderRouter;
     address public seniorVault;
@@ -32,11 +33,21 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
 
+    error HousePool__NotAVault();
+    error HousePool__RouterAlreadySet();
+    error HousePool__SeniorVaultAlreadySet();
+    error HousePool__JuniorVaultAlreadySet();
+    error HousePool__Unauthorized();
+    error HousePool__ExceedsMaxSeniorWithdraw();
+    error HousePool__ExceedsMaxJuniorWithdraw();
+
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
 
     modifier onlyVault() {
-        require(msg.sender == seniorVault || msg.sender == juniorVault, "HousePool: Not a vault");
+        if (msg.sender != seniorVault && msg.sender != juniorVault) {
+            revert HousePool__NotAVault();
+        }
         _;
     }
 
@@ -44,8 +55,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         address _usdc,
         address _engine
     ) Ownable(msg.sender) {
-        usdc = IERC20(_usdc);
-        engine = ICfdEngine(_engine);
+        USDC = IERC20(_usdc);
+        ENGINE = ICfdEngine(_engine);
         lastReconcileTime = block.timestamp;
         seniorRateBps = 800; // 8% APY default
     }
@@ -57,21 +68,27 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     function setOrderRouter(
         address _router
     ) external onlyOwner {
-        require(orderRouter == address(0), "HousePool: Router already set");
+        if (orderRouter != address(0)) {
+            revert HousePool__RouterAlreadySet();
+        }
         orderRouter = _router;
     }
 
     function setSeniorVault(
         address _vault
     ) external onlyOwner {
-        require(seniorVault == address(0), "HousePool: Senior vault already set");
+        if (seniorVault != address(0)) {
+            revert HousePool__SeniorVaultAlreadySet();
+        }
         seniorVault = _vault;
     }
 
     function setJuniorVault(
         address _vault
     ) external onlyOwner {
-        require(juniorVault == address(0), "HousePool: Junior vault already set");
+        if (juniorVault != address(0)) {
+            revert HousePool__JuniorVaultAlreadySet();
+        }
         juniorVault = _vault;
     }
 
@@ -88,15 +105,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     // ==========================================
 
     function totalAssets() external view returns (uint256) {
-        return usdc.balanceOf(address(this));
+        return USDC.balanceOf(address(this));
     }
 
     function payOut(
         address recipient,
         uint256 amount
     ) external {
-        require(msg.sender == address(engine) || msg.sender == orderRouter, "HousePool: Unauthorized");
-        usdc.safeTransfer(recipient, amount);
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter) {
+            revert HousePool__Unauthorized();
+        }
+        USDC.safeTransfer(recipient, amount);
     }
 
     // ==========================================
@@ -107,7 +126,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 amount
     ) external onlyVault {
         _reconcile();
-        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        USDC.safeTransferFrom(msg.sender, address(this), amount);
         seniorPrincipal += amount;
     }
 
@@ -116,16 +135,18 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         address receiver
     ) external onlyVault {
         _reconcile();
-        require(amount <= getMaxSeniorWithdraw(), "HousePool: Exceeds max senior withdraw");
+        if (amount > getMaxSeniorWithdraw()) {
+            revert HousePool__ExceedsMaxSeniorWithdraw();
+        }
         seniorPrincipal -= amount;
-        usdc.safeTransfer(receiver, amount);
+        USDC.safeTransfer(receiver, amount);
     }
 
     function depositJunior(
         uint256 amount
     ) external onlyVault {
         _reconcile();
-        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        USDC.safeTransferFrom(msg.sender, address(this), amount);
         juniorPrincipal += amount;
     }
 
@@ -134,9 +155,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         address receiver
     ) external onlyVault {
         _reconcile();
-        require(amount <= getMaxJuniorWithdraw(), "HousePool: Exceeds max junior withdraw");
+        if (amount > getMaxJuniorWithdraw()) {
+            revert HousePool__ExceedsMaxJuniorWithdraw();
+        }
         juniorPrincipal -= amount;
-        usdc.safeTransfer(receiver, amount);
+        USDC.safeTransfer(receiver, amount);
     }
 
     // ==========================================
@@ -144,9 +167,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     // ==========================================
 
     function getFreeUSDC() public view returns (uint256) {
-        uint256 bal = usdc.balanceOf(address(this));
-        uint256 bullMax = engine.globalBullMaxProfit();
-        uint256 bearMax = engine.globalBearMaxProfit();
+        uint256 bal = USDC.balanceOf(address(this));
+        uint256 bullMax = ENGINE.globalBullMaxProfit();
+        uint256 bearMax = ENGINE.globalBearMaxProfit();
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
         return bal > maxLiability ? bal - maxLiability : 0;
     }
@@ -177,8 +200,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
             return;
         }
 
-        uint256 bal = usdc.balanceOf(address(this));
-        uint256 pendingFees = engine.accumulatedFeesUsdc();
+        uint256 bal = USDC.balanceOf(address(this));
+        uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 distributable = bal > pendingFees ? bal - pendingFees : 0;
 
         if (distributable > claimedEquity) {

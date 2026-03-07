@@ -296,7 +296,7 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
 
         // CORRECT BEHAVIOR: Should revert on mainnet with mock oracle, same as executeLiquidation.
-        vm.expectRevert("OrderRouter: Mock mode disabled on live networks");
+        vm.expectRevert(OrderRouter.OrderRouter__MockModeDisabled.selector);
         router.executeOrder(1, empty);
     }
 

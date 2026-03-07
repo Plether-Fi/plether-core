@@ -385,17 +385,17 @@ contract HousePoolTest is Test {
     }
 
     function test_SetOrderRouter_Twice_Reverts() public {
-        vm.expectRevert("HousePool: Router already set");
+        vm.expectRevert(HousePool.HousePool__RouterAlreadySet.selector);
         pool.setOrderRouter(address(0x999));
     }
 
     function test_SetSeniorVault_Twice_Reverts() public {
-        vm.expectRevert("HousePool: Senior vault already set");
+        vm.expectRevert(HousePool.HousePool__SeniorVaultAlreadySet.selector);
         pool.setSeniorVault(address(0x999));
     }
 
     function test_SetJuniorVault_Twice_Reverts() public {
-        vm.expectRevert("HousePool: Junior vault already set");
+        vm.expectRevert(HousePool.HousePool__JuniorVaultAlreadySet.selector);
         pool.setJuniorVault(address(0x999));
     }
 
@@ -403,7 +403,7 @@ contract HousePoolTest is Test {
         _fundJunior(alice, 100_000 * 1e6);
 
         vm.prank(alice);
-        vm.expectRevert("HousePool: Unauthorized");
+        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
         pool.payOut(alice, 1000 * 1e6);
     }
 
