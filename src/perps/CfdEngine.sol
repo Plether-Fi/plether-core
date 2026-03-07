@@ -88,6 +88,12 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         orderRouter = _router;
     }
 
+    function setRiskParams(
+        CfdTypes.RiskParams memory _riskParams
+    ) external onlyOwner {
+        riskParams = _riskParams;
+    }
+
     function withdrawFees(
         address recipient
     ) external onlyOwner {
