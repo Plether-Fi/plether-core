@@ -78,6 +78,21 @@ contract CfdEngineTest is Test {
         bytes32 accountId = bytes32(uint256(1));
         _depositToClearinghouse(accountId, 5000 * 1e6);
 
+        // maxProfit = 1.2M tokens * $1 entry = $1.2M > vault's $1M balance
+        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1_200_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
+        engine.processOrder(tooLarge, 1e8, 1_000_000 * 1e6);
+
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
@@ -263,7 +278,7 @@ contract CfdEngineTest is Test {
         engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6);
     }
 
-    function test_FundingSettlement_PartialMarginDrain() public {
+    function test_FundingSettlement_ExceedsMargin_Reverts() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
         _depositToClearinghouse(accountId, 5000 * 1e6);
@@ -280,12 +295,8 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(openOrder, 1e8, vaultDepth);
 
-        (, uint256 marginAfterOpen,,,,) = engine.positions(accountId);
-
-        // Warp long enough for funding to exceed margin
         vm.warp(block.timestamp + 365 days);
 
-        // Add to position — triggers funding settlement
         CfdTypes.Order memory addOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 1000 * 1e18,
@@ -296,13 +307,8 @@ contract CfdEngineTest is Test {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
+        vm.expectRevert("CfdEngine: Funding exceeds margin, liquidate position");
         engine.processOrder(addOrder, 1e8, vaultDepth);
-
-        // Margin should have been drained by funding but not go negative
-        (, uint256 marginAfterSettle,,,,) = engine.positions(accountId);
-        // The funding loss was larger than original margin, so after settlement
-        // pos.margin was capped at 0, then new margin added
-        assertTrue(marginAfterSettle < marginAfterOpen + 1000 * 1e6, "Margin should reflect funding drain");
     }
 
     function test_EntryPriceAveraging() public {

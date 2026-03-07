@@ -91,10 +91,12 @@ contract MarginClearinghouse is Ownable2Step {
         require(assetConfigs[asset].isSupported, "Clearinghouse: Asset not supported");
         require(amount > 0, "Clearinghouse: Zero amount");
 
+        uint256 balBefore = IERC20(asset).balanceOf(address(this));
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        balances[accountId][asset] += amount;
+        uint256 received = IERC20(asset).balanceOf(address(this)) - balBefore;
+        balances[accountId][asset] += received;
 
-        emit Deposit(accountId, asset, amount);
+        emit Deposit(accountId, asset, received);
     }
 
     function withdraw(

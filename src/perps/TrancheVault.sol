@@ -29,8 +29,46 @@ contract TrancheVault is ERC4626 {
         IS_SENIOR = _isSenior;
     }
 
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 3;
+    }
+
     function totalAssets() public view override returns (uint256) {
         return IS_SENIOR ? pool.seniorPrincipal() : pool.juniorPrincipal();
+    }
+
+    function deposit(
+        uint256 assets,
+        address receiver
+    ) public override returns (uint256) {
+        pool.reconcile();
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(
+        uint256 shares,
+        address receiver
+    ) public override returns (uint256) {
+        pool.reconcile();
+        return super.mint(shares, receiver);
+    }
+
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address _owner
+    ) public override returns (uint256) {
+        pool.reconcile();
+        return super.withdraw(assets, receiver, _owner);
+    }
+
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address _owner
+    ) public override returns (uint256) {
+        pool.reconcile();
+        return super.redeem(shares, receiver, _owner);
     }
 
     function maxWithdraw(

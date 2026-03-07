@@ -193,12 +193,10 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
                 clearinghouse.lockMargin(order.accountId, gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
-                uint256 actualLoss = pos.margin >= loss ? loss : pos.margin;
-                pos.margin -= actualLoss;
-                if (actualLoss > 0) {
-                    clearinghouse.seizeAsset(order.accountId, address(usdc), actualLoss, address(vault));
-                    clearinghouse.unlockMargin(order.accountId, actualLoss);
-                }
+                require(pos.margin >= loss, "CfdEngine: Funding exceeds margin, liquidate position");
+                pos.margin -= loss;
+                clearinghouse.seizeAsset(order.accountId, address(usdc), loss, address(vault));
+                clearinghouse.unlockMargin(order.accountId, loss);
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         }

@@ -340,7 +340,7 @@ contract OrderRouterPythTest is Test {
         router.executeLiquidation(accountId, empty);
     }
 
-    function test_Slippage_CloseOrders_Bypass() public {
+    function test_Slippage_CloseOrders_Protected() public {
         vm.warp(1000);
         mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
 
@@ -355,8 +355,8 @@ contract OrderRouterPythTest is Test {
         (uint256 size,,,,,) = engine.positions(accountId);
         assertTrue(size > 0, "Position should exist");
 
-        // Close order: BEAR at targetPrice=1.5e8 but Pyth price=1e8
-        // BEAR slippage: 1e8 >= 1.5e8? No → would fail. But isClose=true → bypasses
+        // Close BEAR at targetPrice=1.5e8 but Pyth price=1e8
+        // BEAR slippage: 1e8 >= 1.5e8? No → order cancelled
         vm.warp(2000);
         mockPyth.setPrice(int64(100_000_000), int32(-8), 2001);
 
@@ -367,7 +367,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(2, empty);
 
         (size,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "Position should be closed despite slippage");
+        assertGt(size, 0, "Close should be rejected by slippage check");
     }
 
 }
