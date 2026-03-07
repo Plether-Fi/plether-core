@@ -118,6 +118,10 @@ contract OrderRouter {
                 _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
                 return;
             }
+            if (block.timestamp - pythData.publishTime > 60) {
+                _cancelOrder(orderId, "Oracle price too stale", pythFee);
+                return;
+            }
             executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
             executionPrice = order.targetPrice;
