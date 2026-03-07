@@ -167,17 +167,22 @@ contract CfdEngine is Ownable {
             require(order.isClose, "CfdEngine: Must explicitly close opposing position first");
         }
 
-        // Settle accumulated funding into pos.margin
+        // Settle accumulated funding into pos.margin AND sync clearinghouse
         int256 pendingFunding = getPendingFunding(pos);
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
-                pos.margin += uint256(pendingFunding);
+                uint256 gain = uint256(pendingFunding);
+                pos.margin += gain;
+                vault.payOut(address(clearinghouse), gain);
+                clearinghouse.settleUsdc(order.accountId, address(usdc), pendingFunding);
+                clearinghouse.lockMargin(order.accountId, gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
-                if (pos.margin >= loss) {
-                    pos.margin -= loss;
-                } else {
-                    pos.margin = 0;
+                uint256 actualLoss = pos.margin >= loss ? loss : pos.margin;
+                pos.margin -= actualLoss;
+                if (actualLoss > 0) {
+                    clearinghouse.seizeAsset(order.accountId, address(usdc), actualLoss, address(vault));
+                    clearinghouse.unlockMargin(order.accountId, actualLoss);
                 }
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;

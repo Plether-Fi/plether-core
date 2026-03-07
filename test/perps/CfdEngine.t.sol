@@ -150,4 +150,47 @@ contract CfdEngineTest is Test {
         assertTrue(bullFunding < 0, "Retail BULL should owe massive funding");
     }
 
+    function test_FundingSettlement_SyncsClearinghouse() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
+        // Open BULL $100k at $1.00
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        (, uint256 marginAfterOpen,,,,) = engine.positions(accountId);
+        uint256 lockedAfterOpen = clearinghouse.lockedMarginUsdc(accountId);
+        assertEq(lockedAfterOpen, marginAfterOpen, "lockedMargin == pos.margin after open");
+
+        // Warp 30 days — accumulates negative funding for lone BULL
+        vm.warp(block.timestamp + 30 days);
+
+        // Increase position — triggers funding settlement in processOrder
+        CfdTypes.Order memory addOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 500 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(addOrder, 1e8, vaultDepth);
+
+        (, uint256 marginAfterAdd,,,,) = engine.positions(accountId);
+        uint256 lockedAfterAdd = clearinghouse.lockedMarginUsdc(accountId);
+        assertEq(lockedAfterAdd, marginAfterAdd, "lockedMargin == pos.margin after funding settlement");
+    }
+
 }
