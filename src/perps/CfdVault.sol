@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {ICfdEngine} from "./ICfdEngine.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -9,56 +10,43 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /// @title CfdVault
 /// @notice The House Pool. Holds all USDC and strictly protects trader solvency.
-contract CfdVault is ERC4626 {
+contract CfdVault is ERC4626, Ownable {
 
     using SafeERC20 for IERC20;
 
     ICfdEngine public engine;
     address public orderRouter;
 
-    modifier onlyRouter() {
-        require(msg.sender == orderRouter, "CfdVault: Unauthorized");
-        _;
-    }
-
     constructor(
         IERC20 _usdc,
         address _engine
-    ) ERC4626(_usdc) ERC20("Plether House Pool", "cfdUSDC") {
+    ) ERC4626(_usdc) ERC20("Plether House Pool", "cfdUSDC") Ownable(msg.sender) {
         engine = ICfdEngine(_engine);
     }
 
     function setOrderRouter(
         address _router
-    ) external {
+    ) external onlyOwner {
         require(orderRouter == address(0), "CfdVault: Router already set");
         orderRouter = _router;
     }
 
     // ==========================================
-    // ROUTING FUNCTIONS
+    // SETTLEMENT
     // ==========================================
 
-    /// @notice Router sends trader margin and execution fees to the House
-    function routeToVault(
-        uint256 amountUsdc
-    ) external onlyRouter {
-        IERC20(asset()).safeTransferFrom(msg.sender, address(this), amountUsdc);
-    }
-
-    /// @notice Router pulls payouts and freed margin to return to the trader
-    function routeToTrader(
-        address trader,
-        uint256 amountUsdc
-    ) external onlyRouter {
-        IERC20(asset()).safeTransfer(trader, amountUsdc);
+    function payOut(
+        address recipient,
+        uint256 amount
+    ) external {
+        require(msg.sender == address(engine) || msg.sender == orderRouter, "CfdVault: Unauthorized");
+        IERC20(asset()).safeTransfer(recipient, amount);
     }
 
     // ==========================================
     // THE O(1) WITHDRAWAL FIREWALL
     // ==========================================
 
-    /// @notice Calculates strictly unencumbered capital available for LP withdrawal
     function getFreeUSDC() public view returns (uint256) {
         uint256 totalUsdc = totalAssets();
 
@@ -66,30 +54,45 @@ contract CfdVault is ERC4626 {
         uint256 bearMax = engine.globalBearMaxProfit();
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
 
-        // Total locked capital is Active Margin + Max Liability
-        uint256 lockedCapital = engine.globalMargin() + maxLiability;
-
-        if (totalUsdc <= lockedCapital) {
-            return 0; // 100% Utilization lock
+        if (totalUsdc <= maxLiability) {
+            return 0;
         }
-        return totalUsdc - lockedCapital;
+        return totalUsdc - maxLiability;
     }
 
     function maxWithdraw(
-        address owner
+        address _owner
     ) public view override returns (uint256) {
-        uint256 maxStandard = super.maxWithdraw(owner);
+        uint256 maxStandard = super.maxWithdraw(_owner);
         uint256 freeUsdc = getFreeUSDC();
         return maxStandard < freeUsdc ? maxStandard : freeUsdc;
     }
 
     function maxRedeem(
-        address owner
+        address _owner
     ) public view override returns (uint256) {
-        uint256 maxShares = super.maxRedeem(owner);
+        uint256 maxShares = super.maxRedeem(_owner);
         uint256 freeUsdc = getFreeUSDC();
         uint256 freeShares = previewWithdraw(freeUsdc);
         return maxShares < freeShares ? maxShares : freeShares;
+    }
+
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address _owner
+    ) public override returns (uint256) {
+        require(assets <= maxWithdraw(_owner), "CfdVault: Exceeds max withdraw");
+        return super.withdraw(assets, receiver, _owner);
+    }
+
+    function redeem(
+        uint256 shares,
+        address receiver,
+        address _owner
+    ) public override returns (uint256) {
+        require(shares <= maxRedeem(_owner), "CfdVault: Exceeds max redeem");
+        return super.redeem(shares, receiver, _owner);
     }
 
 }

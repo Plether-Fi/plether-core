@@ -4,9 +4,11 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Test, console} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract MockUSDC is ERC20 {
 
@@ -29,6 +31,7 @@ contract OrderRouterTest is Test {
     CfdEngine engine;
     CfdVault vault;
     OrderRouter router;
+    MarginClearinghouse clearinghouse;
 
     uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
@@ -49,12 +52,17 @@ contract OrderRouterTest is Test {
             bountyBps: 15
         });
 
-        engine = new CfdEngine(CAP_PRICE, params);
-        vault = new CfdVault(usdc, address(engine));
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
-        // Use address(0) for Pyth in test to trigger the mock fallback mode
-        router = new OrderRouter(address(engine), address(vault), address(usdc), address(0), bytes32(0));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), address(0), CAP_PRICE, params);
+        vault = new CfdVault(IERC20(address(usdc)), address(engine));
+        engine.setVault(address(vault));
 
+        router = new OrderRouter(address(engine), address(vault), address(0), bytes32(0));
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
         vault.setOrderRouter(address(router));
 
@@ -65,39 +73,41 @@ contract OrderRouterTest is Test {
         vault.deposit(1_000_000 * 1e6, bob);
         vm.stopPrank();
 
-        // Fund Trader (Alice)
+        // Fund Trader (Alice): deposit to clearinghouse
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(router), type(uint256).max);
-        vm.deal(alice, 10 ether); // Keeper bounties
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        vm.deal(alice, 10 ether);
         vm.stopPrank();
     }
 
     function test_UnbrickableQueue_OnEngineRevert() public {
-        // 1. Bob withdraws all Vault funds so Solvency check will fail
+        // Bob withdraws all Vault funds so Solvency check will fail
         vm.prank(bob);
         vault.withdraw(1_000_000 * 1e6, bob, bob);
 
-        // 2. Alice commits a trade
+        // Alice commits a trade (no USDC escrowed, just the order)
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        uint256 aliceBalBefore = usdc.balanceOf(alice);
-
-        // 3. Keeper executes. Engine will REVERT inside the Try/Catch!
+        // Keeper executes. Engine will REVERT inside the Try/Catch
         bytes[] memory emptyPayload;
         router.executeOrder(1, emptyPayload);
 
-        // 4. Assertions: Tx succeeded, Queue advanced, Margin fully refunded
+        // Queue MUST advance even if Engine reverts
         assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
-        assertEq(usdc.balanceOf(alice), aliceBalBefore + 1000 * 1e6, "Margin must be refunded completely");
 
-        (uint256 size,,,,,) = engine.positions(bytes32(uint256(uint160(alice))));
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
+
+        // Alice's clearinghouse balance is untouched (nothing was escrowed)
+        assertEq(clearinghouse.balances(accountId, address(usdc)), 10_000 * 1e6, "Clearinghouse balance untouched");
     }
 
     function test_WithdrawalFirewall() public {
-        // Alice opens a trade
+        // Alice commits and executes a trade
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -105,14 +115,11 @@ contract OrderRouterTest is Test {
         router.executeOrder(1, empty);
 
         uint256 maxLiability = engine.globalBullMaxProfit();
-        uint256 lockedCapital = engine.globalMargin() + maxLiability;
         uint256 freeUsdc = vault.getFreeUSDC();
 
-        assertEq(freeUsdc, vault.totalAssets() - lockedCapital, "Firewall did not lock Max Liability + Margin");
-        assertTrue(lockedCapital > 50_000 * 1e6, "Locked capital must include max profit");
-        assertTrue(engine.globalMargin() > 0, "Margin must be tracked");
+        assertEq(freeUsdc, vault.totalAssets() - maxLiability, "Firewall locks only Max Liability");
+        assertEq(maxLiability, 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
-        // Bob tries to withdraw EVERYTHING, but is strictly capped at freeUsdc
         uint256 bobMaxWithdraw = vault.maxWithdraw(bob);
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
     }

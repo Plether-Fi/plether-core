@@ -3,14 +3,37 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {Test, console} from "forge-std/Test.sol";
+import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
+
+contract MockUSDC is ERC20 {
+
+    constructor() ERC20("Mock USDC", "USDC") {}
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
+        _mint(to, amount);
+    }
+
+}
 
 contract CfdEngineTest is Test {
 
+    MockUSDC usdc;
     CfdEngine engine;
-    uint256 constant CAP_PRICE = 2e8; // $2.00
+    CfdVault vault;
+    MarginClearinghouse clearinghouse;
+
+    uint256 constant CAP_PRICE = 2e8;
 
     function setUp() public {
+        usdc = new MockUSDC();
+
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
@@ -23,17 +46,37 @@ contract CfdEngineTest is Test {
             bountyBps: 15
         });
 
-        engine = new CfdEngine(CAP_PRICE, params);
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
-        // Mock the OrderRouter to be this test contract
+        engine = new CfdEngine(address(usdc), address(clearinghouse), address(0), CAP_PRICE, params);
+        vault = new CfdVault(IERC20(address(usdc)), address(engine));
+        engine.setVault(address(vault));
+
+        clearinghouse.setOperator(address(engine), true);
         engine.setOrderRouter(address(this));
+
+        // Fund vault with LP depth for solvency + payouts
+        usdc.mint(address(vault), 1_000_000 * 1e6);
+    }
+
+    function _depositToClearinghouse(
+        bytes32 accountId,
+        uint256 amount
+    ) internal {
+        usdc.mint(address(this), amount);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
     }
 
     function test_OpenPosition_SolvencyCheck() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 5000 * 1e6);
+
         CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: bytes32(uint256(1)),
-            sizeDelta: 100_000 * 1e18, // 100k Size
-            marginDelta: 2000 * 1e6, // $2k margin
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -41,28 +84,27 @@ contract CfdEngineTest is Test {
             isClose: false
         });
 
-        // Try to open 100k BULL with only $50k in the vault
-        // Max theoretical liability is $100k. It MUST REVERT.
         vm.expectRevert("CfdEngine: Vault Solvency Capacity Exceeded");
         engine.processOrder(order, 1e8, 50_000 * 1e6);
 
-        // With $200k in the vault, it safely succeeds
         int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6);
+        assertEq(settlement, 0, "processOrder always returns 0");
 
-        // User pays margin, so settlement must be < 0
-        assertEq(settlement, -int256(2000 * 1e6), "Settlement should pull exact margin");
-
-        (uint256 size, uint256 margin,,,,) = engine.positions(bytes32(uint256(1)));
+        (uint256 size, uint256 margin,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
         assertTrue(margin < 2000 * 1e6, "Margin should be reduced by VPI and fees");
     }
 
     function test_FundingAccumulation() public {
-        uint256 vaultDepth = 1_000_000 * 1e6; // $1M vault
+        uint256 vaultDepth = 1_000_000 * 1e6;
 
-        // 1. Retail opens massive BULL position (Creates SKEW)
+        bytes32 account1 = bytes32(uint256(1));
+        bytes32 account2 = bytes32(uint256(2));
+        _depositToClearinghouse(account1, 5000 * 1e6);
+        _depositToClearinghouse(account2, 5000 * 1e6);
+
         CfdTypes.Order memory retailLong = CfdTypes.Order({
-            accountId: bytes32(uint256(1)),
+            accountId: account1,
             sizeDelta: 100_000 * 1e18,
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
@@ -73,12 +115,10 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(retailLong, 1e8, vaultDepth);
 
-        // 2. Fast forward 30 days
         vm.warp(block.timestamp + 30 days);
 
-        // 3. Market Maker opens BEAR position to trigger the lazy funding update
         CfdTypes.Order memory mmShort = CfdTypes.Order({
-            accountId: bytes32(uint256(2)),
+            accountId: account2,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 500 * 1e6,
             targetPrice: 1e8,
@@ -89,17 +129,13 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(mmShort, 1e8, vaultDepth);
 
-        // BULL index should be NEGATIVE (they paid for creating the skew)
         int256 bullIndex = engine.bullFundingIndex();
         assertTrue(bullIndex < 0, "BULL index should decrease");
 
-        // BEAR index should be POSITIVE (they received a subsidy for healing the skew)
         int256 bearIndex = engine.bearFundingIndex();
         assertTrue(bearIndex > 0, "BEAR index should increase");
 
-        // Check BULL pending funding PnL
-        (uint256 size,, uint256 entryPrice, int256 entryFunding, CfdTypes.Side side,) =
-            engine.positions(bytes32(uint256(1)));
+        (uint256 size,, uint256 entryPrice, int256 entryFunding, CfdTypes.Side side,) = engine.positions(account1);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: size,

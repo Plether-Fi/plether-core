@@ -4,9 +4,11 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {CfdVault} from "../../src/perps/CfdVault.sol";
+import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Test, console} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract MockUSDC is ERC20 {
 
@@ -27,14 +29,13 @@ contract LiquidationTest is Test {
     CfdEngine engine;
     CfdVault vault;
     OrderRouter router;
+    MarginClearinghouse clearinghouse;
 
     uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address keeper = address(0x999);
 
-    // Wed, Oct 16, 2024, 12:00:00 UTC (Wednesday - Normal Margin)
     uint256 constant WEDNESDAY_NOON = 1_729_080_000;
-    // Fri, Oct 18, 2024, 20:00:00 UTC (Friday - FAD Active)
     uint256 constant FRIDAY_EVENING = 1_729_281_600;
 
     receive() external payable {}
@@ -47,34 +48,42 @@ contract LiquidationTest is Test {
             kinkSkewRatio: 0.25e18,
             baseApy: 0,
             maxApy: 0,
-            maintMarginBps: 100, // 1%
-            fadMarginBps: 300, // 3%
-            minBountyUsdc: 5 * 1e6, // $5
-            bountyBps: 15 // 0.15%
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
         });
 
-        engine = new CfdEngine(CAP_PRICE, params);
-        vault = new CfdVault(usdc, address(engine));
-        router = new OrderRouter(address(engine), address(vault), address(usdc), address(0), bytes32(0));
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), address(0), CAP_PRICE, params);
+        vault = new CfdVault(IERC20(address(usdc)), address(engine));
+        engine.setVault(address(vault));
+        router = new OrderRouter(address(engine), address(vault), address(0), bytes32(0));
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
         vault.setOrderRouter(address(router));
 
-        usdc.mint(address(vault), 1_000_000 * 1e6); // LP depth
-        usdc.mint(alice, 10_000 * 1e6);
+        usdc.mint(address(vault), 1_000_000 * 1e6);
 
+        // Fund trader via clearinghouse
+        usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(router), type(uint256).max);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
         vm.stopPrank();
     }
 
     function test_FridayAutoDeleverage() public {
-        // 1. Start on a Wednesday
         vm.warp(WEDNESDAY_NOON);
         assertEq(
             engine.getMaintenanceMarginUsdc(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday"
         );
 
-        // 2. Alice opens 50x BULL (Size $100k, Margin $2k)
+        // Alice opens 50x BULL (Size $100k, Margin $2k)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
@@ -83,13 +92,13 @@ contract LiquidationTest is Test {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        // 3. Keeper tries to liquidate immediately. Should REVERT because $2k margin > $1k required.
+        // Keeper tries to liquidate immediately. Should REVERT.
         vm.startPrank(keeper);
         vm.expectRevert("CfdEngine: Position is solvent");
         router.executeLiquidation(accountId, empty);
         vm.stopPrank();
 
-        // 4. Time travel to Friday 20:00 UTC! (FAD Window activates)
+        // FAD Window activates
         vm.warp(FRIDAY_EVENING);
         assertEq(
             engine.getMaintenanceMarginUsdc(100_000 * 1e18, 1e8),
@@ -97,25 +106,32 @@ contract LiquidationTest is Test {
             "MMR should jump to 3.0% ($3k) on Friday evening"
         );
 
-        // 5. Keeper liquidates. Because required margin is $3k and Alice only has $2k, she is liquidatable.
+        // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.
         uint256 keeperBalBefore = usdc.balanceOf(keeper);
 
         vm.startPrank(keeper);
         router.executeLiquidation(accountId, empty);
         vm.stopPrank();
 
-        // 6. Assertions
         (uint256 size,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
         assertEq(bounty, 150 * 1e6, "Keeper should receive $150 USDC bounty (0.15% of $100k)");
+
+        // Ethical: Alice keeps surplus equity
+        // Opening: exec fee = 6 bps of $100k = $60. pos.margin = $2000 - $60 = $1940.
+        // Clearinghouse after open: $10k - $60 (fee seized) = $9940. Locked = $1940.
+        // Liquidation: equity = $1940 + $0 (PnL) = $1940. Bounty = $150.
+        // residual = $1940 - $150 = $1790. toSeize = $1940 - $1790 = $150.
+        // Clearinghouse after liq: $9940 - $150 = $9790.
+        uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
+        assertEq(chBalance, 9790 * 1e6, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
-        // Alice opens 50x BULL (Size 100k at $1.00 = $100k notional. Margin = $2k)
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -123,7 +139,7 @@ contract LiquidationTest is Test {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         // BULL loses when price rises. Price rises to $1.015
-        // PnL = -$0.015 * 100k = -$1500. Remaining equity = $2000 - $1500 = $500
+        // PnL = -$0.015 * 100k = -$1500. Equity = $2000 - $1500 = $500
         // Required margin = 1% of $101.5k = $1015. $500 < $1015 → liquidatable
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
@@ -139,6 +155,13 @@ contract LiquidationTest is Test {
 
         (uint256 size,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
+
+        // Ethical: user should retain equity - bounty
+        // PnL = -$1500, Margin = $2000, Equity = $500
+        // Bounty ~ 0.15% * $101.5k = $152.25, but min $5 → $152.25
+        // Residual = $500 - $152.25 = $347.75
+        uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
+        assertTrue(chBalance > 8000 * 1e6, "Alice retains most of her clearinghouse balance");
     }
 
 }

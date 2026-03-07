@@ -19,6 +19,6 @@ interface ICfdEngine {
 
     function globalBullMaxProfit() external view returns (uint256);
     function globalBearMaxProfit() external view returns (uint256);
-    function globalMargin() external view returns (uint256);
+    function accumulatedFeesUsdc() external view returns (uint256);
 
 }

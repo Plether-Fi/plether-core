@@ -3,34 +3,38 @@ pragma solidity 0.8.33;
 
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
+import {ICfdVault} from "./ICfdVault.sol";
+import {IMarginClearinghouse} from "./IMarginClearinghouse.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title CfdEngine
-/// @notice The core mathematical ledger and clearinghouse for Plether CFDs.
-/// @dev Holds NO funds. Exclusively manages O(1) Solvency and Funding.
-contract CfdEngine {
+/// @notice The core mathematical ledger for Plether CFDs.
+/// @dev Settles all funds through the MarginClearinghouse and CfdVault.
+contract CfdEngine is Ownable {
 
     uint256 public immutable CAP_PRICE;
+
+    IERC20 public immutable usdc;
+    IMarginClearinghouse public clearinghouse;
+    ICfdVault public vault;
 
     // ==========================================
     // GLOBAL STATE & SOLVENCY BOUNDS
     // ==========================================
 
-    // Max theoretical payouts in USDC (6 decimals)
     uint256 public globalBullMaxProfit;
     uint256 public globalBearMaxProfit;
 
-    // Aggregate user margin held by the engine (6 decimals)
-    uint256 public globalMargin;
-
-    // Open Interest in Notional Size (18 decimals)
     uint256 public bullOI;
     uint256 public bearOI;
+
+    uint256 public accumulatedFeesUsdc;
 
     // ==========================================
     // FUNDING ACCUMULATORS
     // ==========================================
 
-    // Stored as 6-decimal USDC per 1e18 Size
     int256 public bullFundingIndex;
     int256 public bearFundingIndex;
     uint64 public lastFundingTime;
@@ -38,7 +42,6 @@ contract CfdEngine {
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => CfdTypes.Position) public positions;
 
-    // Auth (Only the MEV-Shield Router can call this)
     address public orderRouter;
 
     // Events
@@ -57,17 +60,30 @@ contract CfdEngine {
     }
 
     constructor(
+        address _usdc,
+        address _clearinghouse,
+        address _vault,
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams
-    ) {
+    ) Ownable(msg.sender) {
+        usdc = IERC20(_usdc);
+        clearinghouse = IMarginClearinghouse(_clearinghouse);
+        vault = ICfdVault(_vault);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
         lastFundingTime = uint64(block.timestamp);
     }
 
+    function setVault(
+        address _vault
+    ) external onlyOwner {
+        require(address(vault) == address(0), "CfdEngine: Vault already set");
+        vault = ICfdVault(_vault);
+    }
+
     function setOrderRouter(
         address _router
-    ) external {
+    ) external onlyOwner {
         require(orderRouter == address(0), "CfdEngine: Router already set");
         orderRouter = _router;
     }
@@ -76,11 +92,10 @@ contract CfdEngine {
     // 1. CONTINUOUS FUNDING SYSTEM
     // ==========================================
 
-    /// @notice Lazily updates the dual signed accumulators based on current skew
-    function updateFunding(
+    function _updateFunding(
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
-    ) public {
+    ) internal {
         uint256 timeDelta = block.timestamp - lastFundingTime;
         if (timeDelta == 0) {
             return;
@@ -102,18 +117,14 @@ contract CfdEngine {
 
         if (absSkew > 0 && vaultDepthUsdc > 0) {
             uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
-
-            // Multiply first, divide last
             uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
-
-            // Convert APY to "USDC per 1e18 Size"
             uint256 stepUsdc = (currentOraclePrice * fundingDelta) / CfdMath.USDC_TO_TOKEN_SCALE;
             int256 step = int256(stepUsdc);
 
             if (step > 0) {
                 if (bullMajority) {
-                    bullFundingIndex -= step; // Majority Pays (Index drops)
-                    bearFundingIndex += step; // Minority Receives (Index rises)
+                    bullFundingIndex -= step;
+                    bearFundingIndex += step;
                 } else {
                     bearFundingIndex -= step;
                     bullFundingIndex += step;
@@ -125,7 +136,6 @@ contract CfdEngine {
         emit FundingUpdated(bullFundingIndex, bearFundingIndex, absSkew);
     }
 
-    /// @notice Calculates pending funding PnL for a specific position
     function getPendingFunding(
         CfdTypes.Position memory pos
     ) public view returns (int256 fundingUsdc) {
@@ -134,8 +144,6 @@ contract CfdEngine {
         }
         int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         int256 indexDelta = currentIndex - pos.entryFundingIndex;
-
-        // Size(18) * IndexDelta(6) / 1e18 = USDC(6)
         fundingUsdc = (int256(pos.size) * indexDelta) / int256(CfdMath.WAD);
     }
 
@@ -143,54 +151,46 @@ contract CfdEngine {
     // 2. ORDER PROCESSING & NETTING
     // ==========================================
 
-    /// @notice Executes an intent, updates the ledger, and returns the net cash flow required.
-    /// @return settlementUsdc Positive = Protocol pays User. Negative = User pays Protocol.
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
-    ) external onlyRouter returns (int256 settlementUsdc) {
-        // Clamp oracle price to CAP to enforce O(1) mathematical safety bounds
+    ) external onlyRouter returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
 
-        // 1. Always update global funding state first
-        updateFunding(price, vaultDepthUsdc);
+        _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[order.accountId];
         uint256 preSkewUsdc = _getAbsSkewUsdc(price);
 
-        // 2. Strict Netting Rule (No-Flip enforcement)
         if (pos.size > 0 && pos.side != order.side) {
             require(order.isClose, "CfdEngine: Must explicitly close opposing position first");
         }
 
-        // 3. Settle accumulated funding PnL directly into the margin
+        // Settle accumulated funding into pos.margin
         int256 pendingFunding = getPendingFunding(pos);
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
                 pos.margin += uint256(pendingFunding);
-                globalMargin += uint256(pendingFunding);
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 if (pos.margin >= loss) {
                     pos.margin -= loss;
-                    globalMargin -= loss;
                 } else {
-                    globalMargin -= pos.margin;
-                    pos.margin = 0; // Liquidatable
+                    pos.margin = 0;
                 }
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         }
 
-        // 4. State Transitions
         if (order.isClose) {
-            settlementUsdc = _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
+            _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
         } else {
-            settlementUsdc = _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
+            _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
         }
 
         pos.lastUpdateTime = uint64(block.timestamp);
+        return 0;
     }
 
     // ==========================================
@@ -203,8 +203,7 @@ contract CfdEngine {
         uint256 price,
         uint256 preSkewUsdc,
         uint256 vaultDepthUsdc
-    ) internal returns (int256 settlementUsdc) {
-        // O(1) Solvency Check
+    ) internal {
         uint256 newMaxProfit = CfdMath.calculateMaxProfit(order.sizeDelta, price, order.side, CAP_PRICE);
         _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta, vaultDepthUsdc);
 
@@ -224,24 +223,33 @@ contract CfdEngine {
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000; // 6 bps
+        uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
 
-        // Subtract costs from user's provided margin delta
         int256 tradeCost = vpiUsdc + int256(execFeeUsdc);
         int256 netMarginChange = int256(order.marginDelta) - tradeCost;
 
-        if (netMarginChange > 0) {
-            pos.margin += uint256(netMarginChange);
-            globalMargin += uint256(netMarginChange);
-        } else {
-            uint256 deficit = uint256(-netMarginChange);
-            require(pos.margin >= deficit, "CfdEngine: Margin drained by fees and VPI");
-            pos.margin -= deficit;
-            globalMargin -= deficit;
+        // Settle costs between user and vault via clearinghouse
+        if (tradeCost > 0) {
+            clearinghouse.seizeAsset(order.accountId, address(usdc), uint256(tradeCost), address(vault));
+        } else if (tradeCost < 0) {
+            uint256 rebate = uint256(-tradeCost);
+            vault.payOut(address(clearinghouse), rebate);
+            clearinghouse.settleUsdc(order.accountId, address(usdc), int256(rebate));
         }
 
+        // Lock net margin in clearinghouse and track in position
+        if (netMarginChange > 0) {
+            clearinghouse.lockMargin(order.accountId, uint256(netMarginChange));
+            pos.margin += uint256(netMarginChange);
+        } else if (netMarginChange < 0) {
+            uint256 deficit = uint256(-netMarginChange);
+            require(pos.margin >= deficit, "CfdEngine: Margin drained by fees and VPI");
+            clearinghouse.unlockMargin(order.accountId, deficit);
+            pos.margin -= deficit;
+        }
+
+        accumulatedFeesUsdc += execFeeUsdc;
         emit PositionOpened(order.accountId, order.side, order.sizeDelta, price, order.marginDelta);
-        return -int256(order.marginDelta); // User pays margin to Protocol
     }
 
     function _processDecrease(
@@ -250,7 +258,7 @@ contract CfdEngine {
         uint256 price,
         uint256 preSkewUsdc,
         uint256 vaultDepthUsdc
-    ) internal returns (int256 settlementUsdc) {
+    ) internal {
         require(pos.size >= order.sizeDelta, "CfdEngine: Close size exceeds open position");
 
         CfdTypes.Position memory closedPart = pos;
@@ -261,12 +269,15 @@ contract CfdEngine {
         // Free proportionate margin
         uint256 marginToFree = (pos.margin * order.sizeDelta) / pos.size;
         pos.margin -= marginToFree;
-        globalMargin -= marginToFree;
-        pos.size -= order.sizeDelta;
 
-        // Free up Vault Capacity
+        // Reduce liability BEFORE size mutation
         uint256 maxProfitReduction = CfdMath.calculateMaxProfit(order.sizeDelta, pos.entryPrice, pos.side, CAP_PRICE);
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
+
+        pos.size -= order.sizeDelta;
+
+        // Unlock freed margin in clearinghouse
+        clearinghouse.unlockMargin(order.accountId, marginToFree);
 
         // VPI & Fee Calculations
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
@@ -275,15 +286,23 @@ contract CfdEngine {
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
 
-        int256 totalPayout = int256(marginToFree) + realizedPnl - vpiUsdc - int256(execFeeUsdc);
-        require(totalPayout >= 0, "CfdEngine: Close payout cannot be negative");
+        // Net settlement = PnL - costs
+        int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc);
+
+        if (netSettlement > 0) {
+            vault.payOut(address(clearinghouse), uint256(netSettlement));
+            clearinghouse.settleUsdc(order.accountId, address(usdc), netSettlement);
+        } else if (netSettlement < 0) {
+            clearinghouse.seizeAsset(order.accountId, address(usdc), uint256(-netSettlement), address(vault));
+        }
+
+        accumulatedFeesUsdc += execFeeUsdc;
 
         emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
 
         if (pos.size == 0) {
             delete positions[order.accountId];
         }
-        return totalPayout; // Protocol pays User
     }
 
     function _getAbsSkewUsdc(
@@ -329,27 +348,23 @@ contract CfdEngine {
     // LIQUIDATIONS & FAD
     // ==========================================
 
-    /// @notice Determines if the Friday Auto-Deleverage (FAD) is active
-    /// @dev Friday 19:00 UTC to Sunday 22:00 UTC
     function isFadWindow() public view returns (bool) {
-        // Unix epoch 0 (Jan 1 1970) was a Thursday (Day 4)
         uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
         uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
 
         if (dayOfWeek == 5 && hourOfDay >= 19) {
-            return true; // Friday >= 19:00 UTC
+            return true;
         }
         if (dayOfWeek == 6) {
-            return true; // Saturday all day
+            return true;
         }
         if (dayOfWeek == 0 && hourOfDay < 22) {
-            return true; // Sunday < 22:00 UTC
+            return true;
         }
 
         return false;
     }
 
-    /// @notice Returns required Maintenance Margin in USDC (6 dec)
     function getMaintenanceMarginUsdc(
         uint256 size,
         uint256 currentOraclePrice
@@ -359,15 +374,15 @@ contract CfdEngine {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
-    /// @notice Forcefully closes an undercollateralized position
-    /// @return keeperBountyUsdc The USDC reward sent to the Liquidator
+    /// @notice Ethically liquidates an undercollateralized position.
+    ///         Seizes only what's needed; user keeps any surplus equity.
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
     ) external onlyRouter returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
-        updateFunding(price, vaultDepthUsdc);
+        _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[accountId];
         require(pos.size > 0, "CfdEngine: No position to liquidate");
@@ -383,22 +398,41 @@ contract CfdEngine {
         uint256 mmUsdc = getMaintenanceMarginUsdc(pos.size, price);
         require(equityUsdc < int256(mmUsdc), "CfdEngine: Position is solvent");
 
-        // 3. Free up global liability caps and margin lock
+        // 3. Free global liabilities
         uint256 maxProfitReduction = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
         _reduceGlobalLiability(pos.side, maxProfitReduction, pos.size);
-        globalMargin -= pos.margin; // Clear isolated margin from Vault lock tracker
 
-        // 4. Calculate Keeper Bounty (Proportional for L2 gas wars)
+        // 4. Keeper Bounty
         uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
-
         if (keeperBountyUsdc < riskParams.minBountyUsdc) {
-            keeperBountyUsdc = riskParams.minBountyUsdc; // Minimum $5 gas floor
+            keeperBountyUsdc = riskParams.minBountyUsdc;
+        }
+
+        // 5. Ethical settlement via clearinghouse
+        uint256 posMargin = pos.margin;
+        clearinghouse.unlockMargin(accountId, posMargin);
+
+        int256 residual = equityUsdc - int256(keeperBountyUsdc);
+
+        if (residual >= 0) {
+            if (uint256(residual) <= posMargin) {
+                uint256 toSeize = posMargin - uint256(residual);
+                if (toSeize > 0) {
+                    clearinghouse.seizeAsset(accountId, address(usdc), toSeize, address(vault));
+                }
+            } else {
+                uint256 toPay = uint256(residual) - posMargin;
+                vault.payOut(address(clearinghouse), toPay);
+                clearinghouse.settleUsdc(accountId, address(usdc), int256(toPay));
+            }
+        } else {
+            if (posMargin > 0) {
+                clearinghouse.seizeAsset(accountId, address(usdc), posMargin, address(vault));
+            }
         }
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
-
-        // 5. Delete Position
         delete positions[accountId];
     }
 
