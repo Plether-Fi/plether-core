@@ -77,9 +77,11 @@ contract PerpHandler is Test {
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
 
-        usdc.mint(address(this), marginFuzz);
+        usdc.mint(trader, marginFuzz);
+        vm.startPrank(trader);
         usdc.approve(address(clearinghouse), marginFuzz);
         clearinghouse.deposit(accountId, address(usdc), marginFuzz);
+        vm.stopPrank();
         ghost_totalDeposited += marginFuzz;
 
         uint64 commitId = router.nextCommitId();
@@ -230,9 +232,11 @@ contract PerpInvariantTest is Test {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            usdc.mint(address(this), 10_000e6);
+            usdc.mint(trader, 10_000e6);
+            vm.startPrank(trader);
             usdc.approve(address(clearinghouse), 10_000e6);
             clearinghouse.deposit(accountId, address(usdc), 10_000e6);
+            vm.stopPrank();
         }
 
         seniorHighWaterMark = pool.seniorPrincipal();

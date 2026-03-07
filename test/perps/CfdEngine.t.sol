@@ -69,9 +69,12 @@ contract CfdEngineTest is Test {
         bytes32 accountId,
         uint256 amount
     ) internal {
-        usdc.mint(address(this), amount);
+        address user = address(uint160(uint256(accountId)));
+        usdc.mint(user, amount);
+        vm.startPrank(user);
         usdc.approve(address(clearinghouse), amount);
         clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
     }
 
     function test_OpenPosition_SolvencyCheck() public {

@@ -101,6 +101,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         require(fees > 0, "CfdEngine: No fees to withdraw");
         accumulatedFeesUsdc = 0;
         vault.payOut(recipient, fees);
+        _assertPostSolvency();
     }
 
     // ==========================================
@@ -420,11 +421,14 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         uint256 maxProfitReduction = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
         _reduceGlobalLiability(pos.side, maxProfitReduction, pos.size);
 
-        // 4. Keeper Bounty
+        // 4. Keeper Bounty (capped at equity to prevent bad debt)
         uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
         if (keeperBountyUsdc < riskParams.minBountyUsdc) {
             keeperBountyUsdc = riskParams.minBountyUsdc;
+        }
+        if (equityUsdc > 0 && keeperBountyUsdc > uint256(equityUsdc)) {
+            keeperBountyUsdc = uint256(equityUsdc);
         }
 
         // 5. Ethical settlement via clearinghouse
@@ -453,7 +457,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
 
-        _assertPostSolvency();
+        // Solvency check includes the keeper bounty that the router will pay out after this returns
+        uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+        require(vault.totalAssets() >= maxLiability + keeperBountyUsdc, "CfdEngine: Post-liq solvency breach");
     }
 
     function _assertPostSolvency() internal view {

@@ -88,6 +88,7 @@ contract MarginClearinghouse is Ownable2Step {
         address asset,
         uint256 amount
     ) external {
+        require(bytes32(uint256(uint160(msg.sender))) == accountId, "Clearinghouse: Not account owner");
         require(assetConfigs[asset].isSupported, "Clearinghouse: Asset not supported");
         require(amount > 0, "Clearinghouse: Zero amount");
 
