@@ -292,7 +292,7 @@ contract CfdEngineTest is Test {
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1100 * 1e6,
+            marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -511,11 +511,11 @@ contract CfdEngineTest is Test {
         bytes32 accountId = bytes32(uint256(1));
         _depositToClearinghouse(accountId, 10_000 * 1e6);
 
-        // Open BULL 100k tokens at $1.00 with $1100 margin (meets initial margin)
+        // Open BULL 100k tokens at $1.00 with $1600 margin (meets 1.5x initial margin)
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1100 * 1e6,
+            marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -585,7 +585,7 @@ contract CfdEngineTest is Test {
         CfdTypes.Order memory first = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1500 * 1e6,
+            marginDelta: 1600 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -599,7 +599,7 @@ contract CfdEngineTest is Test {
         CfdTypes.Order memory second = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 200_000 * 1e18,
-            marginDelta: 2500 * 1e6,
+            marginDelta: 3200 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
             orderId: 2,
@@ -692,7 +692,7 @@ contract CfdEngineTest is Test {
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 1100 * 1e6,
+            marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -706,7 +706,7 @@ contract CfdEngineTest is Test {
 
         uint256 vaultBefore = usdc.balanceOf(address(pool));
 
-        // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1040) - $10k = negative
+        // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
         engine.liquidatePosition(accountId, 1.1e8, vaultDepth);
 
         (uint256 size,,,,,,) = engine.positions(accountId);

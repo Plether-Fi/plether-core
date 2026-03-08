@@ -23,6 +23,7 @@ contract TrancheVault is ERC4626 {
     mapping(address => uint256) public lastDepositTime;
 
     error TrancheVault__DepositCooldown();
+    error TrancheVault__TransferDuringCooldown();
 
     constructor(
         IERC20 _usdc,
@@ -38,6 +39,19 @@ contract TrancheVault is ERC4626 {
     /// @dev Virtual share offset mitigates ERC4626 first-depositor inflation attack
     function _decimalsOffset() internal pure override returns (uint8) {
         return 3;
+    }
+
+    function _update(
+        address from,
+        address to,
+        uint256 amount
+    ) internal override {
+        if (from != address(0) && to != address(0)) {
+            if (block.timestamp < lastDepositTime[from] + DEPOSIT_COOLDOWN) {
+                revert TrancheVault__TransferDuringCooldown();
+            }
+        }
+        super._update(from, to, amount);
     }
 
     function totalAssets() public view override returns (uint256) {

@@ -152,10 +152,12 @@ contract OrderRouter {
         try engine.processOrder(order, executionPrice, vaultDepth) {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
-            _cancelOrder(orderId, reason, pythFee);
+            emit OrderFailed(orderId, reason);
+            _finalizeExecution(orderId, pythFee);
             return;
         } catch {
-            _cancelOrder(orderId, "Engine Math Panic", pythFee);
+            emit OrderFailed(orderId, "Engine Math Panic");
+            _finalizeExecution(orderId, pythFee);
             return;
         }
 
@@ -241,11 +243,7 @@ contract OrderRouter {
                 emit OrderFailed(orderId, "Engine Math Panic");
             }
 
-            if (success) {
-                totalKeeperFees += _cleanupOrder(orderId);
-            } else {
-                _refundOrderFee(orderId, order);
-            }
+            totalKeeperFees += _cleanupOrder(orderId);
         }
 
         uint256 totalOut = totalKeeperFees + (msg.value - pythFee);
