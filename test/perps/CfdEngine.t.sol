@@ -34,6 +34,7 @@ contract CfdEngineTest is Test {
     uint256 constant CAP_PRICE = 2e8;
 
     function setUp() public {
+        vm.warp(1_709_532_000); // Monday 2024-03-04 10:00 UTC (avoids FAD window)
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
@@ -108,6 +109,7 @@ contract CfdEngineTest is Test {
         });
 
         // Withdraw LP to reduce vault to $50k — solvency check should fail
+        vm.warp(block.timestamp + 1 hours); // past deposit cooldown
         juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
         vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
         engine.processOrder(order, 1e8, 0);
@@ -289,7 +291,7 @@ contract CfdEngineTest is Test {
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
-            marginDelta: 500 * 1e6,
+            marginDelta: 1100 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             orderId: 1,
@@ -500,6 +502,76 @@ contract CfdEngineTest is Test {
             isClose: false
         });
         vm.expectRevert(CfdEngine.CfdEngine__MarginDrainedByFees.selector);
+        engine.processOrder(order, 1e8, vaultDepth);
+    }
+
+    function test_C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 10_000 * 1e6);
+
+        // Open BULL 100k tokens at $1.00 with $1100 margin (meets initial margin)
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 1100 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        // Warp 365 days — funding will far exceed margin
+        vm.warp(block.timestamp + 365 days);
+
+        // Price dropped to $0.50 → BULL has $50k unrealized profit
+        // User should be able to close and receive profit minus funding minus fees
+        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 0.5e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+
+        // This should NOT revert — the position is profitable despite funding > margin
+        engine.processOrder(closeOrder, 0.5e8, vaultDepth);
+
+        (uint256 size,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position should be fully closed");
+
+        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        assertGt(chAfter, chBefore, "User should net positive after profitable close minus funding");
+    }
+
+    function test_C2_InsufficientInitialMargin_Reverts() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 10_000 * 1e6);
+
+        // notional = 100k * $1 = $100k. execFee = $60, VPI ≈ $2.50
+        // MMR = 1% of $100k = $1000
+        // marginDelta = $100 covers fees but leaves pos.margin ≈ $37, far below MMR
+        // Without initial margin check, this succeeds and creates an instantly-liquidatable position
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 100 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         engine.processOrder(order, 1e8, vaultDepth);
     }
 

@@ -18,6 +18,11 @@ contract TrancheVault is ERC4626 {
 
     IHousePool public immutable POOL;
     bool public immutable IS_SENIOR;
+    uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
+
+    mapping(address => uint256) public lastDepositTime;
+
+    error TrancheVault__DepositCooldown();
 
     constructor(
         IERC20 _usdc,
@@ -104,6 +109,7 @@ contract TrancheVault is ERC4626 {
             POOL.depositJunior(assets);
         }
         _mint(receiver, shares);
+        lastDepositTime[receiver] = block.timestamp;
         emit Deposit(caller, receiver, assets, shares);
     }
 
@@ -114,6 +120,9 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares
     ) internal override {
+        if (block.timestamp < lastDepositTime[_owner] + DEPOSIT_COOLDOWN) {
+            revert TrancheVault__DepositCooldown();
+        }
         if (caller != _owner) {
             _spendAllowance(_owner, caller, shares);
         }

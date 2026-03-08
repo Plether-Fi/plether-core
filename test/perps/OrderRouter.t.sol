@@ -131,6 +131,7 @@ contract OrderRouterTest is Test {
 
     function test_UnbrickableQueue_OnEngineRevert() public {
         // Bob withdraws all Vault funds so Solvency check will fail
+        vm.warp(block.timestamp + 1 hours); // past deposit cooldown
         vm.prank(bob);
         juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
 
@@ -482,6 +483,34 @@ contract OrderRouterPythTest is Test {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "Only order 1 should execute, order 2 MEV-cancelled");
+    }
+
+    function test_C1_CancelledOrder_RefundsUser_NotKeeper() public {
+        vm.warp(1000);
+        // Set oracle price published at t=999, BEFORE commit at t=1000 → stale
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 999);
+
+        // Alice commits with 0.1 ETH keeper fee
+        vm.prank(alice);
+        router.commitOrder{value: 0.1 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        address keeper = address(0xBEEF);
+        vm.deal(keeper, 1 ether);
+        uint256 keeperBalBefore = keeper.balance;
+
+        // Keeper executes with no Pyth update — stale price triggers cancellation
+        vm.warp(1050);
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(1, empty);
+
+        // Keeper should NOT receive Alice's 0.1 ETH fee
+        assertEq(keeper.balance, keeperBalBefore, "Keeper should not profit from cancellation");
+
+        // Alice should be able to claim her refunded ETH
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint256 aliceClaimable = router.claimableEth(alice);
+        assertEq(aliceClaimable, 0.1 ether, "Alice's keeper fee should be refundable");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {

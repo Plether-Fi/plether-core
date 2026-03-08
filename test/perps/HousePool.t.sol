@@ -407,4 +407,19 @@ contract HousePoolTest is Test {
         pool.payOut(alice, 1000 * 1e6);
     }
 
+    function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
+        _fundJunior(alice, 100_000 * 1e6);
+
+        // Alice deposits and tries to withdraw in the same block
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.prank(alice);
+        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+
+        // After cooldown passes, withdrawal succeeds
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(alice);
+        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+        assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Withdrawal after cooldown succeeds");
+    }
+
 }

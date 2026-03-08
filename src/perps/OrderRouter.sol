@@ -219,27 +219,33 @@ contract OrderRouter {
 
             if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
                 emit OrderFailed(orderId, "MEV: Oracle price is stale");
-                totalKeeperFees += _cleanupOrder(orderId);
+                _refundOrderFee(orderId, order);
                 continue;
             }
 
             if (!_checkSlippage(order, executionPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                totalKeeperFees += _cleanupOrder(orderId);
+                _refundOrderFee(orderId, order);
                 continue;
             }
 
             uint256 vaultDepth = vault.totalAssets();
+            bool success;
 
             try engine.processOrder(order, executionPrice, vaultDepth) {
                 emit OrderExecuted(orderId, executionPrice);
+                success = true;
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
             }
 
-            totalKeeperFees += _cleanupOrder(orderId);
+            if (success) {
+                totalKeeperFees += _cleanupOrder(orderId);
+            } else {
+                _refundOrderFee(orderId, order);
+            }
         }
 
         uint256 totalOut = totalKeeperFees + (msg.value - pythFee);
@@ -264,13 +270,47 @@ contract OrderRouter {
         nextExecuteId++;
     }
 
+    function _refundOrderFee(
+        uint64 orderId,
+        CfdTypes.Order memory order
+    ) internal {
+        uint256 fee = keeperFees[orderId];
+        delete keeperFees[orderId];
+        delete orders[orderId];
+        nextExecuteId++;
+        if (fee > 0) {
+            address user = address(uint160(uint256(order.accountId)));
+            claimableEth[user] += fee;
+        }
+    }
+
     function _cancelOrder(
         uint64 orderId,
         string memory reason,
         uint256 pythFee
     ) internal {
         emit OrderFailed(orderId, reason);
-        _finalizeExecution(orderId, pythFee);
+
+        CfdTypes.Order memory order = orders[orderId];
+        uint256 fee = keeperFees[orderId];
+        delete keeperFees[orderId];
+        delete orders[orderId];
+        nextExecuteId++;
+
+        // Refund keeper fee to user, not to the cancelling keeper
+        if (fee > 0) {
+            address user = address(uint160(uint256(order.accountId)));
+            claimableEth[user] += fee;
+        }
+
+        // Return only the keeper's own excess ETH (msg.value minus Pyth fee)
+        uint256 refund = msg.value - pythFee;
+        if (refund > 0) {
+            (bool success,) = payable(msg.sender).call{value: refund}("");
+            if (!success) {
+                claimableEth[msg.sender] += refund;
+            }
+        }
     }
 
     function _finalizeExecution(

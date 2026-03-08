@@ -60,6 +60,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__PositionIsSolvent();
     error CfdEngine__PostLiqSolvencyBreach();
     error CfdEngine__PostOpSolvencyBreach();
+    error CfdEngine__InsufficientInitialMargin();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -214,6 +215,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         }
 
         int256 pendingFunding = getPendingFunding(pos);
+        uint256 unsettledFundingDebt;
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
                 uint256 gain = uint256(pendingFunding);
@@ -224,17 +226,26 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 if (pos.margin < loss) {
-                    revert CfdEngine__FundingExceedsMargin();
+                    if (!order.isClose) {
+                        revert CfdEngine__FundingExceedsMargin();
+                    }
+                    unsettledFundingDebt = loss - pos.margin;
+                    if (pos.margin > 0) {
+                        clearinghouse.seizeAsset(order.accountId, address(USDC), pos.margin, address(vault));
+                        clearinghouse.unlockMargin(order.accountId, pos.margin);
+                    }
+                    pos.margin = 0;
+                } else {
+                    pos.margin -= loss;
+                    clearinghouse.seizeAsset(order.accountId, address(USDC), loss, address(vault));
+                    clearinghouse.unlockMargin(order.accountId, loss);
                 }
-                pos.margin -= loss;
-                clearinghouse.seizeAsset(order.accountId, address(USDC), loss, address(vault));
-                clearinghouse.unlockMargin(order.accountId, loss);
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         }
 
         if (order.isClose) {
-            _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
+            _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
         } else {
             _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
         }
@@ -299,6 +310,12 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         }
 
         accumulatedFeesUsdc += execFeeUsdc;
+
+        uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
+        if (pos.margin < mmr) {
+            revert CfdEngine__InsufficientInitialMargin();
+        }
+
         emit PositionOpened(order.accountId, order.side, order.sizeDelta, price, order.marginDelta);
     }
 
@@ -307,7 +324,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         CfdTypes.Position storage pos,
         uint256 price,
         uint256 preSkewUsdc,
-        uint256 vaultDepthUsdc
+        uint256 vaultDepthUsdc,
+        uint256 unsettledFundingDebt
     ) internal {
         if (pos.size < order.sizeDelta) {
             revert CfdEngine__CloseSizeExceedsPosition();
@@ -334,7 +352,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
 
-        int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc);
+        int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
         if (netSettlement > 0) {
             vault.payOut(address(clearinghouse), uint256(netSettlement));
