@@ -721,6 +721,53 @@ contract CfdEngineTest is Test {
         assertTrue(totalRecovered > 0, "Vault should recover more than zero from bad debt liquidation");
     }
 
+    function test_LiquidationWorksWhenVaultInsolvent() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 aliceId = bytes32(uint256(1));
+        bytes32 bobId = bytes32(uint256(2));
+        _depositToClearinghouse(aliceId, 50_000 * 1e6);
+        _depositToClearinghouse(bobId, 50_000 * 1e6);
+
+        CfdTypes.Order memory aliceOpen = CfdTypes.Order({
+            accountId: aliceId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(aliceOpen, 1e8, vaultDepth);
+
+        CfdTypes.Order memory bobOpen = CfdTypes.Order({
+            accountId: bobId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        engine.processOrder(bobOpen, 1e8, vaultDepth);
+
+        // Drain vault to simulate insolvency (pool has ~$1M + fees, maxLiab = $200k)
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 810_000 * 1e6);
+
+        uint256 maxLiab = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
+            ? engine.globalBullMaxProfit()
+            : engine.globalBearMaxProfit();
+        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
+
+        // Price rises to $1.10 — BULL loses $20k, deeply underwater
+        engine.liquidatePosition(aliceId, 1.1e8, vaultDepth);
+
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        assertEq(aliceSize, 0, "Liquidation must succeed during insolvency");
+    }
+
     function test_Liquidate_EmptyPosition_Reverts() public {
         bytes32 accountId = bytes32(uint256(1));
         vm.expectRevert(CfdEngine.CfdEngine__NoPositionToLiquidate.selector);

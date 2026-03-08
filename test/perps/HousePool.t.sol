@@ -471,6 +471,27 @@ contract HousePoolTest is Test {
         juniorVault.withdraw(500_000 * 1e6, carol, carol);
     }
 
+    function test_DustDepositGriefing_DoesNotResetCooldown() public {
+        _fundJunior(alice, 100_000 * 1e6);
+
+        vm.warp(block.timestamp + 50 minutes);
+
+        // Attacker deposits 1 wei on behalf of alice to grief her cooldown
+        address attacker = address(0xBAD);
+        usdc.mint(attacker, 1);
+        vm.startPrank(attacker);
+        usdc.approve(address(juniorVault), 1);
+        juniorVault.deposit(1, alice);
+        vm.stopPrank();
+
+        // Alice's cooldown should still be mostly elapsed (weighted average),
+        // not fully reset. She can withdraw after the remaining ~10 minutes.
+        vm.warp(block.timestamp + 11 minutes);
+        vm.prank(alice);
+        juniorVault.withdraw(100_000 * 1e6, alice, alice);
+        assertEq(usdc.balanceOf(alice), 100_000 * 1e6);
+    }
+
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
         _fundJunior(alice, 100_000 * 1e6);
 

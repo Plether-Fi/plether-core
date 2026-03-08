@@ -58,7 +58,6 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__CloseSizeExceedsPosition();
     error CfdEngine__NoPositionToLiquidate();
     error CfdEngine__PositionIsSolvent();
-    error CfdEngine__PostLiqSolvencyBreach();
     error CfdEngine__PostOpSolvencyBreach();
     error CfdEngine__InsufficientInitialMargin();
 
@@ -523,11 +522,6 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
-
-        uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        if (vault.totalAssets() < maxLiability + keeperBountyUsdc) {
-            revert CfdEngine__PostLiqSolvencyBreach();
-        }
     }
 
     function _assertPostSolvency() internal view {
