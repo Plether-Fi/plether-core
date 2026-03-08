@@ -407,6 +407,70 @@ contract HousePoolTest is Test {
         pool.payOut(alice, 1000 * 1e6);
     }
 
+    function test_H6_ReconcileSpam_DoesNotEraseSeniorYield() public {
+        _fundSenior(alice, 500_000 * 1e6);
+        _fundJunior(bob, 500_000 * 1e6);
+
+        usdc.mint(address(pool), 100_000 * 1e6);
+
+        // Use absolute timestamps to avoid block.timestamp caching in test call frame
+        uint256 t0 = block.timestamp;
+        for (uint256 i = 1; i <= 365; i++) {
+            vm.warp(t0 + i * 1 days);
+            pool.reconcile();
+        }
+
+        // Senior's total claim = seniorPrincipal + unpaidSeniorYield
+        // Should be ~$540k (8% * $500k = $40k yield) regardless of reconcile frequency.
+        uint256 totalSeniorClaim = pool.seniorPrincipal() + pool.unpaidSeniorYield();
+        assertGe(totalSeniorClaim, 540_000 * 1e6 - 1e6, "Senior total claim must reflect 8% APY");
+
+        // Inject fresh revenue to pay unpaid yield
+        usdc.mint(address(pool), 50_000 * 1e6);
+        vm.warp(t0 + 366 days);
+        pool.reconcile();
+
+        // Now unpaidSeniorYield should be mostly paid from fresh revenue
+        assertGe(pool.seniorPrincipal(), 540_000 * 1e6 - 1e6, "Senior principal catches up when revenue arrives");
+    }
+
+    function test_M12_GetFreeUSDC_ReservesFees() public {
+        _fundJunior(bob, 500_000 * 1e6);
+
+        address trader = address(0x444);
+        usdc.mint(trader, 50_000 * 1e6);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), 50_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(trader))), address(usdc), 50_000 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertTrue(fees > 0, "Fees should accrue");
+
+        uint256 freeUSDC = pool.getFreeUSDC();
+        uint256 vaultBal = usdc.balanceOf(address(pool));
+        uint256 maxLiability = engine.globalBullMaxProfit();
+
+        assertTrue(freeUSDC <= vaultBal - maxLiability - fees, "Free USDC must exclude pending fees");
+    }
+
+    function test_M10_JitLP_BlockedByCooldown() public {
+        _fundJunior(bob, 500_000 * 1e6);
+
+        _fundJunior(carol, 500_000 * 1e6);
+
+        usdc.mint(address(pool), 50_000 * 1e6);
+
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.prank(carol);
+        juniorVault.withdraw(500_000 * 1e6, carol, carol);
+    }
+
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
         _fundJunior(alice, 100_000 * 1e6);
 

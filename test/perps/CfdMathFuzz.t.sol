@@ -50,7 +50,13 @@ contract CfdMathFuzzTest is Test {
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
 
         CfdTypes.Position memory pos = CfdTypes.Position({
-            size: size, margin: 0, entryPrice: entryPrice, entryFundingIndex: 0, side: side, lastUpdateTime: 0
+            size: size,
+            margin: 0,
+            entryPrice: entryPrice,
+            maxProfitUsdc: 0,
+            entryFundingIndex: 0,
+            side: side,
+            lastUpdateTime: 0
         });
 
         (bool isProfit, uint256 pnlUsdc) = CfdMath.calculatePnL(pos, currentPrice, CAP_PRICE);

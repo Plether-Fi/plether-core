@@ -121,7 +121,7 @@ contract CfdEngineTest is Test {
         int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6);
         assertEq(settlement, 0, "processOrder always returns 0");
 
-        (uint256 size, uint256 margin,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
         assertTrue(margin < 2000 * 1e6, "Margin should be reduced by VPI and fees");
     }
@@ -166,12 +166,13 @@ contract CfdEngineTest is Test {
         int256 bearIndex = engine.bearFundingIndex();
         assertTrue(bearIndex > 0, "BEAR index should increase");
 
-        (uint256 size,, uint256 entryPrice, int256 entryFunding, CfdTypes.Side side,) = engine.positions(account1);
+        (uint256 size,, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,) = engine.positions(account1);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: size,
             margin: 0,
             entryPrice: entryPrice,
+            maxProfitUsdc: 0,
             entryFundingIndex: entryFunding,
             side: side,
             lastUpdateTime: 0
@@ -199,7 +200,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(openOrder, 1e8, vaultDepth);
 
-        (, uint256 marginAfterOpen,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterOpen,,,,,) = engine.positions(accountId);
         uint256 lockedAfterOpen = clearinghouse.lockedMarginUsdc(accountId);
         assertEq(lockedAfterOpen, marginAfterOpen, "lockedMargin == pos.margin after open");
 
@@ -219,7 +220,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(addOrder, 1e8, vaultDepth);
 
-        (, uint256 marginAfterAdd,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterAdd,,,,,) = engine.positions(accountId);
         uint256 lockedAfterAdd = clearinghouse.lockedMarginUsdc(accountId);
         assertEq(lockedAfterAdd, marginAfterAdd, "lockedMargin == pos.margin after funding settlement");
     }
@@ -334,7 +335,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(first, 0.8e8, vaultDepth);
 
-        (,, uint256 entryAfterFirst,,,) = engine.positions(accountId);
+        (,, uint256 entryAfterFirst,,,,) = engine.positions(accountId);
         assertEq(entryAfterFirst, 0.8e8, "Entry should be $0.80");
 
         // Add 30k tokens at $1.20 → weighted avg = (10k*0.80 + 30k*1.20) / 40k = $1.10
@@ -350,7 +351,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(second, 1.2e8, vaultDepth);
 
-        (uint256 totalSize,, uint256 avgEntry,,,) = engine.positions(accountId);
+        (uint256 totalSize,, uint256 avgEntry,,,,) = engine.positions(accountId);
         assertEq(totalSize, 40_000 * 1e18, "Total size should be 40k");
         assertEq(avgEntry, 1.1e8, "Weighted avg entry should be $1.10");
     }
@@ -429,7 +430,7 @@ contract CfdEngineTest is Test {
         uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth);
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
 
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
     }
 
@@ -544,7 +545,7 @@ contract CfdEngineTest is Test {
         // This should NOT revert — the position is profitable despite funding > margin
         engine.processOrder(closeOrder, 0.5e8, vaultDepth);
 
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
 
         uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
@@ -573,6 +574,151 @@ contract CfdEngineTest is Test {
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         engine.processOrder(order, 1e8, vaultDepth);
+    }
+
+    function test_H8_CloseAfterBlendedEntry_DoesNotUnderflow() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 10_000 * 1e6);
+
+        // Open BEAR 100k tokens at price $1.00000001 (just above $1.00)
+        CfdTypes.Order memory first = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 1500 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        engine.processOrder(first, 100_000_001, vaultDepth);
+
+        // Open BEAR 200k tokens at price $1.00 — blends entry to 100_000_000 (truncated from .33)
+        // Sum of individual maxProfits < maxProfit(blended) due to integer truncation
+        CfdTypes.Order memory second = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 2500 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        engine.processOrder(second, 100_000_000, vaultDepth);
+
+        // Close entire position — must not underflow in _reduceGlobalLiability
+        CfdTypes.Order memory close = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 300_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 3,
+            side: CfdTypes.Side.BEAR,
+            isClose: true
+        });
+        engine.processOrder(close, 100_000_000, vaultDepth);
+
+        (uint256 size,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position should be fully closed");
+        assertEq(engine.globalBearMaxProfit(), 0, "Global bear max profit should be zero");
+    }
+
+    function test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency() public {
+        vm.warp(block.timestamp + 1 hours);
+        juniorVault.withdraw(800_000 * 1e6, address(this), address(this));
+
+        uint256 vaultDepth = 200_000 * 1e6;
+        bytes32 aliceId = bytes32(uint256(1));
+        bytes32 bobId = bytes32(uint256(2));
+        _depositToClearinghouse(aliceId, 50_000 * 1e6);
+        _depositToClearinghouse(bobId, 50_000 * 1e6);
+
+        CfdTypes.Order memory aliceOpen = CfdTypes.Order({
+            accountId: aliceId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(aliceOpen, 1e8, vaultDepth);
+
+        CfdTypes.Order memory bobOpen = CfdTypes.Order({
+            accountId: bobId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        engine.processOrder(bobOpen, 1e8, vaultDepth);
+
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 60_000 * 1e6);
+
+        uint256 maxLiab = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
+            ? engine.globalBullMaxProfit()
+            : engine.globalBearMaxProfit();
+        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
+
+        CfdTypes.Order memory aliceClose = CfdTypes.Order({
+            accountId: aliceId,
+            sizeDelta: 200_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 3,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        engine.processOrder(aliceClose, 1e8, vaultDepth);
+
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        assertEq(aliceSize, 0, "Close should succeed during insolvency");
+    }
+
+    function test_M11_LiquidationSeizesFreeEquity() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 50_000 * 1e6);
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 1100 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        engine.processOrder(openOrder, 1e8, vaultDepth);
+
+        uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        assertTrue(freeEquityBefore > 0, "User should have free equity beyond locked margin");
+
+        uint256 vaultBefore = usdc.balanceOf(address(pool));
+
+        // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1040) - $10k = negative
+        engine.liquidatePosition(accountId, 1.1e8, vaultDepth);
+
+        (uint256 size,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position should be liquidated");
+
+        uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        assertTrue(freeEquityAfter < freeEquityBefore, "Free equity should be reduced to cover bad debt");
+
+        uint256 vaultAfter = usdc.balanceOf(address(pool));
+        uint256 totalRecovered = vaultAfter - vaultBefore;
+        (, uint256 posMarginStored,,,,,) = engine.positions(accountId);
+        assertTrue(totalRecovered > 0, "Vault should recover more than zero from bad debt liquidation");
     }
 
     function test_Liquidate_EmptyPosition_Reverts() public {

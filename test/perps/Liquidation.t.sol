@@ -119,7 +119,7 @@ contract LiquidationTest is Test {
         router.executeLiquidation(accountId, empty);
         vm.stopPrank();
 
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
@@ -159,7 +159,7 @@ contract LiquidationTest is Test {
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
         assertTrue(bounty > 0, "Keeper should get bounty");
 
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
         // Ethical: user should retain equity - bounty
@@ -249,7 +249,7 @@ contract LiquidationTest is Test {
         vm.prank(keeper);
         router.executeLiquidation(accountId, empty);
 
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position liquidated by funding drain alone");
         assertTrue(usdc.balanceOf(keeper) > keeperBal, "Keeper received bounty");
     }
@@ -263,7 +263,7 @@ contract LiquidationTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (, uint256 posMargin,,,,) = engine.positions(accountId);
+        (, uint256 posMargin,,,,,) = engine.positions(accountId);
 
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balances(accountId, address(usdc));

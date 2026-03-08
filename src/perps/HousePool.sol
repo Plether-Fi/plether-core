@@ -26,6 +26,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     uint256 public seniorPrincipal;
     uint256 public juniorPrincipal;
+    uint256 public unpaidSeniorYield;
 
     uint256 public lastReconcileTime;
     uint256 public seniorRateBps;
@@ -174,7 +175,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
-        return bal > maxLiability ? bal - maxLiability : 0;
+        uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
+        uint256 reserved = maxLiability + pendingFees;
+        return bal > reserved ? bal - reserved : 0;
     }
 
     /// @notice Max USDC the senior tranche can withdraw (limited by free USDC)
@@ -201,10 +204,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     }
 
     function _reconcile() internal {
+        uint256 elapsed = block.timestamp - lastReconcileTime;
+        lastReconcileTime = block.timestamp;
+
         uint256 claimedEquity = seniorPrincipal + juniorPrincipal;
         if (claimedEquity == 0) {
-            lastReconcileTime = block.timestamp;
             return;
+        }
+
+        if (elapsed > 0 && seniorPrincipal > 0) {
+            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
+            unpaidSeniorYield += yieldInc;
         }
 
         uint256 bal = USDC.balanceOf(address(this));
@@ -216,23 +226,20 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         } else if (distributable < claimedEquity) {
             _absorbLoss(claimedEquity - distributable);
         }
-
-        lastReconcileTime = block.timestamp;
     }
 
     function _distributeRevenue(
         uint256 revenue
     ) internal {
-        uint256 elapsed = block.timestamp - lastReconcileTime;
-        uint256 seniorYield = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
-
-        if (seniorYield > revenue) {
-            seniorYield = revenue;
+        uint256 seniorPayout = unpaidSeniorYield;
+        if (seniorPayout > revenue) {
+            seniorPayout = revenue;
         }
 
-        seniorPrincipal += seniorYield;
+        seniorPrincipal += seniorPayout;
+        unpaidSeniorYield -= seniorPayout;
 
-        uint256 juniorSurplus = revenue - seniorYield;
+        uint256 juniorSurplus = revenue - seniorPayout;
         juniorPrincipal += juniorSurplus;
 
         emit Reconciled(seniorPrincipal, juniorPrincipal, int256(revenue));

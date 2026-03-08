@@ -37,6 +37,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6, // $2k margin (50x leverage)
             entryPrice: 1e8,
+            maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0
@@ -58,6 +59,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6,
             entryPrice: 1e8,
+            maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0
@@ -188,6 +190,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6,
             entryPrice: 0.8e8,
+            maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0
@@ -206,7 +209,13 @@ contract CfdMathTest is Test {
 
     function test_CalculatePnL_ZeroSize() public pure {
         CfdTypes.Position memory pos = CfdTypes.Position({
-            size: 0, margin: 0, entryPrice: 1e8, entryFundingIndex: 0, side: CfdTypes.Side.BULL, lastUpdateTime: 0
+            size: 0,
+            margin: 0,
+            entryPrice: 1e8,
+            maxProfitUsdc: 0,
+            entryFundingIndex: 0,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0
         });
 
         (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 1.5e8, CAP_PRICE);

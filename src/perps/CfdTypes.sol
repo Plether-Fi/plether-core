@@ -18,6 +18,7 @@ library CfdTypes {
         uint256 size; // [18 dec] Notional size in synthetic tokens
         uint256 margin; // [6 dec] Isolated margin backing this position
         uint256 entryPrice; // [8 dec] Oracle price of BEAR at execution
+        uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         int256 entryFundingIndex; // [18 dec WAD] Global funding index at the time of entry
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification

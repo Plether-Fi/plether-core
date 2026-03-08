@@ -3,6 +3,15 @@ pragma solidity 0.8.33;
 
 interface IMarginClearinghouse {
 
+    /// @notice Returns the balance of an asset for an account
+    function balances(
+        bytes32 accountId,
+        address asset
+    ) external view returns (uint256);
+    /// @notice Returns the locked USDC margin for an account
+    function lockedMarginUsdc(
+        bytes32 accountId
+    ) external view returns (uint256);
     /// @notice Locks margin to back a new CFD position
     function lockMargin(
         bytes32 accountId,

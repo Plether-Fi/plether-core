@@ -250,7 +250,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
         }
 
-        _assertPostSolvency();
+        if (!order.isClose) {
+            _assertPostSolvency();
+        }
         pos.lastUpdateTime = uint64(block.timestamp);
         return 0;
     }
@@ -268,6 +270,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     ) internal {
         uint256 newMaxProfit = CfdMath.calculateMaxProfit(order.sizeDelta, price, order.side, CAP_PRICE);
         _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta);
+        pos.maxProfitUsdc += newMaxProfit;
 
         if (pos.size == 0) {
             pos.entryPrice = price;
@@ -339,7 +342,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         uint256 marginToFree = (pos.margin * order.sizeDelta) / pos.size;
         pos.margin -= marginToFree;
 
-        uint256 maxProfitReduction = CfdMath.calculateMaxProfit(order.sizeDelta, pos.entryPrice, pos.side, CAP_PRICE);
+        uint256 maxProfitReduction = (pos.maxProfitUsdc * order.sizeDelta) / pos.size;
+        pos.maxProfitUsdc -= maxProfitReduction;
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
 
         pos.size -= order.sizeDelta;
@@ -472,8 +476,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             revert CfdEngine__PositionIsSolvent();
         }
 
-        uint256 maxProfitReduction = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
-        _reduceGlobalLiability(pos.side, maxProfitReduction, pos.size);
+        _reduceGlobalLiability(pos.side, pos.maxProfitUsdc, pos.size);
 
         uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
@@ -503,6 +506,14 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         } else {
             if (posMargin > 0) {
                 clearinghouse.seizeAsset(accountId, address(USDC), posMargin, address(vault));
+            }
+            uint256 deficit = uint256(-residual);
+            uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
+            uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+            uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
+            if (freeUsdc > 0) {
+                uint256 toSeize = freeUsdc < deficit ? freeUsdc : deficit;
+                clearinghouse.seizeAsset(accountId, address(USDC), toSeize, address(vault));
             }
         }
 

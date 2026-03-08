@@ -200,14 +200,14 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 50_000e18, "Position should be 50k tokens");
 
         // Close at $0.90 (BULL profits when price drops)
         vm.warp(block.timestamp + 60);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(90_000_000), true);
 
-        (size,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed");
 
         // Verify USDC conservation across all contracts
@@ -274,7 +274,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "MEV stale price should cancel order");
 
         // 60-second order staleness boundary — too stale
@@ -288,7 +288,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(2, empty);
 
-        (size,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "61-second stale price should cancel order");
 
         // Within boundary: should succeed
@@ -302,7 +302,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(3, empty);
 
-        (size,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "59-second-old price should succeed");
 
         // Cleanup: close position
@@ -345,7 +345,7 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should exist");
 
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
@@ -361,7 +361,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeLiquidation(aliceId, empty);
 
-        (size,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be liquidated");
 
         uint256 keeperGain = IERC20(USDC).balanceOf(keeper) - keeperBefore;
@@ -399,7 +399,7 @@ contract PerpsForkTest is Test {
         assertLt(executeGas, 500_000, "executeOrder should use < 500k gas");
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position must exist for liquidation test");
 
         // Move price to make position liquidatable
@@ -478,7 +478,7 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 40_000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should exist");
 
         int256 bullIdxBefore = engine.bullFundingIndex();

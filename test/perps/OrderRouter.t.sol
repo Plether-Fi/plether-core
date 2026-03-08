@@ -147,7 +147,7 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
 
         // Alice's clearinghouse balance is untouched (nothing was escrowed)
@@ -165,7 +165,8 @@ contract OrderRouterTest is Test {
         uint256 maxLiability = engine.globalBullMaxProfit();
         uint256 freeUsdc = pool.getFreeUSDC();
 
-        assertEq(freeUsdc, pool.totalAssets() - maxLiability, "Firewall locks only Max Liability");
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertEq(freeUsdc, pool.totalAssets() - maxLiability - fees, "Firewall locks Max Liability + pending fees");
         assertEq(maxLiability, 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
         uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
@@ -223,11 +224,11 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 4, "All 3 orders should be processed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = address(this).balance;
@@ -253,7 +254,7 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 4, "All 3 should be consumed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 15_000 * 1e18, "Orders 1 and 3 succeed, order 2 cancelled");
     }
 
@@ -367,7 +368,7 @@ contract OrderRouterPythTest is Test {
         assertEq(router.nextExecuteId(), 2, "Queue should advance after stale cancel");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "No position should be opened");
     }
 
@@ -441,7 +442,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertTrue(size > 0, "Position should exist");
 
         // Close BEAR at targetPrice=1.5e8 but Pyth price=1e8
@@ -455,7 +456,7 @@ contract OrderRouterPythTest is Test {
         vm.warp(2050);
         router.executeOrder(2, empty);
 
-        (size,,,,,) = engine.positions(accountId);
+        (size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Close should be rejected by slippage check");
     }
 
@@ -481,7 +482,7 @@ contract OrderRouterPythTest is Test {
         assertEq(router.nextExecuteId(), 3, "Both orders consumed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "Only order 1 should execute, order 2 MEV-cancelled");
     }
 
