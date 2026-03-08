@@ -240,9 +240,9 @@ contract OrderRouterTest is Test {
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        // Order 2: BULL with bad slippage (targetPrice $0.50, execution at $1.00)
+        // Order 2: BULL open with bad slippage (targetPrice $1.50, execution at $1.00 is too low)
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.5e8, false);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
 
         // Order 3: Another valid BULL
         vm.prank(alice);
@@ -375,11 +375,11 @@ contract OrderRouterPythTest is Test {
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 
-        // BEAR slippage: executionPrice >= targetPrice. 0.95e8 < 1e8 → fails
+        // BEAR open slippage: exec <= target required. 1.05e8 > 1e8 → fails
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
-        mockPyth.setPrice(int64(95_000_000), int32(-8), 1001);
+        mockPyth.setPrice(int64(105_000_000), int32(-8), 1001);
         vm.warp(1050);
 
         bytes[] memory empty;
@@ -428,6 +428,67 @@ contract OrderRouterPythTest is Test {
         vm.warp(2015);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
+    }
+
+    function test_Slippage_OpenDirections() public {
+        address trader2 = address(0x444);
+        usdc.mint(trader2, 10_000 * 1e6);
+        vm.startPrank(trader2);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(trader2))), address(usdc), 10_000 * 1e6);
+        vm.stopPrank();
+
+        vm.warp(1000);
+
+        // BULL open: wants HIGH entry. Target $0.90 → exec $1.00 >= $0.90 → succeeds
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
+        vm.warp(1050);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertGt(size, 0, "BULL open at favorable price should succeed");
+
+        // BEAR open: wants LOW entry. Target $1.10 → exec $1.00 <= $1.10 → succeeds
+        vm.warp(2000);
+        vm.prank(trader2);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
+
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 2001);
+        vm.warp(2050);
+        router.executeOrder(2, empty);
+
+        bytes32 trader2Id = bytes32(uint256(uint160(trader2)));
+        (size,,,,,,) = engine.positions(trader2Id);
+        assertGt(size, 0, "BEAR open at favorable price should succeed");
+
+        // BULL open: adverse. Target $1.10, exec $1.00 → $1.00 >= $1.10 false → rejected
+        vm.warp(3000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
+
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 3001);
+        vm.warp(3050);
+        router.executeOrder(3, empty);
+
+        (size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
+
+        // BEAR open: adverse. Target $0.90, exec $1.00 → $1.00 <= $0.90 false → rejected
+        vm.warp(4000);
+        vm.prank(trader2);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+
+        mockPyth.setPrice(int64(100_000_000), int32(-8), 4001);
+        vm.warp(4050);
+        router.executeOrder(4, empty);
+
+        (size,,,,,,) = engine.positions(trader2Id);
+        assertEq(size, 10_000 * 1e18, "BEAR open at adverse price should be rejected");
     }
 
     function test_Slippage_CloseOrders_Protected() public {

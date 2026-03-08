@@ -343,8 +343,11 @@ contract OrderRouter {
         }
     }
 
-    /// @dev BULL slippage: execution price must be ≤ target (buying low is good).
-    ///      BEAR slippage: execution price must be ≥ target (selling high is good).
+    /// @dev Opens vs closes have opposing slippage directions:
+    ///      BULL open wants HIGH entry (more room for drop) → exec >= target
+    ///      BULL close wants LOW exit (lock in profit) → exec <= target
+    ///      BEAR open wants LOW entry (more room for rise) → exec <= target
+    ///      BEAR close wants HIGH exit (lock in profit) → exec >= target
     ///      targetPrice == 0 disables the check (market order).
     function _checkSlippage(
         CfdTypes.Order memory order,
@@ -353,10 +356,16 @@ contract OrderRouter {
         if (order.targetPrice == 0) {
             return true;
         }
-        if (order.side == CfdTypes.Side.BULL) {
-            return executionPrice <= order.targetPrice;
+        if (order.isClose) {
+            if (order.side == CfdTypes.Side.BULL) {
+                return executionPrice <= order.targetPrice;
+            }
+            return executionPrice >= order.targetPrice;
         }
-        return executionPrice >= order.targetPrice;
+        if (order.side == CfdTypes.Side.BULL) {
+            return executionPrice >= order.targetPrice;
+        }
+        return executionPrice <= order.targetPrice;
     }
 
     /// @dev Converts a Pyth price to 8-decimal format. Scales up/down based on exponent difference from -8.
