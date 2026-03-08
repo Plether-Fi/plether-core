@@ -162,12 +162,16 @@ contract OrderRouterTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        uint256 maxLiability = engine.globalBullMaxProfit();
-        uint256 freeUsdc = pool.getFreeUSDC();
+        // 50k BULL at $1.00 with CAP=$2: maxProfit = 50k * $1.00 = $50k
+        assertEq(engine.globalBullMaxProfit(), 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
+        // Pool started with $1M, received VPI+execFee from trade.
+        // execFee = 50k * 6bps = $30. freeUSDC = totalAssets - maxLiab - pendingFees
+        uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(freeUsdc, pool.totalAssets() - maxLiability - fees, "Firewall locks Max Liability + pending fees");
-        assertEq(maxLiability, 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
+        assertEq(fees, 30_000_000, "Exec fee = 6bps of $50k notional");
+        assertGt(freeUsdc, 949_000 * 1e6, "Free USDC should be ~$950k (pool - maxLiab - fees)");
+        assertLt(freeUsdc, 951_000 * 1e6, "Free USDC bounded above");
 
         uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
@@ -284,8 +288,8 @@ contract OrderRouterTest is Test {
         router.executeOrderBatch{value: 0.1 ether}(2, empty);
         uint256 keeperAfter = address(this).balance;
 
-        // Keeper sent 0.1 ETH msg.value, gets back 0.1 ETH + 0.1 ETH keeper fees
-        assertEq(keeperAfter - keeperBefore, 0.1 ether, "Keeper receives all keeper fees + msg.value refund");
+        // Keeper spent 0.1 ETH msg.value, received back 0.2 ETH (0.1 refund + 0.1 keeper fees), net +0.1
+        assertEq(keeperAfter - keeperBefore, 0.1 ether, "Keeper net gain = sum of keeper fees");
     }
 
 }

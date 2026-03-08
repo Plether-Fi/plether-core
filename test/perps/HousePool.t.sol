@@ -423,6 +423,7 @@ contract HousePoolTest is Test {
         // Senior's total claim = seniorPrincipal + unpaidSeniorYield
         // Should be ~$540k (8% * $500k = $40k yield) regardless of reconcile frequency.
         uint256 totalSeniorClaim = pool.seniorPrincipal() + pool.unpaidSeniorYield();
+        // Integer division across 365 daily reconciles loses ≤ $1 cumulative
         assertGe(totalSeniorClaim, 540_000 * 1e6 - 1e6, "Senior total claim must reflect 8% APY");
 
         // Inject fresh revenue to pay unpaid yield
@@ -449,8 +450,9 @@ contract HousePoolTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
+        // 100k BULL at $1.00: execFee = $100k * 6bps = $60
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertTrue(fees > 0, "Fees should accrue");
+        assertEq(fees, 60_000_000, "Exec fee = 6bps of $100k notional");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = usdc.balanceOf(address(pool));

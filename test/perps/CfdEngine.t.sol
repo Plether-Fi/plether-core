@@ -123,7 +123,8 @@ contract CfdEngineTest is Test {
 
         (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
-        assertTrue(margin < 2000 * 1e6, "Margin should be reduced by VPI and fees");
+        // 100k BULL at $1.00: execFee = $60, VPI = $12.50 → margin = $2000 - $72.50 = $1927.50
+        assertEq(margin, 1_927_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
     function test_FundingAccumulation() public {
@@ -241,8 +242,9 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(order, 1e8, 1_000_000 * 1e6);
 
+        // 100k BULL at $1.00: execFee = notional * 6bps = $100k * 0.0006 = $60
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertTrue(fees > 0, "Fees should accrue after trade");
+        assertEq(fees, 60_000_000, "Exec fee should be 6bps of $100k notional");
 
         address treasury = address(0xBEEF);
         engine.withdrawFees(treasury);
