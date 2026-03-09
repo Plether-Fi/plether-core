@@ -191,15 +191,15 @@ contract OrderRouter {
             }
         }
 
+        uint256 capPrice = engine.CAP_PRICE();
+        if (executionPrice > capPrice) {
+            executionPrice = capPrice;
+        }
+
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
             _finalizeExecution(orderId, pythFee);
             return;
-        }
-
-        uint256 capPrice = engine.CAP_PRICE();
-        if (executionPrice > capPrice) {
-            executionPrice = capPrice;
         }
 
         uint256 vaultDepth = vault.totalAssets();
@@ -292,7 +292,7 @@ contract OrderRouter {
                 break;
             }
 
-            if (!_checkSlippage(order, executionPrice)) {
+            if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
                 totalKeeperFees += _cleanupOrder(orderId);
                 continue;

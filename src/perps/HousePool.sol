@@ -139,6 +139,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 amount,
         address receiver
     ) external onlyVault {
+        if (amount == 0) {
+            return;
+        }
         _reconcile();
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();

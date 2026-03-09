@@ -705,6 +705,38 @@ contract OrderRouterPythTest is Test {
         router.executeOrderBatch(1, empty);
     }
 
+    function test_Slippage_ClampedBeforeCheck_BullClose() public {
+        vm.warp(1000);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "BULL position should exist");
+
+        // Oracle jumps to $2.50, above CAP ($2.00). Engine clamps to $2.00.
+        // User sets targetPrice=$2.40 — acceptable since clamped price is $2.00.
+        // Bug: if slippage checked unclamped $2.50 <= $2.40 → false → wrongly rejected.
+        // Fix: slippage checks clamped $2.00 <= $2.40 → true → correctly accepted.
+        vm.warp(2000);
+        mockPyth.setAllPrices(feedIds, int64(250_000_000), int32(-8), 2001);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 240_000_000, true);
+
+        vm.warp(2050);
+        router.executeOrder(2, empty);
+
+        (size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "BULL close should succeed against clamped price");
+    }
+
 }
 
 contract BasketPriceHarness is OrderRouter {
