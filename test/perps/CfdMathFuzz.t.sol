@@ -56,7 +56,8 @@ contract CfdMathFuzzTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: side,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         (bool isProfit, uint256 pnlUsdc) = CfdMath.calculatePnL(pos, currentPrice, CAP_PRICE);

@@ -164,7 +164,7 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
 
         // Alice's clearinghouse balance is untouched (nothing was escrowed)
@@ -245,11 +245,11 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 4, "All 3 orders should be processed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = address(this).balance;
@@ -275,7 +275,7 @@ contract OrderRouterTest is Test {
         assertEq(router.nextExecuteId(), 4, "All 3 should be consumed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 15_000 * 1e18, "Orders 1 and 3 succeed, order 2 cancelled");
     }
 
@@ -483,7 +483,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "BULL open at favorable price should succeed");
 
         // BEAR open: wants LOW entry. Target $1.10 → exec $1.00 <= $1.10 → succeeds
@@ -496,7 +496,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 trader2Id = bytes32(uint256(uint160(trader2)));
-        (size,,,,,,) = engine.positions(trader2Id);
+        (size,,,,,,,) = engine.positions(trader2Id);
         assertGt(size, 0, "BEAR open at favorable price should succeed");
 
         // BULL open: adverse. Target $1.10, exec $1.00 → $1.00 >= $1.10 false → rejected
@@ -508,7 +508,7 @@ contract OrderRouterPythTest is Test {
         vm.warp(3050);
         router.executeOrder(3, empty);
 
-        (size,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
 
         // BEAR open: adverse. Target $0.90, exec $1.00 → $1.00 <= $0.90 false → rejected
@@ -520,7 +520,7 @@ contract OrderRouterPythTest is Test {
         vm.warp(4050);
         router.executeOrder(4, empty);
 
-        (size,,,,,,) = engine.positions(trader2Id);
+        (size,,,,,,,) = engine.positions(trader2Id);
         assertEq(size, 10_000 * 1e18, "BEAR open at adverse price should be rejected");
     }
 
@@ -536,7 +536,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertTrue(size > 0, "Position should exist");
 
         // Close BEAR at targetPrice=1.5e8 but Pyth price=1e8
@@ -550,7 +550,7 @@ contract OrderRouterPythTest is Test {
         vm.warp(2050);
         router.executeOrder(2, empty);
 
-        (size,,,,,,) = engine.positions(accountId);
+        (size,,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Close should be rejected by slippage check");
     }
 
@@ -576,7 +576,7 @@ contract OrderRouterPythTest is Test {
         assertEq(router.nextExecuteId(), 2, "Batch breaks at MEV-stale order, leaving it in queue");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "Only order 1 should execute");
     }
 
@@ -632,7 +632,7 @@ contract OrderRouterPythTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Basket at $1.00 should pass slippage for target $1.00");
     }
 
@@ -850,7 +850,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         require(size == 10_000 * 1e18, "setUp: position not opened");
     }
 
@@ -866,7 +866,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close should succeed during FAD with stale price");
     }
 
@@ -897,7 +897,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close should succeed - MEV check bypassed during FAD");
     }
 
@@ -914,7 +914,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "Position unchanged - excess staleness still cancels during FAD");
     }
 
@@ -928,7 +928,7 @@ contract FadStalenessTest is Test {
 
         router.executeLiquidation(aliceId, empty);
 
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Liquidation should succeed during FAD with stale price");
     }
 
@@ -966,11 +966,11 @@ contract FadStalenessTest is Test {
         assertEq(router.nextExecuteId(), 4, "All orders consumed");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 5000 * 1e18, "Alice close partially succeeded");
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 0, "Carol open rejected during FAD");
     }
 
@@ -1001,7 +1001,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "61s stale on weekday should cancel");
     }
 
@@ -1024,7 +1024,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 size,,,,,,) = engine.positions(carolId);
+        (uint256 size,,,,,,,) = engine.positions(carolId);
         assertGt(size, 0, "Weekday open orders should work normally");
     }
 
@@ -1128,7 +1128,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "MEV check must block stale-price close during Friday gap");
     }
 
@@ -1149,7 +1149,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close with fresh price should succeed during Friday gap");
     }
 
@@ -1189,7 +1189,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
     }
 
@@ -1226,7 +1226,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close should succeed at Sunday 21:00 with fresh price");
     }
 
@@ -1245,7 +1245,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "MEV check must block stale close at Sunday 21:00");
     }
 
@@ -1281,7 +1281,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "Winter stale price correctly rejected at Sunday 21:00");
     }
 
@@ -1345,7 +1345,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(3, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close with fresh price works during runway");
     }
 
@@ -1369,7 +1369,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "MEV check must block stale price during runway");
     }
 

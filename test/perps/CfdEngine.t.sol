@@ -122,7 +122,7 @@ contract CfdEngineTest is Test {
         int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6);
         assertEq(settlement, 0, "processOrder always returns 0");
 
-        (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
         // 100k BULL at $1.00: execFee = $60, VPI = $12.50 → margin = $2000 - $72.50 = $1927.50
         assertEq(margin, 1_927_500_000, "Margin should equal deposit minus VPI and exec fee");
@@ -168,7 +168,7 @@ contract CfdEngineTest is Test {
         int256 bearIndex = engine.bearFundingIndex();
         assertTrue(bearIndex > 0, "BEAR index should increase");
 
-        (uint256 size,, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,) = engine.positions(account1);
+        (uint256 size,, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(account1);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: size,
@@ -177,7 +177,8 @@ contract CfdEngineTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: entryFunding,
             side: side,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         int256 bullFunding = engine.getPendingFunding(bullPos);
@@ -202,7 +203,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(openOrder, 1e8, vaultDepth);
 
-        (, uint256 marginAfterOpen,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterOpen,,,,,,) = engine.positions(accountId);
         uint256 lockedAfterOpen = clearinghouse.lockedMarginUsdc(accountId);
         assertEq(lockedAfterOpen, marginAfterOpen, "lockedMargin == pos.margin after open");
 
@@ -222,7 +223,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(addOrder, 1e8, vaultDepth);
 
-        (, uint256 marginAfterAdd,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterAdd,,,,,,) = engine.positions(accountId);
         uint256 lockedAfterAdd = clearinghouse.lockedMarginUsdc(accountId);
         assertEq(lockedAfterAdd, marginAfterAdd, "lockedMargin == pos.margin after funding settlement");
     }
@@ -338,7 +339,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(first, 0.8e8, vaultDepth);
 
-        (,, uint256 entryAfterFirst,,,,) = engine.positions(accountId);
+        (,, uint256 entryAfterFirst,,,,,) = engine.positions(accountId);
         assertEq(entryAfterFirst, 0.8e8, "Entry should be $0.80");
 
         // Add 30k tokens at $1.20 → weighted avg = (10k*0.80 + 30k*1.20) / 40k = $1.10
@@ -354,7 +355,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(second, 1.2e8, vaultDepth);
 
-        (uint256 totalSize,, uint256 avgEntry,,,,) = engine.positions(accountId);
+        (uint256 totalSize,, uint256 avgEntry,,,,,) = engine.positions(accountId);
         assertEq(totalSize, 40_000 * 1e18, "Total size should be 40k");
         assertEq(avgEntry, 1.1e8, "Weighted avg entry should be $1.10");
     }
@@ -433,7 +434,7 @@ contract CfdEngineTest is Test {
         uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth);
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
     }
 
@@ -548,7 +549,7 @@ contract CfdEngineTest is Test {
         // This should NOT revert — the position is profitable despite funding > margin
         engine.processOrder(closeOrder, 0.5e8, vaultDepth);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
 
         uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
@@ -624,7 +625,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(close, 100_000_000, vaultDepth);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
         assertEq(engine.globalBearMaxProfit(), 0, "Global bear max profit should be zero");
     }
@@ -683,7 +684,7 @@ contract CfdEngineTest is Test {
         });
         engine.processOrder(aliceClose, 1e8, vaultDepth);
 
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 0, "Close should succeed during insolvency");
     }
 
@@ -712,7 +713,7 @@ contract CfdEngineTest is Test {
         // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
         engine.liquidatePosition(accountId, 1.1e8, vaultDepth);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be liquidated");
 
         uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerUsdc(accountId);
@@ -720,7 +721,7 @@ contract CfdEngineTest is Test {
 
         uint256 vaultAfter = usdc.balanceOf(address(pool));
         uint256 totalRecovered = vaultAfter - vaultBefore;
-        (, uint256 posMarginStored,,,,,) = engine.positions(accountId);
+        (, uint256 posMarginStored,,,,,,) = engine.positions(accountId);
         assertTrue(totalRecovered > 0, "Vault should recover more than zero from bad debt liquidation");
     }
 
@@ -767,7 +768,7 @@ contract CfdEngineTest is Test {
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
         engine.liquidatePosition(aliceId, 1.1e8, vaultDepth);
 
-        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 0, "Liquidation must succeed during insolvency");
     }
 
@@ -775,6 +776,52 @@ contract CfdEngineTest is Test {
         bytes32 accountId = bytes32(uint256(1));
         vm.expectRevert(CfdEngine.CfdEngine__NoPositionToLiquidate.selector);
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
+    }
+
+    function test_VpiDepthManipulation_NeutralizedByEntryDepth() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _depositToClearinghouse(accountId, 50_000 * 1e6);
+
+        uint256 largeDepth = 10_000_000 * 1e6;
+        uint256 smallDepth = 100_000 * 1e6;
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 10_000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        uint256 chBeforeOpen = clearinghouse.balances(accountId, address(usdc));
+        engine.processOrder(openOrder, 1e8, largeDepth);
+
+        (,,,,,,, uint256 storedDepth) = engine.positions(accountId);
+        assertEq(storedDepth, largeDepth, "Entry depth recorded at open");
+
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: true
+        });
+        engine.processOrder(closeOrder, 1e8, smallDepth);
+
+        uint256 chAfterClose = clearinghouse.balances(accountId, address(usdc));
+
+        // Without fix: close at smallDepth yields massive VPI rebate (attacker profits).
+        // With fix: close uses max(smallDepth, entryDepth) = largeDepth.
+        // Same depth for open and close → VPI charge = VPI rebate → net VPI = 0.
+        // Only exec fees should be deducted. Exec fee = 6bps * $100k * 2 = $120.
+        uint256 roundTripCost = chBeforeOpen - chAfterClose;
+        uint256 execFeeRoundTrip = 120 * 1e6;
+        assertEq(roundTripCost, execFeeRoundTrip, "Round-trip costs only exec fees, no VPI profit");
     }
 
 }

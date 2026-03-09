@@ -40,7 +40,8 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BULL,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         // Price drops to $0.98 (BULL makes $0.02 * 100k = $2,000)
@@ -62,7 +63,8 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         // Oracle teleports to $5.00 (way above the $2.00 CAP)
@@ -193,7 +195,8 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         // Price rises to $0.95 → BEAR profits (profits when oracle rises)
@@ -215,7 +218,8 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             entryFundingIndex: 0,
             side: CfdTypes.Side.BULL,
-            lastUpdateTime: 0
+            lastUpdateTime: 0,
+            entryDepth: 0
         });
 
         (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 1.5e8, CAP_PRICE);

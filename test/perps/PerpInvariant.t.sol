@@ -101,7 +101,7 @@ contract PerpHandler is Test {
         address trader = traders[traderIdx % 3];
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        (uint256 size,,,,, CfdTypes.Side side,) = engine.positions(accountId);
+        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -123,7 +123,7 @@ contract PerpHandler is Test {
         address trader = traders[traderIdx % 3];
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -298,7 +298,7 @@ contract PerpInvariantTest is Test {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size,,,,, CfdTypes.Side side,) = engine.positions(accountId);
+            (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
             if (size > 0) {
                 if (side == CfdTypes.Side.BULL) {
                     sumBullSize += size;
@@ -316,7 +316,7 @@ contract PerpInvariantTest is Test {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             if (size > 0) {
                 uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
                 assertGe(locked, margin, "Clearinghouse must back position margin");

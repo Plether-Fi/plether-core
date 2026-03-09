@@ -193,7 +193,7 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        (uint256 sizeAfterOpen,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfterOpen,,,,,,,) = engine.positions(accountId);
 
         vm.warp(block.timestamp + 180 days);
 
@@ -201,7 +201,7 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 500 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        (uint256 sizeAfterSecond,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfterSecond,,,,,,,) = engine.positions(accountId);
 
         // CORRECT BEHAVIOR: The order was cancelled because funding > margin.
         // Position size should be unchanged (no new size added, no bad debt created).
@@ -232,7 +232,7 @@ contract AuditFindingsTest is Test {
         router.executeOrder(2, empty);
 
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
-        (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
+        (uint256 sizeBefore,,,,,,,) = engine.positions(carolAccount);
 
         vm.warp(block.timestamp + 90 days);
 
@@ -240,7 +240,7 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         router.executeOrder(3, empty);
 
-        (uint256 sizeAfter,,,,,,) = engine.positions(carolAccount);
+        (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);
 
         assertGt(sizeAfter, sizeBefore, "Order should succeed: unsettled funding credit covers vault depletion");
         assertGt(engine.netUnsettledFunding(), 0, "Vault should have unsettled funding credit from payers");
@@ -273,7 +273,7 @@ contract AuditFindingsTest is Test {
         router.executeOrder(2, pythData);
 
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
-        (uint256 size,,,,,,) = engine.positions(carolAccount);
+        (uint256 size,,,,,,,) = engine.positions(carolAccount);
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
     }
 
@@ -325,7 +325,7 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Position should be open");
 
         uint256 freeBalance =
@@ -353,7 +353,7 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 1e8, true);
         router.executeOrder(2, empty);
 
-        (uint256 size,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be closed");
 
         uint256 balance = clearinghouse.balances(accountId, address(usdc));

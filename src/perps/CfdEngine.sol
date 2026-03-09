@@ -356,6 +356,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             pos.entryPrice = price;
             pos.side = order.side;
             pos.entryFundingIndex = order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+            pos.entryDepth = vaultDepthUsdc;
         } else {
             uint256 totalValue = (pos.size * pos.entryPrice) + (order.sizeDelta * price);
             pos.entryPrice = totalValue / (pos.size + order.sizeDelta);
@@ -438,7 +439,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         clearinghouse.unlockMargin(order.accountId, marginToFree);
 
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
-        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
+        uint256 closeDepth = vaultDepthUsdc > pos.entryDepth ? vaultDepthUsdc : pos.entryDepth;
+        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, closeDepth, riskParams.vpiFactor);
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
