@@ -389,6 +389,97 @@ contract AuditFindingsTest is Test {
     }
 
     // ==========================================
+    // H-01: Mark-to-Market accounting
+    // Without MtM, reconcile treats cash balance as pool value, ignoring
+    // unrealized trader PnL. When traders are winning, the pool over-distributes
+    // revenue to LP shares (inflated). When traders are losing, shares are undervalued.
+    // FIX: CfdEngine tracks global entry notionals for O(1) aggregate PnL calculation.
+    //      HousePool._reconcile() adjusts distributable by unrealized trader PnL.
+    // ==========================================
+
+    function test_H01_MtM_TraderProfitReducesJuniorPrincipal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        // Alice opens BEAR 200K @ $1.00
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        // Carol opens BULL at $1.20 to update lastMarkPrice — BEAR profits
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1.2e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
+        router.executeOrder(2, priceData);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertLt(juniorAfter, juniorBefore, "MtM: junior principal must decrease when traders are winning");
+        assertGt(engine.getUnrealizedTraderPnl(), 0, "Traders should have positive unrealized PnL");
+    }
+
+    function test_H01_MtM_TraderLossIncreasesJuniorPrincipal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        // Alice opens BEAR 200K @ $1.00
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        // Carol opens BULL at $0.80 to update lastMarkPrice — BEAR loses
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.8e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.8e8, false);
+        router.executeOrder(2, priceData);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertGt(juniorAfter, juniorBefore, "MtM: junior principal must increase when traders are losing");
+        assertLt(engine.getUnrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
+    }
+
+    function test_H01_MtM_ZeroAfterAllPositionsClosed() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        // Open and close a position
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0);
+
+        assertEq(engine.globalBullEntryNotional(), 0, "Bull entry notional should be zero");
+        assertEq(engine.globalBearEntryNotional(), 0, "Bear entry notional should be zero");
+        assertEq(engine.getUnrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
+    }
+
+    // ==========================================
     // C-01: Partial close seize must respect lockedMarginUsdc
     // A partial close at a large loss must only seize from unencumbered (free) USDC,
     // not from margin locked for the remaining position. Without the fix, the seize

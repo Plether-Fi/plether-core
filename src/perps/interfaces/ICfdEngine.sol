@@ -28,6 +28,10 @@ interface ICfdEngine {
     /// @notice Net unsettled funding imbalance (positive = vault temporarily deflated)
     function netUnsettledFunding() external view returns (int256);
 
+    /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
+    ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
+    function getUnrealizedTraderPnl() external view returns (int256);
+
     /// @notice Protocol cap price (8 decimals). Oracle prices are clamped to this.
     function CAP_PRICE() external view returns (uint256);
 

@@ -234,7 +234,16 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         if (netFunding < 0) {
             reserved += uint256(-netFunding);
         }
-        uint256 distributable = bal > reserved ? bal - reserved : 0;
+        uint256 cashMinusReserved = bal > reserved ? bal - reserved : 0;
+
+        int256 traderPnl = ENGINE.getUnrealizedTraderPnl();
+        uint256 distributable;
+        if (traderPnl >= 0) {
+            uint256 mtmReserve = uint256(traderPnl);
+            distributable = cashMinusReserved > mtmReserve ? cashMinusReserved - mtmReserve : 0;
+        } else {
+            distributable = cashMinusReserved + uint256(-traderPnl);
+        }
 
         if (distributable > claimedEquity) {
             _distributeRevenue(distributable - claimedEquity);

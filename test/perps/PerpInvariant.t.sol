@@ -288,7 +288,14 @@ contract PerpInvariantTest is Test {
         pool.reconcile();
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 bal = pool.totalAssets();
-        assertLe(claimed, bal, "Claimed equity cannot exceed pool balance");
+        int256 traderPnl = engine.getUnrealizedTraderPnl();
+        uint256 effectivePool;
+        if (traderPnl >= 0) {
+            effectivePool = bal;
+        } else {
+            effectivePool = bal + uint256(-traderPnl);
+        }
+        assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
     }
 
     function invariant_FeesWithinVault() public {
@@ -316,6 +323,27 @@ contract PerpInvariantTest is Test {
 
         assertEq(engine.bullOI(), sumBullSize, "Bull OI must match sum of bull positions");
         assertEq(engine.bearOI(), sumBearSize, "Bear OI must match sum of bear positions");
+    }
+
+    function invariant_EntryNotionalsMatchPositions() public {
+        uint256 sumBullNotional;
+        uint256 sumBearNotional;
+
+        for (uint256 i = 0; i < 3; i++) {
+            address trader = handler.traders(i);
+            bytes32 accountId = bytes32(uint256(uint160(trader)));
+            (uint256 size,, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            if (size > 0) {
+                if (side == CfdTypes.Side.BULL) {
+                    sumBullNotional += size * entryPrice;
+                } else {
+                    sumBearNotional += size * entryPrice;
+                }
+            }
+        }
+
+        assertEq(engine.globalBullEntryNotional(), sumBullNotional, "Bull entry notional must match positions");
+        assertEq(engine.globalBearEntryNotional(), sumBearNotional, "Bear entry notional must match positions");
     }
 
     function invariant_PositionMarginsBackedByClearinghouse() public {
