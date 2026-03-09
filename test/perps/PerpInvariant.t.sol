@@ -211,7 +211,13 @@ contract PerpInvariantTest is Test {
         engine.setVault(address(pool));
 
         router = new OrderRouter(
-            address(engine), address(pool), address(0), new bytes32[](0), new uint256[](0), new uint256[](0)
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
         );
 
         clearinghouse.setOperator(address(engine), true);

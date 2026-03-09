@@ -121,7 +121,13 @@ contract OrderRouterTest is Test {
         engine.setVault(address(pool));
 
         router = new OrderRouter(
-            address(engine), address(pool), address(0), new bytes32[](0), new uint256[](0), new uint256[](0)
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
         );
 
         clearinghouse.setOperator(address(engine), true);
@@ -366,7 +372,8 @@ contract OrderRouterPythTest is Test {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases);
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -649,7 +656,7 @@ contract OrderRouterPythTest is Test {
         b[0] = 1e8;
         b[1] = 1e8;
 
-        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b);
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, new bool[](2));
 
         mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
@@ -704,8 +711,9 @@ contract BasketPriceHarness is OrderRouter {
         address _pyth,
         bytes32[] memory _feedIds,
         uint256[] memory _quantities,
-        uint256[] memory _basePrices
-    ) OrderRouter(address(1), address(1), _pyth, _feedIds, _quantities, _basePrices) {}
+        uint256[] memory _basePrices,
+        bool[] memory _inversions
+    ) OrderRouter(address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
 
     function computeBasketPrice() external view returns (uint256, uint256) {
         return _computeBasketPrice();
@@ -716,7 +724,9 @@ contract BasketPriceHarness is OrderRouter {
 contract NormalizePythHarness is OrderRouter {
 
     constructor()
-        OrderRouter(address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0))
+        OrderRouter(
+            address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0)
+        )
     {}
 
     function normalizePythPrice(
@@ -817,7 +827,8 @@ contract FadStalenessTest is Test {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases);
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -1399,6 +1410,86 @@ contract FadStalenessTest is Test {
         // Wednesday itself still works
         vm.warp(WEDNESDAY_NOON);
         assertTrue(engine.isFadWindow(), "Holiday day itself still FAD");
+    }
+
+}
+
+contract InversionTest is Test {
+
+    MockPyth mockPyth;
+    bytes32 constant FEED_JPY = bytes32(uint256(0xAA));
+    bytes32 constant FEED_EUR = bytes32(uint256(0xBB));
+
+    function setUp() public {
+        mockPyth = new MockPyth();
+    }
+
+    function test_H03_InvertedFeedUsesCorrectPrice() public {
+        // USD/JPY = 156.70 (expo=-3 → raw price 156700 * 10^-3)
+        // Inverted: JPY/USD = 10^(8-(-3)) / 156700 = 10^11 / 156700 = 638,163
+        // That's $0.00638163 in 8 decimals
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = FEED_JPY;
+        uint256[] memory w = new uint256[](1);
+        w[0] = 1e18;
+        uint256[] memory b = new uint256[](1);
+        b[0] = 638_163; // base price is ~$0.00638 (JPY/USD at launch)
+        bool[] memory inv = new bool[](1);
+        inv[0] = true;
+
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
+
+        mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
+        (uint256 price,) = harness.computeBasketPrice();
+
+        uint256 expectedNorm = uint256(1e11) / 156_700; // = 638,163
+        uint256 expectedBasket = (expectedNorm * 1e18) / (uint256(638_163) * 1e10);
+        assertEq(price, expectedBasket, "Inverted JPY should produce correct basket price");
+    }
+
+    function test_H03_InversionsLengthMismatchReverts() public {
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = FEED_JPY;
+        ids[1] = FEED_EUR;
+        uint256[] memory w = new uint256[](2);
+        w[0] = 0.5e18;
+        w[1] = 0.5e18;
+        uint256[] memory b = new uint256[](2);
+        b[0] = 1e8;
+        b[1] = 1e8;
+        bool[] memory inv = new bool[](1); // wrong length
+
+        vm.expectRevert(OrderRouter.OrderRouter__LengthMismatch.selector);
+        new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
+    }
+
+    function test_H03_MixedInversionsComputeCorrectBasket() public {
+        // Feed 0: EUR/USD direct, $1.08 (expo=-8, raw=108_000_000)
+        // Feed 1: USD/JPY inverted, 156.70 (expo=-3, raw=156_700) → JPY/USD = 638_163
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = FEED_EUR;
+        ids[1] = FEED_JPY;
+        uint256[] memory w = new uint256[](2);
+        w[0] = 0.5e18;
+        w[1] = 0.5e18;
+        uint256[] memory b = new uint256[](2);
+        b[0] = 108_000_000; // EUR/USD base = $1.08
+        b[1] = 638_163; // JPY/USD base = $0.00638163
+        bool[] memory inv = new bool[](2);
+        inv[0] = false;
+        inv[1] = true;
+
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
+
+        mockPyth.setPrice(FEED_EUR, int64(108_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
+
+        (uint256 price,) = harness.computeBasketPrice();
+
+        // EUR component: exact (direct, no rounding)
+        // JPY component: slight rounding from integer division in inversion
+        // Total ≈ $1.00 within integer rounding tolerance
+        assertApproxEqAbs(price, 100_000_000, 100, "Mixed basket at base prices should be ~$1.00");
     }
 
 }

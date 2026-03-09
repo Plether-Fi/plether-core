@@ -123,7 +123,7 @@ contract PerpsForkTest is Test {
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
-        router = new OrderRouter(address(engine), address(pool), address(pyth), feedIds, w, b);
+        router = new OrderRouter(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -260,7 +260,8 @@ contract PerpsForkTest is Test {
         rw[0] = 1e18;
         uint256[] memory rb = new uint256[](1);
         rb[0] = 1e8;
-        OrderRouter realPythRouter = new OrderRouter(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb);
+        OrderRouter realPythRouter =
+            new OrderRouter(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
         clearinghouse.setOperator(address(realPythRouter), true);
 
         // We can't set it as engine's router (already set), but we can verify the Pyth interaction

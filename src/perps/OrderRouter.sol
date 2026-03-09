@@ -19,6 +19,7 @@ contract OrderRouter {
     bytes32[] public pythFeedIds;
     uint256[] public quantities;
     uint256[] public basePrices;
+    bool[] public inversions;
 
     uint64 public nextCommitId = 1;
     uint64 public nextExecuteId = 1;
@@ -55,7 +56,8 @@ contract OrderRouter {
         address _pyth,
         bytes32[] memory _feedIds,
         uint256[] memory _quantities,
-        uint256[] memory _basePrices
+        uint256[] memory _basePrices,
+        bool[] memory _inversions
     ) {
         engine = ICfdEngine(_engine);
         vault = ICfdVault(_vault);
@@ -65,7 +67,10 @@ contract OrderRouter {
             if (_feedIds.length == 0) {
                 revert OrderRouter__EmptyFeeds();
             }
-            if (_feedIds.length != _quantities.length || _feedIds.length != _basePrices.length) {
+            if (
+                _feedIds.length != _quantities.length || _feedIds.length != _basePrices.length
+                    || _feedIds.length != _inversions.length
+            ) {
                 revert OrderRouter__LengthMismatch();
             }
             uint256 totalWeight;
@@ -83,6 +88,7 @@ contract OrderRouter {
         pythFeedIds = _feedIds;
         quantities = _quantities;
         basePrices = _basePrices;
+        inversions = _inversions;
     }
 
     // ==========================================
@@ -408,7 +414,7 @@ contract OrderRouter {
 
         for (uint256 i = 0; i < len; i++) {
             PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
-            uint256 norm = _normalizePythPrice(p.price, p.expo);
+            uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
 
             basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
 
@@ -465,6 +471,18 @@ contract OrderRouter {
         }
 
         return engine.fadDayOverrides(block.timestamp / 86_400);
+    }
+
+    /// @dev Inverts a Pyth price (e.g. USD/JPY → JPY/USD) and returns 8-decimal output.
+    ///      Formula: 10^(8 - expo) / price
+    function _invertPythPrice(
+        int64 price,
+        int32 expo
+    ) internal pure returns (uint256) {
+        if (price <= 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
+        return 10 ** uint256(uint32(8 - expo)) / uint64(price);
     }
 
     /// @dev Converts a Pyth price to 8-decimal format. Scales up/down based on exponent difference from -8.
