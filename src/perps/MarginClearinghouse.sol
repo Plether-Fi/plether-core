@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -34,6 +35,8 @@ contract MarginClearinghouse is Ownable2Step {
     mapping(bytes32 => mapping(address => uint256)) public balances;
 
     mapping(bytes32 => uint256) public lockedMarginUsdc;
+
+    IWithdrawGuard public withdrawGuard;
 
     mapping(address => bool) public isProtocolOperator;
 
@@ -71,6 +74,12 @@ contract MarginClearinghouse is Ownable2Step {
         bool status
     ) external onlyOwner {
         isProtocolOperator[operator] = status;
+    }
+
+    function setWithdrawGuard(
+        address _guard
+    ) external onlyOwner {
+        withdrawGuard = IWithdrawGuard(_guard);
     }
 
     function supportAsset(
@@ -138,6 +147,10 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
         if (remainingEquity < lockedMarginUsdc[accountId]) {
             revert MarginClearinghouse__InsufficientFreeEquity();
+        }
+
+        if (address(withdrawGuard) != address(0)) {
+            withdrawGuard.checkWithdraw(accountId);
         }
 
         IERC20(asset).safeTransfer(msg.sender, amount);

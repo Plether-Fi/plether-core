@@ -127,6 +127,7 @@ contract PerpsForkTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -555,6 +556,7 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 0, 0, int64(50_000_000), true);
 
         // Reconcile to distribute loss through tranches
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 seniorAfter = pool.seniorPrincipal();

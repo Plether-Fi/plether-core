@@ -126,6 +126,7 @@ contract OrderRouterTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -369,6 +370,7 @@ contract OrderRouterPythTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -827,6 +829,7 @@ contract FadStalenessTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

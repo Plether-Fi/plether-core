@@ -215,6 +215,7 @@ contract PerpInvariantTest is Test {
         );
 
         clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

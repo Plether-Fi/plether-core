@@ -5,6 +5,7 @@ import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -14,7 +15,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @notice The core mathematical ledger for Plether CFDs.
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
 /// @custom:security-contact contact@plether.com
-contract CfdEngine is Ownable2Step, ReentrancyGuard {
+contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     uint256 public immutable CAP_PRICE;
 
@@ -65,6 +66,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__PostOpSolvencyBreach();
     error CfdEngine__InsufficientInitialMargin();
     error CfdEngine__PositionTooSmall();
+    error CfdEngine__WithdrawBlockedByOpenPosition();
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
     error CfdEngine__RunwayTooLong();
@@ -183,6 +185,18 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         accumulatedFeesUsdc = 0;
         vault.payOut(recipient, fees);
         _assertPostSolvency();
+    }
+
+    // ==========================================
+    // WITHDRAW GUARD (IWithdrawGuard)
+    // ==========================================
+
+    function checkWithdraw(
+        bytes32 accountId
+    ) external view override {
+        if (positions[accountId].size > 0) {
+            revert CfdEngine__WithdrawBlockedByOpenPosition();
+        }
     }
 
     // ==========================================

@@ -72,6 +72,7 @@ contract HousePoolTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
     }

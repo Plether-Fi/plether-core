@@ -59,6 +59,7 @@ contract CfdEngineTest is Test {
         engine.setVault(address(pool));
 
         clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(this));
 
         usdc.mint(address(this), 1_000_000 * 1e6);

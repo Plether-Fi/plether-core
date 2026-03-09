@@ -110,6 +110,7 @@ contract AuditFindingsTest is Test {
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
     }
@@ -308,6 +309,60 @@ contract AuditFindingsTest is Test {
     // EXPECTED: balances[account][fot] == fot.balanceOf(clearinghouse).
     // BUG: balances records the pre-fee amount, actual balance is less.
     // ==========================================
+
+    // ==========================================
+    // Finding 8: Clearinghouse withdrawal ignores unrealized PnL
+    // Users can withdraw free balance while holding an underwater position,
+    // front-running liquidation and leaving the vault to absorb bad debt.
+    // EXPECTED: Withdrawal reverts while a position is open.
+    // ==========================================
+
+    function test_Finding8_WithdrawBlockedByOpenPosition() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 10_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "Position should be open");
+
+        uint256 freeBalance =
+            clearinghouse.balances(accountId, address(usdc)) - clearinghouse.lockedMarginUsdc(accountId);
+        assertGt(freeBalance, 0, "Alice should have free balance");
+
+        vm.prank(alice);
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(accountId, address(usdc), freeBalance);
+    }
+
+    function test_Finding8_WithdrawAllowedAfterClose() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 10_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 1e8, true);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position should be closed");
+
+        uint256 balance = clearinghouse.balances(accountId, address(usdc));
+        vm.prank(alice);
+        clearinghouse.withdraw(accountId, address(usdc), balance);
+        assertEq(usdc.balanceOf(alice), balance, "Alice should receive her USDC");
+    }
 
     function test_Finding7_FeeOnTransferAccounting() public {
         MockFeeOnTransferToken fot = new MockFeeOnTransferToken(100); // 1% fee
