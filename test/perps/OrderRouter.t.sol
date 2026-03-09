@@ -2,12 +2,14 @@
 pragma solidity 0.8.33;
 
 import {PythStructs} from "../../src/interfaces/IPyth.sol";
+import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {MockOracle} from "../utils/MockOracle.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -1490,6 +1492,84 @@ contract InversionTest is Test {
         // JPY component: slight rounding from integer division in inversion
         // Total ≈ $1.00 within integer rounding tolerance
         assertApproxEqAbs(price, 100_000_000, 100, "Mixed basket at base prices should be ~$1.00");
+    }
+
+    function test_H03_OracleEquivalence_SamePricesSameBasket() public {
+        // Real-world FX rates:
+        //   EUR/USD = 1.0800  (direct in both oracles)
+        //   USD/JPY = 156.70  (Chainlink provides JPY/USD=0.00638; Pyth provides USD/JPY=156.70 inverted)
+        //   GBP/USD = 1.2600  (direct in both)
+        //   USD/CHF = 0.8800  (Chainlink provides CHF/USD=1.1364; Pyth provides USD/CHF=0.88 inverted)
+
+        // Weights: 40% EUR, 20% JPY, 25% GBP, 15% CHF
+        uint256[] memory w = new uint256[](4);
+        w[0] = 0.4e18;
+        w[1] = 0.2e18;
+        w[2] = 0.25e18;
+        w[3] = 0.15e18;
+
+        // --- Chainlink prices (all XXX/USD, 8 decimals) ---
+        int256 eurUsd8 = 108_000_000; // $1.08
+        int256 jpyUsd8 = 638_163; // $0.00638163 (= 1/156.70, truncated)
+        int256 gbpUsd8 = 126_000_000; // $1.26
+        int256 chfUsd8 = 113_636_363; // $1.13636363 (= 1/0.88, truncated)
+
+        // Base prices = same as current prices so basket ≈ $1.00
+        uint256[] memory basePrices = new uint256[](4);
+        basePrices[0] = uint256(eurUsd8);
+        basePrices[1] = uint256(jpyUsd8);
+        basePrices[2] = uint256(gbpUsd8);
+        basePrices[3] = uint256(chfUsd8);
+
+        // --- BasketOracle (Chainlink) ---
+        address[] memory feeds = new address[](4);
+        feeds[0] = address(new MockOracle(eurUsd8, "EUR/USD"));
+        feeds[1] = address(new MockOracle(jpyUsd8, "JPY/USD"));
+        feeds[2] = address(new MockOracle(gbpUsd8, "GBP/USD"));
+        feeds[3] = address(new MockOracle(chfUsd8, "CHF/USD"));
+
+        BasketOracle basket = new BasketOracle(feeds, w, basePrices, 500, 2e8, address(this));
+        (, int256 chainlinkPrice,,,) = basket.latestRoundData();
+
+        // --- OrderRouter (Pyth) ---
+        // Pyth feeds: EUR/USD direct, USD/JPY inverted, GBP/USD direct, USD/CHF inverted
+        bytes32[] memory pythIds = new bytes32[](4);
+        pythIds[0] = bytes32(uint256(0x01));
+        pythIds[1] = bytes32(uint256(0x02));
+        pythIds[2] = bytes32(uint256(0x03));
+        pythIds[3] = bytes32(uint256(0x04));
+
+        bool[] memory inv = new bool[](4);
+        inv[0] = false; // EUR/USD direct
+        inv[1] = true; // USD/JPY inverted
+        inv[2] = false; // GBP/USD direct
+        inv[3] = true; // USD/CHF inverted
+
+        // Pyth prices — direct feeds use expo=-8 (same scale as Chainlink)
+        // Inverted feeds use their natural Pyth expo
+        // EUR/USD: 1.0800 → price=108000000, expo=-8
+        // USD/JPY: 156.70 → price=15670, expo=-2
+        // GBP/USD: 1.2600 → price=126000000, expo=-8
+        // USD/CHF: 0.8800 → price=8800, expo=-4
+
+        // For inverted feeds, OrderRouter computes: 10^(8-expo) / price
+        // USD/JPY: 10^(8-(-2)) / 15670 = 10^10 / 15670 = 638,163 ✓
+        // USD/CHF: 10^(8-(-4)) / 8800 = 10^12 / 8800 = 113,636,363 ✓
+
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), pythIds, w, basePrices, inv);
+
+        mockPyth.setPrice(pythIds[0], int64(108_000_000), int32(-8), 1001);
+        mockPyth.setPrice(pythIds[1], int64(15_670), int32(-2), 1001);
+        mockPyth.setPrice(pythIds[2], int64(126_000_000), int32(-8), 1001);
+        mockPyth.setPrice(pythIds[3], int64(8800), int32(-4), 1001);
+
+        (uint256 pythPrice,) = harness.computeBasketPrice();
+
+        // Integer division in _invertPythPrice introduces ≤1 unit rounding per inverted feed.
+        // With 2 inverted feeds at 15-20% weight each, max error < 100 units out of 1e8 (~0.0001%).
+        assertApproxEqAbs(
+            uint256(chainlinkPrice), pythPrice, 100, "BasketOracle and OrderRouter must agree within rounding"
+        );
     }
 
 }
