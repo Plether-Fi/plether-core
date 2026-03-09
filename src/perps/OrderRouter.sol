@@ -185,6 +185,11 @@ contract OrderRouter {
             }
         }
 
+        uint256 capPrice = engine.CAP_PRICE();
+        if (executionPrice > capPrice) {
+            executionPrice = capPrice;
+        }
+
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
             _finalizeExecution(orderId, pythFee);
@@ -255,6 +260,11 @@ contract OrderRouter {
             } else {
                 executionPrice = 1e8;
             }
+        }
+
+        uint256 capPrice = engine.CAP_PRICE();
+        if (executionPrice > capPrice) {
+            executionPrice = capPrice;
         }
 
         uint256 totalKeeperFees;

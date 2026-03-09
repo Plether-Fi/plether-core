@@ -11,6 +11,7 @@ library CfdMath {
     uint256 internal constant WAD = 1e18;
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
     uint256 internal constant USDC_TO_TOKEN_SCALE = 1e20; // Resolves Size(18)*Price(8) -> USDC(6)
+    uint256 internal constant FUNDING_INDEX_SCALE = 1e30; // Resolves Size(18)*Index(18) -> USDC(6)
 
     // ==========================================
     // 1. PNL & SOLVENCY MATH

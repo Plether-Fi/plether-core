@@ -214,8 +214,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         if (absSkew > 0 && vaultDepthUsdc > 0) {
             uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
             uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
-            uint256 stepUsdc = (currentOraclePrice * fundingDelta) / CfdMath.USDC_TO_TOKEN_SCALE;
-            int256 step = int256(stepUsdc);
+            int256 step = int256((currentOraclePrice * fundingDelta) / 1e8);
 
             if (step > 0) {
                 if (bullMajority) {
@@ -241,7 +240,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         }
         int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
         int256 indexDelta = currentIndex - pos.entryFundingIndex;
-        fundingUsdc = (int256(pos.size) * indexDelta) / int256(CfdMath.WAD);
+        fundingUsdc = (int256(pos.size) * indexDelta) / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
     // ==========================================
@@ -420,7 +419,12 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             vault.payOut(address(clearinghouse), uint256(netSettlement));
             clearinghouse.settleUsdc(order.accountId, address(USDC), netSettlement);
         } else if (netSettlement < 0) {
-            clearinghouse.seizeAsset(order.accountId, address(USDC), uint256(-netSettlement), address(vault));
+            uint256 owed = uint256(-netSettlement);
+            uint256 available = clearinghouse.balances(order.accountId, address(USDC));
+            uint256 toSeize = available < owed ? available : owed;
+            if (toSeize > 0) {
+                clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));
+            }
         }
 
         accumulatedFeesUsdc += execFeeUsdc;
@@ -554,9 +558,6 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
         if (keeperBountyUsdc < riskParams.minBountyUsdc) {
             keeperBountyUsdc = riskParams.minBountyUsdc;
-        }
-        if (equityUsdc > 0 && keeperBountyUsdc > uint256(equityUsdc)) {
-            keeperBountyUsdc = uint256(equityUsdc);
         }
 
         uint256 posMargin = pos.margin;

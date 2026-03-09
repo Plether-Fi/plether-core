@@ -208,9 +208,9 @@ contract LiquidationTest is Test {
         router.executeLiquidation(accountId, pythData);
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
 
-        // 0.15% of $1095 = $1.64 → below $5 minimum, but equity ≈ $4.40 caps the bounty
-        assertLt(bounty, 5 * 1e6, "Bounty should be capped below min floor when equity is insufficient");
-        assertGt(bounty, 0, "Bounty should still be positive");
+        // 0.15% of $1095 = $1.64 → below $5 minimum → floor applies.
+        // Vault absorbs the difference between bounty and equity as bad-debt cost.
+        assertEq(bounty, 5 * 1e6, "Keeper always receives full minBounty to prevent liquidation delay");
     }
 
     function test_LiquidationEquity_IncludesFunding() public {
