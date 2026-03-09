@@ -437,3 +437,182 @@ contract AuditFindingsTest is Test {
     }
 
 }
+
+// ==========================================
+// C-02 tests require non-zero vpiFactor (separate deployment)
+// ==========================================
+
+contract C02VpiDepthTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    function setUp() public {
+        vm.warp(1_709_532_000);
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0.01e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    // ==========================================
+    // C-02a: Minority position reverse attack
+    // Attacker opens minority position (receives VPI rebate) at low depth,
+    // depth inflates, then closes (tiny charge at high depth).
+    // Without fix: attacker extracts net VPI rebate.
+    // With fix: stateful bound caps close VPI so net VPI >= 0.
+    // ==========================================
+
+    function test_C02a_MinorityVpiRebateCannotExceedPaidCharges() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        // Carol opens large BEAR to create skew
+        _fundTrader(carol, 50_000 * 1e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 40_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        // Alice opens minority BULL (heals skew) at current depth → receives VPI rebate
+        _fundTrader(alice, 50_000 * 1e6);
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        // Inflate depth by 10x via LP deposit
+        _fundJunior(bob, 9_000_000 * 1e6);
+
+        // Alice closes at inflated depth — VPI charge should be bounded
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+        router.executeOrder(3, closePrice);
+
+        uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
+
+        // PnL is zero (same price). Exec fees are a pure cost.
+        // With the bound, net VPI >= 0, so Alice must have lost money overall.
+        assertLe(aliceBalAfter, aliceBalBefore, "Minority VPI depth attack must not be profitable");
+    }
+
+    // ==========================================
+    // C-02b: Size addition bypass
+    // Attacker opens dust at low depth (entryDepth = low), inflates depth,
+    // adds massive size (tiny charge at high depth), deflates depth, closes
+    // (massive rebate at low depth).
+    // Without fix: entryDepth was set only on first open, bypass via size addition.
+    // With fix: vpiAccrued tracks all charges, close rebate bounded by total paid.
+    // ==========================================
+
+    function test_C02b_SizeAdditionCannotBypassVpiBound() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
+
+        // Open dust BULL at current (low) depth
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        // Inflate depth by 10x
+        _fundJunior(bob, 9_000_000 * 1e6);
+
+        // Add massive size at high depth (tiny VPI charge)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        // Deflate depth: withdraw most LP capital
+        vm.warp(block.timestamp + 2 hours);
+        vm.startPrank(bob);
+        uint256 withdrawable = juniorVault.maxWithdraw(bob);
+        if (withdrawable > 0) {
+            juniorVault.withdraw(withdrawable, bob, bob);
+        }
+        vm.stopPrank();
+
+        // Close all at deflated depth
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+        router.executeOrder(3, closePrice);
+
+        uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
+
+        // Same price → PnL = 0. With the bound, Alice cannot profit from VPI.
+        assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
+    }
+
+}

@@ -53,7 +53,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open, where `IMR = max(1.5 × MMR, minBountyUsdc)` |
 | **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence |
-| **VPI Entry Depth** | Close VPI uses `max(currentDepth, pos.entryDepth)` — rebate denominator is always >= open denominator, preventing depth manipulation attacks |
+| **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Funding Invariants
 

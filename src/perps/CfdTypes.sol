@@ -22,7 +22,7 @@ library CfdTypes {
         int256 entryFundingIndex; // [18 dec WAD] Global funding index at the time of entry
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
-        uint256 entryDepth; // [6 dec] Vault depth at position inception (VPI rebate cap)
+        int256 vpiAccrued; // [6 dec] Cumulative VPI charges (+) and rebates (-) across the position's lifetime
     }
 
     /// @notice An intent submitted by a user, waiting for Keeper execution

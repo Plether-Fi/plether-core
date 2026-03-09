@@ -79,7 +79,7 @@ C(S) = 0.5 · k · S² / D
 
 **Wash-Trade Immunity**: Opening and immediately closing yields exactly $0 net VPI. Combined with the flat 6 bps execution fee, wash-trading to farm rebates is guaranteed to be a net loss.
 
-**Depth Manipulation Resistance**: Each position stores `entryDepth` (vault depth at inception). On close, VPI uses `max(currentDepth, entryDepth)`, ensuring the rebate denominator is at least as large as at open. If an attacker inflates depth to open cheaply then deflates it to claim a massive rebate, the stored entry depth caps the rebate at the original charge.
+**Depth Manipulation Resistance**: Each position tracks `vpiAccrued` — the cumulative VPI charges and rebates across its lifetime. On close, the engine bounds the VPI so the user can never extract a net rebate greater than what they paid. This stateful approach is immune to depth manipulation: inflating or deflating depth between open and close cannot produce VPI profit because the bound enforces `accruedVpi + closeVpi >= 0`.
 
 ### Kinked Convex Funding Curve
 

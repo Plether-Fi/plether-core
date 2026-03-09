@@ -178,7 +178,7 @@ contract CfdEngineTest is Test {
             entryFundingIndex: entryFunding,
             side: side,
             lastUpdateTime: 0,
-            entryDepth: 0
+            vpiAccrued: 0
         });
 
         int256 bullFunding = engine.getPendingFunding(bullPos);
@@ -778,7 +778,7 @@ contract CfdEngineTest is Test {
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6);
     }
 
-    function test_VpiDepthManipulation_NeutralizedByEntryDepth() public {
+    function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
         bytes32 accountId = bytes32(uint256(1));
         _depositToClearinghouse(accountId, 50_000 * 1e6);
 
@@ -798,8 +798,8 @@ contract CfdEngineTest is Test {
         uint256 chBeforeOpen = clearinghouse.balances(accountId, address(usdc));
         engine.processOrder(openOrder, 1e8, largeDepth);
 
-        (,,,,,,, uint256 storedDepth) = engine.positions(accountId);
-        assertEq(storedDepth, largeDepth, "Entry depth recorded at open");
+        (,,,,,,, int256 storedVpi) = engine.positions(accountId);
+        assertTrue(storedVpi != 0, "VPI should be tracked");
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             accountId: accountId,
@@ -816,8 +816,7 @@ contract CfdEngineTest is Test {
         uint256 chAfterClose = clearinghouse.balances(accountId, address(usdc));
 
         // Without fix: close at smallDepth yields massive VPI rebate (attacker profits).
-        // With fix: close uses max(smallDepth, entryDepth) = largeDepth.
-        // Same depth for open and close → VPI charge = VPI rebate → net VPI = 0.
+        // With fix: stateful bound caps close rebate to what was paid on open → net VPI = 0.
         // Only exec fees should be deducted. Exec fee = 6bps * $100k * 2 = $120.
         uint256 roundTripCost = chBeforeOpen - chAfterClose;
         uint256 execFeeRoundTrip = 120 * 1e6;
