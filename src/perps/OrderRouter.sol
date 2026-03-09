@@ -209,8 +209,7 @@ contract OrderRouter {
 
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
             if (staleness > maxStaleness) {
-                _cancelOrder(orderId, "Oracle price too stale", pythFee);
-                return;
+                revert OrderRouter__OraclePriceTooStale();
             }
 
             if (!oracleFrozen && minPublishTime <= order.commitTime) {

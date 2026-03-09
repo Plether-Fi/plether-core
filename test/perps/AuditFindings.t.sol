@@ -1510,3 +1510,125 @@ contract NegativeFundingFreeUsdcTest is Test {
     }
 
 }
+
+// ==========================================
+// H-02: executeOrder cancels on oracle staleness instead of reverting
+// An attacker calls executeOrder(orderId, []) without Pyth data.
+// The cached price is stale → _cancelOrder permanently deletes the
+// victim's order. Should revert to leave the order safely in the queue.
+// ==========================================
+
+contract H02StalenessGriefTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    uint256 constant CAP_PRICE = 2e8;
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address attacker = address(0x666);
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    function setUp() public {
+        vm.warp(10_000);
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function test_H02_StaleOracleCancelsOrderInsteadOfReverting() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        // Fresh price for the commit
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        // Time passes — cached Pyth price becomes stale (>60s)
+        vm.warp(block.timestamp + 120);
+
+        // Attacker calls executeOrder without updating Pyth — must revert,
+        // leaving the order safely in the queue for an honest keeper
+        bytes[] memory empty;
+        vm.prank(attacker);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrder(1, empty);
+
+        // Order is still in the queue
+        (, uint256 sizeDelta,,,,,,) = router.orders(1);
+        assertGt(sizeDelta, 0, "order must survive stale-oracle griefing attempt");
+    }
+
+}
