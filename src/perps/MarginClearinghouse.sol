@@ -149,10 +149,6 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
 
-        if (address(withdrawGuard) != address(0)) {
-            withdrawGuard.checkWithdraw(accountId);
-        }
-
         IERC20(asset).safeTransfer(msg.sender, amount);
         emit Withdraw(accountId, asset, amount);
     }

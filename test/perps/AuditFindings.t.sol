@@ -314,7 +314,7 @@ contract AuditFindingsTest is Test {
     // EXPECTED: Withdrawal reverts while a position is open.
     // ==========================================
 
-    function test_Finding8_WithdrawBlockedByOpenPosition() public {
+    function test_Finding8_WithdrawAllowedWithOpenPosition() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 10_000 * 1e6);
 
@@ -332,9 +332,10 @@ contract AuditFindingsTest is Test {
             clearinghouse.balances(accountId, address(usdc)) - clearinghouse.lockedMarginUsdc(accountId);
         assertGt(freeBalance, 0, "Alice should have free balance");
 
+        uint256 balBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(accountId, address(usdc), freeBalance);
+        assertEq(usdc.balanceOf(alice) - balBefore, freeBalance, "Free equity withdrawable with open position");
     }
 
     function test_Finding8_WithdrawAllowedAfterClose() public {

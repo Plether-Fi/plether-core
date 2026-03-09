@@ -388,24 +388,21 @@ contract OrderRouterPythTest is Test {
         vm.stopPrank();
     }
 
-    function test_Staleness_CancelsGracefully() public {
+    function test_MevCheck_RevertsInsteadOfCancelling() public {
         vm.warp(1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        // publishTime 999 < commitTime 1000 → stale
+        // publishTime 999 < commitTime 1000 → MEV detected
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
         vm.warp(1050);
 
         bytes[] memory empty;
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 2, "Queue should advance after stale cancel");
-
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "No position should be opened");
+        assertEq(router.nextExecuteId(), 1, "Order stays in queue for honest keeper");
     }
 
     function test_Slippage_CancelsGracefully() public {
@@ -576,16 +573,16 @@ contract OrderRouterPythTest is Test {
         bytes[] memory empty;
         router.executeOrderBatch(2, empty);
 
-        assertEq(router.nextExecuteId(), 3, "Both orders consumed");
+        assertEq(router.nextExecuteId(), 2, "Batch breaks at MEV-stale order, leaving it in queue");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "Only order 1 should execute, order 2 MEV-cancelled");
+        assertEq(size, 10_000 * 1e18, "Only order 1 should execute");
     }
 
-    function test_C1_CancelledOrder_RefundsUser_NotKeeper() public {
+    function test_C1_MevDetected_RevertsEntireTx() public {
         vm.warp(1000);
-        // Set oracle price published at t=999, BEFORE commit at t=1000 → stale
+        // Set oracle price published at t=999, BEFORE commit at t=1000 → MEV
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
         // Alice commits with 0.1 ETH keeper fee
@@ -594,21 +591,17 @@ contract OrderRouterPythTest is Test {
 
         address keeper = address(0xBEEF);
         vm.deal(keeper, 1 ether);
-        uint256 keeperBalBefore = keeper.balance;
 
-        // Keeper executes with no Pyth update - stale price triggers cancellation
+        // Keeper executes with no Pyth update - stale price triggers revert (not cancel)
         vm.warp(1050);
         bytes[] memory empty;
         vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        // Keeper should NOT receive Alice's 0.1 ETH fee
-        assertEq(keeper.balance, keeperBalBefore, "Keeper should not profit from cancellation");
-
-        // Alice should be able to claim her refunded ETH
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        uint256 aliceClaimable = router.claimableEth(alice);
-        assertEq(aliceClaimable, 0.1 ether, "Alice's keeper fee should be refundable");
+        // Order stays in queue, fee stays in mapping
+        assertEq(router.nextExecuteId(), 1, "Order preserved for honest keeper");
+        assertEq(router.keeperFees(1), 0.1 ether, "Keeper fee preserved");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -681,11 +674,10 @@ contract OrderRouterPythTest is Test {
 
         vm.warp(1050);
         bytes[] memory empty;
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Weakest-link stale feed should cancel order");
+        assertEq(router.nextExecuteId(), 1, "Weakest-link stale feed reverts, order preserved");
     }
 
     function test_WeakestLink_Staleness() public {

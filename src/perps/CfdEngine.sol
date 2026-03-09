@@ -75,6 +75,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
     error CfdEngine__RunwayTooLong();
+    error CfdEngine__PartialCloseUnderwaterFunding();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -302,6 +303,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 if (pos.margin < loss) {
                     if (!order.isClose) {
                         revert CfdEngine__FundingExceedsMargin();
+                    }
+                    if (order.sizeDelta < pos.size) {
+                        revert CfdEngine__PartialCloseUnderwaterFunding();
                     }
                     unsettledFundingDebt = loss - pos.margin;
                     if (pos.margin > 0) {

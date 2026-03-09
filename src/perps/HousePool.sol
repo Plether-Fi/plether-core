@@ -240,6 +240,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     ) internal {
         uint256 remaining = revenue;
 
+        if (remaining > 0 && seniorPrincipal < seniorHighWaterMark) {
+            uint256 deficit = seniorHighWaterMark - seniorPrincipal;
+            uint256 restore = remaining < deficit ? remaining : deficit;
+            seniorPrincipal += restore;
+            remaining -= restore;
+        }
+
         uint256 seniorPayout = unpaidSeniorYield;
         if (seniorPayout > remaining) {
             seniorPayout = remaining;
@@ -247,13 +254,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         seniorPrincipal += seniorPayout;
         unpaidSeniorYield -= seniorPayout;
         remaining -= seniorPayout;
-
-        if (remaining > 0 && seniorPrincipal < seniorHighWaterMark) {
-            uint256 deficit = seniorHighWaterMark - seniorPrincipal;
-            uint256 restore = remaining < deficit ? remaining : deficit;
-            seniorPrincipal += restore;
-            remaining -= restore;
-        }
 
         if (seniorPrincipal > seniorHighWaterMark) {
             seniorHighWaterMark = seniorPrincipal;

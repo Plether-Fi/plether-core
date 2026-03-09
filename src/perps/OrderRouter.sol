@@ -43,6 +43,7 @@ contract OrderRouter {
     error OrderRouter__InvalidWeights();
     error OrderRouter__InvalidBasePrice();
     error OrderRouter__EmptyFeeds();
+    error OrderRouter__MevDetected();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -171,8 +172,7 @@ contract OrderRouter {
             }
 
             if (!oracleFrozen && minPublishTime <= order.commitTime) {
-                _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
-                return;
+                revert OrderRouter__MevDetected();
             }
         } else {
             if (block.chainid != 31_337) {
@@ -185,15 +185,15 @@ contract OrderRouter {
             }
         }
 
-        uint256 capPrice = engine.CAP_PRICE();
-        if (executionPrice > capPrice) {
-            executionPrice = capPrice;
-        }
-
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
             _finalizeExecution(orderId, pythFee);
             return;
+        }
+
+        uint256 capPrice = engine.CAP_PRICE();
+        if (executionPrice > capPrice) {
+            executionPrice = capPrice;
         }
 
         uint256 vaultDepth = vault.totalAssets();
@@ -263,9 +263,7 @@ contract OrderRouter {
         }
 
         uint256 capPrice = engine.CAP_PRICE();
-        if (executionPrice > capPrice) {
-            executionPrice = capPrice;
-        }
+        uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
 
         uint256 totalKeeperFees;
 
@@ -285,9 +283,7 @@ contract OrderRouter {
             }
 
             if (!oracleFrozen && pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
-                emit OrderFailed(orderId, "MEV: Oracle price is stale");
-                _refundOrderFee(orderId, order);
-                continue;
+                break;
             }
 
             if (!_checkSlippage(order, executionPrice)) {
@@ -298,8 +294,8 @@ contract OrderRouter {
 
             uint256 vaultDepth = vault.totalAssets();
 
-            try engine.processOrder(order, executionPrice, vaultDepth) {
-                emit OrderExecuted(orderId, executionPrice);
+            try engine.processOrder(order, clampedPrice, vaultDepth) {
+                emit OrderExecuted(orderId, clampedPrice);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
             } catch {
