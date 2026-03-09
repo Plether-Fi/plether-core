@@ -707,3 +707,181 @@ contract C02VpiDepthTest is Test {
     }
 
 }
+
+// ==========================================
+// H-03: Stale order auto-expiry prevents zero-fee queue spam
+// ==========================================
+
+contract H03StaleOrderExpiryTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address spammer = address(0x666);
+
+    function setUp() public {
+        vm.warp(1_709_532_000);
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        router.setMaxOrderAge(300);
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function test_H03_StaleSpamOrdersAutoSkipped() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        // Spammer commits 5 zero-fee garbage orders (no margin, will fail at engine)
+        for (uint256 i = 0; i < 5; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        }
+        // Alice commits a real order (orderId = 6)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        assertEq(router.nextExecuteId(), 1);
+
+        // Time passes beyond maxOrderAge
+        vm.warp(block.timestamp + 301);
+
+        // Keeper executes Alice's order (id=6) — stale spam orders 1-5 auto-skipped
+        bytes[] memory empty;
+        router.executeOrder(6, empty);
+
+        assertEq(router.nextExecuteId(), 7, "Queue advanced past spam + real order");
+    }
+
+    function test_H03_FreshOrdersNotSkipped() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        // Execute immediately (within maxOrderAge) — no skip, normal FIFO
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 2);
+    }
+
+    function test_H03_SpammerFeeRefundedOnExpiry() public {
+        // Spammer attaches ETH fee
+        vm.deal(spammer, 1 ether);
+        vm.prank(spammer);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        router.executeOrder(2, empty);
+
+        // Spammer's ETH fee was refunded to claimableEth, not given to keeper
+        assertEq(router.claimableEth(spammer), 0.01 ether, "Expired order fee refunded to user");
+    }
+
+    function test_H03_BatchSkipsStaleOrders() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        // 3 spam orders
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        }
+
+        // Alice's real order (id=4)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        // Batch execute up to order 4
+        bytes[] memory empty;
+        router.executeOrderBatch(4, empty);
+
+        assertEq(router.nextExecuteId(), 5, "Batch advanced past stale + real order");
+    }
+
+    function test_H03_SetMaxOrderAge_OnlyOwner() public {
+        vm.prank(spammer);
+        vm.expectRevert(OrderRouter.OrderRouter__Unauthorized.selector);
+        router.setMaxOrderAge(600);
+
+        // Engine owner (this contract) can set it
+        router.setMaxOrderAge(600);
+        assertEq(router.maxOrderAge(), 600);
+    }
+
+}

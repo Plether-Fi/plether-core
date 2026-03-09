@@ -6,6 +6,7 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
@@ -24,11 +25,14 @@ contract OrderRouter {
     uint64 public nextCommitId = 1;
     uint64 public nextExecuteId = 1;
 
+    uint256 public maxOrderAge;
+
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
+    error OrderRouter__Unauthorized();
     error OrderRouter__FIFOViolation();
     error OrderRouter__OrderNotPending();
     error OrderRouter__InsufficientPythFee();
@@ -92,6 +96,19 @@ contract OrderRouter {
     }
 
     // ==========================================
+    // ADMIN
+    // ==========================================
+
+    function setMaxOrderAge(
+        uint256 _maxOrderAge
+    ) external {
+        if (msg.sender != Ownable(address(engine)).owner()) {
+            revert OrderRouter__Unauthorized();
+        }
+        maxOrderAge = _maxOrderAge;
+    }
+
+    // ==========================================
     // STEP 1: THE COMMITMENT (User Intent)
     // ==========================================
 
@@ -138,6 +155,7 @@ contract OrderRouter {
         uint64 orderId,
         bytes[] calldata pythUpdateData
     ) external payable {
+        _skipStaleOrders(orderId);
         if (orderId != nextExecuteId) {
             revert OrderRouter__FIFOViolation();
         }
@@ -282,6 +300,12 @@ contract OrderRouter {
                 continue;
             }
 
+            if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
+                emit OrderFailed(orderId, "Order expired");
+                _refundOrderFee(orderId, order);
+                continue;
+            }
+
             if (isFad && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
                 totalKeeperFees += _cleanupOrder(orderId);
@@ -323,6 +347,28 @@ contract OrderRouter {
     // ==========================================
     // INTERNAL HELPERS
     // ==========================================
+
+    function _skipStaleOrders(
+        uint64 upToId
+    ) internal {
+        uint256 age = maxOrderAge;
+        if (age == 0) {
+            return;
+        }
+        while (nextExecuteId < upToId) {
+            uint64 headId = nextExecuteId;
+            CfdTypes.Order memory order = orders[headId];
+            if (order.sizeDelta == 0) {
+                nextExecuteId++;
+                continue;
+            }
+            if (block.timestamp - order.commitTime <= age) {
+                break;
+            }
+            emit OrderFailed(headId, "Order expired");
+            _refundOrderFee(headId, order);
+        }
+    }
 
     function _cleanupOrder(
         uint64 orderId
