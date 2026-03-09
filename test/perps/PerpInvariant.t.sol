@@ -255,9 +255,12 @@ contract PerpInvariantTest is Test {
 
     function invariant_GlobalSolvency() public {
         uint256 effectiveAssets = pool.totalAssets();
-        int256 nuf = engine.netUnsettledFunding();
-        if (nuf > 0) {
-            effectiveAssets += uint256(nuf);
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        if (unrealizedFunding < 0) {
+            effectiveAssets += uint256(-unrealizedFunding);
+        } else if (unrealizedFunding > 0) {
+            effectiveAssets =
+                effectiveAssets > uint256(unrealizedFunding) ? effectiveAssets - uint256(unrealizedFunding) : 0;
         }
         uint256 maxLiability = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
             ? engine.globalBullMaxProfit()

@@ -25,12 +25,22 @@ interface ICfdEngine {
     function globalBearMaxProfit() external view returns (uint256);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
-    /// @notice Net unsettled funding imbalance (positive = vault temporarily deflated)
-    function netUnsettledFunding() external view returns (int256);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
     function getUnrealizedTraderPnl() external view returns (int256);
+
+    /// @notice Aggregate unrealized funding PnL across all open positions.
+    ///         Positive = traders are net funding receivers (vault liability).
+    function getUnrealizedFundingPnl() external view returns (int256);
+
+    /// @notice Timestamp of the last mark price update
+    function lastMarkTime() external view returns (uint64);
+
+    /// @notice Push a fresh mark price without processing an order
+    function updateMarkPrice(
+        uint256 price
+    ) external;
 
     /// @notice Protocol cap price (8 decimals). Oracle prices are clamped to this.
     function CAP_PRICE() external view returns (uint256);

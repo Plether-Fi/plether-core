@@ -36,6 +36,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public globalBullEntryNotional;
     uint256 public globalBearEntryNotional;
     uint256 public lastMarkPrice;
+    uint64 public lastMarkTime;
 
     uint256 public accumulatedFeesUsdc;
 
@@ -46,11 +47,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     int256 public bullFundingIndex;
     int256 public bearFundingIndex;
     uint64 public lastFundingTime;
-
-    /// @notice Net USDC paid out by the vault for funding that payers haven't settled yet.
-    ///         Positive = vault temporarily deflated (owed by payers). Used to prevent
-    ///         false solvency reverts when receivers settle before payers.
-    int256 public netUnsettledFunding;
+    int256 public globalBullEntryFunding;
+    int256 public globalBearEntryFunding;
 
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => CfdTypes.Position) public positions;
@@ -281,6 +279,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         lastMarkPrice = price;
+        lastMarkTime = uint64(block.timestamp);
 
         _updateFunding(price, vaultDepthUsdc);
 
@@ -302,7 +301,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 vault.payOut(address(clearinghouse), gain);
                 clearinghouse.settleUsdc(order.accountId, address(USDC), pendingFunding);
                 clearinghouse.lockMargin(order.accountId, gain);
-                netUnsettledFunding += int256(gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 if (pos.margin < loss) {
@@ -316,17 +314,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                     if (pos.margin > 0) {
                         clearinghouse.seizeAsset(order.accountId, address(USDC), pos.margin, address(vault));
                         clearinghouse.unlockMargin(order.accountId, pos.margin);
-                        netUnsettledFunding -= int256(pos.margin);
                     }
                     pos.margin = 0;
                 } else {
                     pos.margin -= loss;
                     clearinghouse.seizeAsset(order.accountId, address(USDC), loss, address(vault));
                     clearinghouse.unlockMargin(order.accountId, loss);
-                    netUnsettledFunding -= int256(loss);
                 }
             }
-            pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+            int256 newIdx = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+            int256 fundingDelta = int256(pos.size) * (newIdx - pos.entryFundingIndex);
+            if (pos.side == CfdTypes.Side.BULL) {
+                globalBullEntryFunding += fundingDelta;
+            } else {
+                globalBearEntryFunding += fundingDelta;
+            }
+            pos.entryFundingIndex = newIdx;
         }
 
         if (order.isClose) {
@@ -373,8 +376,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         if (order.side == CfdTypes.Side.BULL) {
             globalBullEntryNotional += newNotional - oldNotional;
+            globalBullEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
         } else {
             globalBearEntryNotional += newNotional - oldNotional;
+            globalBearEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
         }
 
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
@@ -454,8 +459,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 entryNotionalReduction = order.sizeDelta * pos.entryPrice;
         if (pos.side == CfdTypes.Side.BULL) {
             globalBullEntryNotional -= entryNotionalReduction;
+            globalBullEntryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
         } else {
             globalBearEntryNotional -= entryNotionalReduction;
+            globalBearEntryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
         }
 
         pos.size -= order.sizeDelta;
@@ -486,10 +493,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             if (toSeize > 0) {
                 clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));
             }
-        }
-
-        if (unsettledFundingDebt > 0) {
-            netUnsettledFunding -= int256(unsettledFundingDebt);
         }
 
         accumulatedFeesUsdc += execFeeUsdc;
@@ -600,6 +603,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         lastMarkPrice = price;
+        lastMarkTime = uint64(block.timestamp);
         _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[accountId];
@@ -608,7 +612,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         int256 pendingFunding = getPendingFunding(pos);
-        netUnsettledFunding += pendingFunding;
+        if (pos.side == CfdTypes.Side.BULL) {
+            globalBullEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
+        } else {
+            globalBearEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
+        }
 
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
@@ -685,12 +693,33 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _getEffectiveAssets() internal view returns (uint256 effectiveAssets) {
         effectiveAssets = vault.totalAssets();
-        if (netUnsettledFunding > 0) {
-            effectiveAssets += uint256(netUnsettledFunding);
-        } else if (netUnsettledFunding < 0) {
-            uint256 owed = uint256(-netUnsettledFunding);
-            effectiveAssets = effectiveAssets > owed ? effectiveAssets - owed : 0;
+        int256 unrealizedFunding = _getUnrealizedFundingPnl();
+        if (unrealizedFunding > 0) {
+            effectiveAssets =
+                effectiveAssets > uint256(unrealizedFunding) ? effectiveAssets - uint256(unrealizedFunding) : 0;
+        } else if (unrealizedFunding < 0) {
+            effectiveAssets += uint256(-unrealizedFunding);
         }
+    }
+
+    function _getUnrealizedFundingPnl() internal view returns (int256) {
+        int256 bullPnl =
+            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearPnl =
+            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        return bullPnl + bearPnl;
+    }
+
+    function getUnrealizedFundingPnl() external view returns (int256) {
+        return _getUnrealizedFundingPnl();
+    }
+
+    function updateMarkPrice(
+        uint256 price
+    ) external onlyRouter {
+        uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
+        lastMarkPrice = clamped;
+        lastMarkTime = uint64(block.timestamp);
     }
 
     // ==========================================

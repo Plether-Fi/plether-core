@@ -249,7 +249,7 @@ contract AuditFindingsTest is Test {
         (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);
 
         assertGt(sizeAfter, sizeBefore, "Order should succeed: unsettled funding credit covers vault depletion");
-        assertGt(engine.netUnsettledFunding(), 0, "Vault should have unsettled funding credit from payers");
+        assertLt(engine.getUnrealizedFundingPnl(), 0, "Net payers have negative unrealized funding (vault is owed)");
     }
 
     // ==========================================
@@ -489,6 +489,151 @@ contract AuditFindingsTest is Test {
     // BUG (pre-fix): seize uses gross balance, balance < locked, liquidation reverts.
     // ==========================================
 
+    // ==========================================
+    // C-01 (new): Stale Mark Price enables risk-free NAV arbitrage
+    // In a pull-oracle architecture, lastMarkPrice is only updated when a trade or
+    // liquidation executes. Deposits and withdrawals are synchronous ERC-4626 calls
+    // that do NOT require an oracle update.
+    // If the real market moves (e.g., BEAR traders gain $120K), but no trade has
+    // updated lastMarkPrice, _reconcile() computes MtM from the stale mark.
+    // An LP can withdraw at the inflated NAV before the loss is marked on-chain.
+    // EXPECTED: Both LPs absorb losses equally regardless of withdrawal timing.
+    // BUG: First-mover LP escapes at stale NAV; last LP absorbs all MtM losses.
+    // ==========================================
+
+    function test_C01_StaleMarkPriceBlocksWithdrawal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundJunior(carol, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        vm.warp(block.timestamp + 2 hours);
+
+        // Alice opens BEAR 400K @ $1.00 → lastMarkPrice = $1.00, lastMarkTime = now
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        // Time passes beyond staleness limit — mark becomes stale
+        vm.warp(block.timestamp + 121);
+
+        // Bob tries to withdraw — reconcile reverts due to stale mark
+        vm.startPrank(bob);
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        juniorVault.withdraw(1e6, bob, bob);
+        vm.stopPrank();
+
+        // Push fresh mark at $1.30 via updateMarkPrice
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1.3e8));
+        router.updateMarkPrice(priceData);
+
+        // Now both Bob and Carol can withdraw at the same fair NAV
+        uint256 bobMax = juniorVault.maxWithdraw(bob);
+        uint256 carolMax = juniorVault.maxWithdraw(carol);
+
+        assertEq(bobMax, carolMax, "Both LPs see the same fair withdrawal limit at fresh mark price");
+    }
+
+    // ==========================================
+    // C-02 (new): Vault Funding Spread permanently locked as ghost liability
+    // When the majority side pays funding, the vault receives more cash than it
+    // pays to minority receivers. The surplus (spread) is the vault's revenue.
+    // However, netUnsettledFunding tracks cumulative cash flows, not current
+    // liabilities. After all positions close, the spread makes netUnsettledFunding
+    // permanently negative. Both _getEffectiveAssets() and _reconcile() reserve
+    // this amount as if someone will claim it — but nobody will.
+    // EXPECTED: After all positions close, netUnsettledFunding = 0 and spread is distributable.
+    // BUG: Spread trapped as ghost liability, permanently reducing LP distributable revenue.
+    // ==========================================
+
+    function test_C02_FundingSpreadLockedAfterAllPositionsClose() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        // Bear-heavy market: 300K bear (majority payer) vs 100K bull (minority receiver)
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        // 90 days of funding accrues. Bears pay more than bulls receive.
+        vm.warp(block.timestamp + 90 days);
+
+        // Close both: all funding physically settled.
+        // Must pass explicit price so _updateFunding sees non-zero skew.
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, closePrice);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
+        router.executeOrder(4, closePrice);
+
+        assertEq(engine.bullOI(), 0, "All bull positions closed");
+        assertEq(engine.bearOI(), 0, "All bear positions closed");
+
+        // With no open positions, unrealized funding PnL must be zero.
+        // The funding spread is now distributable revenue in the pool.
+        assertEq(
+            engine.getUnrealizedFundingPnl(), 0, "No positions => zero unrealized funding; spread is distributable"
+        );
+    }
+
+    function test_C02_FundingSpreadReducesDistributableRevenue() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 90 days);
+
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, closePrice);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
+        router.executeOrder(4, closePrice);
+
+        // Trigger reconcile to distribute revenue
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 poolBalance = usdc.balanceOf(address(pool));
+        uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
+        uint256 pendingFees = engine.accumulatedFeesUsdc();
+
+        // With no positions and no MtM, all pool cash should be accounted for
+        // by LP principals + pending protocol fees.
+        // BUG: The funding spread sits in the pool as cash but is reserved
+        //       as a ghost liability via netUnsettledFunding, so it's never
+        //       distributed to LPs or claimable as fees.
+        assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
+    }
+
+    // ==========================================
+    // C-01 (old, partial close): seize must respect lockedMarginUsdc
+    // ==========================================
+
     function test_C01_PartialClosePreservesLockedMarginForRemainingPosition() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 22_000 * 1e6);
@@ -686,6 +831,10 @@ contract C02VpiDepthTest is Test {
 
         // Deflate depth: withdraw most LP capital
         vm.warp(block.timestamp + 2 hours);
+        // Push fresh mark so reconcile doesn't revert on staleness
+        bytes[] memory freshPrice = new bytes[](1);
+        freshPrice[0] = abi.encode(uint256(1e8));
+        router.updateMarkPrice(freshPrice);
         vm.startPrank(bob);
         uint256 withdrawable = juniorVault.maxWithdraw(bob);
         if (withdrawable > 0) {

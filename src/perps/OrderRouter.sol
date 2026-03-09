@@ -550,6 +550,49 @@ contract OrderRouter {
     }
 
     // ==========================================
+    // MARK PRICE REFRESH
+    // ==========================================
+
+    /// @notice Push a fresh mark price to the engine without processing an order.
+    ///         Required before LP deposits/withdrawals when mark is stale.
+    function updateMarkPrice(
+        bytes[] calldata pythUpdateData
+    ) external payable {
+        uint256 pythFee;
+        uint256 executionPrice;
+
+        if (address(pyth) != address(0)) {
+            if (pythUpdateData.length > 0) {
+                pythFee = pyth.getUpdateFee(pythUpdateData);
+                if (msg.value < pythFee) {
+                    revert OrderRouter__InsufficientPythFee();
+                }
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            }
+            (executionPrice,) = _computeBasketPrice();
+        } else {
+            if (block.chainid != 31_337) {
+                revert OrderRouter__MockModeDisabled();
+            }
+            if (pythUpdateData.length > 0) {
+                executionPrice = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                executionPrice = 1e8;
+            }
+        }
+
+        engine.updateMarkPrice(executionPrice);
+
+        uint256 refund = msg.value - pythFee;
+        if (refund > 0) {
+            (bool success,) = payable(msg.sender).call{value: refund}("");
+            if (!success) {
+                claimableEth[msg.sender] += refund;
+            }
+        }
+    }
+
+    // ==========================================
     // ATOMIC LIQUIDATIONS
     // ==========================================
 

@@ -31,6 +31,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     uint256 public lastReconcileTime;
     uint256 public seniorRateBps;
+    uint256 public markStalenessLimit = 120;
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
@@ -42,9 +43,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     error HousePool__Unauthorized();
     error HousePool__ExceedsMaxSeniorWithdraw();
     error HousePool__ExceedsMaxJuniorWithdraw();
+    error HousePool__MarkPriceStale();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
+    event MarkStalenessLimitUpdated(uint256 newLimit);
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -100,6 +103,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         _reconcile();
         seniorRateBps = _rateBps;
         emit SeniorRateUpdated(_rateBps);
+    }
+
+    function setMarkStalenessLimit(
+        uint256 _limit
+    ) external onlyOwner {
+        markStalenessLimit = _limit;
+        emit MarkStalenessLimitUpdated(_limit);
     }
 
     // ==========================================
@@ -183,9 +193,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = maxLiability + pendingFees;
-        int256 netFunding = ENGINE.netUnsettledFunding();
-        if (netFunding < 0) {
-            reserved += uint256(-netFunding);
+        int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
+        if (unrealizedFunding > 0) {
+            reserved += uint256(unrealizedFunding);
         }
         return bal > reserved ? bal - reserved : 0;
     }
@@ -222,6 +232,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
             return;
         }
 
+        uint256 bullMax = ENGINE.globalBullMaxProfit();
+        uint256 bearMax = ENGINE.globalBearMaxProfit();
+        if (bullMax + bearMax > 0) {
+            if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
+                revert HousePool__MarkPriceStale();
+            }
+        }
+
         if (elapsed > 0 && seniorPrincipal > 0) {
             uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
             unpaidSeniorYield += yieldInc;
@@ -230,9 +248,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 bal = USDC.balanceOf(address(this));
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = pendingFees;
-        int256 netFunding = ENGINE.netUnsettledFunding();
-        if (netFunding < 0) {
-            reserved += uint256(-netFunding);
+        int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
+        if (unrealizedFunding > 0) {
+            reserved += uint256(unrealizedFunding);
         }
         uint256 cashMinusReserved = bal > reserved ? bal - reserved : 0;
 

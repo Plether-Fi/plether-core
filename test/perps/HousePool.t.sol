@@ -588,10 +588,10 @@ contract HousePoolTest is Test {
     }
 
     // ==========================================
-    // C-01: LIQUIDATION MUST UPDATE netUnsettledFunding
+    // C-01: LIQUIDATION CLEARS UNREALIZED FUNDING FOR CLOSED POSITION
     // ==========================================
 
-    function test_C01_LiquidationUpdatesNetUnsettledFunding() public {
+    function test_C01_LiquidationClearsUnrealizedFunding() public {
         engine.setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -614,7 +614,7 @@ contract HousePoolTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertEq(engine.netUnsettledFunding(), 0, "Starts at zero");
+        assertEq(engine.getUnrealizedFundingPnl(), 0, "Starts at zero");
 
         vm.warp(block.timestamp + 60 days);
 
@@ -624,14 +624,14 @@ contract HousePoolTest is Test {
 
         router.executeLiquidation(carolId, pythData);
 
-        assertLt(engine.netUnsettledFunding(), 0, "Liquidation must settle payer funding into accumulator");
+        assertEq(engine.getUnrealizedFundingPnl(), 0, "Liquidation clears unrealized funding for closed position");
     }
 
     // ==========================================
-    // C-03: getFreeUSDC MUST RESERVE NEGATIVE netUnsettledFunding
+    // C-03: getFreeUSDC RESERVES POSITIVE UNREALIZED FUNDING
     // ==========================================
 
-    function test_C03_GetFreeUSDC_ReservesNegativeNetFunding() public {
+    function test_C03_GetFreeUSDC_ReservesPositiveUnrealizedFunding() public {
         engine.setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -663,14 +663,15 @@ contract HousePoolTest is Test {
 
         vm.warp(block.timestamp + 20 days);
 
+        // Bull payer closes → bear receiver still open with positive unrealized funding
         bytes[] memory closePythData = new bytes[](1);
         closePythData[0] = abi.encode(1e8);
         vm.prank(trader1);
         router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
         router.executeOrder(3, closePythData);
 
-        int256 netFunding = engine.netUnsettledFunding();
-        assertTrue(netFunding < 0, "Payer settled first -> negative netUnsettledFunding");
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        assertTrue(unrealizedFunding > 0, "Remaining receiver has positive unrealized funding");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 bal = usdc.balanceOf(address(pool));
@@ -678,14 +679,14 @@ contract HousePoolTest is Test {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 naiveFree = bal - maxLiab - fees;
 
-        assertLt(freeUSDC, naiveFree, "getFreeUSDC must reserve negative funding amount");
+        assertLt(freeUSDC, naiveFree, "getFreeUSDC must reserve positive unrealized funding");
     }
 
     // ==========================================
-    // C-03b: _reconcile MUST EXCLUDE NEGATIVE netUnsettledFunding FROM DISTRIBUTABLE
+    // C-03b: _reconcile RESERVES POSITIVE UNREALIZED FUNDING FROM DISTRIBUTABLE
     // ==========================================
 
-    function test_C03b_Reconcile_ExcludesNegativeNetFunding() public {
+    function test_C03b_Reconcile_ReservesPositiveUnrealizedFunding() public {
         engine.setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -724,19 +725,18 @@ contract HousePoolTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
         router.executeOrder(3, closePythData);
 
-        int256 netFunding = engine.netUnsettledFunding();
-        assertTrue(netFunding < 0, "Payer settled first -> negative netUnsettledFunding");
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        assertTrue(unrealizedFunding > 0, "Remaining receiver has positive unrealized funding");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
+        // Pool cash must cover LP claims + fees + unrealized funding obligations
+        uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
-        uint256 transientCash = uint256(-netFunding);
-        assertLe(
-            juniorAfter,
-            juniorBefore + transientCash,
-            "Reconcile must not attribute transient funding cash as junior revenue"
-        );
+        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 reserved = fees + uint256(unrealizedFunding);
+        assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }
 
 }
