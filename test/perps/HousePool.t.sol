@@ -507,6 +507,65 @@ contract HousePoolTest is Test {
         assertEq(usdc.balanceOf(alice), 100_000 * 1e6);
     }
 
+    function test_SeniorPrincipal_RestoredBeforeJuniorSurplus() public {
+        _fundSenior(alice, 500_000 * 1e6);
+        _fundJunior(bob, 500_000 * 1e6);
+
+        assertEq(pool.seniorHighWaterMark(), 500_000 * 1e6);
+
+        // Catastrophic loss: pool loses $600k → junior wiped ($500k), senior loses $100k
+        // Simulate by burning pool USDC
+        vm.prank(address(pool));
+        usdc.transfer(address(0xdead), 600_000 * 1e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.juniorPrincipal(), 0, "Junior wiped");
+        assertEq(pool.seniorPrincipal(), 400_000 * 1e6, "Senior lost $100k");
+        assertEq(pool.seniorHighWaterMark(), 500_000 * 1e6, "HWM remembers original principal");
+
+        // Revenue arrives: $150k. Should restore senior $100k first, then junior gets $50k.
+        usdc.mint(address(pool), 150_000 * 1e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        // Senior yield for ~0 elapsed time is negligible, so nearly all goes to restoration + junior
+        assertEq(pool.seniorPrincipal(), 500_000 * 1e6, "Senior restored to HWM");
+        assertEq(pool.juniorPrincipal(), 50_000 * 1e6, "Junior gets remainder after restoration");
+    }
+
+    function test_SeniorHWM_ProportionalOnWithdraw() public {
+        _fundSenior(alice, 500_000 * 1e6);
+        _fundJunior(bob, 500_000 * 1e6);
+
+        // Warp past cooldown
+        vm.warp(block.timestamp + 1 hours);
+
+        // Alice withdraws half her senior position
+        vm.prank(alice);
+        seniorVault.withdraw(250_000 * 1e6, alice, alice);
+
+        assertEq(pool.seniorPrincipal(), 250_000 * 1e6);
+        assertEq(pool.seniorHighWaterMark(), 250_000 * 1e6, "HWM scales proportionally on withdraw");
+    }
+
+    function test_SeniorHWM_ResetOnFullWipeout() public {
+        _fundSenior(alice, 100_000 * 1e6);
+        _fundJunior(bob, 100_000 * 1e6);
+
+        // Total wipeout
+        vm.prank(address(pool));
+        usdc.transfer(address(0xdead), 200_000 * 1e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.seniorHighWaterMark(), 0, "HWM reset on full wipeout");
+    }
+
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
         _fundJunior(alice, 100_000 * 1e6);
 

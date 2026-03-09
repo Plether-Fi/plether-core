@@ -27,6 +27,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     uint256 public seniorPrincipal;
     uint256 public juniorPrincipal;
     uint256 public unpaidSeniorYield;
+    uint256 public seniorHighWaterMark;
 
     uint256 public lastReconcileTime;
     uint256 public seniorRateBps;
@@ -131,6 +132,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         _reconcile();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         seniorPrincipal += amount;
+        seniorHighWaterMark += amount;
     }
 
     function withdrawSenior(
@@ -141,6 +143,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();
         }
+        seniorHighWaterMark = seniorHighWaterMark * (seniorPrincipal - amount) / seniorPrincipal;
         seniorPrincipal -= amount;
         USDC.safeTransfer(receiver, amount);
     }
@@ -231,16 +234,28 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     function _distributeRevenue(
         uint256 revenue
     ) internal {
-        uint256 seniorPayout = unpaidSeniorYield;
-        if (seniorPayout > revenue) {
-            seniorPayout = revenue;
-        }
+        uint256 remaining = revenue;
 
+        uint256 seniorPayout = unpaidSeniorYield;
+        if (seniorPayout > remaining) {
+            seniorPayout = remaining;
+        }
         seniorPrincipal += seniorPayout;
         unpaidSeniorYield -= seniorPayout;
+        remaining -= seniorPayout;
 
-        uint256 juniorSurplus = revenue - seniorPayout;
-        juniorPrincipal += juniorSurplus;
+        if (remaining > 0 && seniorPrincipal < seniorHighWaterMark) {
+            uint256 deficit = seniorHighWaterMark - seniorPrincipal;
+            uint256 restore = remaining < deficit ? remaining : deficit;
+            seniorPrincipal += restore;
+            remaining -= restore;
+        }
+
+        if (seniorPrincipal > seniorHighWaterMark) {
+            seniorHighWaterMark = seniorPrincipal;
+        }
+
+        juniorPrincipal += remaining;
 
         emit Reconciled(seniorPrincipal, juniorPrincipal, int256(revenue));
     }
@@ -257,6 +272,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
                 seniorPrincipal -= seniorLoss;
             } else {
                 seniorPrincipal = 0;
+                seniorHighWaterMark = 0;
                 unpaidSeniorYield = 0;
             }
         }
