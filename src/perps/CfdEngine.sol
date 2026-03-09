@@ -563,6 +563,11 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         if (keeperBountyUsdc < riskParams.minBountyUsdc) {
             keeperBountyUsdc = riskParams.minBountyUsdc;
         }
+        if (equityUsdc <= 0) {
+            keeperBountyUsdc = 0;
+        } else if (keeperBountyUsdc > uint256(equityUsdc)) {
+            keeperBountyUsdc = uint256(equityUsdc);
+        }
 
         uint256 posMargin = pos.margin;
         clearinghouse.unlockMargin(accountId, posMargin);

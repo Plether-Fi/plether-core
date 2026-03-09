@@ -199,7 +199,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     /// @notice Distributes revenue (senior yield first, junior gets surplus) or absorbs losses
     ///         (junior first-loss, senior last-loss). Called before any deposit/withdrawal.
-    function reconcile() external {
+    function reconcile() external onlyVault {
         _reconcile();
     }
 
@@ -253,7 +253,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         } else {
             uint256 seniorLoss = loss - juniorPrincipal;
             juniorPrincipal = 0;
-            seniorPrincipal = seniorPrincipal > seniorLoss ? seniorPrincipal - seniorLoss : 0;
+            if (seniorPrincipal > seniorLoss) {
+                seniorPrincipal -= seniorLoss;
+            } else {
+                seniorPrincipal = 0;
+                unpaidSeniorYield = 0;
+            }
         }
 
         emit Reconciled(seniorPrincipal, juniorPrincipal, -int256(loss));

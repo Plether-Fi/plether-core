@@ -255,6 +255,7 @@ contract PerpInvariantTest is Test {
     }
 
     function invariant_TranchePriority() public {
+        vm.prank(address(juniorVault));
         pool.reconcile();
         uint256 currentSenior = pool.seniorPrincipal();
         if (currentSenior < seniorHighWaterMark) {
@@ -272,6 +273,7 @@ contract PerpInvariantTest is Test {
     }
 
     function invariant_NoNegativePrincipal() public {
+        vm.prank(address(juniorVault));
         pool.reconcile();
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 bal = pool.totalAssets();

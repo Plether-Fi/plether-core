@@ -187,30 +187,31 @@ contract LiquidationTest is Test {
         router.executeLiquidation(accountId, empty);
     }
 
-    function test_KeeperBounty_MinimumFloor() public {
+    function test_KeeperBounty_CappedAtEquity() public {
         vm.warp(WEDNESDAY_NOON);
 
+        // 4000 tokens at $1 = $4000 notional (above $3,333 minimum)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 4000 * 1e18, 200 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (, uint256 posMargin,,,,,) = engine.positions(accountId);
 
-        // BULL loses when price rises. At $1.095:
-        // PnL = -$95, equity ≈ $4.4, MMR = 1% of $1095 = $10.95 → liquidatable
+        // BULL loses when price rises. At $1.06:
+        // PnL = 4000 * $0.06 = -$240. equity = posMargin - $240 < 0 → liquidatable.
+        // Bounty capped to 0 (equity <= 0).
         bytes[] memory pythData = new bytes[](1);
-        pythData[0] = abi.encode(1.095e8);
+        pythData[0] = abi.encode(1.06e8);
 
         uint256 keeperBalBefore = usdc.balanceOf(keeper);
         vm.prank(keeper);
         router.executeLiquidation(accountId, pythData);
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
 
-        // 0.15% of $1095 = $1.64 → below $5 minimum → floor applies.
-        // Vault absorbs the difference between bounty and equity as bad-debt cost.
-        assertEq(bounty, 5 * 1e6, "Keeper always receives full minBounty to prevent liquidation delay");
+        assertEq(bounty, 0, "Bounty is zero when equity is negative");
     }
 
     function test_LiquidationEquity_IncludesFunding() public {
@@ -253,7 +254,8 @@ contract LiquidationTest is Test {
 
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position liquidated by funding drain alone");
-        assertTrue(usdc.balanceOf(keeper) > keeperBal, "Keeper received bounty");
+        // Funding drain pushes equity negative → bounty capped to 0
+        assertEq(usdc.balanceOf(keeper), keeperBal, "No bounty when equity drained below zero");
     }
 
     function test_KeeperBounty_PaidFromVault() public {

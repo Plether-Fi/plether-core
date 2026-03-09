@@ -137,6 +137,7 @@ contract HousePoolTest is Test {
         usdc.mint(address(pool), 100_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Senior yield = 500k * 8% * 1 year = 40k (capped at revenue=100k, so 40k)
@@ -153,6 +154,7 @@ contract HousePoolTest is Test {
         usdc.mint(address(pool), 10_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Senior yield would be 40k but capped at 10k revenue
@@ -183,6 +185,7 @@ contract HousePoolTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
         router.executeOrder{value: 0}(2, pythData);
 
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertLe(pool.juniorPrincipal(), 300_000 * 1e6, "Junior absorbed loss");
@@ -208,6 +211,7 @@ contract HousePoolTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 200_000 * 1e18, 0, 0, true);
         router.executeOrder{value: 0}(2, pythData);
 
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped out");
@@ -281,6 +285,7 @@ contract HousePoolTest is Test {
 
         // Pool balance includes the seized margin (exec fee goes to pool as part of seize)
         // But reconcile should NOT treat fees as LP revenue
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Junior principal should NOT include protocol fees
@@ -318,6 +323,7 @@ contract HousePoolTest is Test {
         router.executeOrder{value: 0}(2, pythData);
 
         vm.warp(block.timestamp + 30 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Pool paid out ~$20k profit to trader. Junior absorbs first.
@@ -359,6 +365,7 @@ contract HousePoolTest is Test {
 
         usdc.mint(address(pool), 20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 seniorPriceAfter = seniorVault.convertToAssets(1e9);
@@ -374,6 +381,7 @@ contract HousePoolTest is Test {
 
         usdc.mint(address(pool), 20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         _fundJunior(bob, 100_000 * 1e6);
@@ -419,6 +427,7 @@ contract HousePoolTest is Test {
         uint256 t0 = block.timestamp;
         for (uint256 i = 1; i <= 365; i++) {
             vm.warp(t0 + i * 1 days);
+            vm.prank(address(juniorVault));
             pool.reconcile();
         }
 
@@ -431,6 +440,7 @@ contract HousePoolTest is Test {
         // Inject fresh revenue to pay unpaid yield
         usdc.mint(address(pool), 50_000 * 1e6);
         vm.warp(t0 + 366 days);
+        vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Now unpaidSeniorYield should be mostly paid from fresh revenue
