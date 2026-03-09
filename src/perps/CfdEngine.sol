@@ -693,6 +693,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _getEffectiveAssets() internal view returns (uint256 effectiveAssets) {
         effectiveAssets = vault.totalAssets();
+        uint256 fees = accumulatedFeesUsdc;
+        effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
         int256 unrealizedFunding = _getUnrealizedFundingPnl();
         if (unrealizedFunding > 0) {
             effectiveAssets =
