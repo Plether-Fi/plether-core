@@ -178,7 +178,8 @@ contract OrderRouter {
             revert OrderRouter__OrderNotPending();
         }
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-            _cancelOrder(orderId, "Order expired", 0);
+            emit OrderFailed(orderId, "Order expired");
+            _finalizeExecution(orderId, 0);
             return;
         }
 
@@ -319,7 +320,7 @@ contract OrderRouter {
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, "Order expired");
-                _refundOrderFee(orderId, order);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
@@ -383,7 +384,19 @@ contract OrderRouter {
                 break;
             }
             emit OrderFailed(headId, "Order expired");
-            _refundOrderFee(headId, order);
+            _confiscateOrderFee(headId);
+        }
+    }
+
+    function _confiscateOrderFee(
+        uint64 orderId
+    ) internal {
+        uint256 fee = keeperFees[orderId];
+        delete keeperFees[orderId];
+        delete orders[orderId];
+        nextExecuteId++;
+        if (fee > 0) {
+            claimableEth[msg.sender] += fee;
         }
     }
 
@@ -394,49 +407,6 @@ contract OrderRouter {
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
-    }
-
-    function _refundOrderFee(
-        uint64 orderId,
-        CfdTypes.Order memory order
-    ) internal {
-        uint256 fee = keeperFees[orderId];
-        delete keeperFees[orderId];
-        delete orders[orderId];
-        nextExecuteId++;
-        if (fee > 0) {
-            address user = address(uint160(uint256(order.accountId)));
-            claimableEth[user] += fee;
-        }
-    }
-
-    function _cancelOrder(
-        uint64 orderId,
-        string memory reason,
-        uint256 pythFee
-    ) internal {
-        emit OrderFailed(orderId, reason);
-
-        CfdTypes.Order memory order = orders[orderId];
-        uint256 fee = keeperFees[orderId];
-        delete keeperFees[orderId];
-        delete orders[orderId];
-        nextExecuteId++;
-
-        // Refund keeper fee to user, not to the cancelling keeper
-        if (fee > 0) {
-            address user = address(uint160(uint256(order.accountId)));
-            claimableEth[user] += fee;
-        }
-
-        // Return only the keeper's own excess ETH (msg.value minus Pyth fee)
-        uint256 refund = msg.value - pythFee;
-        if (refund > 0) {
-            (bool success,) = payable(msg.sender).call{value: refund}("");
-            if (!success) {
-                claimableEth[msg.sender] += refund;
-            }
-        }
     }
 
     function _finalizeExecution(

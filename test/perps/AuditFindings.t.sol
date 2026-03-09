@@ -1109,8 +1109,7 @@ contract H03StaleOrderExpiryTest is Test {
         assertEq(router.nextExecuteId(), 2);
     }
 
-    function test_H03_SpammerFeeRefundedOnExpiry() public {
-        // Spammer attaches ETH fee
+    function test_H03_SpammerFeeConfiscatedOnExpiry() public {
         vm.deal(spammer, 1 ether);
         vm.prank(spammer);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -1123,11 +1122,13 @@ contract H03StaleOrderExpiryTest is Test {
 
         vm.warp(block.timestamp + 301);
 
+        address keeper = address(0x999);
         bytes[] memory empty;
+        vm.prank(keeper);
         router.executeOrder(2, empty);
 
-        // Spammer's ETH fee was refunded to claimableEth, not given to keeper
-        assertEq(router.claimableEth(spammer), 0.01 ether, "Expired order fee refunded to user");
+        assertEq(router.claimableEth(spammer), 0, "Spammer must not be refunded for expired order");
+        assertGt(router.claimableEth(keeper), 0, "Keeper must be compensated for cleaning expired order");
     }
 
     function test_H03_BatchSkipsStaleOrders() public {
@@ -1161,6 +1162,39 @@ contract H03StaleOrderExpiryTest is Test {
         // Engine owner (this contract) can set it
         router.setMaxOrderAge(600);
         assertEq(router.maxOrderAge(), 600);
+    }
+
+    // ==========================================
+    // H-03 (new): Expired order fee must compensate keeper, not refund spammer
+    // _skipStaleOrders and _cancelOrder refund the keeper fee to the user
+    // who submitted the expired order. Keepers pay gas to clean the queue
+    // but receive nothing, so they have no incentive to process expired spam.
+    // EXPECTED: Keeper receives the expired order's fee.
+    // BUG: Spammer gets 100% refund; keeper gets nothing.
+    // ==========================================
+
+    function test_H03_ExpiredOrderFeeGoesToKeeper() public {
+        vm.deal(spammer, 1 ether);
+        vm.prank(spammer);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        // Keeper executes alice's order (id=2), auto-skipping spammer's expired order (id=1)
+        address keeper = address(0x999);
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(2, empty);
+
+        // Keeper should be compensated for cleaning expired order
+        assertGt(router.claimableEth(keeper), 0, "keeper must receive expired order fee");
+        assertEq(router.claimableEth(spammer), 0, "spammer must not be refunded for expired order");
     }
 
 }
