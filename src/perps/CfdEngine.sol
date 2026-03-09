@@ -452,7 +452,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             clearinghouse.settleUsdc(order.accountId, address(USDC), netSettlement);
         } else if (netSettlement < 0) {
             uint256 owed = uint256(-netSettlement);
-            uint256 available = clearinghouse.balances(order.accountId, address(USDC));
+            uint256 chBalance = clearinghouse.balances(order.accountId, address(USDC));
+            uint256 locked = clearinghouse.lockedMarginUsdc(order.accountId);
+            uint256 available = chBalance > locked ? chBalance - locked : 0;
             uint256 toSeize = available < owed ? available : owed;
             if (toSeize > 0) {
                 clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));

@@ -388,4 +388,52 @@ contract AuditFindingsTest is Test {
         assertEq(recordedBalance, actualBalance, "Recorded balance should match actual tokens received");
     }
 
+    // ==========================================
+    // C-01: Partial close seize must respect lockedMarginUsdc
+    // A partial close at a large loss must only seize from unencumbered (free) USDC,
+    // not from margin locked for the remaining position. Without the fix, the seize
+    // drains the physical balance below lockedMarginUsdc, creating a "zombie" position
+    // whose liquidation reverts with InsufficientAssetToSeize.
+    // EXPECTED: After partial close, balance >= locked. Liquidation succeeds.
+    // BUG (pre-fix): seize uses gross balance, balance < locked, liquidation reverts.
+    // ==========================================
+
+    function test_C01_PartialClosePreservesLockedMarginForRemainingPosition() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 22_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        // Open BEAR 200K @ $1.00 with 20K margin
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        (uint256 openSize,,,,,,,) = engine.positions(accountId);
+        assertEq(openSize, 200_000 * 1e18);
+
+        // Partial close half at $0.80 — BEAR loses ~$20K on closed portion.
+        // Alice's free USDC (~$2K) is far less than the loss, so the seize
+        // must stop at the free boundary to protect the remaining position's margin.
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.8e8));
+        router.executeOrder(2, priceData);
+
+        (uint256 remainingSize,,,,,,,) = engine.positions(accountId);
+        assertEq(remainingSize, 100_000 * 1e18, "Half position should remain");
+
+        uint256 balAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 lockedAfter = clearinghouse.lockedMarginUsdc(accountId);
+        assertGe(balAfter, lockedAfter, "Physical balance must cover locked margin (zombie prevention)");
+
+        // Liquidation of the underwater remaining position must succeed
+        router.executeLiquidation(accountId, priceData);
+
+        (uint256 sizeAfterLiq,,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfterLiq, 0, "Remaining position should be fully liquidated");
+    }
+
 }
