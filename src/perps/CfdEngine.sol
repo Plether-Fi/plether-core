@@ -64,6 +64,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__PositionIsSolvent();
     error CfdEngine__PostOpSolvencyBreach();
     error CfdEngine__InsufficientInitialMargin();
+    error CfdEngine__PositionTooSmall();
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
     error CfdEngine__RunwayTooLong();
@@ -340,6 +341,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        if (notionalUsdc * riskParams.bountyBps < riskParams.minBountyUsdc * 10_000) {
+            revert CfdEngine__PositionTooSmall();
+        }
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
 
         int256 tradeCost = vpiUsdc + int256(execFeeUsdc);
