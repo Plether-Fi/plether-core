@@ -681,4 +681,62 @@ contract HousePoolTest is Test {
         assertLt(freeUSDC, naiveFree, "getFreeUSDC must reserve negative funding amount");
     }
 
+    // ==========================================
+    // C-03b: _reconcile MUST EXCLUDE NEGATIVE netUnsettledFunding FROM DISTRIBUTABLE
+    // ==========================================
+
+    function test_C03b_Reconcile_ExcludesNegativeNetFunding() public {
+        engine.setRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 1e18,
+                maxApy: 5e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        address trader1 = address(0x444);
+        _fundTrader(trader1, 100_000 * 1e6);
+        vm.prank(trader1);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        address trader2 = address(0x555);
+        _fundTrader(trader2, 100_000 * 1e6);
+        vm.prank(trader2);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 20 days);
+
+        bytes[] memory closePythData = new bytes[](1);
+        closePythData[0] = abi.encode(1e8);
+        vm.prank(trader1);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
+        router.executeOrder(3, closePythData);
+
+        int256 netFunding = engine.netUnsettledFunding();
+        assertTrue(netFunding < 0, "Payer settled first -> negative netUnsettledFunding");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorAfter = pool.juniorPrincipal();
+        uint256 transientCash = uint256(-netFunding);
+        assertLe(
+            juniorAfter,
+            juniorBefore + transientCash,
+            "Reconcile must not attribute transient funding cash as junior revenue"
+        );
+    }
+
 }
