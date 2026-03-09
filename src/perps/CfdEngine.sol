@@ -47,6 +47,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
 
     address public orderRouter;
 
+    mapping(uint256 => bool) public fadDayOverrides;
+    uint256 public fadMaxStaleness = 3 days;
+
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
@@ -60,6 +63,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__PositionIsSolvent();
     error CfdEngine__PostOpSolvencyBreach();
     error CfdEngine__InsufficientInitialMargin();
+    error CfdEngine__EmptyDays();
+    error CfdEngine__ZeroStaleness();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -69,6 +74,9 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     event PositionLiquidated(
         bytes32 indexed accountId, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
     );
+    event FadDaysAdded(uint256[] timestamps);
+    event FadDaysRemoved(uint256[] timestamps);
+    event FadMaxStalenessUpdated(uint256 newStaleness);
 
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
@@ -114,6 +122,40 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
         riskParams = _riskParams;
+    }
+
+    function addFadDays(
+        uint256[] calldata timestamps
+    ) external onlyOwner {
+        if (timestamps.length == 0) {
+            revert CfdEngine__EmptyDays();
+        }
+        for (uint256 i; i < timestamps.length; i++) {
+            fadDayOverrides[timestamps[i] / 86_400] = true;
+        }
+        emit FadDaysAdded(timestamps);
+    }
+
+    function removeFadDays(
+        uint256[] calldata timestamps
+    ) external onlyOwner {
+        if (timestamps.length == 0) {
+            revert CfdEngine__EmptyDays();
+        }
+        for (uint256 i; i < timestamps.length; i++) {
+            delete fadDayOverrides[timestamps[i] / 86_400];
+        }
+        emit FadDaysRemoved(timestamps);
+    }
+
+    function setFadMaxStaleness(
+        uint256 _seconds
+    ) external onlyOwner {
+        if (_seconds == 0) {
+            revert CfdEngine__ZeroStaleness();
+        }
+        fadMaxStaleness = _seconds;
+        emit FadMaxStalenessUpdated(_seconds);
     }
 
     /// @notice Withdraws accumulated execution fees from the vault to a recipient
@@ -421,9 +463,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     // LIQUIDATIONS & FAD
     // ==========================================
 
-    /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window.
-    ///         FAD raises maintenance margin (fadMarginBps) during weekend market closure:
-    ///         Friday 19:00 UTC through Sunday 22:00 UTC.
+    /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window
+    ///         (Friday 19:00 UTC → Sunday 22:00 UTC) or on any admin-configured FAD day.
     function isFadWindow() public view returns (bool) {
         uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
         uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
@@ -438,7 +479,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             return true;
         }
 
-        return false;
+        return fadDayOverrides[block.timestamp / 86_400];
     }
 
     /// @notice Returns the maintenance margin requirement in USDC (6 decimals).

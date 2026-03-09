@@ -154,13 +154,27 @@ contract OrderRouter {
             uint256 minPublishTime;
             (executionPrice, minPublishTime) = _computeBasketPrice();
 
-            if (minPublishTime <= order.commitTime) {
-                _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
-                return;
-            }
-            if (block.timestamp - minPublishTime > 60) {
-                _cancelOrder(orderId, "Oracle price too stale", pythFee);
-                return;
+            bool isFad = engine.isFadWindow();
+            uint256 staleness = block.timestamp - minPublishTime;
+
+            if (isFad) {
+                if (staleness > engine.fadMaxStaleness()) {
+                    _cancelOrder(orderId, "Oracle price too stale", pythFee);
+                    return;
+                }
+                if (!order.isClose) {
+                    _cancelOrder(orderId, "FAD: close-only mode", pythFee);
+                    return;
+                }
+            } else {
+                if (minPublishTime <= order.commitTime) {
+                    _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
+                    return;
+                }
+                if (staleness > 60) {
+                    _cancelOrder(orderId, "Oracle price too stale", pythFee);
+                    return;
+                }
             }
         } else {
             if (block.chainid != 31_337) {
@@ -212,6 +226,7 @@ contract OrderRouter {
         uint256 pythFee;
         uint256 executionPrice;
         uint256 pricePublishTime;
+        bool isFad;
 
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length > 0) {
@@ -223,7 +238,11 @@ contract OrderRouter {
             }
 
             (executionPrice, pricePublishTime) = _computeBasketPrice();
-            if (block.timestamp - pricePublishTime > 60) {
+
+            isFad = engine.isFadWindow();
+            uint256 maxStaleness = isFad ? engine.fadMaxStaleness() : 60;
+
+            if (block.timestamp - pricePublishTime > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         } else {
@@ -248,7 +267,13 @@ contract OrderRouter {
                 continue;
             }
 
-            if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
+            if (isFad) {
+                if (!order.isClose) {
+                    emit OrderFailed(orderId, "FAD: close-only mode");
+                    _refundOrderFee(orderId, order);
+                    continue;
+                }
+            } else if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
                 emit OrderFailed(orderId, "MEV: Oracle price is stale");
                 _refundOrderFee(orderId, order);
                 continue;
@@ -458,7 +483,8 @@ contract OrderRouter {
             uint256 minPublishTime;
             (executionPrice, minPublishTime) = _computeBasketPrice();
 
-            if (block.timestamp - minPublishTime > 15) {
+            uint256 maxStaleness = engine.isFadWindow() ? engine.fadMaxStaleness() : 15;
+            if (block.timestamp - minPublishTime > maxStaleness) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }
         } else {

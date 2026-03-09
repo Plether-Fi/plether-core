@@ -594,7 +594,7 @@ contract OrderRouterPythTest is Test {
         vm.deal(keeper, 1 ether);
         uint256 keeperBalBefore = keeper.balance;
 
-        // Keeper executes with no Pyth update — stale price triggers cancellation
+        // Keeper executes with no Pyth update - stale price triggers cancellation
         vm.warp(1050);
         bytes[] memory empty;
         vm.prank(keeper);
@@ -758,6 +758,353 @@ contract NormalizePythFuzzTest is Test {
         if (expo > -8) {
             assertGe(result, uint256(uint64(rawPrice)), "Upscaling must not shrink value");
         }
+    }
+
+}
+
+contract FadStalenessTest is Test {
+
+    receive() external payable {}
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    OrderRouter router;
+    MarginClearinghouse clearinghouse;
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    // Timestamps verified against isFadWindow's dayOfWeek = ((ts/86400)+4)%7
+    uint256 constant FRIDAY_18UTC = 604_951_200; // dayOfWeek=5, hour=18 → NOT FAD
+    uint256 constant SATURDAY_NOON = 605_016_000; // dayOfWeek=6 → FAD
+    uint256 constant MONDAY_NOON = 605_188_800; // dayOfWeek=1 → NOT FAD
+    uint256 constant WEDNESDAY_NOON = 605_361_600; // dayOfWeek=3 → NOT FAD
+
+    function setUp() public {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0.0005e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases);
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        usdc.mint(bob, 1_000_000 * 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(1_000_000 * 1e6, bob);
+        vm.stopPrank();
+
+        usdc.mint(alice, 10_000 * 1e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        vm.deal(alice, 10 ether);
+        vm.stopPrank();
+
+        // Open BULL position on Friday before FAD (basket=$0.80, not $1.00)
+        vm.warp(FRIDAY_18UTC);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 1);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
+
+        vm.warp(FRIDAY_18UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        require(size == 10_000 * 1e18, "setUp: position not opened");
+    }
+
+    function test_FadWindow_CloseOrder_AcceptsStalePrice() public {
+        // Friday price (~18h stale) should be accepted during Saturday FAD
+        vm.warp(SATURDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close should succeed during FAD with stale price");
+    }
+
+    function test_FadWindow_OpenOrder_Rejected() public {
+        vm.warp(SATURDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 3, "Queue must advance");
+        assertEq(router.claimableEth(alice), 0.01 ether, "Keeper fee refunded on FAD cancel");
+    }
+
+    function test_FadWindow_MevCheckBypassed() public {
+        // publishTime from Friday < commitTime on Saturday → would normally trigger MEV cancel
+        // During FAD this is expected (frozen prices) and should NOT cancel
+        vm.warp(SATURDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close should succeed - MEV check bypassed during FAD");
+    }
+
+    function test_FadWindow_ExcessStaleness_StillCancels() public {
+        // Price from 4 days ago exceeds 3-day fadMaxStaleness
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
+
+        vm.warp(SATURDAY_NOON);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "Position unchanged - excess staleness still cancels during FAD");
+    }
+
+    function test_FadWindow_Liquidation_AcceptsStalePrice() public {
+        // Move price against BULL: basket $0.80 → $0.86 (BULL loses ~$600, wipes $500 margin)
+        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_18UTC + 1);
+
+        vm.warp(SATURDAY_NOON);
+        bytes[] memory empty = new bytes[](0);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        router.executeLiquidation(aliceId, empty);
+
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Liquidation should succeed during FAD with stale price");
+    }
+
+    function test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {
+        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), SATURDAY_NOON - 4 days);
+
+        vm.warp(SATURDAY_NOON);
+        bytes[] memory empty = new bytes[](0);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        router.executeLiquidation(aliceId, empty);
+    }
+
+    function test_FadBatch_CloseOnlyEnforced() public {
+        address carol = address(0x333);
+        usdc.mint(carol, 10_000 * 1e6);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
+        vm.stopPrank();
+
+        vm.warp(SATURDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrderBatch(3, empty);
+
+        assertEq(router.nextExecuteId(), 4, "All orders consumed");
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        assertEq(aliceSize, 5000 * 1e18, "Alice close partially succeeded");
+
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
+        assertEq(carolSize, 0, "Carol open rejected during FAD");
+    }
+
+    function test_FadBatch_ExcessStaleness_Reverts() public {
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
+
+        vm.warp(SATURDAY_NOON);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+
+        vm.warp(SATURDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrderBatch(2, empty);
+    }
+
+    function test_Weekday_StalenessUnchanged() public {
+        // On Wednesday, >60s stale should still cancel
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 1);
+
+        vm.warp(WEDNESDAY_NOON);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+
+        // publishTime=WEDNESDAY_NOON+1, execution at WEDNESDAY_NOON+62 → staleness=61 > 60
+        vm.warp(WEDNESDAY_NOON + 62);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "61s stale on weekday should cancel");
+    }
+
+    function test_Weekday_OpenOrder_Allowed() public {
+        address carol = address(0x333);
+        usdc.mint(carol, 10_000 * 1e6);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
+        vm.stopPrank();
+
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 1);
+
+        vm.warp(WEDNESDAY_NOON);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
+
+        vm.warp(WEDNESDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        (uint256 size,,,,,,) = engine.positions(carolId);
+        assertGt(size, 0, "Weekday open orders should work normally");
+    }
+
+    // ==========================================
+    // ADMIN FAD DAY OVERRIDES
+    // ==========================================
+
+    function test_Admin_AddFadDay() public {
+        vm.warp(WEDNESDAY_NOON);
+        assertFalse(engine.isFadWindow());
+
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        assertTrue(engine.isFadWindow(), "Wednesday should be FAD after admin override");
+    }
+
+    function test_Admin_RemoveFadDay() public {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        vm.warp(WEDNESDAY_NOON);
+        assertTrue(engine.isFadWindow());
+
+        engine.removeFadDays(timestamps);
+        assertFalse(engine.isFadWindow(), "FAD override should be removed");
+    }
+
+    function test_Admin_SetFadMaxStaleness() public {
+        assertEq(engine.fadMaxStaleness(), 3 days);
+        engine.setFadMaxStaleness(5 days);
+        assertEq(engine.fadMaxStaleness(), 5 days);
+    }
+
+    function test_Admin_SetFadMaxStaleness_ZeroReverts() public {
+        vm.expectRevert(CfdEngine.CfdEngine__ZeroStaleness.selector);
+        engine.setFadMaxStaleness(0);
+    }
+
+    function test_Admin_AddFadDays_NonOwner_Reverts() public {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+
+        vm.prank(alice);
+        vm.expectRevert();
+        engine.addFadDays(timestamps);
+    }
+
+    function test_Admin_EmptyDays_Reverts() public {
+        uint256[] memory empty = new uint256[](0);
+        vm.expectRevert(CfdEngine.CfdEngine__EmptyDays.selector);
+        engine.addFadDays(empty);
+    }
+
+    function test_AdminFadDay_CloseOnlyEnforced() public {
+        // Mark Monday as FAD
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = MONDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        // Price from Sunday night (~14h stale, within fadMaxStaleness)
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), MONDAY_NOON - 14 hours);
+
+        vm.warp(MONDAY_NOON);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(MONDAY_NOON + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 3);
+        assertEq(router.claimableEth(alice), 0.01 ether, "Fee refunded on admin FAD day cancel");
     }
 
 }

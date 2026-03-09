@@ -26,4 +26,10 @@ interface ICfdEngine {
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
 
+    /// @notice True during weekend FX closure or admin-configured FAD days
+    function isFadWindow() external view returns (bool);
+
+    /// @notice Maximum oracle staleness allowed during FAD windows
+    function fadMaxStaleness() external view returns (uint256);
+
 }

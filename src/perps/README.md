@@ -33,7 +33,9 @@ The House Pool is the USDC counterparty backing all trader payouts. It implement
 Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 1. **Commit** — User submits intent (Size, Side, Target Price) and locks margin. The router assigns a strictly sequential `orderId` and logs `block.timestamp`.
-2. **Reveal** — Keepers push Pyth price payloads. The router verifies `publishTime > commitTimestamp` to defeat oracle latency arbitrage. Supports batched multi-order execution for L2 throughput.
+2. **Reveal** — Keepers push Pyth price payloads. The router aggregates multiple Pyth FX feeds into a weighted basket price (replicating the spot BasketOracle formula) and verifies the weakest-link `publishTime > commitTimestamp` to defeat oracle latency arbitrage. Supports batched multi-order execution for L2 throughput.
+
+**Basket Oracle**: The router is constructed with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to 1e18), and base prices (8-dec). `_computeBasketPrice()` loops over feeds, normalizes each to 8 decimals, and computes `Σ (price × quantity) / (basePrice × 1e10)` — identical to the spot BasketOracle. The minimum `publishTime` across all feeds is used for MEV and staleness checks.
 
 **Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and refunds the user, incrementing the queue for 100% protocol liveness.
 
@@ -107,9 +109,13 @@ FX markets close on weekends. Sunday re-opens feature violent price gaps that bl
 | Window | MMR | Max Leverage |
 |--------|-----|-------------|
 | Normal | 1.0% | 100x |
-| FAD (Fri 19:00 UTC → Sun 22:00 UTC) | 3.0% | 33x |
+| FAD (Fri 19:00 UTC -> Sun 22:00 UTC) | 3.0% | 33x |
 
 Traders over 33x leverage must deposit margin before Friday evening, or keepers liquidate them while Friday oracle prices are still active, neutralizing weekend gap risk.
+
+**FAD-Aware Oracle Staleness**: During FAD windows, the OrderRouter relaxes staleness thresholds from 60s/15s to `fadMaxStaleness` (default 3 days) since Pyth FX feeds stop publishing when markets close. The router enforces **close-only mode** during FAD -- new position opens are rejected to prevent exploitation of frozen prices against weekend macro news. The MEV `commitTime` check is bypassed during FAD since frontrunning is impossible when prices are not updating. Liquidations remain fully operational during FAD.
+
+**Admin FAD Days**: The protocol owner can designate additional FAD days via `addFadDays()` for FX market holidays (e.g., Christmas, New Year). These days inherit the same close-only and relaxed staleness behavior as the automatic weekend window. Configurable via `setFadMaxStaleness()` for extended holiday stretches.
 
 ## Fee Structure
 
@@ -119,24 +125,6 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 | Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
 Accumulated fees are withdrawn by the protocol owner via `withdrawFees()`.
-
-## Contract Map
-
-```
-src/perps/
-├── CfdEngine.sol              # Core state machine & solvency math
-├── CfdMath.sol                # Pure math: PnL, VPI, Funding curves
-├── CfdTypes.sol               # Shared structs: Position, Order, RiskParams
-├── HousePool.sol              # USDC counterparty pool (senior/junior tranches)
-├── MarginClearinghouse.sol    # Cross-margin collateral manager
-├── OrderRouter.sol            # MEV-resistant commit-reveal order queue
-├── TrancheVault.sol           # ERC-4626 share token per tranche
-└── interfaces/
-    ├── ICfdEngine.sol
-    ├── ICfdVault.sol
-    ├── IHousePool.sol
-    └── IMarginClearinghouse.sol
-```
 
 ## Key Constants
 
@@ -151,3 +139,4 @@ src/perps/
 | `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
+| `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during FAD windows |
