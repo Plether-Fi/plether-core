@@ -202,16 +202,20 @@ contract LiquidationTest is Test {
 
         // BULL loses when price rises. At $1.06:
         // PnL = 4000 * $0.06 = -$240. equity = posMargin - $240 < 0 → liquidatable.
-        // Bounty capped to 0 (equity <= 0).
+        // Bounty capped at posMargin (vault never pays more than it recovers).
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
+        uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 keeperBalBefore = usdc.balanceOf(keeper);
         vm.prank(keeper);
         router.executeLiquidation(accountId, pythData);
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
 
-        assertEq(bounty, 0, "Bounty is zero when equity is negative");
+        // Proportional bounty (0.15% of ~$4240 = ~$6.36) is below posMargin, so cap doesn't bind
+        assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
+        assertLe(bounty, posMargin, "Bounty never exceeds margin vault can seize");
+        assertGe(usdc.balanceOf(address(pool)), poolBefore, "Vault never pays more than it seizes");
     }
 
     function test_LiquidationEquity_IncludesFunding() public {
@@ -254,8 +258,8 @@ contract LiquidationTest is Test {
 
         (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position liquidated by funding drain alone");
-        // Funding drain pushes equity negative → bounty capped to 0
-        assertEq(usdc.balanceOf(keeper), keeperBal, "No bounty when equity drained below zero");
+        // Funding drain pushes equity negative → bounty capped at remaining margin
+        assertGe(usdc.balanceOf(keeper), keeperBal, "Keeper gets bounty from remaining margin");
     }
 
     function test_KeeperBounty_PaidFromVault() public {
