@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -1112,6 +1113,128 @@ contract H03StaleOrderExpiryTest is Test {
         // Engine owner (this contract) can set it
         router.setMaxOrderAge(600);
         assertEq(router.maxOrderAge(), 600);
+    }
+
+}
+
+contract MockPyth {
+
+    struct MockPrice {
+        int64 price;
+        int32 expo;
+        uint256 publishTime;
+    }
+
+    mapping(bytes32 => MockPrice) public prices;
+
+    function setAllPrices(
+        bytes32[] memory feedIds,
+        int64 _price,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        for (uint256 i = 0; i < feedIds.length; i++) {
+            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+        }
+    }
+
+    function getPriceUnsafe(
+        bytes32 id
+    ) external view returns (PythStructs.Price memory) {
+        MockPrice memory p = prices[id];
+        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
+    }
+
+    function getUpdateFee(
+        bytes[] calldata
+    ) external pure returns (uint256) {
+        return 0;
+    }
+
+    function updatePriceFeeds(
+        bytes[] calldata
+    ) external payable {}
+
+}
+
+contract MarkPriceStalenessTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    OrderRouter router;
+    MarginClearinghouse clearinghouse;
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    uint256 constant CAP_PRICE = 2e8;
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    function setUp() public {
+        vm.warp(10_000);
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 120);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.updateMarkPrice(updateData);
+    }
+
+    function test_UpdateMarkPrice_AcceptsFreshOracle() public {
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 30);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        router.updateMarkPrice(updateData);
+        assertEq(engine.lastMarkPrice(), 1e8);
     }
 
 }

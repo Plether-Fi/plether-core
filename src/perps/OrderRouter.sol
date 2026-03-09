@@ -587,7 +587,12 @@ contract OrderRouter {
                 }
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
-            (executionPrice,) = _computeBasketPrice();
+            uint256 minPublishTime;
+            (executionPrice, minPublishTime) = _computeBasketPrice();
+            uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 60;
+            if (block.timestamp - minPublishTime > maxStaleness) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
         } else {
             if (block.chainid != 31_337) {
                 revert OrderRouter__MockModeDisabled();
