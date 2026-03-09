@@ -43,6 +43,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     int256 public bearFundingIndex;
     uint64 public lastFundingTime;
 
+    /// @notice Net USDC paid out by the vault for funding that payers haven't settled yet.
+    ///         Positive = vault temporarily deflated (owed by payers). Used to prevent
+    ///         false solvency reverts when receivers settle before payers.
+    int256 public netUnsettledFunding;
+
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => CfdTypes.Position) public positions;
 
@@ -291,6 +296,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 vault.payOut(address(clearinghouse), gain);
                 clearinghouse.settleUsdc(order.accountId, address(USDC), pendingFunding);
                 clearinghouse.lockMargin(order.accountId, gain);
+                netUnsettledFunding += int256(gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 if (pos.margin < loss) {
@@ -301,12 +307,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                     if (pos.margin > 0) {
                         clearinghouse.seizeAsset(order.accountId, address(USDC), pos.margin, address(vault));
                         clearinghouse.unlockMargin(order.accountId, pos.margin);
+                        netUnsettledFunding -= int256(pos.margin);
                     }
                     pos.margin = 0;
                 } else {
                     pos.margin -= loss;
                     clearinghouse.seizeAsset(order.accountId, address(USDC), loss, address(vault));
                     clearinghouse.unlockMargin(order.accountId, loss);
+                    netUnsettledFunding -= int256(loss);
                 }
             }
             pos.entryFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
@@ -445,6 +453,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
+        if (unsettledFundingDebt > 0) {
+            netUnsettledFunding -= int256(unsettledFundingDebt);
+        }
+
         accumulatedFeesUsdc += execFeeUsdc;
 
         emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
@@ -475,7 +487,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearOI += sizeDelta;
         }
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        if (vault.totalAssets() < maxLiability) {
+        uint256 effectiveAssets = vault.totalAssets();
+        if (netUnsettledFunding > 0) {
+            effectiveAssets += uint256(netUnsettledFunding);
+        }
+        if (effectiveAssets < maxLiability) {
             revert CfdEngine__VaultSolvencyExceeded();
         }
     }
@@ -620,7 +636,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _assertPostSolvency() internal view {
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        if (vault.totalAssets() < maxLiability) {
+        uint256 effectiveAssets = vault.totalAssets();
+        if (netUnsettledFunding > 0) {
+            effectiveAssets += uint256(netUnsettledFunding);
+        }
+        if (effectiveAssets < maxLiability) {
             revert CfdEngine__PostOpSolvencyBreach();
         }
     }

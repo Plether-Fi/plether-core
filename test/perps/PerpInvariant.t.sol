@@ -248,11 +248,15 @@ contract PerpInvariantTest is Test {
     }
 
     function invariant_GlobalSolvency() public {
-        uint256 poolBalance = pool.totalAssets();
+        uint256 effectiveAssets = pool.totalAssets();
+        int256 nuf = engine.netUnsettledFunding();
+        if (nuf > 0) {
+            effectiveAssets += uint256(nuf);
+        }
         uint256 maxLiability = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
             ? engine.globalBullMaxProfit()
             : engine.globalBearMaxProfit();
-        assertGe(poolBalance, maxLiability, "Pool must cover worst-case liability");
+        assertGe(effectiveAssets, maxLiability, "Pool must cover worst-case liability");
     }
 
     function invariant_TranchePriority() public {

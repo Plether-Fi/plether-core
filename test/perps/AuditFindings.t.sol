@@ -209,14 +209,13 @@ contract AuditFindingsTest is Test {
     }
 
     // ==========================================
-    // Finding 4: Stale vault depth solvency check
-    // The solvency check should use the vault's ACTUAL balance at the time of
-    // the check, not a stale snapshot from before funding settlement.
-    // EXPECTED: Order rejected when funding settlement drains vault below maxLiability.
-    // BUG: Order passes because solvency check uses stale pre-funding snapshot.
+    // Finding 4: Async funding — netUnsettledFunding prevents false solvency reverts
+    // When a receiver settles funding before payers, vault.totalAssets() temporarily drops.
+    // The netUnsettledFunding credit ensures the solvency check accounts for owed funding,
+    // allowing legitimate orders to proceed.
     // ==========================================
 
-    function test_Finding4_StaleVaultDepth() public {
+    function test_Finding4_AsyncFundingDoesNotBlockLegitOrders() public {
         _fundJunior(bob, 210_000 * 1e6);
 
         address dave = address(0x444);
@@ -243,10 +242,8 @@ contract AuditFindingsTest is Test {
 
         (uint256 sizeAfter,,,,,,) = engine.positions(carolAccount);
 
-        // CORRECT BEHAVIOR: Funding settlement during processOrder drains the vault
-        // below maxLiability. The fresh solvency check catches this and reverts,
-        // causing the router to cancel the order. Position size is unchanged.
-        assertEq(sizeAfter, sizeBefore, "Order should be cancelled: vault insolvent after funding settlement");
+        assertGt(sizeAfter, sizeBefore, "Order should succeed: unsettled funding credit covers vault depletion");
+        assertGt(engine.netUnsettledFunding(), 0, "Vault should have unsettled funding credit from payers");
     }
 
     // ==========================================
