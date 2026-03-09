@@ -163,6 +163,10 @@ contract OrderRouter {
         if (order.sizeDelta == 0) {
             revert OrderRouter__OrderNotPending();
         }
+        if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
+            _cancelOrder(orderId, "Order expired", 0);
+            return;
+        }
 
         uint256 pythFee = 0;
         uint256 executionPrice;
