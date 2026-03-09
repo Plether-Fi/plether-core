@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
+import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
@@ -15,7 +16,9 @@ contract OrderRouter {
     ICfdEngine public engine;
     ICfdVault public vault;
     IPyth public pyth;
-    bytes32 public pythPriceFeedId;
+    bytes32[] public pythFeedIds;
+    uint256[] public quantities;
+    uint256[] public basePrices;
 
     uint64 public nextCommitId = 1;
     uint64 public nextExecuteId = 1;
@@ -36,6 +39,10 @@ contract OrderRouter {
     error OrderRouter__EthTransferFailed();
     error OrderRouter__OraclePriceNegative();
     error OrderRouter__MevOraclePriceTooStale();
+    error OrderRouter__LengthMismatch();
+    error OrderRouter__InvalidWeights();
+    error OrderRouter__InvalidBasePrice();
+    error OrderRouter__EmptyFeeds();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -45,12 +52,36 @@ contract OrderRouter {
         address _engine,
         address _vault,
         address _pyth,
-        bytes32 _feedId
+        bytes32[] memory _feedIds,
+        uint256[] memory _quantities,
+        uint256[] memory _basePrices
     ) {
         engine = ICfdEngine(_engine);
         vault = ICfdVault(_vault);
         pyth = IPyth(_pyth);
-        pythPriceFeedId = _feedId;
+
+        if (_pyth != address(0)) {
+            if (_feedIds.length == 0) {
+                revert OrderRouter__EmptyFeeds();
+            }
+            if (_feedIds.length != _quantities.length || _feedIds.length != _basePrices.length) {
+                revert OrderRouter__LengthMismatch();
+            }
+            uint256 totalWeight;
+            for (uint256 i = 0; i < _basePrices.length; i++) {
+                if (_basePrices[i] == 0) {
+                    revert OrderRouter__InvalidBasePrice();
+                }
+                totalWeight += _quantities[i];
+            }
+            if (totalWeight != 1e18) {
+                revert OrderRouter__InvalidWeights();
+            }
+        }
+
+        pythFeedIds = _feedIds;
+        quantities = _quantities;
+        basePrices = _basePrices;
     }
 
     // ==========================================
@@ -120,17 +151,17 @@ contract OrderRouter {
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
 
-            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
+            uint256 minPublishTime;
+            (executionPrice, minPublishTime) = _computeBasketPrice();
 
-            if (pythData.publishTime <= order.commitTime) {
+            if (minPublishTime <= order.commitTime) {
                 _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
                 return;
             }
-            if (block.timestamp - pythData.publishTime > 60) {
+            if (block.timestamp - minPublishTime > 60) {
                 _cancelOrder(orderId, "Oracle price too stale", pythFee);
                 return;
             }
-            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
             if (block.chainid != 31_337) {
                 revert OrderRouter__MockModeDisabled();
@@ -191,12 +222,10 @@ contract OrderRouter {
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
 
-            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
-            if (block.timestamp - pythData.publishTime > 60) {
+            (executionPrice, pricePublishTime) = _computeBasketPrice();
+            if (block.timestamp - pricePublishTime > 60) {
                 revert OrderRouter__OraclePriceTooStale();
             }
-            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
-            pricePublishTime = pythData.publishTime;
         } else {
             if (block.chainid != 31_337) {
                 revert OrderRouter__MockModeDisabled();
@@ -232,11 +261,9 @@ contract OrderRouter {
             }
 
             uint256 vaultDepth = vault.totalAssets();
-            bool success;
 
             try engine.processOrder(order, executionPrice, vaultDepth) {
                 emit OrderExecuted(orderId, executionPrice);
-                success = true;
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
             } catch {
@@ -343,6 +370,26 @@ contract OrderRouter {
         }
     }
 
+    function _computeBasketPrice() internal view returns (uint256 basketPrice, uint256 minPublishTime) {
+        minPublishTime = type(uint256).max;
+        uint256 len = pythFeedIds.length;
+
+        for (uint256 i = 0; i < len; i++) {
+            PythStructs.Price memory p = pyth.getPriceUnsafe(pythFeedIds[i]);
+            uint256 norm = _normalizePythPrice(p.price, p.expo);
+
+            basketPrice += (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+
+            if (p.publishTime < minPublishTime) {
+                minPublishTime = p.publishTime;
+            }
+        }
+
+        if (basketPrice == 0) {
+            revert OrderRouter__OraclePriceNegative();
+        }
+    }
+
     /// @dev Opens vs closes have opposing slippage directions:
     ///      BULL open wants HIGH entry (more room for drop) → exec >= target
     ///      BULL close wants LOW exit (lock in profit) → exec <= target
@@ -407,12 +454,13 @@ contract OrderRouter {
                 }
                 pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             }
-            PythStructs.Price memory pythData = pyth.getPriceUnsafe(pythPriceFeedId);
 
-            if (block.timestamp - pythData.publishTime > 15) {
+            uint256 minPublishTime;
+            (executionPrice, minPublishTime) = _computeBasketPrice();
+
+            if (block.timestamp - minPublishTime > 15) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }
-            executionPrice = _normalizePythPrice(pythData.price, pythData.expo);
         } else {
             if (block.chainid != 31_337) {
                 revert OrderRouter__MockModeDisabled();

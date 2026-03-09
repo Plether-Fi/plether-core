@@ -13,24 +13,39 @@ import "forge-std/Test.sol";
 
 contract ControllablePyth {
 
-    int64 public mockPrice;
-    int32 public mockExpo;
-    uint256 public mockPublishTime;
+    struct MockPrice {
+        int64 price;
+        int32 expo;
+        uint256 publishTime;
+    }
+
+    mapping(bytes32 => MockPrice) public prices;
 
     function setPrice(
+        bytes32 feedId,
         int64 _price,
         int32 _expo,
         uint256 _publishTime
     ) external {
-        mockPrice = _price;
-        mockExpo = _expo;
-        mockPublishTime = _publishTime;
+        prices[feedId] = MockPrice(_price, _expo, _publishTime);
+    }
+
+    function setAllPrices(
+        bytes32[] memory feedIds,
+        int64 _price,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        for (uint256 i = 0; i < feedIds.length; i++) {
+            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+        }
     }
 
     function getPriceUnsafe(
-        bytes32
+        bytes32 id
     ) external view returns (PythStructs.Price memory) {
-        return PythStructs.Price({price: mockPrice, conf: 0, expo: mockExpo, publishTime: mockPublishTime});
+        MockPrice memory p = prices[id];
+        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
     }
 
     function getUpdateFee(
@@ -62,6 +77,8 @@ contract PerpsForkTest is Test {
     TrancheVault juniorVault;
     OrderRouter router;
     ControllablePyth pyth;
+
+    bytes32[] feedIds;
 
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
@@ -101,7 +118,12 @@ contract PerpsForkTest is Test {
         engine.setVault(address(pool));
 
         pyth = new ControllablePyth();
-        router = new OrderRouter(address(engine), address(pool), address(pyth), EUR_USD_FEED_ID);
+        feedIds.push(EUR_USD_FEED_ID);
+        uint256[] memory w = new uint256[](1);
+        w[0] = 1e18;
+        uint256[] memory b = new uint256[](1);
+        b[0] = 1e8;
+        router = new OrderRouter(address(engine), address(pool), address(pyth), feedIds, w, b);
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -146,7 +168,7 @@ contract PerpsForkTest is Test {
         vm.prank(trader);
         router.commitOrder(side, size, margin, targetPrice, isClose);
 
-        pyth.setPrice(pythPrice, int32(-8), commitTime + 1);
+        pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 1);
         vm.warp(commitTime + 2);
 
         bytes[] memory empty;
@@ -233,7 +255,11 @@ contract PerpsForkTest is Test {
         assertEq(fee, 0, "Empty update should have zero fee");
 
         // Deploy a separate router with real Pyth to test the real code path
-        OrderRouter realPythRouter = new OrderRouter(address(engine), address(pool), REAL_PYTH, EUR_USD_FEED_ID);
+        uint256[] memory rw = new uint256[](1);
+        rw[0] = 1e18;
+        uint256[] memory rb = new uint256[](1);
+        rb[0] = 1e8;
+        OrderRouter realPythRouter = new OrderRouter(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb);
         clearinghouse.setOperator(address(realPythRouter), true);
 
         // We can't set it as engine's router (already set), but we can verify the Pyth interaction
@@ -268,7 +294,7 @@ contract PerpsForkTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setPrice(int64(100_000_000), int32(-8), t0); // publishTime == commitTime → stale
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0); // publishTime == commitTime → stale
         vm.warp(t0 + 2);
 
         vm.prank(keeper);
@@ -282,7 +308,7 @@ contract PerpsForkTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setPrice(int64(100_000_000), int32(-8), t0 + 3); // publishTime > commitTime
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 3); // publishTime > commitTime
         vm.warp(t0 + 64); // block.timestamp - publishTime = 61 > 60 → too stale
 
         vm.prank(keeper);
@@ -296,7 +322,7 @@ contract PerpsForkTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setPrice(int64(100_000_000), int32(-8), t0 + 65); // publishTime > commitTime
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 65); // publishTime > commitTime
         vm.warp(t0 + 124); // block.timestamp - publishTime = 59 <= 60 → OK
 
         vm.prank(keeper);
@@ -309,7 +335,7 @@ contract PerpsForkTest is Test {
         // block.timestamp is now t0+124; commitTime = t0+124
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
-        pyth.setPrice(int64(100_000_000), int32(-8), t0 + 125);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 125);
         vm.warp(t0 + 126);
         vm.prank(keeper);
         router.executeOrder(4, empty);
@@ -319,14 +345,14 @@ contract PerpsForkTest is Test {
         // block.timestamp is now t0+126
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
-        pyth.setPrice(int64(100_000_000), int32(-8), t0 + 127);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 127);
         vm.warp(t0 + 128);
         vm.prank(keeper);
         router.executeOrder(5, empty);
 
         // publishTime + 16 > 15 → stale for liquidation
         // block.timestamp is now t0+128
-        pyth.setPrice(int64(100_000_000), int32(-8), t0 + 128);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 128);
         vm.warp(t0 + 145); // 145 - 128 = 17 > 15
 
         vm.prank(keeper);
@@ -355,7 +381,7 @@ contract PerpsForkTest is Test {
         // Price rises to $1.06 → BULL PnL = -$6000, equity negative → liquidatable
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
-        pyth.setPrice(int64(106_000_000), -8, liqTs);
+        pyth.setAllPrices(feedIds, int64(106_000_000), -8, liqTs);
 
         bytes[] memory empty;
         vm.prank(keeper);
@@ -385,7 +411,7 @@ contract PerpsForkTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setPrice(int64(100_000_000), -8, ts + 1);
+        pyth.setAllPrices(feedIds, int64(100_000_000), -8, ts + 1);
         vm.warp(ts + 2);
 
         bytes[] memory empty;
@@ -405,7 +431,7 @@ contract PerpsForkTest is Test {
         // Move price to make position liquidatable
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
-        pyth.setPrice(int64(112_000_000), -8, liqTs);
+        pyth.setAllPrices(feedIds, int64(112_000_000), -8, liqTs);
 
         gasBefore = gasleft();
         vm.prank(keeper);

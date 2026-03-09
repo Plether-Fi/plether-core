@@ -66,7 +66,9 @@ contract HousePoolTest is Test {
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
-        router = new OrderRouter(address(engine), address(pool), address(0), bytes32(0));
+        router = new OrderRouter(
+            address(engine), address(pool), address(0), new bytes32[](0), new uint256[](0), new uint256[](0)
+        );
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);

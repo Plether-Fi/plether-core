@@ -27,27 +27,41 @@ contract MockUSDC is ERC20 {
 
 contract MockPyth {
 
-    int64 public mockPrice;
-    int32 public mockExpo;
-    uint256 public mockPublishTime;
+    struct MockPrice {
+        int64 price;
+        int32 expo;
+        uint256 publishTime;
+    }
+
+    mapping(bytes32 => MockPrice) public prices;
+    uint256 public mockFee;
 
     function setPrice(
+        bytes32 feedId,
         int64 _price,
         int32 _expo,
         uint256 _publishTime
     ) external {
-        mockPrice = _price;
-        mockExpo = _expo;
-        mockPublishTime = _publishTime;
+        prices[feedId] = MockPrice(_price, _expo, _publishTime);
+    }
+
+    function setAllPrices(
+        bytes32[] memory feedIds,
+        int64 _price,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        for (uint256 i = 0; i < feedIds.length; i++) {
+            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+        }
     }
 
     function getPriceUnsafe(
-        bytes32
+        bytes32 id
     ) external view returns (PythStructs.Price memory) {
-        return PythStructs.Price({price: mockPrice, conf: 0, expo: mockExpo, publishTime: mockPublishTime});
+        MockPrice memory p = prices[id];
+        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
     }
-
-    uint256 public mockFee;
 
     function setFee(
         uint256 _fee
@@ -106,7 +120,9 @@ contract OrderRouterTest is Test {
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
-        router = new OrderRouter(address(engine), address(pool), address(0), bytes32(0));
+        router = new OrderRouter(
+            address(engine), address(pool), address(0), new bytes32[](0), new uint256[](0), new uint256[](0)
+        );
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -306,9 +322,16 @@ contract OrderRouterPythTest is Test {
     MarginClearinghouse clearinghouse;
     MockPyth mockPyth;
 
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+
     uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
 
     function setUp() public {
         usdc = new MockUSDC();
@@ -335,7 +358,14 @@ contract OrderRouterPythTest is Test {
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), bytes32(0));
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases);
 
         clearinghouse.setOperator(address(engine), true);
         clearinghouse.setOperator(address(router), true);
@@ -363,7 +393,7 @@ contract OrderRouterPythTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         // publishTime 999 < commitTime 1000 → stale
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 999);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
         vm.warp(1050);
 
         bytes[] memory empty;
@@ -383,7 +413,7 @@ contract OrderRouterPythTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
-        mockPyth.setPrice(int64(105_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1001);
         vm.warp(1050);
 
         bytes[] memory empty;
@@ -412,7 +442,7 @@ contract OrderRouterPythTest is Test {
 
     function test_LiquidationStaleness_15SecBoundary() public {
         vm.warp(1000);
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -423,7 +453,7 @@ contract OrderRouterPythTest is Test {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 2000);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
         vm.warp(2016);
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
@@ -448,7 +478,7 @@ contract OrderRouterPythTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
         vm.warp(1050);
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -462,7 +492,7 @@ contract OrderRouterPythTest is Test {
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 2001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2001);
         vm.warp(2050);
         router.executeOrder(2, empty);
 
@@ -475,7 +505,7 @@ contract OrderRouterPythTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 3001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3001);
         vm.warp(3050);
         router.executeOrder(3, empty);
 
@@ -487,7 +517,7 @@ contract OrderRouterPythTest is Test {
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 4001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 4001);
         vm.warp(4050);
         router.executeOrder(4, empty);
 
@@ -497,7 +527,7 @@ contract OrderRouterPythTest is Test {
 
     function test_Slippage_CloseOrders_Protected() public {
         vm.warp(1000);
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
@@ -513,7 +543,7 @@ contract OrderRouterPythTest is Test {
         // Close BEAR at targetPrice=1.5e8 but Pyth price=1e8
         // BEAR slippage: 1e8 >= 1.5e8? No → order cancelled
         vm.warp(2000);
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 2001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2001);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 0, 150_000_000, true);
@@ -527,7 +557,7 @@ contract OrderRouterPythTest is Test {
 
     function test_BatchExecution_MEVCheckPerOrder() public {
         vm.warp(1000);
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 1005);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1005);
 
         // Order 1: committed at t=1000, price published at t=1005 → valid (1005 > 1000)
         vm.prank(alice);
@@ -554,7 +584,7 @@ contract OrderRouterPythTest is Test {
     function test_C1_CancelledOrder_RefundsUser_NotKeeper() public {
         vm.warp(1000);
         // Set oracle price published at t=999, BEFORE commit at t=1000 → stale
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 999);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
         // Alice commits with 0.1 ETH keeper fee
         vm.prank(alice);
@@ -581,7 +611,7 @@ contract OrderRouterPythTest is Test {
 
     function test_BatchExecution_StalePrice_Reverts() public {
         vm.warp(1000);
-        mockPyth.setPrice(int64(100_000_000), int32(-8), 900);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -592,11 +622,108 @@ contract OrderRouterPythTest is Test {
         router.executeOrderBatch(1, empty);
     }
 
+    function test_BasketMath_WeightedAverage() public {
+        vm.warp(1000);
+
+        // FEED_A=$1.10, FEED_B=$0.90, 50/50 weights, $1.00 base → basket=$1.00
+        mockPyth.setPrice(FEED_A, int64(110_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_B, int64(90_000_000), int32(-8), 1001);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertGt(size, 0, "Basket at $1.00 should pass slippage for target $1.00");
+    }
+
+    function test_BasketMath_UnequalWeights() public {
+        // 70/30 weights: FEED_A=$1.20, FEED_B=$0.80, base $1.00
+        // basket = (1.20 * 0.70) / 1.00 + (0.80 * 0.30) / 1.00 = 0.84 + 0.24 = 1.08
+        bytes32[] memory ids = new bytes32[](2);
+        ids[0] = FEED_A;
+        ids[1] = FEED_B;
+        uint256[] memory w = new uint256[](2);
+        w[0] = 0.7e18;
+        w[1] = 0.3e18;
+        uint256[] memory b = new uint256[](2);
+        b[0] = 1e8;
+        b[1] = 1e8;
+
+        BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), ids, w, b);
+
+        mockPyth.setPrice(FEED_A, int64(120_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
+
+        (uint256 price, uint256 minPt) = harness.computeBasketPrice();
+        // 120_000_000 * 0.7e18 / (1e8 * 1e10) = 84_000_000
+        // 80_000_000 * 0.3e18 / (1e8 * 1e10) = 24_000_000
+        // total = 108_000_000 = $1.08
+        assertEq(price, 108_000_000, "70/30 basket should compute $1.08");
+        assertEq(minPt, 1001, "minPublishTime should be weakest link");
+    }
+
+    function test_WeakestLink_Timestamp_MEV() public {
+        vm.warp(1000);
+
+        // FEED_A fresh, FEED_B stale (publishTime < commitTime)
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 999);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Weakest-link stale feed should cancel order");
+    }
+
+    function test_WeakestLink_Staleness() public {
+        vm.warp(1000);
+
+        // FEED_A fresh, FEED_B >60s old
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1001);
+        bytes[] memory empty;
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrderBatch(1, empty);
+    }
+
+}
+
+contract BasketPriceHarness is OrderRouter {
+
+    constructor(
+        address _pyth,
+        bytes32[] memory _feedIds,
+        uint256[] memory _quantities,
+        uint256[] memory _basePrices
+    ) OrderRouter(address(1), address(1), _pyth, _feedIds, _quantities, _basePrices) {}
+
+    function computeBasketPrice() external view returns (uint256, uint256) {
+        return _computeBasketPrice();
+    }
+
 }
 
 contract NormalizePythHarness is OrderRouter {
 
-    constructor() OrderRouter(address(1), address(1), address(0), bytes32(0)) {}
+    constructor()
+        OrderRouter(address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0))
+    {}
 
     function normalizePythPrice(
         int64 price,
