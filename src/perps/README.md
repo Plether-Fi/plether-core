@@ -37,6 +37,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Basket Oracle**: The router is constructed with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to 1e18), and base prices (8-dec). `_computeBasketPrice()` loops over feeds, normalizes each to 8 decimals, and computes `Σ (price × quantity) / (basePrice × 1e10)` — identical to the spot BasketOracle. The minimum `publishTime` across all feeds is used for MEV and staleness checks.
 
+**Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
+
 **Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and refunds the user, incrementing the queue for 100% protocol liveness.
 
 ### IV. CfdEngine — The Mathematical Ledger
@@ -88,7 +90,7 @@ Zone 2 creates a "wall of APY" that forces arbitrageurs to delta-neutralize the 
 
 ### Continuous Funding Without Loops
 
-Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track "USDC owed per 1 unit of size." User funding PnL = `size × (currentIndex - entryIndex)`. No gas-heavy loops across users.
+Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track funding owed per unit of size at 18-decimal (WAD) precision to prevent truncation at short keeper intervals. User funding PnL = `size × (currentIndex - entryIndex) / FUNDING_INDEX_SCALE`. No gas-heavy loops across users.
 
 ## Risk Management & Liquidations
 
@@ -96,11 +98,16 @@ Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track "USDC 
 
 An `accountId` can only hold one directional state per market. Opening an opposing side requires explicitly closing the existing position first, preventing capacity griefing (locking up vault liability for free with offsetting positions).
 
+### Minimum Position Size
+
+Positions must be large enough that their proportional keeper bounty (`notional × bountyBps`) meets the `minBountyUsdc` floor. This guarantees keepers are always incentivized to liquidate, regardless of position size.
+
 ### Proportional Liquidations
 
-- **Keeper Bounty**: 0.15% of notional size, bounded by a $5 floor for L2 gas profitability
+- **Keeper Bounty**: 0.15% of notional size, bounded by a $5 floor. Capped at equity when positive, at `posMargin` when negative (vault never pays more than it seizes)
 - **Residual Equity Preserved**: The protocol seizes only the exact mathematical loss + keeper bounty; remaining cross-margin equity is returned to the user
 - **Bad Debt Socialization**: If user equity is negative (extreme slippage), the House Pool absorbs the shortfall as a systemic insurance cost
+- **Graceful Self-Close**: Voluntary closes on underwater positions seize available balance and let the vault absorb any shortfall, rather than reverting
 
 ### Friday Auto-Deleverage (FAD)
 
