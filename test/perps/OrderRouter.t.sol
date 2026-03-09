@@ -787,6 +787,7 @@ contract FadStalenessTest is Test {
     // Timestamps verified against isFadWindow's dayOfWeek = ((ts/86400)+4)%7
     uint256 constant FRIDAY_18UTC = 604_951_200; // dayOfWeek=5, hour=18 → NOT FAD
     uint256 constant SATURDAY_NOON = 605_016_000; // dayOfWeek=6 → FAD
+    uint256 constant SUNDAY_21UTC = 605_134_800; // dayOfWeek=0, hour=21 → summer FX re-open
     uint256 constant MONDAY_NOON = 605_188_800; // dayOfWeek=1 → NOT FAD
     uint256 constant WEDNESDAY_NOON = 605_361_600; // dayOfWeek=3 → NOT FAD
 
@@ -1208,6 +1209,85 @@ contract FadStalenessTest is Test {
 
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
         router.executeLiquidation(aliceId, empty);
+    }
+
+    // ==========================================
+    // SUNDAY DST GAP (21:00-22:00 UTC)
+    // ==========================================
+
+    function test_SundayDst_OracleUnfrozenAt21() public {
+        // Sunday 21:00 UTC: summer FX markets re-open, Pyth publishes live prices
+        // _isOracleFrozen must return false so MEV checks are enforced
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
+
+        vm.warp(SUNDAY_21UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        // Fresh price (publishTime > commitTime) => MEV check passes, close succeeds
+        vm.warp(SUNDAY_21UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close should succeed at Sunday 21:00 with fresh price");
+    }
+
+    function test_SundayDst_MevEnforcedAt21() public {
+        // Sunday 21:00 UTC: stale price must be caught by MEV check (not bypassed)
+        uint256 publishTime = SUNDAY_21UTC - 30 minutes;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
+
+        vm.warp(SUNDAY_21UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(SUNDAY_21UTC + 30);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "MEV check must block stale close at Sunday 21:00");
+    }
+
+    function test_SundayDst_StillFadAt21() public {
+        // Sunday 21:00 UTC: isFadWindow() still true (< 22), so opens are blocked
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
+
+        vm.warp(SUNDAY_21UTC);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(SUNDAY_21UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 3);
+        assertEq(router.claimableEth(alice), 0.01 ether, "Opens still blocked at Sunday 21:00 (FAD active)");
+    }
+
+    function test_SundayDst_WinterStalenessRejects() public {
+        // Sunday 21:00 UTC in winter: Pyth hasn't woken up yet, price is ~47h stale
+        // _isOracleFrozen=false => 60s staleness check kicks in => rejects correctly
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 12 hours);
+
+        vm.warp(SUNDAY_21UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(SUNDAY_21UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "Winter stale price correctly rejected at Sunday 21:00");
     }
 
     // ==========================================

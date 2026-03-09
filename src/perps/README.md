@@ -116,7 +116,7 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 **Two-State Oracle Model**: The router separates two distinct states to avoid conflating risk management with oracle availability:
 
 1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): Enforces **close-only mode** and elevated margins. Open orders are rejected. MEV and staleness checks remain at normal thresholds (60s/15s) since Pyth FX feeds are still publishing until ~22:00 UTC.
-2. **Oracle frozen** (`_isOracleFrozen()`, Friday 22:00 UTC+): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses MEV `commitTime` check, since Pyth FX feeds have stopped and prices are genuinely frozen. Uses 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
+2. **Oracle frozen** (`_isOracleFrozen()`, Friday 22:00 → Sunday 21:00 UTC): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses MEV `commitTime` check, since Pyth FX feeds have stopped and prices are genuinely frozen. Asymmetric DST-safe thresholds: Friday uses 22:00 UTC (latest possible close) to avoid freezing while markets may still be open; Sunday uses 21:00 UTC (earliest possible open) to restore MEV protection as soon as markets could resume. In winter, the 21:00 unfreeze causes a safe 1-hour liveness drop (60s staleness rejects the ~47h-old price).
 
 This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
 

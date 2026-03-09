@@ -452,7 +452,7 @@ contract OrderRouter {
         if (dayOfWeek == 6) {
             return true;
         }
-        if (dayOfWeek == 0 && hourOfDay < 22) {
+        if (dayOfWeek == 0 && hourOfDay < 21) {
             return true;
         }
 
