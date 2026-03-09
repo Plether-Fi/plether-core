@@ -481,6 +481,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
+        uint256 actualFee = execFeeUsdc;
         if (netSettlement > 0) {
             vault.payOut(address(clearinghouse), uint256(netSettlement));
             clearinghouse.settleUsdc(order.accountId, address(USDC), netSettlement);
@@ -493,9 +494,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             if (toSeize > 0) {
                 clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));
             }
+            uint256 shortfall = owed - toSeize;
+            actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
         }
 
-        accumulatedFeesUsdc += execFeeUsdc;
+        accumulatedFeesUsdc += actualFee;
 
         emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
 

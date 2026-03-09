@@ -1238,3 +1238,110 @@ contract MarkPriceStalenessTest is Test {
     }
 
 }
+
+contract PhantomExecFeeTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+
+    receive() external payable {}
+
+    function setUp() public {
+        vm.warp(1000);
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function test_PhantomExecFee_InflatesAccumulatedFees() public {
+        uint256 lpDeposit = 1_000_000e6;
+        usdc.mint(bob, lpDeposit);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), lpDeposit);
+        juniorVault.deposit(lpDeposit, bob);
+        vm.stopPrank();
+
+        uint256 margin = 1000e6;
+        usdc.mint(alice, margin);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), margin);
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        clearinghouse.deposit(accountId, address(usdc), margin);
+
+        uint256 size = 50_000e18;
+        router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
+        vm.stopPrank();
+
+        vm.warp(1001);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        router.executeOrder(1, priceData);
+
+        uint256 openFee = engine.accumulatedFeesUsdc();
+
+        vm.warp(1002);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
+
+        vm.warp(1003);
+        priceData[0] = abi.encode(uint256(1.5e8));
+        router.executeOrder(2, priceData);
+
+        uint256 totalFees = engine.accumulatedFeesUsdc();
+        uint256 closeFee = totalFees - openFee;
+
+        // Close notional: 50_000e18 * 1.5e8 / 1e20 = 75_000e6
+        // Close exec fee: 75_000e6 * 6/10000 = 45e6
+        // Realized loss: 25_000e6 (BULL, price rose from 1e8 to 1.5e8)
+        // netSettlement: -25_000e6 - 45e6 = -25_045e6
+        // Available in clearinghouse: ~970e6
+        // Shortfall: ~24_075e6 >> 45e6 exec fee
+        //
+        // The trader couldn't pay the full settlement. The 45e6 exec fee
+        // was never collected, yet accumulatedFeesUsdc records it in full.
+        assertEq(closeFee, 0, "close exec fee should be 0 when shortfall exceeds fee");
+    }
+
+}
