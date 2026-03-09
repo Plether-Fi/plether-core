@@ -672,6 +672,91 @@ contract AuditFindingsTest is Test {
         assertEq(sizeAfterLiq, 0, "Remaining position should be fully liquidated");
     }
 
+    // ==========================================
+    // H-02: _skipStaleOrders uses `< upToId` so the target order itself
+    // is never age-checked. A stale order executes if it's the target.
+    // EXPECTED: Stale order should NOT execute.
+    // BUG: _skipStaleOrders only skips orders *before* the target.
+    // ==========================================
+
+    function test_H02_StaleOrderExecutesViaExecuteOrder() public {
+        router.setMaxOrderAge(300);
+
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+
+        uint64 commitId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 600);
+
+        router.executeOrder(commitId, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Expired order must not execute via executeOrder");
+    }
+
+    // ==========================================
+    // H-03: commitOrder accepts msg.value == 0 as keeper fee.
+    // An attacker can spam the queue with zero-fee orders.
+    // EXPECTED: commitOrder should revert when no keeper fee is attached.
+    // BUG: No minimum fee check exists.
+    // ==========================================
+
+    function test_H03_ZeroFeeCommitShouldRevert() public {
+        _fundTrader(alice, 10_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        router.commitOrder{value: 0}(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+    }
+
+    // ==========================================
+    // H-04: accumulatedFeesUsdc is NOT subtracted in _getEffectiveAssets(),
+    // so fees count as collateral. When utilization is high, withdrawFees
+    // reduces the real USDC balance below maxLiability, but fees propped up
+    // the solvency check pre-withdrawal.
+    // EXPECTED: withdrawFees should succeed (fees are protocol-owned, not collateral).
+    // BUG: _assertPostSolvency fails because removing fees drops effective assets.
+    // ==========================================
+
+    function test_H04_FeesLockedWhenVaultAtMaxUtilization() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+
+        uint64 id1 = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8, false);
+        router.executeOrder(id1, priceData);
+
+        uint64 id2 = router.nextCommitId();
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8, false);
+        router.executeOrder(id2, priceData);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertGt(fees, 0, "Fees should have accumulated");
+
+        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 poolBal = usdc.balanceOf(address(pool));
+        assertGe(poolBal, maxLiability, "Pool solvent before fee withdrawal");
+        assertLt(poolBal - fees, maxLiability, "Pool insolvent after fee removal (precondition)");
+
+        address feeRecipient = address(0xFEE);
+        engine.withdrawFees(feeRecipient);
+
+        assertEq(usdc.balanceOf(feeRecipient), fees, "Fee recipient should receive fees");
+    }
+
 }
 
 // ==========================================
