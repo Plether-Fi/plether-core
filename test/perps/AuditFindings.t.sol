@@ -709,10 +709,11 @@ contract AuditFindingsTest is Test {
     // ==========================================
 
     function test_H03_ZeroFeeCommitShouldRevert() public {
+        router.setMinKeeperFee(0.001 ether);
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientKeeperFee.selector);
         router.commitOrder{value: 0}(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
     }
 

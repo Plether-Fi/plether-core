@@ -26,12 +26,14 @@ contract OrderRouter {
     uint64 public nextExecuteId = 1;
 
     uint256 public maxOrderAge;
+    uint256 public minKeeperFee;
 
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
+    error OrderRouter__InsufficientKeeperFee();
     error OrderRouter__Unauthorized();
     error OrderRouter__FIFOViolation();
     error OrderRouter__OrderNotPending();
@@ -108,6 +110,15 @@ contract OrderRouter {
         maxOrderAge = _maxOrderAge;
     }
 
+    function setMinKeeperFee(
+        uint256 _minKeeperFee
+    ) external {
+        if (msg.sender != Ownable(address(engine)).owner()) {
+            revert OrderRouter__Unauthorized();
+        }
+        minKeeperFee = _minKeeperFee;
+    }
+
     // ==========================================
     // STEP 1: THE COMMITMENT (User Intent)
     // ==========================================
@@ -123,6 +134,9 @@ contract OrderRouter {
     ) external payable {
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
+        }
+        if (msg.value < minKeeperFee) {
+            revert OrderRouter__InsufficientKeeperFee();
         }
 
         uint64 orderId = nextCommitId++;
