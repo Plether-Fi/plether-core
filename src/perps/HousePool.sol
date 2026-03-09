@@ -180,6 +180,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = maxLiability + pendingFees;
+        int256 netFunding = ENGINE.netUnsettledFunding();
+        if (netFunding < 0) {
+            reserved += uint256(-netFunding);
+        }
         return bal > reserved ? bal - reserved : 0;
     }
 

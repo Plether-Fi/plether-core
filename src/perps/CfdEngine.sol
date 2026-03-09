@@ -487,11 +487,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearOI += sizeDelta;
         }
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        uint256 effectiveAssets = vault.totalAssets();
-        if (netUnsettledFunding > 0) {
-            effectiveAssets += uint256(netUnsettledFunding);
-        }
-        if (effectiveAssets < maxLiability) {
+        if (_getEffectiveAssets() < maxLiability) {
             revert CfdEngine__VaultSolvencyExceeded();
         }
     }
@@ -576,6 +572,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         int256 pendingFunding = getPendingFunding(pos);
+        netUnsettledFunding += pendingFunding;
+
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
         int256 equityUsdc = int256(pos.margin) + pendingFunding;
@@ -636,12 +634,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _assertPostSolvency() internal view {
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        uint256 effectiveAssets = vault.totalAssets();
-        if (netUnsettledFunding > 0) {
-            effectiveAssets += uint256(netUnsettledFunding);
-        }
+        uint256 effectiveAssets = _getEffectiveAssets();
         if (effectiveAssets < maxLiability) {
             revert CfdEngine__PostOpSolvencyBreach();
+        }
+    }
+
+    function _getEffectiveAssets() internal view returns (uint256 effectiveAssets) {
+        effectiveAssets = vault.totalAssets();
+        if (netUnsettledFunding > 0) {
+            effectiveAssets += uint256(netUnsettledFunding);
+        } else if (netUnsettledFunding < 0) {
+            uint256 owed = uint256(-netUnsettledFunding);
+            effectiveAssets = effectiveAssets > owed ? effectiveAssets - owed : 0;
         }
     }
 

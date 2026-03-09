@@ -581,4 +581,98 @@ contract HousePoolTest is Test {
         assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Withdrawal after cooldown succeeds");
     }
 
+    // ==========================================
+    // C-01: LIQUIDATION MUST UPDATE netUnsettledFunding
+    // ==========================================
+
+    function test_C01_LiquidationUpdatesNetUnsettledFunding() public {
+        engine.setRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 1e18,
+                maxApy: 5e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        _fundTrader(carol, 100_000 * 1e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        assertEq(engine.netUnsettledFunding(), 0, "Starts at zero");
+
+        vm.warp(block.timestamp + 60 days);
+
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+        bytes[] memory pythData = new bytes[](1);
+        pythData[0] = abi.encode(1.95e8);
+
+        router.executeLiquidation(carolId, pythData);
+
+        assertLt(engine.netUnsettledFunding(), 0, "Liquidation must settle payer funding into accumulator");
+    }
+
+    // ==========================================
+    // C-03: getFreeUSDC MUST RESERVE NEGATIVE netUnsettledFunding
+    // ==========================================
+
+    function test_C03_GetFreeUSDC_ReservesNegativeNetFunding() public {
+        engine.setRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 1e18,
+                maxApy: 5e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        address trader1 = address(0x444);
+        _fundTrader(trader1, 100_000 * 1e6);
+        vm.prank(trader1);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 40_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        address trader2 = address(0x555);
+        _fundTrader(trader2, 100_000 * 1e6);
+        vm.prank(trader2);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 20 days);
+
+        bytes[] memory closePythData = new bytes[](1);
+        closePythData[0] = abi.encode(1e8);
+        vm.prank(trader1);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
+        router.executeOrder(3, closePythData);
+
+        int256 netFunding = engine.netUnsettledFunding();
+        assertTrue(netFunding < 0, "Payer settled first -> negative netUnsettledFunding");
+
+        uint256 freeUSDC = pool.getFreeUSDC();
+        uint256 bal = usdc.balanceOf(address(pool));
+        uint256 maxLiab = engine.globalBearMaxProfit();
+        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 naiveFree = bal - maxLiab - fees;
+
+        assertLt(freeUSDC, naiveFree, "getFreeUSDC must reserve negative funding amount");
+    }
+
 }
