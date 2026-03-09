@@ -32,4 +32,9 @@ interface ICfdEngine {
     /// @notice Maximum oracle staleness allowed during FAD windows
     function fadMaxStaleness() external view returns (uint256);
 
+    /// @notice Whether a given day number is an admin-configured FAD override
+    function fadDayOverrides(
+        uint256 dayNumber
+    ) external view returns (bool);
+
 }

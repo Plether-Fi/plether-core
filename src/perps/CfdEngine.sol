@@ -49,6 +49,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
 
     mapping(uint256 => bool) public fadDayOverrides;
     uint256 public fadMaxStaleness = 3 days;
+    uint256 public fadRunwaySeconds = 3 hours;
 
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
@@ -65,6 +66,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     error CfdEngine__InsufficientInitialMargin();
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
+    error CfdEngine__RunwayTooLong();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -77,6 +79,7 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     event FadDaysAdded(uint256[] timestamps);
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
+    event FadRunwayUpdated(uint256 newRunway);
 
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
@@ -156,6 +159,16 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
         }
         fadMaxStaleness = _seconds;
         emit FadMaxStalenessUpdated(_seconds);
+    }
+
+    function setFadRunway(
+        uint256 _seconds
+    ) external onlyOwner {
+        if (_seconds > 24 hours) {
+            revert CfdEngine__RunwayTooLong();
+        }
+        fadRunwaySeconds = _seconds;
+        emit FadRunwayUpdated(_seconds);
     }
 
     /// @notice Withdraws accumulated execution fees from the vault to a recipient
@@ -464,7 +477,8 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
     // ==========================================
 
     /// @notice Returns true during the Friday Afternoon Deleverage (FAD) window
-    ///         (Friday 19:00 UTC → Sunday 22:00 UTC) or on any admin-configured FAD day.
+    ///         (Friday 19:00 UTC → Sunday 22:00 UTC), on admin-configured FAD days,
+    ///         or within fadRunwaySeconds before an admin FAD day (deleverage runway).
     function isFadWindow() public view returns (bool) {
         uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
         uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
@@ -479,7 +493,21 @@ contract CfdEngine is Ownable2Step, ReentrancyGuard {
             return true;
         }
 
-        return fadDayOverrides[block.timestamp / 86_400];
+        uint256 today = block.timestamp / 86_400;
+
+        if (fadDayOverrides[today]) {
+            return true;
+        }
+
+        uint256 runway = fadRunwaySeconds;
+        if (runway > 0) {
+            uint256 secondsUntilTomorrow = 86_400 - (block.timestamp % 86_400);
+            if (secondsUntilTomorrow <= runway && fadDayOverrides[today + 1]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// @notice Returns the maintenance margin requirement in USDC (6 decimals).

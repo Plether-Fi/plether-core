@@ -113,9 +113,16 @@ FX markets close on weekends. Sunday re-opens feature violent price gaps that bl
 
 Traders over 33x leverage must deposit margin before Friday evening, or keepers liquidate them while Friday oracle prices are still active, neutralizing weekend gap risk.
 
-**FAD-Aware Oracle Staleness**: During FAD windows, the OrderRouter relaxes staleness thresholds from 60s/15s to `fadMaxStaleness` (default 3 days) since Pyth FX feeds stop publishing when markets close. The router enforces **close-only mode** during FAD -- new position opens are rejected to prevent exploitation of frozen prices against weekend macro news. The MEV `commitTime` check is bypassed during FAD since frontrunning is impossible when prices are not updating. Liquidations remain fully operational during FAD.
+**Two-State Oracle Model**: The router separates two distinct states to avoid conflating risk management with oracle availability:
 
-**Admin FAD Days**: The protocol owner can designate additional FAD days via `addFadDays()` for FX market holidays (e.g., Christmas, New Year). These days inherit the same close-only and relaxed staleness behavior as the automatic weekend window. Configurable via `setFadMaxStaleness()` for extended holiday stretches.
+1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): Enforces **close-only mode** and elevated margins. Open orders are rejected. MEV and staleness checks remain at normal thresholds (60s/15s) since Pyth FX feeds are still publishing until ~22:00 UTC.
+2. **Oracle frozen** (`_isOracleFrozen()`, Friday 22:00 UTC+): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses MEV `commitTime` check, since Pyth FX feeds have stopped and prices are genuinely frozen. Uses 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
+
+This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
+
+**Admin FAD Days**: The protocol owner can designate additional FAD days via `addFadDays()` / `removeFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed.
+
+**Deleverage Runway**: Admin holidays lack the natural 3-hour runway that weekends get (Friday 19:00→22:00). To compensate, `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable via `setFadRunway()`) triggers `isFadWindow()` N seconds before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins are enforced while the oracle remains live with normal staleness and MEV checks — giving keepers time to liquidate over-leveraged positions before the oracle freezes at midnight.
 
 ## Fee Structure
 
@@ -139,4 +146,5 @@ Accumulated fees are withdrawn by the protocol owner via `withdrawFees()`.
 | `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
-| `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during FAD windows |
+| `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
+| `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |

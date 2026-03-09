@@ -155,26 +155,23 @@ contract OrderRouter {
             (executionPrice, minPublishTime) = _computeBasketPrice();
 
             bool isFad = engine.isFadWindow();
+            bool oracleFrozen = _isOracleFrozen();
             uint256 staleness = block.timestamp - minPublishTime;
 
-            if (isFad) {
-                if (staleness > engine.fadMaxStaleness()) {
-                    _cancelOrder(orderId, "Oracle price too stale", pythFee);
-                    return;
-                }
-                if (!order.isClose) {
-                    _cancelOrder(orderId, "FAD: close-only mode", pythFee);
-                    return;
-                }
-            } else {
-                if (minPublishTime <= order.commitTime) {
-                    _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
-                    return;
-                }
-                if (staleness > 60) {
-                    _cancelOrder(orderId, "Oracle price too stale", pythFee);
-                    return;
-                }
+            if (isFad && !order.isClose) {
+                _cancelOrder(orderId, "FAD: close-only mode", pythFee);
+                return;
+            }
+
+            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
+            if (staleness > maxStaleness) {
+                _cancelOrder(orderId, "Oracle price too stale", pythFee);
+                return;
+            }
+
+            if (!oracleFrozen && minPublishTime <= order.commitTime) {
+                _cancelOrder(orderId, "MEV: Oracle price is stale", pythFee);
+                return;
             }
         } else {
             if (block.chainid != 31_337) {
@@ -227,6 +224,7 @@ contract OrderRouter {
         uint256 executionPrice;
         uint256 pricePublishTime;
         bool isFad;
+        bool oracleFrozen;
 
         if (address(pyth) != address(0)) {
             if (pythUpdateData.length > 0) {
@@ -240,7 +238,8 @@ contract OrderRouter {
             (executionPrice, pricePublishTime) = _computeBasketPrice();
 
             isFad = engine.isFadWindow();
-            uint256 maxStaleness = isFad ? engine.fadMaxStaleness() : 60;
+            oracleFrozen = _isOracleFrozen();
+            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
 
             if (block.timestamp - pricePublishTime > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
@@ -267,13 +266,13 @@ contract OrderRouter {
                 continue;
             }
 
-            if (isFad) {
-                if (!order.isClose) {
-                    emit OrderFailed(orderId, "FAD: close-only mode");
-                    _refundOrderFee(orderId, order);
-                    continue;
-                }
-            } else if (pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
+            if (isFad && !order.isClose) {
+                emit OrderFailed(orderId, "FAD: close-only mode");
+                _refundOrderFee(orderId, order);
+                continue;
+            }
+
+            if (!oracleFrozen && pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
                 emit OrderFailed(orderId, "MEV: Oracle price is stale");
                 _refundOrderFee(orderId, order);
                 continue;
@@ -440,6 +439,26 @@ contract OrderRouter {
         return executionPrice <= order.targetPrice;
     }
 
+    /// @dev Returns true only when FX markets are actually closed and Pyth feeds have stopped publishing.
+    ///      Distinct from isFadWindow() which starts 3 hours earlier for margin purposes.
+    ///      Uses Friday 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
+    function _isOracleFrozen() internal view returns (bool) {
+        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
+        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
+
+        if (dayOfWeek == 5 && hourOfDay >= 22) {
+            return true;
+        }
+        if (dayOfWeek == 6) {
+            return true;
+        }
+        if (dayOfWeek == 0 && hourOfDay < 22) {
+            return true;
+        }
+
+        return engine.fadDayOverrides(block.timestamp / 86_400);
+    }
+
     /// @dev Converts a Pyth price to 8-decimal format. Scales up/down based on exponent difference from -8.
     function _normalizePythPrice(
         int64 price,
@@ -483,7 +502,7 @@ contract OrderRouter {
             uint256 minPublishTime;
             (executionPrice, minPublishTime) = _computeBasketPrice();
 
-            uint256 maxStaleness = engine.isFadWindow() ? engine.fadMaxStaleness() : 15;
+            uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 15;
             if (block.timestamp - minPublishTime > maxStaleness) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }

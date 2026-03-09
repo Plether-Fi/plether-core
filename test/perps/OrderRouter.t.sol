@@ -1107,4 +1107,223 @@ contract FadStalenessTest is Test {
         assertEq(router.claimableEth(alice), 0.01 ether, "Fee refunded on admin FAD day cancel");
     }
 
+    // ==========================================
+    // FRIDAY 19:00-22:00 GAP (FAD active, oracle NOT frozen)
+    // ==========================================
+
+    function test_FridayGap_MevCheckStillActive() public {
+        // Friday 20:00 UTC: FAD is active but Pyth is still publishing (markets open until ~22:00)
+        // dayOfWeek=5, hour=20 => isFadWindow=true, _isOracleFrozen=false
+        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+
+        // Price published at 19:30 (before the close order at 20:00)
+        uint256 publishTime = FRIDAY_20UTC - 30 minutes;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
+
+        vm.warp(FRIDAY_20UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        // Keeper tries to execute with the 19:30 price (publishTime < commitTime)
+        // MEV check MUST still catch this since oracle is not frozen
+        vm.warp(FRIDAY_20UTC + 30);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "MEV check must block stale-price close during Friday gap");
+    }
+
+    function test_FridayGap_FreshPriceStillWorks() public {
+        // Friday 20:00 UTC: close order with a fresh price should succeed
+        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+
+        // Fresh price published after commit
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
+
+        vm.warp(FRIDAY_20UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(FRIDAY_20UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close with fresh price should succeed during Friday gap");
+    }
+
+    function test_FridayGap_OpenStillBlocked() public {
+        // Friday 20:00 UTC: open orders blocked by FAD even though oracle is live
+        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
+
+        vm.warp(FRIDAY_20UTC);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(FRIDAY_20UTC + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 3);
+        assertEq(router.claimableEth(alice), 0.01 ether, "Open still blocked during Friday gap");
+    }
+
+    function test_FridayGap_StalenessStill60s() public {
+        // Friday 20:00 UTC: 60s staleness should still apply (oracle is not frozen)
+        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+
+        // Price 61s stale at execution time, but publishTime > commitTime
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
+
+        vm.warp(FRIDAY_20UTC);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        // Execute 62s after publishTime => staleness = 61 > 60
+        vm.warp(FRIDAY_20UTC + 63);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
+    }
+
+    function test_FridayGap_LiquidationStaleness15s() public {
+        // Friday 20:00 UTC: liquidation staleness should still be 15s (not relaxed)
+        uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
+        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
+
+        vm.warp(FRIDAY_20UTC + 16);
+        bytes[] memory empty = new bytes[](0);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        router.executeLiquidation(aliceId, empty);
+    }
+
+    // ==========================================
+    // ADMIN HOLIDAY DELEVERAGE RUNWAY
+    // ==========================================
+
+    function test_Runway_FadActivatesBeforeHoliday() public {
+        // Mark Wednesday as holiday
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        // Tuesday 20:59 UTC: 3h01m before midnight => outside runway
+        uint256 tuesdayBeforeRunway = WEDNESDAY_NOON - 12 hours - 1; // 23:59:59 minus 3h = 20:59:59
+        // More precisely: Wednesday midnight = WEDNESDAY_NOON - 12 hours (noon - 12h = midnight)
+        uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
+        uint256 tuesdayJustOutside = wednesdayMidnight - 3 hours - 1;
+
+        vm.warp(tuesdayJustOutside);
+        assertFalse(engine.isFadWindow(), "Before runway: FAD should be inactive");
+
+        // Tuesday 21:00 UTC: exactly 3h before midnight => inside runway
+        uint256 tuesdayRunwayStart = wednesdayMidnight - 3 hours;
+        vm.warp(tuesdayRunwayStart);
+        assertTrue(engine.isFadWindow(), "At runway start: FAD should be active");
+
+        // Tuesday 22:00 UTC: 2h before midnight => inside runway, oracle NOT frozen
+        uint256 tuesday22 = wednesdayMidnight - 2 hours;
+        vm.warp(tuesday22);
+        assertTrue(engine.isFadWindow(), "During runway: FAD should be active");
+    }
+
+    function test_Runway_OracleFrozenOnlyOnHolidayDay() public {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
+
+        // Tuesday 21:00: FAD active (runway) but oracle NOT frozen
+        vm.warp(wednesdayMidnight - 3 hours);
+        assertTrue(engine.isFadWindow());
+
+        // Open order should be rejected (FAD close-only)
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 1);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
+        vm.warp(wednesdayMidnight - 3 hours + 50);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+        assertEq(router.claimableEth(alice), 0.01 ether, "Open blocked during runway");
+
+        // Close order with fresh price should succeed (MEV check still active)
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 51);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(wednesdayMidnight - 3 hours + 100);
+        router.executeOrder(3, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close with fresh price works during runway");
+    }
+
+    function test_Runway_MevStillEnforcedDuringRunway() public {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+
+        uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
+        uint256 runwayTime = wednesdayMidnight - 2 hours;
+
+        // Stale price (publishTime before commitTime)
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), runwayTime - 60);
+
+        vm.warp(runwayTime);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        vm.warp(runwayTime + 30);
+        bytes[] memory empty = new bytes[](0);
+        router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 10_000 * 1e18, "MEV check must block stale price during runway");
+    }
+
+    function test_Runway_SetFadRunway() public {
+        assertEq(engine.fadRunwaySeconds(), 3 hours);
+        engine.setFadRunway(6 hours);
+        assertEq(engine.fadRunwaySeconds(), 6 hours);
+    }
+
+    function test_Runway_TooLong_Reverts() public {
+        vm.expectRevert(CfdEngine.CfdEngine__RunwayTooLong.selector);
+        engine.setFadRunway(25 hours);
+    }
+
+    function test_Runway_ZeroDisablesLookahead() public {
+        uint256[] memory timestamps = new uint256[](1);
+        timestamps[0] = WEDNESDAY_NOON;
+        engine.addFadDays(timestamps);
+        engine.setFadRunway(0);
+
+        uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
+
+        // Tuesday 21:00: with zero runway, FAD should NOT activate
+        vm.warp(wednesdayMidnight - 3 hours);
+        assertFalse(engine.isFadWindow(), "Zero runway disables lookahead");
+
+        // Wednesday itself still works
+        vm.warp(WEDNESDAY_NOON);
+        assertTrue(engine.isFadWindow(), "Holiday day itself still FAD");
+    }
+
 }
