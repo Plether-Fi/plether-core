@@ -1345,3 +1345,120 @@ contract PhantomExecFeeTest is Test {
     }
 
 }
+
+contract NegativeFundingFreeUsdcTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+
+    receive() external payable {}
+
+    function setUp() public {
+        vm.warp(1000);
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function test_GetFreeUSDC_IgnoresNegativeFunding() public {
+        usdc.mint(bob, 1_000_000e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1_000_000e6);
+        juniorVault.deposit(1_000_000e6, bob);
+        vm.stopPrank();
+
+        uint256 margin = 100_000e6;
+        usdc.mint(alice, margin);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), margin);
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        clearinghouse.deposit(accountId, address(usdc), margin);
+
+        uint256 size = 200_000e18;
+        router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
+        vm.stopPrank();
+
+        vm.warp(1001);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        router.executeOrder(1, priceData);
+
+        // Warp forward so funding accrues on the skewed bull position
+        vm.warp(1001 + 30 days);
+
+        // Open a tiny position to trigger _updateFunding inside processOrder
+        address carol = address(0x333);
+        uint256 carolMargin = 10_000e6;
+        usdc.mint(carol, carolMargin);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), carolMargin);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), carolMargin);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, carolMargin, 1e8, false);
+        vm.stopPrank();
+
+        vm.warp(1001 + 30 days + 1);
+        priceData[0] = abi.encode(uint256(1e8));
+        router.executeOrder(2, priceData);
+
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        assertLt(unrealizedFunding, 0, "funding should be negative (house is owed)");
+
+        uint256 freeUsdcNow = pool.getFreeUSDC();
+
+        // Compute what getFreeUSDC returns without negative funding adjustment
+        uint256 bal = usdc.balanceOf(address(pool));
+        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 pendingFees = engine.accumulatedFeesUsdc();
+        uint256 reservedWithoutFunding = maxLiability + pendingFees;
+        uint256 freeWithoutFunding = bal > reservedWithoutFunding ? bal - reservedWithoutFunding : 0;
+
+        // getFreeUSDC currently returns the same as if negative funding didn't exist
+        // After the fix, it should return MORE (negative funding = house asset = less reserved)
+        assertGt(
+            freeUsdcNow, freeWithoutFunding, "getFreeUSDC should account for negative funding by reducing reserved"
+        );
+    }
+
+}

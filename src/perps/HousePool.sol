@@ -196,6 +196,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
         if (unrealizedFunding > 0) {
             reserved += uint256(unrealizedFunding);
+        } else if (unrealizedFunding < 0) {
+            uint256 fundingAsset = uint256(-unrealizedFunding);
+            reserved = reserved > fundingAsset ? reserved - fundingAsset : 0;
         }
         return bal > reserved ? bal - reserved : 0;
     }
