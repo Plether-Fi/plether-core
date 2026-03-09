@@ -33,6 +33,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public bullOI;
     uint256 public bearOI;
 
+    uint256 public globalBullEntryNotional;
+    uint256 public globalBearEntryNotional;
+    uint256 public lastMarkPrice;
+
     uint256 public accumulatedFeesUsdc;
 
     // ==========================================
@@ -276,6 +280,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 vaultDepthUsdc
     ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
+        lastMarkPrice = price;
 
         _updateFunding(price, vaultDepthUsdc);
 
@@ -352,17 +357,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta);
         pos.maxProfitUsdc += newMaxProfit;
 
+        uint256 oldNotional = pos.size * pos.entryPrice;
+
         if (pos.size == 0) {
             pos.entryPrice = price;
             pos.side = order.side;
             pos.entryFundingIndex = order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
             pos.entryDepth = vaultDepthUsdc;
         } else {
-            uint256 totalValue = (pos.size * pos.entryPrice) + (order.sizeDelta * price);
+            uint256 totalValue = oldNotional + (order.sizeDelta * price);
             pos.entryPrice = totalValue / (pos.size + order.sizeDelta);
         }
 
         pos.size += order.sizeDelta;
+        uint256 newNotional = pos.size * pos.entryPrice;
+
+        if (order.side == CfdTypes.Side.BULL) {
+            globalBullEntryNotional += newNotional - oldNotional;
+        } else {
+            globalBearEntryNotional += newNotional - oldNotional;
+        }
 
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
@@ -433,6 +447,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 maxProfitReduction = (pos.maxProfitUsdc * order.sizeDelta) / pos.size;
         pos.maxProfitUsdc -= maxProfitReduction;
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
+
+        uint256 entryNotionalReduction = order.sizeDelta * pos.entryPrice;
+        if (pos.side == CfdTypes.Side.BULL) {
+            globalBullEntryNotional -= entryNotionalReduction;
+        } else {
+            globalBearEntryNotional -= entryNotionalReduction;
+        }
 
         pos.size -= order.sizeDelta;
 
@@ -572,6 +593,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 vaultDepthUsdc
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
+        lastMarkPrice = price;
         _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[accountId];
@@ -593,6 +615,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         _reduceGlobalLiability(pos.side, pos.maxProfitUsdc, pos.size);
+
+        uint256 liqEntryNotional = pos.size * pos.entryPrice;
+        if (pos.side == CfdTypes.Side.BULL) {
+            globalBullEntryNotional -= liqEntryNotional;
+        } else {
+            globalBearEntryNotional -= liqEntryNotional;
+        }
 
         uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
@@ -656,6 +685,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             uint256 owed = uint256(-netUnsettledFunding);
             effectiveAssets = effectiveAssets > owed ? effectiveAssets - owed : 0;
         }
+    }
+
+    // ==========================================
+    // MARK-TO-MARKET
+    // ==========================================
+
+    /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
+    ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
+    function getUnrealizedTraderPnl() external view returns (int256) {
+        uint256 price = lastMarkPrice;
+        if (price == 0) {
+            return 0;
+        }
+
+        int256 bullPnl = int256(globalBullEntryNotional) - int256(bullOI * price);
+        int256 bearPnl = int256(bearOI * price) - int256(globalBearEntryNotional);
+
+        return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
     }
 
 }
