@@ -252,10 +252,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = pendingFees;
         int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
+        uint256 effectiveBal = bal;
         if (unrealizedFunding > 0) {
             reserved += uint256(unrealizedFunding);
+        } else if (unrealizedFunding < 0) {
+            effectiveBal += uint256(-unrealizedFunding);
         }
-        uint256 cashMinusReserved = bal > reserved ? bal - reserved : 0;
+        uint256 cashMinusReserved = effectiveBal > reserved ? effectiveBal - reserved : 0;
 
         int256 traderPnl = ENGINE.getUnrealizedTraderPnl();
         uint256 distributable;

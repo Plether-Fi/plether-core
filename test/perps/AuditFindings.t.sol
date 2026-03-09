@@ -632,6 +632,54 @@ contract AuditFindingsTest is Test {
     }
 
     // ==========================================
+    // C-02 (new): _reconcile ignores negative unrealizedFunding
+    // When a funding receiver closes before payers, vault cash drops by the
+    // payout, but the payers' debt (negative unrealizedFunding) is a vault asset
+    // that _reconcile fails to account for. This deflates cashMinusReserved,
+    // triggering spurious _absorbLoss on the junior tranche.
+    // EXPECTED: Junior principal unaffected (pool is owed more than it paid).
+    // BUG: Junior is slashed by the funding payout amount.
+    // ==========================================
+
+    function test_C02_NegativeFundingCausesSpuriousJuniorLoss() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        // Bear-heavy market: bears pay funding, bulls receive
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        // 90 days of funding accrues — bears owe, bulls receive
+        vm.warp(block.timestamp + 90 days);
+
+        // Close minority (bull/receiver) — vault physically pays out funding
+        bytes[] memory price = new bytes[](1);
+        price[0] = abi.encode(uint256(1e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, price);
+
+        // Bears still owe funding → unrealizedFunding < 0 (vault asset)
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
+
+        // Reconcile should NOT absorb loss — the funding debt is a vault asset
+        uint256 juniorBefore = pool.juniorPrincipal();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertGe(juniorAfter, juniorBefore, "negative funding must not cause spurious junior loss");
+    }
+
+    // ==========================================
     // C-01 (old, partial close): seize must respect lockedMarginUsdc
     // ==========================================
 
