@@ -886,7 +886,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3, "Queue must advance");
-        assertEq(router.claimableEth(alice), 0.01 ether, "Keeper fee refunded on FAD cancel");
+        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
     function test_FadWindow_MevCheckBypassed() public {
@@ -1105,7 +1105,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0.01 ether, "Fee refunded on admin FAD day cancel");
+        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
     // ==========================================
@@ -1173,7 +1173,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0.01 ether, "Open still blocked during Friday gap");
+        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
     function test_FridayGap_StalenessStill60s() public {
@@ -1268,7 +1268,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0.01 ether, "Opens still blocked at Sunday 21:00 (FAD active)");
+        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
     function test_SundayDst_WinterStalenessRejects() public {
@@ -1339,7 +1339,7 @@ contract FadStalenessTest is Test {
         vm.warp(wednesdayMidnight - 3 hours + 50);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
-        assertEq(router.claimableEth(alice), 0.01 ether, "Open blocked during runway");
+        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
 
         // Close order with fresh price should succeed (MEV check still active)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 51);

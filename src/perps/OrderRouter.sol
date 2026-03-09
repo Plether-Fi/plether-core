@@ -159,7 +159,8 @@ contract OrderRouter {
             uint256 staleness = block.timestamp - minPublishTime;
 
             if (isFad && !order.isClose) {
-                _cancelOrder(orderId, "FAD: close-only mode", pythFee);
+                emit OrderFailed(orderId, "FAD: close-only mode");
+                _finalizeExecution(orderId, pythFee);
                 return;
             }
 
@@ -185,7 +186,8 @@ contract OrderRouter {
         }
 
         if (!_checkSlippage(order, executionPrice)) {
-            _cancelOrder(orderId, "Slippage tolerance exceeded", pythFee);
+            emit OrderFailed(orderId, "Slippage tolerance exceeded");
+            _finalizeExecution(orderId, pythFee);
             return;
         }
 
@@ -268,7 +270,7 @@ contract OrderRouter {
 
             if (isFad && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
-                _refundOrderFee(orderId, order);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
@@ -280,7 +282,7 @@ contract OrderRouter {
 
             if (!_checkSlippage(order, executionPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                _refundOrderFee(orderId, order);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
