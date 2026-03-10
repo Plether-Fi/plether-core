@@ -179,6 +179,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (block.timestamp < riskParamsActivationTime) {
             revert CfdEngine__TimelockNotReady();
         }
+        _updateFunding(lastMarkPrice, vault.totalAssets());
         riskParams = pendingRiskParams;
         delete pendingRiskParams;
         riskParamsActivationTime = 0;

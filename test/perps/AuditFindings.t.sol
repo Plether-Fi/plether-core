@@ -824,6 +824,67 @@ contract AuditFindingsTest is Test {
         assertEq(usdc.balanceOf(feeRecipient), fees, "Fee recipient should receive fees");
     }
 
+    // ==========================================
+    // M-01: finalizeRiskParams retroactive funding
+    // _updateFunding is not called before applying new params, so the
+    // entire dormant period is retroactively charged at the new rate.
+    // ==========================================
+
+    function test_M01_FinalizeRiskParamsRetroactiveFunding() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(carol, 200_000 * 1e6);
+
+        uint256 T0 = 1_710_000_000;
+        uint256 T_PROPOSE = T0 + 30 days;
+        uint256 T_FINALIZE = T0 + 30 days + 48 hours + 1;
+        uint256 T_ORDER2 = T0 + 33 days;
+
+        vm.warp(T0);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        int256 indexAfterOpen = engine.bullFundingIndex();
+
+        vm.warp(T_PROPOSE);
+
+        CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 3.0e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+        engine.proposeRiskParams(newParams);
+
+        vm.warp(T_FINALIZE);
+        engine.finalizeRiskParams();
+
+        vm.warp(T_ORDER2);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        int256 indexAfterSettle = engine.bullFundingIndex();
+        int256 indexDrop = indexAfterOpen - indexAfterSettle;
+
+        // With the fix, ~32 days settle at old rate and ~1 day at new rate (~1.6x old).
+        // Without the fix, all 33 days charge at new 20x rate (~20x old).
+        // Threshold at 2x old rate cleanly separates: fixed (1.6x) < 2x < unfixed (20x).
+        uint256 totalElapsed = T_ORDER2 - T0;
+        uint256 oldAnnRate = 0.06e18;
+        int256 maxDrop = int256((oldAnnRate * totalElapsed * 2) / 365 days);
+
+        assertLe(indexDrop, maxDrop, "Funding must not retroactively apply new rate to pre-finalize period");
+    }
+
 }
 
 // ==========================================
