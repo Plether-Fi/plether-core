@@ -615,7 +615,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
-    /// @dev Best-effort harvest that silently skips on oracle or Curve failure, preserving withdrawal liveness.
+    /// @dev Harvest yield before withdrawals. Skips safely when no yield is pending or Curve is down.
+    ///      When yield IS pending, harvest must succeed (oracle must be fresh) or the withdrawal reverts
+    ///      to prevent withdrawers from extracting unharvested yield meant for sINVAR stakers.
     function _harvestSafe() internal {
         if (address(stakedInvarCoin) == address(0)) {
             return;
@@ -625,19 +627,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             return;
         }
 
-        try this.harvestSafeExternal(lpBal) {} catch {}
-    }
-
-    /// @dev External entry point for _harvestSafe so the entire Curve+Oracle sequence is caught by try/catch.
-    ///      Must only be called via `this.harvestSafeExternal()` from `_harvestSafe()`.
-    function harvestSafeExternal(
-        uint256 lpBal
-    ) external {
-        if (msg.sender != address(this)) {
-            revert InvarCoin__Unauthorized();
+        uint256 vp;
+        try CURVE_POOL.get_virtual_price() returns (uint256 _vp) {
+            vp = _vp;
+        } catch {
+            return;
         }
 
-        uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
+        uint256 currentVpValue = (lpBal * vp) / 1e18;
         if (currentVpValue <= curveLpCostVp) {
             return;
         }
