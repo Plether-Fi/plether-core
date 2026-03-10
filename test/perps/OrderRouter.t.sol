@@ -12,7 +12,9 @@ import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract OrderRouterTest is BasePerpTest {
@@ -1366,6 +1368,864 @@ contract InversionTest is Test {
         assertApproxEqAbs(
             uint256(chainlinkPrice), pythPrice, 100, "BasketOracle and OrderRouter must agree within rounding"
         );
+    }
+
+}
+
+contract OrderRouterAuditTest is BasePerpTest {
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    // Regression: Finding-5 — close orders bypass slippage
+    function test_CloseBypassesSlippage() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(carol, 50_000 * 1e6);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0.9e8, true);
+
+        bytes[] memory pythData = new bytes[](1);
+        pythData[0] = abi.encode(uint256(1.5e8));
+        router.executeOrder(2, pythData);
+
+        bytes32 carolAccount = bytes32(uint256(uint160(carol)));
+        (uint256 size,,,,,,,) = engine.positions(carolAccount);
+        assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
+    }
+
+    // Regression: Finding-6 — missing chainId guard
+    function test_MissingChainIdGuard() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(carol, 50_000 * 1e6);
+
+        vm.chainId(1);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+
+        vm.expectRevert(OrderRouter.OrderRouter__MockModeDisabled.selector);
+        router.executeOrder(1, empty);
+    }
+
+    // Regression: H-02 — stale order executes via executeOrder
+    function test_StaleOrderExecutesViaExecuteOrder() public {
+        router.proposeMaxOrderAge(300);
+        _warpForward(48 hours + 1);
+        router.finalizeMaxOrderAge();
+
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+
+        uint64 commitId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 600);
+
+        router.executeOrder(commitId, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Expired order must not execute via executeOrder");
+    }
+
+    // Regression: H-03 — zero fee commit should revert
+    function test_ZeroFeeCommitShouldRevert() public {
+        router.proposeMinKeeperFee(0.001 ether);
+        _warpForward(48 hours + 1);
+        router.finalizeMinKeeperFee();
+        _fundTrader(alice, 10_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientKeeperFee.selector);
+        router.commitOrder{value: 0}(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+    }
+
+    // Regression: H-03 — close order allowed while paused
+    function test_CloseOrderAllowedWhilePaused() public {
+        _fundJunior(bob, 500_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "Position should be open");
+
+        router.pause();
+
+        vm.prank(alice);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
+
+        router.unpause();
+        router.executeOrder(2, empty);
+
+        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, 0, "Position should be fully closed");
+    }
+
+}
+
+// Regression: H-03
+contract StaleOrderExpiryTest is BasePerpTest {
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address spammer = address(0x666);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function setUp() public override {
+        super.setUp();
+        router.proposeMaxOrderAge(300);
+        _warpForward(48 hours + 1);
+        router.finalizeMaxOrderAge();
+    }
+
+    // Regression: H-03
+    function test_StaleSpamOrdersAutoSkipped() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        for (uint256 i = 0; i < 5; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        }
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        assertEq(router.nextExecuteId(), 1);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        router.executeOrder(6, empty);
+
+        assertEq(router.nextExecuteId(), 7, "Queue advanced past spam + real order");
+    }
+
+    // Regression: H-03
+    function test_FreshOrdersNotSkipped() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 2);
+    }
+
+    // Regression: H-03
+    function test_SpammerFeeConfiscatedOnExpiry() public {
+        vm.deal(spammer, 1 ether);
+        vm.prank(spammer);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        address keeper = address(0x999);
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(2, empty);
+
+        assertGt(router.claimableEth(spammer), 0, "Spammer must be refunded expired order fee");
+        assertEq(router.claimableEth(keeper), 0, "Keeper must not receive expired order fee");
+    }
+
+    // Regression: H-03
+    function test_BatchSkipsStaleOrders() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        }
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        router.executeOrderBatch(4, empty);
+
+        assertEq(router.nextExecuteId(), 5, "Batch advanced past stale + real order");
+    }
+
+    // Regression: H-03
+    function test_SetMaxOrderAge_OnlyOwner() public {
+        vm.prank(spammer);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, spammer));
+        router.proposeMaxOrderAge(600);
+
+        router.proposeMaxOrderAge(600);
+        _warpForward(48 hours + 1);
+        router.finalizeMaxOrderAge();
+        assertEq(router.maxOrderAge(), 600);
+    }
+
+    // Regression: H-01
+    function test_ExpiredOrderFeeRefundedToUser_ViaSkip() public {
+        vm.deal(spammer, 1 ether);
+        vm.prank(spammer);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        address keeper = address(0x999);
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(2, empty);
+
+        assertGt(router.claimableEth(spammer), 0, "User must be refunded expired order fee");
+        assertEq(router.claimableEth(keeper), 0, "Keeper must not receive expired order fee");
+    }
+
+}
+
+contract MarkPriceStalenessTest is BasePerpTest {
+
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        pool = new HousePool(address(usdc), address(engine));
+
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        pool.setSeniorVault(address(seniorVault));
+        engine.setVault(address(pool));
+
+        mockPyth = new MockPyth();
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(144 hours + 4);
+        clearinghouse.finalizeOperator();
+
+        vm.warp(SETUP_TIMESTAMP);
+    }
+
+    function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 120);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.updateMarkPrice(updateData);
+    }
+
+    function test_UpdateMarkPrice_AcceptsFreshOracle() public {
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 30);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        router.updateMarkPrice(updateData);
+        assertEq(engine.lastMarkPrice(), 1e8);
+    }
+
+}
+
+// Regression: H-02
+contract StalenessGriefTest is BasePerpTest {
+
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address attacker = address(0x666);
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        pool = new HousePool(address(usdc), address(engine));
+
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        pool.setSeniorVault(address(seniorVault));
+        engine.setVault(address(pool));
+
+        mockPyth = new MockPyth();
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(144 hours + 4);
+        clearinghouse.finalizeOperator();
+
+        vm.warp(SETUP_TIMESTAMP);
+    }
+
+    // Regression: H-02
+    function test_StaleOracleCancelsOrderInsteadOfReverting() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 120);
+
+        bytes[] memory empty;
+        vm.prank(attacker);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrder(1, empty);
+
+        (, uint256 sizeDelta,,,,,,) = router.orders(1);
+        assertGt(sizeDelta, 0, "order must survive stale-oracle griefing attempt");
+    }
+
+}
+
+// Regression: C-05
+contract VpiImrBypassTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function setUp() public {
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 1e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    // Regression: C-05
+    function test_VpiRebateSatisfiesIMR_ZeroRiskPosition() public {
+        _fundJunior(bob, 1_000_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 0, "Alice starts with zero USDC");
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        assertEq(size, 0, "Position must not open with zero user capital");
+    }
+
+}
+
+// Regression: H-01
+contract KeeperFeeRefundTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address keeper = address(0x999);
+
+    receive() external payable {}
+
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function setUp() public {
+        vm.warp(1_709_532_000);
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        router.proposeMaxOrderAge(300);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+        router.finalizeMaxOrderAge();
+    }
+
+    // Regression: H-01
+    function test_ExpiredOrderFeeRefundedToUser() public {
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(1, empty);
+
+        assertGt(router.claimableEth(alice), 0, "User must be refunded expired order fee");
+        assertEq(router.claimableEth(keeper), 0, "Keeper must not profit from user's expired order");
+    }
+
+    // Regression: H-01
+    function test_SlippageFailFeeRefundedToUser() public {
+        usdc.mint(bob, 1_000_000e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1_000_000e6);
+        juniorVault.deposit(1_000_000e6, bob);
+        vm.stopPrank();
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        usdc.mint(alice, 50_000e6);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
+        vm.stopPrank();
+
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.prank(keeper);
+        router.executeOrder(1, priceData);
+
+        assertGt(router.claimableEth(alice), 0, "User must be refunded on slippage failure");
+        assertEq(router.claimableEth(keeper), 0, "Keeper must not profit from slippage failure");
+    }
+
+    // Regression: H-01
+    function test_BatchExpiredFeeRefundedToUser() public {
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        router.executeOrderBatch(1, empty);
+
+        assertGt(router.claimableEth(alice), 0, "User must be refunded expired order fee in batch");
+    }
+
+}
+
+// Regression: H-02
+contract WeekendArbitrageTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+    MockPyth mockPyth;
+
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    uint256 constant CAP_PRICE = 2e8;
+
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address keeper = address(0x999);
+
+    receive() external payable {}
+
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function setUp() public {
+        vm.warp(1_709_100_000);
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+    }
+
+    // Regression: H-02
+    function test_CloseOrderExecutesAtStaleFridayPrice() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        router.updateMarkPrice(updateData);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 0, false);
+        vm.warp(block.timestamp + 1);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+        router.executeOrder(1, updateData);
+
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        assertGt(size, 0, "Position should be open");
+
+        uint256 ts = block.timestamp;
+        uint256 dayOfWeek = ((ts / 86_400) + 4) % 7;
+        uint256 daysToSaturday = (6 + 7 - dayOfWeek) % 7;
+        if (daysToSaturday == 0) {
+            daysToSaturday = 7;
+        }
+        uint256 saturdayNoon = ts + (daysToSaturday * 86_400) - (ts % 86_400) + 12 hours;
+        vm.warp(saturdayNoon);
+
+        uint256 fridayPublishTime = saturdayNoon - 18 hours;
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), fridayPublishTime);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
+
+        vm.expectRevert();
+        router.executeOrder(2, updateData);
     }
 
 }

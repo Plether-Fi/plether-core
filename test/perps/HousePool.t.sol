@@ -1,130 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
-import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Test} from "forge-std/Test.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 
-contract MockUSDC is ERC20 {
+contract HousePoolTest is BasePerpTest {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract HousePoolTest is Test {
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault seniorVault;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
 
-    receive() external payable {}
-
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
-            vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
-            maintMarginBps: 100,
-            fadMarginBps: 300,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
-        });
-
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
-        pool.setSeniorVault(address(seniorVault));
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(144 hours + 4);
-        clearinghouse.finalizeOperator();
-
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
-    function _fundSenior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(seniorVault), amount);
-        seniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     // ==========================================
@@ -469,11 +362,7 @@ contract HousePoolTest is Test {
         _fundJunior(bob, 500_000 * 1e6);
 
         address trader = address(0x444);
-        usdc.mint(trader, 50_000 * 1e6);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), 50_000 * 1e6);
-        clearinghouse.deposit(bytes32(uint256(uint160(trader))), address(usdc), 50_000 * 1e6);
-        vm.stopPrank();
+        _fundTrader(trader, 50_000 * 1e6);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
@@ -754,6 +643,366 @@ contract HousePoolTest is Test {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 reserved = fees + uint256(unrealizedFunding);
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
+    }
+
+}
+
+contract HousePoolAuditTest is BasePerpTest {
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    // Regression: Finding-2 — stale totalAssets on deposit
+    function test_StaleSharePriceOnDeposit() public {
+        _fundSenior(alice, 100_000 * 1e6);
+        _fundJunior(bob, 100_000 * 1e6);
+
+        usdc.mint(address(pool), 20_000 * 1e6);
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 carolDeposit = 100_000 * 1e6;
+        _fundSenior(carol, carolDeposit);
+
+        uint256 carolShares = seniorVault.balanceOf(carol);
+        uint256 carolShareValue = seniorVault.convertToAssets(carolShares);
+
+        assertLe(carolShareValue, carolDeposit, "Carol should not profit from pre-existing yield");
+    }
+
+    // Regression: H-01 — MtM: trader profit reduces junior principal
+    function test_MtM_TraderProfitReducesJuniorPrincipal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1.2e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
+        router.executeOrder(2, priceData);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertLt(juniorAfter, juniorBefore, "MtM: junior principal must decrease when traders are winning");
+        assertGt(engine.getUnrealizedTraderPnl(), 0, "Traders should have positive unrealized PnL");
+    }
+
+    // Regression: H-01 + C-03 — unrealized trader losses must not inflate junior principal
+    function test_MtM_TraderLossDoesNotInflateJuniorPrincipal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.8e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.8e8, false);
+        router.executeOrder(2, priceData);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertLe(juniorAfter, juniorBefore, "C-03 fix: unrealized trader losses must not inflate junior principal");
+        assertLt(engine.getUnrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
+    }
+
+    // Regression: H-01 — MtM zeroes after all positions closed
+    function test_MtM_ZeroAfterAllPositionsClosed() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0);
+
+        assertEq(engine.globalBullEntryNotional(), 0, "Bull entry notional should be zero");
+        assertEq(engine.globalBearEntryNotional(), 0, "Bear entry notional should be zero");
+        assertEq(engine.getUnrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
+    }
+
+    // Regression: M-01 — stale mark does not block withdrawal
+    function test_StaleMarkDoesNotBlockWithdrawal() public {
+        _fundJunior(bob, 500_000e6);
+        _fundJunior(carol, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+        vm.warp(block.timestamp + 2 hours);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.warp(block.timestamp + 121);
+
+        uint256 bobBalBefore = usdc.balanceOf(bob);
+        vm.startPrank(bob);
+        juniorVault.withdraw(1e6, bob, bob);
+        vm.stopPrank();
+        assertEq(usdc.balanceOf(bob) - bobBalBefore, 1e6, "Withdrawal succeeds with stale mark");
+    }
+
+    // Regression: C-02 — funding spread not permanently locked after positions close
+    function test_FundingSpreadLockedAfterAllPositionsClose() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 90 days);
+
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, closePrice);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
+        router.executeOrder(4, closePrice);
+
+        assertEq(engine.bullOI(), 0, "All bull positions closed");
+        assertEq(engine.bearOI(), 0, "All bear positions closed");
+
+        assertEq(
+            engine.getUnrealizedFundingPnl(), 0, "No positions => zero unrealized funding; spread is distributable"
+        );
+    }
+
+    // Regression: C-02 — funding spread reduces distributable revenue
+    function test_FundingSpreadReducesDistributableRevenue() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 90 days);
+
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, closePrice);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
+        router.executeOrder(4, closePrice);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 poolBalance = usdc.balanceOf(address(pool));
+        uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
+        uint256 pendingFees = engine.accumulatedFeesUsdc();
+
+        assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
+    }
+
+    // Regression: C-02 — negative funding must not inflate junior principal
+    function test_NegativeFundingDoesNotInflateJuniorPrincipal() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(alice, 100_000e6);
+        _fundTrader(carol, 100_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(block.timestamp + 90 days);
+
+        bytes[] memory price = new bytes[](1);
+        price[0] = abi.encode(uint256(1e8));
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.executeOrder(3, price);
+
+        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        assertLe(juniorAfter, juniorBefore, "conservative: junior must not increase from unrealized funding debt");
+    }
+
+    // Regression: H-04 — fees withdrawable at high utilization
+    function test_FeesWithdrawableAtHighUtilization() public {
+        _fundJunior(bob, 500_200e6);
+        _fundTrader(alice, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+
+        uint64 id1 = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 250_000e18, 25_000e6, 1e8, false);
+        router.executeOrder(id1, priceData);
+
+        uint64 id2 = router.nextCommitId();
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 250_100e18, 25_000e6, 1e8, false);
+        router.executeOrder(id2, priceData);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertGt(fees, 0, "Fees should have accumulated");
+
+        uint256 maxLiability = engine.globalBullMaxProfit();
+        assertEq(maxLiability, 500_100e6, "Both positions should be open");
+
+        address feeRecipient = address(0xFEE);
+        engine.withdrawFees(feeRecipient);
+
+        assertEq(usdc.balanceOf(feeRecipient), fees, "Fee recipient should receive fees");
+    }
+
+    // Regression: C-03 — senior HWM preserved for restoration after wipeout
+    function test_SeniorHWMResetPreventsRestoration() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 0, 0, true);
+        bytes[] memory capPrice = new bytes[](1);
+        capPrice[0] = abi.encode(uint256(2e8));
+        router.executeOrder(2, capPrice);
+
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        assertEq(pool.seniorPrincipal(), 0, "Senior wiped");
+        assertGt(pool.seniorHighWaterMark(), 0, "HWM preserved for restoration");
+
+        usdc.mint(address(pool), 100_000e6);
+
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        uint256 aliceShares = seniorVault.balanceOf(alice);
+        assertGt(aliceShares, 0, "Alice still holds senior shares");
+        assertGt(pool.seniorPrincipal(), 0, "Senior should be restored after recovery");
+    }
+
+    // Regression: C-04 — flash deposit must not crush senior deficit
+    function test_FlashDepositCrushesDeficit() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 50_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
+        bytes[] memory capPrice = new bytes[](1);
+        capPrice[0] = abi.encode(uint256(2e8));
+        router.executeOrder(2, capPrice);
+
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        uint256 deficitBefore = pool.seniorHighWaterMark() - pool.seniorPrincipal();
+        assertGt(deficitBefore, 0, "Senior deficit exists");
+
+        address dave = address(0x444);
+        _fundSenior(dave, 10_000_000e6);
+
+        vm.warp(block.timestamp + 2 hours);
+        uint256 withdrawable = seniorVault.maxWithdraw(dave);
+        vm.prank(dave);
+        seniorVault.withdraw(withdrawable, dave, dave);
+
+        uint256 deficitAfter = pool.seniorHighWaterMark() - pool.seniorPrincipal();
+        assertGe(deficitAfter, deficitBefore / 2, "Deficit must not be slashable via flash deposit");
     }
 
 }
