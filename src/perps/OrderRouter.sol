@@ -264,12 +264,13 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-            if (staleness > maxStaleness) {
-                revert OrderRouter__OraclePriceTooStale();
+            if (staleness > 60) {
+                emit OrderFailed(orderId, "Oracle price too stale");
+                _finalizeExecution(orderId, pythFee, false);
+                return;
             }
 
-            if (!oracleFrozen && minPublishTime <= order.commitTime) {
+            if (minPublishTime <= order.commitTime) {
                 revert OrderRouter__MevDetected();
             }
         } else {

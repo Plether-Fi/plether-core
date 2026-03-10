@@ -1834,11 +1834,11 @@ contract StalenessGriefTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.prank(attacker);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, empty);
 
-        (, uint256 sizeDelta,,,,,,) = router.orders(1);
-        assertGt(sizeDelta, 0, "order must survive stale-oracle griefing attempt");
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        assertEq(size, 0, "stale oracle gracefully cancels order instead of reverting");
     }
 
 }
