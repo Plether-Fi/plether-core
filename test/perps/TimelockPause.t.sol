@@ -57,7 +57,7 @@ contract TimelockPauseTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         vm.warp(48 hours + 1);

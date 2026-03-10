@@ -49,7 +49,7 @@ contract AuditC01C02C03Test is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC");

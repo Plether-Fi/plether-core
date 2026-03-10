@@ -64,11 +64,11 @@ contract MarginClearinghouseTest is Test {
     bytes32 aliceId;
 
     function setUp() public {
-        clearinghouse = new MarginClearinghouse();
-        aliceId = bytes32(uint256(uint160(alice)));
-
         usdc = new MockToken("USDC", "USDC", 6);
         splDxy = new MockToken("Staked DXY", "splDXY", 18);
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        aliceId = bytes32(uint256(uint160(alice)));
 
         // Oracle returns $1.00 in 8 decimals
         splDxyOracle = new MockOracle(1e8);

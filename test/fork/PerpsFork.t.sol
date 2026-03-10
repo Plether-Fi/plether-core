@@ -105,7 +105,7 @@ contract PerpsForkTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(USDC);
 
         engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(USDC, address(engine));

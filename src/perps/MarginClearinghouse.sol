@@ -40,6 +40,8 @@ contract MarginClearinghouse is Ownable2Step {
 
     mapping(address => bool) public isProtocolOperator;
 
+    address public immutable settlementAsset;
+
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 
     address public pendingOperatorAddress;
@@ -80,7 +82,11 @@ contract MarginClearinghouse is Ownable2Step {
         _;
     }
 
-    constructor() Ownable(msg.sender) {}
+    constructor(
+        address _settlementAsset
+    ) Ownable(msg.sender) {
+        settlementAsset = _settlementAsset;
+    }
 
     // ==========================================
     // CONFIGURATION
@@ -281,13 +287,17 @@ contract MarginClearinghouse is Ownable2Step {
     // PROTOCOL INTEGRATION (OrderRouter / Engine)
     // ==========================================
 
-    /// @notice Locks margin to back a new CFD trade
+    /// @notice Locks margin to back a new CFD trade.
+    ///         Requires sufficient USDC to back settlement (non-USDC equity alone is insufficient).
     function lockMargin(
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
+        }
+        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + amountUsdc) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         lockedMarginUsdc[accountId] += amountUsdc;
         emit MarginLocked(accountId, amountUsdc);

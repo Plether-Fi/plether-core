@@ -100,7 +100,7 @@ contract AuditFindingsTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -863,7 +863,7 @@ contract C02VpiDepthTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1060,7 +1060,7 @@ contract MarginCappedMtmTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1317,7 +1317,7 @@ contract H03StaleOrderExpiryTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1583,7 +1583,7 @@ contract MarkPriceStalenessTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1673,7 +1673,7 @@ contract PhantomExecFeeTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1798,7 +1798,7 @@ contract NegativeFundingFreeUsdcTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1943,7 +1943,7 @@ contract H02StalenessGriefTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));

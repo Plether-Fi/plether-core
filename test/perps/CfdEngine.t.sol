@@ -48,7 +48,7 @@ contract CfdEngineTest is Test {
             bountyBps: 15
         });
 
-        clearinghouse = new MarginClearinghouse();
+        clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
