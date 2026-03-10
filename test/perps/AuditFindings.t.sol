@@ -1,32 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
+import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
-
-contract MockUSDC is ERC20 {
-
-    constructor() ERC20("Mock USDC", "USDC") {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
 
 contract MockFeeOnTransferToken is ERC20 {
 
@@ -65,31 +54,14 @@ contract MockFeeOnTransferToken is ERC20 {
 
 }
 
-contract AuditFindingsTest is Test {
+contract AuditFindingsTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault seniorVault;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
 
-    receive() external payable {}
-
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -100,75 +72,10 @@ contract AuditFindingsTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
-
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
-        pool.setSeniorVault(address(seniorVault));
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
     }
 
-    function _fundSenior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(seniorVault), amount);
-        seniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     // ==========================================
@@ -191,8 +98,6 @@ contract AuditFindingsTest is Test {
         uint256 carolShares = seniorVault.balanceOf(carol);
         uint256 carolShareValue = seniorVault.convertToAssets(carolShares);
 
-        // CORRECT BEHAVIOR: Carol deposited 100k, her shares should be worth 100k.
-        // She arrived after yield accrued, so she gets no yield.
         assertLe(carolShareValue, carolDeposit, "Carol should not profit from pre-existing yield");
     }
 
@@ -225,8 +130,6 @@ contract AuditFindingsTest is Test {
 
         (uint256 sizeAfterSecond,,,,,,,) = engine.positions(accountId);
 
-        // CORRECT BEHAVIOR: The order was cancelled because funding > margin.
-        // Position size should be unchanged (no new size added, no bad debt created).
         assertEq(sizeAfterSecond, sizeAfterOpen, "Order on underwater position should be cancelled");
     }
 
@@ -285,11 +188,9 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Close with targetPrice = $0.90 (BULL wants oracle <= target)
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0.9e8, true);
 
-        // Execute at $1.50 — oracle went UP, bad for BULL ($1.50 > $0.90)
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(uint256(1.5e8));
         router.executeOrder(2, pythData);
@@ -317,7 +218,6 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty;
 
-        // CORRECT BEHAVIOR: Should revert on mainnet with mock oracle, same as executeLiquidation.
         vm.expectRevert(OrderRouter.OrderRouter__MockModeDisabled.selector);
         router.executeOrder(1, empty);
     }
@@ -386,7 +286,7 @@ contract AuditFindingsTest is Test {
     function test_Finding7_FeeOnTransferAccounting() public {
         MockFeeOnTransferToken fot = new MockFeeOnTransferToken(100); // 1% fee
         clearinghouse.proposeAssetConfig(address(fot), 18, 10_000, address(0));
-        _warpPastTimelock();
+        _warpForward(48 hours + 1);
         clearinghouse.finalizeAssetConfig();
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -401,7 +301,6 @@ contract AuditFindingsTest is Test {
         uint256 recordedBalance = clearinghouse.balances(accountId, address(fot));
         uint256 actualBalance = fot.balanceOf(address(clearinghouse));
 
-        // CORRECT BEHAVIOR: Recorded balance should equal actual tokens held.
         assertEq(recordedBalance, actualBalance, "Recorded balance should match actual tokens received");
     }
 
@@ -419,7 +318,6 @@ contract AuditFindingsTest is Test {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        // Alice opens BEAR 200K @ $1.00
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty;
@@ -427,7 +325,6 @@ contract AuditFindingsTest is Test {
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        // Carol opens BULL at $1.20 to update lastMarkPrice — BEAR profits
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1.2e8));
         vm.prank(carol);
@@ -448,7 +345,6 @@ contract AuditFindingsTest is Test {
         _fundTrader(alice, 50_000e6);
         _fundTrader(carol, 50_000e6);
 
-        // Alice opens BEAR 200K @ $1.00
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty;
@@ -456,7 +352,6 @@ contract AuditFindingsTest is Test {
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        // Carol opens BULL at $0.80 to update lastMarkPrice — BEAR loses
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(0.8e8));
         vm.prank(carol);
@@ -478,7 +373,6 @@ contract AuditFindingsTest is Test {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        // Open and close a position
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8, false);
         bytes[] memory empty;
@@ -529,10 +423,8 @@ contract AuditFindingsTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Time passes beyond staleness limit — mark becomes stale
         vm.warp(block.timestamp + 121);
 
-        // Bob withdraws — reconcile skips MTM distribution but does not revert
         uint256 bobBalBefore = usdc.balanceOf(bob);
         vm.startPrank(bob);
         juniorVault.withdraw(1e6, bob, bob);
@@ -542,14 +434,6 @@ contract AuditFindingsTest is Test {
 
     // ==========================================
     // C-02 (new): Vault Funding Spread permanently locked as ghost liability
-    // When the majority side pays funding, the vault receives more cash than it
-    // pays to minority receivers. The surplus (spread) is the vault's revenue.
-    // However, netUnsettledFunding tracks cumulative cash flows, not current
-    // liabilities. After all positions close, the spread makes netUnsettledFunding
-    // permanently negative. Both _getEffectiveAssets() and _reconcile() reserve
-    // this amount as if someone will claim it — but nobody will.
-    // EXPECTED: After all positions close, netUnsettledFunding = 0 and spread is distributable.
-    // BUG: Spread trapped as ghost liability, permanently reducing LP distributable revenue.
     // ==========================================
 
     function test_C02_FundingSpreadLockedAfterAllPositionsClose() public {
@@ -557,7 +441,6 @@ contract AuditFindingsTest is Test {
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
 
-        // Bear-heavy market: 300K bear (majority payer) vs 100K bull (minority receiver)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
         bytes[] memory empty;
@@ -567,11 +450,8 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        // 90 days of funding accrues. Bears pay more than bulls receive.
         vm.warp(block.timestamp + 90 days);
 
-        // Close both: all funding physically settled.
-        // Must pass explicit price so _updateFunding sees non-zero skew.
         bytes[] memory closePrice = new bytes[](1);
         closePrice[0] = abi.encode(uint256(1e8));
 
@@ -586,8 +466,6 @@ contract AuditFindingsTest is Test {
         assertEq(engine.bullOI(), 0, "All bull positions closed");
         assertEq(engine.bearOI(), 0, "All bear positions closed");
 
-        // With no open positions, unrealized funding PnL must be zero.
-        // The funding spread is now distributable revenue in the pool.
         assertEq(
             engine.getUnrealizedFundingPnl(), 0, "No positions => zero unrealized funding; spread is distributable"
         );
@@ -620,7 +498,6 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
         router.executeOrder(4, closePrice);
 
-        // Trigger reconcile to distribute revenue
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -628,22 +505,11 @@ contract AuditFindingsTest is Test {
         uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
 
-        // With no positions and no MtM, all pool cash should be accounted for
-        // by LP principals + pending protocol fees.
-        // BUG: The funding spread sits in the pool as cash but is reserved
-        //       as a ghost liability via netUnsettledFunding, so it's never
-        //       distributed to LPs or claimable as fees.
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
 
     // ==========================================
     // C-02 (new): _reconcile ignores negative unrealizedFunding
-    // When a funding receiver closes before payers, vault cash drops by the
-    // payout, but the payers' debt (negative unrealizedFunding) is a vault asset
-    // that _reconcile fails to account for. This deflates cashMinusReserved,
-    // triggering spurious _absorbLoss on the junior tranche.
-    // EXPECTED: Junior principal unaffected (pool is owed more than it paid).
-    // BUG: Junior is slashed by the funding payout amount.
     // ==========================================
 
     function test_C02_NegativeFundingCausesSpuriousJuniorLoss() public {
@@ -651,7 +517,6 @@ contract AuditFindingsTest is Test {
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
 
-        // Bear-heavy market: bears pay funding, bulls receive
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8, false);
         bytes[] memory empty;
@@ -661,23 +526,17 @@ contract AuditFindingsTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        // 90 days of funding accrues — bears owe, bulls receive
         vm.warp(block.timestamp + 90 days);
 
-        // Close minority (bull/receiver) — vault physically pays out funding
         bytes[] memory price = new bytes[](1);
         price[0] = abi.encode(uint256(1e8));
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         router.executeOrder(3, price);
 
-        // Bears still owe funding → unrealizedFunding < 0 (vault asset)
         int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
         assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
 
-        // With the C-02/C-03 clamping fix, the vault conservatively ignores unrealized
-        // funding debts as MtM assets. When bulls are physically paid but bears haven't
-        // settled yet, junior temporarily drops until bears realize their debt.
         uint256 juniorBefore = pool.juniorPrincipal();
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -696,7 +555,6 @@ contract AuditFindingsTest is Test {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        // Open BEAR 200K @ $1.00 with 20K margin
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
         bytes[] memory empty;
@@ -705,9 +563,6 @@ contract AuditFindingsTest is Test {
         (uint256 openSize,,,,,,,) = engine.positions(accountId);
         assertEq(openSize, 200_000 * 1e18);
 
-        // Partial close half at $0.80 — BEAR loses ~$20K on closed portion.
-        // Alice's free USDC (~$2K) is far less than the loss, so the seize
-        // must stop at the free boundary to protect the remaining position's margin.
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
         bytes[] memory priceData = new bytes[](1);
@@ -721,7 +576,6 @@ contract AuditFindingsTest is Test {
         uint256 lockedAfter = clearinghouse.lockedMarginUsdc(accountId);
         assertGe(balAfter, lockedAfter, "Physical balance must cover locked margin (zombie prevention)");
 
-        // Liquidation of the underwater remaining position must succeed
         router.executeLiquidation(accountId, priceData);
 
         (uint256 sizeAfterLiq,,,,,,,) = engine.positions(accountId);
@@ -737,7 +591,7 @@ contract AuditFindingsTest is Test {
 
     function test_H02_StaleOrderExecutesViaExecuteOrder() public {
         router.proposeMaxOrderAge(300);
-        _warpPastTimelock();
+        _warpForward(48 hours + 1);
         router.finalizeMaxOrderAge();
 
         _fundJunior(bob, 1_000_000e6);
@@ -768,7 +622,7 @@ contract AuditFindingsTest is Test {
 
     function test_H03_ZeroFeeCommitShouldRevert() public {
         router.proposeMinKeeperFee(0.001 ether);
-        _warpPastTimelock();
+        _warpForward(48 hours + 1);
         router.finalizeMinKeeperFee();
         _fundTrader(alice, 10_000e6);
 
@@ -779,8 +633,7 @@ contract AuditFindingsTest is Test {
 
     // ==========================================
     // H-04: Verify fees are excluded from effective assets so withdrawFees
-    // succeeds even at high utilization. Pre-fix, fees counted as collateral
-    // and withdrawFees reverted with PostOpSolvencyBreach.
+    // succeeds even at high utilization.
     // ==========================================
 
     function test_H04_FeesWithdrawableAtHighUtilization() public {
@@ -815,8 +668,6 @@ contract AuditFindingsTest is Test {
 
     // ==========================================
     // M-01: finalizeRiskParams retroactive funding
-    // _updateFunding is not called before applying new params, so the
-    // entire dormant period is retroactively charged at the new rate.
     // ==========================================
 
     function test_M01_FinalizeRiskParamsRetroactiveFunding() public {
@@ -864,9 +715,6 @@ contract AuditFindingsTest is Test {
         int256 indexAfterSettle = engine.bullFundingIndex();
         int256 indexDrop = indexAfterOpen - indexAfterSettle;
 
-        // With the fix, ~32 days settle at old rate and ~1 day at new rate (~1.6x old).
-        // Without the fix, all 33 days charge at new 20x rate (~20x old).
-        // Threshold at 2x old rate cleanly separates: fixed (1.6x) < 2x < unfixed (20x).
         uint256 totalElapsed = T_ORDER2 - T0;
         uint256 oldAnnRate = 0.06e18;
         int256 maxDrop = int256((oldAnnRate * totalElapsed * 2) / 365 days);
@@ -1014,28 +862,14 @@ contract AuditFindingsTest is Test {
 // C-02 tests require non-zero vpiFactor (separate deployment)
 // ==========================================
 
-contract C02VpiDepthTest is Test {
+contract C02VpiDepthTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
 
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0.01e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1046,81 +880,25 @@ contract C02VpiDepthTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
-
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
     }
 
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     // ==========================================
     // C-02a: Minority position reverse attack
-    // Attacker opens minority position (receives VPI rebate) at low depth,
-    // depth inflates, then closes (tiny charge at high depth).
-    // Without fix: attacker extracts net VPI rebate.
-    // With fix: stateful bound caps close VPI so net VPI >= 0.
     // ==========================================
 
     function test_C02a_MinorityVpiRebateCannotExceedPaidCharges() public {
         _fundJunior(bob, 1_000_000 * 1e6);
 
-        // Carol opens large BEAR to create skew
         _fundTrader(carol, 50_000 * 1e6);
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 40_000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Alice opens minority BULL (heals skew) at current depth → receives VPI rebate
         _fundTrader(alice, 50_000 * 1e6);
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
         uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
@@ -1129,10 +907,8 @@ contract C02VpiDepthTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        // Inflate depth by 10x via LP deposit
         _fundJunior(bob, 9_000_000 * 1e6);
 
-        // Alice closes at inflated depth — VPI charge should be bounded
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
         bytes[] memory closePrice = new bytes[](1);
@@ -1141,18 +917,11 @@ contract C02VpiDepthTest is Test {
 
         uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
 
-        // PnL is zero (same price). Exec fees are a pure cost.
-        // With the bound, net VPI >= 0, so Alice must have lost money overall.
         assertLe(aliceBalAfter, aliceBalBefore, "Minority VPI depth attack must not be profitable");
     }
 
     // ==========================================
     // C-02b: Size addition bypass
-    // Attacker opens dust at low depth (entryDepth = low), inflates depth,
-    // adds massive size (tiny charge at high depth), deflates depth, closes
-    // (massive rebate at low depth).
-    // Without fix: entryDepth was set only on first open, bypass via size addition.
-    // With fix: vpiAccrued tracks all charges, close rebate bounded by total paid.
     // ==========================================
 
     function test_C02b_SizeAdditionCannotBypassVpiBound() public {
@@ -1162,23 +931,18 @@ contract C02VpiDepthTest is Test {
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
         uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
 
-        // Open dust BULL at current (low) depth
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Inflate depth by 10x
         _fundJunior(bob, 9_000_000 * 1e6);
 
-        // Add massive size at high depth (tiny VPI charge)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        // Deflate depth: withdraw most LP capital
         vm.warp(block.timestamp + 2 hours);
-        // Push fresh mark so reconcile doesn't revert on staleness
         bytes[] memory freshPrice = new bytes[](1);
         freshPrice[0] = abi.encode(uint256(1e8));
         router.updateMarkPrice(freshPrice);
@@ -1189,7 +953,6 @@ contract C02VpiDepthTest is Test {
         }
         vm.stopPrank();
 
-        // Close all at deflated depth
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 110_000 * 1e18, 0, 0, true);
         bytes[] memory closePrice = new bytes[](1);
@@ -1198,7 +961,6 @@ contract C02VpiDepthTest is Test {
 
         uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
 
-        // Same price → PnL = 0. With the bound, Alice cannot profit from VPI.
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
     }
 
@@ -1208,31 +970,14 @@ contract C02VpiDepthTest is Test {
 // Margin-Capped MtM: per-side margin cap prevents phantom profits
 // ==========================================
 
-contract MarginCappedMtmTest is Test {
+contract MarginCappedMtmTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault seniorVault;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
 
-    receive() external payable {}
-
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1243,63 +988,10 @@ contract MarginCappedMtmTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
-
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
-        pool.setSeniorVault(address(seniorVault));
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
     }
 
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     function test_MarginTracking_IncreasesOnOpen() public {
@@ -1385,7 +1077,6 @@ contract MarginCappedMtmTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Price drops to $0.50 — BEAR loses $100k notionally but only has $10k margin
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(0.5e8));
         _fundTrader(carol, 50_000e6);
@@ -1396,9 +1087,7 @@ contract MarginCappedMtmTest is Test {
         int256 uncappedPnl = engine.getUnrealizedTraderPnl();
         int256 cappedMtm = engine.getVaultMtmAdjustment();
 
-        // Uncapped shows a huge vault gain (traders losing more than margin)
         assertLt(uncappedPnl, -int256(engine.totalBearMargin()), "Uncapped loss exceeds deposited margin");
-        // Capped MtM bounds it at physical margin
         assertGe(cappedMtm, -int256(engine.totalBearMargin() + engine.totalBullMargin()), "Capped MtM bounded");
         assertGt(cappedMtm, uncappedPnl, "Capped MtM is less aggressive than uncapped");
     }
@@ -1414,7 +1103,6 @@ contract MarginCappedMtmTest is Test {
 
         uint256 juniorBefore = pool.juniorPrincipal();
 
-        // Price drops to $0.50 — massive notional loss for BEAR, capped at margin
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(0.5e8));
         _fundTrader(carol, 50_000e6);
@@ -1427,7 +1115,6 @@ contract MarginCappedMtmTest is Test {
         uint256 juniorAfter = pool.juniorPrincipal();
 
         uint256 revenue = juniorAfter > juniorBefore ? juniorAfter - juniorBefore : 0;
-        // Revenue recognized must not exceed total deposited margin
         assertLe(
             revenue,
             engine.totalBearMargin() + engine.totalBullMargin(),
@@ -1444,7 +1131,6 @@ contract MarginCappedMtmTest is Test {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Price rises to $1.20 — BEAR profits (vault liability)
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1.2e8));
         _fundTrader(carol, 50_000e6);
@@ -1467,29 +1153,14 @@ contract MarginCappedMtmTest is Test {
 // H-03: Stale order auto-expiry prevents zero-fee queue spam
 // ==========================================
 
-contract H03StaleOrderExpiryTest is Test {
+contract H03StaleOrderExpiryTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
     address spammer = address(0x666);
 
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        vm.warp(1_709_532_000);
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1500,83 +1171,34 @@ contract H03StaleOrderExpiryTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
+    function setUp() public override {
+        super.setUp();
         router.proposeMaxOrderAge(300);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+        _warpForward(48 hours + 1);
         router.finalizeMaxOrderAge();
-    }
-
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
     }
 
     function test_H03_StaleSpamOrdersAutoSkipped() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
-        // Spammer commits 5 zero-fee garbage orders (no margin, will fail at engine)
         for (uint256 i = 0; i < 5; i++) {
             vm.prank(spammer);
             router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         }
-        // Alice commits a real order (orderId = 6)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         assertEq(router.nextExecuteId(), 1);
 
-        // Time passes beyond maxOrderAge
         vm.warp(block.timestamp + 301);
 
-        // Keeper executes Alice's order (id=6) — stale spam orders 1-5 auto-skipped
         bytes[] memory empty;
         router.executeOrder(6, empty);
 
@@ -1590,7 +1212,6 @@ contract H03StaleOrderExpiryTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
-        // Execute immediately (within maxOrderAge) — no skip, normal FIFO
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
@@ -1623,19 +1244,16 @@ contract H03StaleOrderExpiryTest is Test {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
-        // 3 spam orders
         for (uint256 i = 0; i < 3; i++) {
             vm.prank(spammer);
             router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         }
 
-        // Alice's real order (id=4)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
-        // Batch execute up to order 4
         bytes[] memory empty;
         router.executeOrderBatch(4, empty);
 
@@ -1648,7 +1266,7 @@ contract H03StaleOrderExpiryTest is Test {
         router.proposeMaxOrderAge(600);
 
         router.proposeMaxOrderAge(600);
-        _warpPastTimelock();
+        _warpForward(48 hours + 1);
         router.finalizeMaxOrderAge();
         assertEq(router.maxOrderAge(), 600);
     }
@@ -1677,74 +1295,19 @@ contract H03StaleOrderExpiryTest is Test {
 
 }
 
-contract MockPyth {
+contract MarkPriceStalenessTest is BasePerpTest {
 
-    struct MockPrice {
-        int64 price;
-        int32 expo;
-        uint256 publishTime;
-    }
-
-    mapping(bytes32 => MockPrice) public prices;
-
-    function setAllPrices(
-        bytes32[] memory feedIds,
-        int64 _price,
-        int32 _expo,
-        uint256 _publishTime
-    ) external {
-        for (uint256 i = 0; i < feedIds.length; i++) {
-            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
-        }
-    }
-
-    function getPriceUnsafe(
-        bytes32 id
-    ) external view returns (PythStructs.Price memory) {
-        MockPrice memory p = prices[id];
-        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
-    }
-
-    function getUpdateFee(
-        bytes[] calldata
-    ) external pure returns (uint256) {
-        return 0;
-    }
-
-    function updatePriceFeeds(
-        bytes[] calldata
-    ) external payable {}
-
-}
-
-contract MarkPriceStalenessTest is Test {
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    OrderRouter router;
-    MarginClearinghouse clearinghouse;
     MockPyth mockPyth;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
-    uint256 constant CAP_PRICE = 2e8;
 
     bytes32[] feedIds;
     uint256[] weights;
     uint256[] bases;
 
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        vm.warp(10_000);
-        usdc = new MockUSDC();
-        mockPyth = new MockPyth();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1755,15 +1318,25 @@ contract MarkPriceStalenessTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         pool = new HousePool(address(usdc), address(engine));
+
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
+        pool.setSeniorVault(address(seniorVault));
         engine.setVault(address(pool));
 
+        mockPyth = new MockPyth();
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
         weights.push(0.5e18);
@@ -1777,16 +1350,20 @@ contract MarkPriceStalenessTest is Test {
         pool.setOrderRouter(address(router));
 
         clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        _warpPastTimelock();
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
         clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
+        vm.warp(96 hours + 3);
         clearinghouse.finalizeOperator();
 
         clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
+        vm.warp(144 hours + 4);
         clearinghouse.finalizeOperator();
+
+        vm.warp(SETUP_TIMESTAMP);
     }
 
     function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
@@ -1811,30 +1388,13 @@ contract MarkPriceStalenessTest is Test {
 
 }
 
-contract PhantomExecFeeTest is Test {
+contract PhantomExecFeeTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
 
-    receive() external payable {}
-
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        vm.warp(1000);
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1845,39 +1405,10 @@ contract PhantomExecFeeTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     function test_PhantomExecFee_InflatesAccumulatedFees() public {
@@ -1917,49 +1448,18 @@ contract PhantomExecFeeTest is Test {
         uint256 totalFees = engine.accumulatedFeesUsdc();
         uint256 closeFee = totalFees - openFee;
 
-        // Close notional: 50_000e18 * 1.5e8 / 1e20 = 75_000e6
-        // Close exec fee: 75_000e6 * 6/10000 = 45e6
-        // Realized loss: 25_000e6 (BULL, price rose from 1e8 to 1.5e8)
-        // netSettlement: -25_000e6 - 45e6 = -25_045e6
-        // Available in clearinghouse: ~970e6
-        // Shortfall: ~24_075e6 >> 45e6 exec fee
-        //
-        // The trader couldn't pay the full settlement. The 45e6 exec fee
-        // was never collected, yet accumulatedFeesUsdc records it in full.
         assertEq(closeFee, 0, "close exec fee should be 0 when shortfall exceeds fee");
     }
 
 }
 
-contract NegativeFundingFreeUsdcTest is Test {
+contract NegativeFundingFreeUsdcTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
 
-    receive() external payable {}
-
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function _warpForward(
-        uint256 delta
-    ) internal {
-        vm.warp(block.timestamp + delta);
-    }
-
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -1970,39 +1470,10 @@ contract NegativeFundingFreeUsdcTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
     function test_GetFreeUSDC_IgnoresNegativeFunding() public {
@@ -2028,10 +1499,8 @@ contract NegativeFundingFreeUsdcTest is Test {
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(1, priceData);
 
-        // Warp forward so funding accrues on the skewed bull position
         _warpForward(30 days);
 
-        // Open a tiny position to trigger _updateFunding inside processOrder
         address carol = address(0x333);
         uint256 carolMargin = 10_000e6;
         usdc.mint(carol, carolMargin);
@@ -2050,15 +1519,12 @@ contract NegativeFundingFreeUsdcTest is Test {
 
         uint256 freeUsdcNow = pool.getFreeUSDC();
 
-        // Compute what getFreeUSDC returns without negative funding adjustment
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = engine.globalBullMaxProfit();
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 reservedWithoutFunding = maxLiability + pendingFees;
         uint256 freeWithoutFunding = bal > reservedWithoutFunding ? bal - reservedWithoutFunding : 0;
 
-        // getFreeUSDC uses asymmetric accounting for physical liquidity:
-        // negative funding (vault receivable) must NOT reduce reserves, since it's illiquid
         assertEq(
             freeUsdcNow, freeWithoutFunding, "getFreeUSDC must not reduce reserves by illiquid funding receivables"
         );
@@ -2068,24 +1534,14 @@ contract NegativeFundingFreeUsdcTest is Test {
 
 // ==========================================
 // H-02: executeOrder cancels on oracle staleness instead of reverting
-// An attacker calls executeOrder(orderId, []) without Pyth data.
-// The cached price is stale → _cancelOrder permanently deletes the
-// victim's order. Should revert to leave the order safely in the queue.
 // ==========================================
 
-contract H02StalenessGriefTest is Test {
+contract H02StalenessGriefTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
     MockPyth mockPyth;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
-    uint256 constant CAP_PRICE = 2e8;
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -2095,16 +1551,8 @@ contract H02StalenessGriefTest is Test {
     uint256[] weights;
     uint256[] bases;
 
-    function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
-    }
-
-    function setUp() public {
-        vm.warp(10_000);
-        usdc = new MockUSDC();
-        mockPyth = new MockPyth();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -2115,15 +1563,25 @@ contract H02StalenessGriefTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
         clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         pool = new HousePool(address(usdc), address(engine));
+
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         pool.setJuniorVault(address(juniorVault));
+        pool.setSeniorVault(address(seniorVault));
         engine.setVault(address(pool));
 
+        mockPyth = new MockPyth();
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
         weights.push(0.5e18);
@@ -2138,63 +1596,37 @@ contract H02StalenessGriefTest is Test {
 
         clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
-        _warpPastTimelock();
+        vm.warp(48 hours + 2);
         clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
+        vm.warp(96 hours + 3);
         clearinghouse.finalizeOperator();
 
         clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
+        vm.warp(144 hours + 4);
         clearinghouse.finalizeOperator();
-    }
 
-    function _fundJunior(
-        address lp,
-        uint256 amount
-    ) internal {
-        usdc.mint(lp, amount);
-        vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
-        juniorVault.deposit(amount, lp);
-        vm.stopPrank();
-    }
-
-    function _fundTrader(
-        address trader,
-        uint256 amount
-    ) internal {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        usdc.mint(trader, amount);
-        vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
-        vm.stopPrank();
+        vm.warp(SETUP_TIMESTAMP);
     }
 
     function test_H02_StaleOracleCancelsOrderInsteadOfReverting() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
-        // Fresh price for the commit
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
-        // Time passes — cached Pyth price becomes stale (>60s)
         vm.warp(block.timestamp + 120);
 
-        // Attacker calls executeOrder without updating Pyth — must revert,
-        // leaving the order safely in the queue for an honest keeper
         bytes[] memory empty;
         vm.prank(attacker);
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, empty);
 
-        // Order is still in the queue
         (, uint256 sizeDelta,,,,,,) = router.orders(1);
         assertGt(sizeDelta, 0, "order must survive stale-oracle griefing attempt");
     }

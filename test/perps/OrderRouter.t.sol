@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {PythStructs} from "../../src/interfaces/IPyth.sol";
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -9,99 +8,20 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {MockPyth} from "../mocks/MockPyth.sol";
+import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract MockUSDC is ERC20 {
+contract OrderRouterTest is BasePerpTest {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract MockPyth {
-
-    struct MockPrice {
-        int64 price;
-        int32 expo;
-        uint256 publishTime;
-    }
-
-    mapping(bytes32 => MockPrice) public prices;
-    uint256 public mockFee;
-
-    function setPrice(
-        bytes32 feedId,
-        int64 _price,
-        int32 _expo,
-        uint256 _publishTime
-    ) external {
-        prices[feedId] = MockPrice(_price, _expo, _publishTime);
-    }
-
-    function setAllPrices(
-        bytes32[] memory feedIds,
-        int64 _price,
-        int32 _expo,
-        uint256 _publishTime
-    ) external {
-        for (uint256 i = 0; i < feedIds.length; i++) {
-            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
-        }
-    }
-
-    function getPriceUnsafe(
-        bytes32 id
-    ) external view returns (PythStructs.Price memory) {
-        MockPrice memory p = prices[id];
-        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
-    }
-
-    function setFee(
-        uint256 _fee
-    ) external {
-        mockFee = _fee;
-    }
-
-    function getUpdateFee(
-        bytes[] calldata
-    ) external view returns (uint256) {
-        return mockFee;
-    }
-
-    function updatePriceFeeds(
-        bytes[] calldata
-    ) external payable {}
-
-}
-
-contract OrderRouterTest is Test {
-
-    receive() external payable {}
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    OrderRouter router;
-    MarginClearinghouse clearinghouse;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
 
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -112,51 +32,21 @@ contract OrderRouterTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        uint256 t = block.timestamp + 48 hours + 1;
-        vm.warp(t);
-        clearinghouse.finalizeAssetConfig();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
+    function setUp() public override {
+        super.setUp();
 
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        clearinghouse.proposeOperator(address(engine), true);
-        t += 48 hours + 1;
-        vm.warp(t);
-        clearinghouse.finalizeWithdrawGuard();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        t += 48 hours + 1;
-        vm.warp(t);
-        clearinghouse.finalizeOperator();
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        // Fund LP (Bob) with $1 Million
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
         usdc.approve(address(juniorVault), type(uint256).max);
         juniorVault.deposit(1_000_000 * 1e6, bob);
         vm.stopPrank();
 
-        // Fund Trader (Alice): deposit to clearinghouse
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
@@ -166,43 +56,34 @@ contract OrderRouterTest is Test {
     }
 
     function test_UnbrickableQueue_OnEngineRevert() public {
-        // Bob withdraws all Vault funds so Solvency check will fail
-        vm.warp(block.timestamp + 1 hours); // past deposit cooldown
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(bob);
         juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
 
-        // Alice commits a trade (no USDC escrowed, just the order)
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        // Keeper executes. Engine will REVERT inside the Try/Catch
         bytes[] memory emptyPayload;
         router.executeOrder(1, emptyPayload);
 
-        // Queue MUST advance even if Engine reverts
         assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
 
-        // Alice's clearinghouse balance is untouched (nothing was escrowed)
         assertEq(clearinghouse.balances(accountId, address(usdc)), 10_000 * 1e6, "Clearinghouse balance untouched");
     }
 
     function test_WithdrawalFirewall() public {
-        // Alice commits and executes a trade
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // 50k BULL at $1.00 with CAP=$2: maxProfit = 50k * $1.00 = $50k
         assertEq(engine.globalBullMaxProfit(), 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
 
-        // Pool started with $1M, received VPI+execFee from trade.
-        // execFee = 50k * 6bps = $30. freeUSDC = totalAssets - maxLiab - pendingFees
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = engine.accumulatedFeesUsdc();
         assertEq(fees, 30_000_000, "Exec fee = 6bps of $50k notional");
@@ -276,15 +157,12 @@ contract OrderRouterTest is Test {
     }
 
     function test_BatchExecution_MixedResults() public {
-        // Order 1: Valid BULL
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        // Order 2: BULL open with bad slippage (targetPrice $1.50, execution at $1.00 is too low)
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
 
-        // Order 3: Another valid BULL
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
@@ -324,28 +202,18 @@ contract OrderRouterTest is Test {
         router.executeOrderBatch{value: 0.1 ether}(2, empty);
         uint256 keeperAfter = address(this).balance;
 
-        // Keeper spent 0.1 ETH msg.value, received back 0.2 ETH (0.1 refund + 0.1 keeper fees), net +0.1
         assertEq(keeperAfter - keeperBefore, 0.1 ether, "Keeper net gain = sum of keeper fees");
     }
 
 }
 
-contract OrderRouterPythTest is Test {
+contract OrderRouterPythTest is BasePerpTest {
 
-    receive() external payable {}
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    OrderRouter router;
-    MarginClearinghouse clearinghouse;
     MockPyth mockPyth;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
 
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address bob = address(0x222);
 
@@ -353,11 +221,8 @@ contract OrderRouterPythTest is Test {
     uint256[] weights;
     uint256[] bases;
 
-    function setUp() public {
-        usdc = new MockUSDC();
-        mockPyth = new MockPyth();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -368,11 +233,19 @@ contract OrderRouterPythTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         pool = new HousePool(address(usdc), address(engine));
+
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
@@ -388,19 +261,7 @@ contract OrderRouterPythTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        clearinghouse.proposeOperator(address(engine), true);
-        uint256 t = block.timestamp + 48 hours + 1;
-        vm.warp(t);
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        t += 48 hours + 1;
-        vm.warp(t);
-        clearinghouse.finalizeOperator();
+        _bypassAllTimelocks();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
@@ -424,7 +285,6 @@ contract OrderRouterPythTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-        // publishTime 999 < commitTime 1000 → MEV detected
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
         vm.warp(1050);
 
@@ -438,7 +298,6 @@ contract OrderRouterPythTest is Test {
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 
-        // BEAR open slippage: exec <= target required. 1.05e8 > 1e8 → fails
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
@@ -503,7 +362,6 @@ contract OrderRouterPythTest is Test {
 
         vm.warp(1000);
 
-        // BULL open: wants HIGH entry. Target $0.90 → exec $1.00 >= $0.90 → succeeds
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
@@ -516,7 +374,6 @@ contract OrderRouterPythTest is Test {
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "BULL open at favorable price should succeed");
 
-        // BEAR open: wants LOW entry. Target $1.10 → exec $1.00 <= $1.10 → succeeds
         vm.warp(2000);
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
@@ -529,7 +386,6 @@ contract OrderRouterPythTest is Test {
         (size,,,,,,,) = engine.positions(trader2Id);
         assertGt(size, 0, "BEAR open at favorable price should succeed");
 
-        // BULL open: adverse. Target $1.10, exec $1.00 → $1.00 >= $1.10 false → rejected
         vm.warp(3000);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
@@ -541,7 +397,6 @@ contract OrderRouterPythTest is Test {
         (size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
 
-        // BEAR open: adverse. Target $0.90, exec $1.00 → $1.00 <= $0.90 false → rejected
         vm.warp(4000);
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
@@ -569,8 +424,6 @@ contract OrderRouterPythTest is Test {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertTrue(size > 0, "Position should exist");
 
-        // Close BEAR at targetPrice=1.5e8 but Pyth price=1e8
-        // BEAR slippage: 1e8 >= 1.5e8? No → order cancelled
         vm.warp(2000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2001);
 
@@ -588,13 +441,11 @@ contract OrderRouterPythTest is Test {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1005);
 
-        // Order 1: committed at t=1000, price published at t=1005 → valid (1005 > 1000)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1010);
 
-        // Order 2: committed at t=1010, price published at t=1005 → stale (1005 <= 1010)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
@@ -612,24 +463,20 @@ contract OrderRouterPythTest is Test {
 
     function test_C1_MevDetected_RevertsEntireTx() public {
         vm.warp(1000);
-        // Set oracle price published at t=999, BEFORE commit at t=1000 → MEV
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
-        // Alice commits with 0.1 ETH keeper fee
         vm.prank(alice);
         router.commitOrder{value: 0.1 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address keeper = address(0xBEEF);
         vm.deal(keeper, 1 ether);
 
-        // Keeper executes with no Pyth update - stale price triggers revert (not cancel)
         vm.warp(1050);
         bytes[] memory empty;
         vm.prank(keeper);
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        // Order stays in queue, fee stays in mapping
         assertEq(router.nextExecuteId(), 1, "Order preserved for honest keeper");
         assertEq(router.keeperFees(1), 0.1 ether, "Keeper fee preserved");
     }
@@ -650,7 +497,6 @@ contract OrderRouterPythTest is Test {
     function test_BasketMath_WeightedAverage() public {
         vm.warp(1000);
 
-        // FEED_A=$1.10, FEED_B=$0.90, 50/50 weights, $1.00 base → basket=$1.00
         mockPyth.setPrice(FEED_A, int64(110_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(90_000_000), int32(-8), 1001);
 
@@ -667,8 +513,6 @@ contract OrderRouterPythTest is Test {
     }
 
     function test_BasketMath_UnequalWeights() public {
-        // 70/30 weights: FEED_A=$1.20, FEED_B=$0.80, base $1.00
-        // basket = (1.20 * 0.70) / 1.00 + (0.80 * 0.30) / 1.00 = 0.84 + 0.24 = 1.08
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = FEED_A;
         ids[1] = FEED_B;
@@ -685,9 +529,6 @@ contract OrderRouterPythTest is Test {
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
 
         (uint256 price, uint256 minPt) = harness.computeBasketPrice();
-        // 120_000_000 * 0.7e18 / (1e8 * 1e10) = 84_000_000
-        // 80_000_000 * 0.3e18 / (1e8 * 1e10) = 24_000_000
-        // total = 108_000_000 = $1.08
         assertEq(price, 108_000_000, "70/30 basket should compute $1.08");
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
     }
@@ -695,7 +536,6 @@ contract OrderRouterPythTest is Test {
     function test_WeakestLink_Timestamp_MEV() public {
         vm.warp(1000);
 
-        // FEED_A fresh, FEED_B stale (publishTime < commitTime)
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 999);
 
@@ -713,7 +553,6 @@ contract OrderRouterPythTest is Test {
     function test_WeakestLink_Staleness() public {
         vm.warp(1000);
 
-        // FEED_A fresh, FEED_B >60s old
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
@@ -741,10 +580,6 @@ contract OrderRouterPythTest is Test {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "BULL position should exist");
 
-        // Oracle jumps to $2.50, above CAP ($2.00). Engine clamps to $2.00.
-        // User sets targetPrice=$2.40 — acceptable since clamped price is $2.00.
-        // Bug: if slippage checked unclamped $2.50 <= $2.40 → false → wrongly rejected.
-        // Fix: slippage checks clamped $2.00 <= $2.40 → true → correctly accepted.
         vm.warp(2000);
         mockPyth.setAllPrices(feedIds, int64(250_000_000), int32(-8), 2001);
 
@@ -821,21 +656,13 @@ contract NormalizePythFuzzTest is Test {
 
 }
 
-contract FadStalenessTest is Test {
+contract FadStalenessTest is BasePerpTest {
 
-    receive() external payable {}
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault juniorVault;
-    OrderRouter router;
-    MarginClearinghouse clearinghouse;
     MockPyth mockPyth;
 
     bytes32 constant FEED_A = bytes32(uint256(1));
     bytes32 constant FEED_B = bytes32(uint256(2));
-    uint256 constant CAP_PRICE = 2e8;
+
     address alice = address(0x111);
     address bob = address(0x222);
 
@@ -843,18 +670,14 @@ contract FadStalenessTest is Test {
     uint256[] weights;
     uint256[] bases;
 
-    // Timestamps verified against isFadWindow's dayOfWeek = ((ts/86400)+4)%7
-    uint256 constant FRIDAY_18UTC = 604_951_200; // dayOfWeek=5, hour=18 → NOT FAD
-    uint256 constant SATURDAY_NOON = 605_016_000; // dayOfWeek=6 → FAD
-    uint256 constant SUNDAY_21UTC = 605_134_800; // dayOfWeek=0, hour=21 → summer FX re-open
-    uint256 constant MONDAY_NOON = 605_188_800; // dayOfWeek=1 → NOT FAD
-    uint256 constant WEDNESDAY_NOON = 605_361_600; // dayOfWeek=3 → NOT FAD
+    uint256 constant FRIDAY_18UTC = 604_951_200;
+    uint256 constant SATURDAY_NOON = 605_016_000;
+    uint256 constant SUNDAY_21UTC = 605_134_800;
+    uint256 constant MONDAY_NOON = 605_188_800;
+    uint256 constant WEDNESDAY_NOON = 605_361_600;
 
-    function setUp() public {
-        usdc = new MockUSDC();
-        mockPyth = new MockPyth();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -865,12 +688,19 @@ contract FadStalenessTest is Test {
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         pool = new HousePool(address(usdc), address(engine));
+
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
@@ -886,17 +716,7 @@ contract FadStalenessTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
+        _bypassAllTimelocks();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
@@ -911,7 +731,6 @@ contract FadStalenessTest is Test {
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
-        // Open BULL position on Friday before FAD (basket=$0.80, not $1.00)
         vm.warp(FRIDAY_18UTC);
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 1);
 
@@ -1015,7 +834,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
-        // Move price against BULL: basket $0.80 → $0.86 (BULL loses ~$600, wipes $500 margin)
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_18UTC + 1);
 
         vm.warp(SATURDAY_NOON);
@@ -1065,14 +883,12 @@ contract FadStalenessTest is Test {
     }
 
     function test_Weekday_StalenessUnchanged() public {
-        // On Wednesday, >60s stale should still cancel
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 1);
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
-        // publishTime=WEDNESDAY_NOON+1, execution at WEDNESDAY_NOON+62 → staleness=61 > 60
         vm.warp(WEDNESDAY_NOON + 62);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
@@ -1104,10 +920,6 @@ contract FadStalenessTest is Test {
         (uint256 size,,,,,,,) = engine.positions(carolId);
         assertGt(size, 0, "Weekday open orders should work normally");
     }
-
-    // ==========================================
-    // ADMIN FAD DAY OVERRIDES
-    // ==========================================
 
     function test_Admin_AddFadDay() public {
         uint256[] memory timestamps = new uint256[](1);
@@ -1176,16 +988,9 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
     }
 
-    // ==========================================
-    // FRIDAY 19:00-22:00 GAP (FAD active, oracle NOT frozen)
-    // ==========================================
-
     function test_FridayGap_MevCheckStillActive() public {
-        // Friday 20:00 UTC: FAD is active but Pyth is still publishing (markets open until ~22:00)
-        // dayOfWeek=5, hour=20 => isFadWindow=true, _isOracleFrozen=false
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
 
-        // Price published at 19:30 (before the close order at 20:00)
         uint256 publishTime = FRIDAY_20UTC - 30 minutes;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
 
@@ -1194,8 +999,6 @@ contract FadStalenessTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        // Keeper tries to execute with the 19:30 price (publishTime < commitTime)
-        // MEV check MUST still catch this since oracle is not frozen
         vm.warp(FRIDAY_20UTC + 30);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
@@ -1206,10 +1009,8 @@ contract FadStalenessTest is Test {
     }
 
     function test_FridayGap_FreshPriceStillWorks() public {
-        // Friday 20:00 UTC: close order with a fresh price should succeed
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
 
-        // Fresh price published after commit
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
 
         vm.warp(FRIDAY_20UTC);
@@ -1227,7 +1028,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_FridayGap_OpenStillBlocked() public {
-        // Friday 20:00 UTC: open orders blocked by FAD even though oracle is live
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
 
@@ -1245,10 +1045,8 @@ contract FadStalenessTest is Test {
     }
 
     function test_FridayGap_StalenessStill60s() public {
-        // Friday 20:00 UTC: 60s staleness should still apply (oracle is not frozen)
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
 
-        // Price 61s stale at execution time, but publishTime > commitTime
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
 
         vm.warp(FRIDAY_20UTC);
@@ -1256,7 +1054,6 @@ contract FadStalenessTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        // Execute 62s after publishTime => staleness = 61 > 60
         vm.warp(FRIDAY_20UTC + 63);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
@@ -1267,7 +1064,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_FridayGap_LiquidationStaleness15s() public {
-        // Friday 20:00 UTC: liquidation staleness should still be 15s (not relaxed)
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
 
@@ -1279,13 +1075,7 @@ contract FadStalenessTest is Test {
         router.executeLiquidation(aliceId, empty);
     }
 
-    // ==========================================
-    // SUNDAY DST GAP (21:00-22:00 UTC)
-    // ==========================================
-
     function test_SundayDst_OracleUnfrozenAt21() public {
-        // Sunday 21:00 UTC: summer FX markets re-open, Pyth publishes live prices
-        // _isOracleFrozen must return false so MEV checks are enforced
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
 
         vm.warp(SUNDAY_21UTC);
@@ -1293,7 +1083,6 @@ contract FadStalenessTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        // Fresh price (publishTime > commitTime) => MEV check passes, close succeeds
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
@@ -1304,7 +1093,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_SundayDst_MevEnforcedAt21() public {
-        // Sunday 21:00 UTC: stale price must be caught by MEV check (not bypassed)
         uint256 publishTime = SUNDAY_21UTC - 30 minutes;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
 
@@ -1323,7 +1111,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_SundayDst_StillFadAt21() public {
-        // Sunday 21:00 UTC: isFadWindow() still true (< 22), so opens are blocked
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
 
         vm.warp(SUNDAY_21UTC);
@@ -1340,8 +1127,6 @@ contract FadStalenessTest is Test {
     }
 
     function test_SundayDst_WinterStalenessRejects() public {
-        // Sunday 21:00 UTC in winter: Pyth hasn't woken up yet, price is ~47h stale
-        // _isOracleFrozen=false => 60s staleness check kicks in => rejects correctly
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 12 hours);
 
         vm.warp(SUNDAY_21UTC);
@@ -1358,30 +1143,21 @@ contract FadStalenessTest is Test {
         assertEq(size, 10_000 * 1e18, "Winter stale price correctly rejected at Sunday 21:00");
     }
 
-    // ==========================================
-    // ADMIN HOLIDAY DELEVERAGE RUNWAY
-    // ==========================================
-
     function test_Runway_FadActivatesBeforeHoliday() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
 
-        // Tuesday 20:59 UTC: 3h01m before midnight => outside runway
-        uint256 tuesdayBeforeRunway = WEDNESDAY_NOON - 12 hours - 1; // 23:59:59 minus 3h = 20:59:59
-        // More precisely: Wednesday midnight = WEDNESDAY_NOON - 12 hours (noon - 12h = midnight)
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
         uint256 tuesdayJustOutside = wednesdayMidnight - 3 hours - 1;
 
         vm.warp(tuesdayJustOutside);
         assertFalse(engine.isFadWindow(), "Before runway: FAD should be inactive");
 
-        // Tuesday 21:00 UTC: exactly 3h before midnight => inside runway
         uint256 tuesdayRunwayStart = wednesdayMidnight - 3 hours;
         vm.warp(tuesdayRunwayStart);
         assertTrue(engine.isFadWindow(), "At runway start: FAD should be active");
 
-        // Tuesday 22:00 UTC: 2h before midnight => inside runway, oracle NOT frozen
         uint256 tuesday22 = wednesdayMidnight - 2 hours;
         vm.warp(tuesday22);
         assertTrue(engine.isFadWindow(), "During runway: FAD should be active");
@@ -1394,11 +1170,9 @@ contract FadStalenessTest is Test {
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
 
-        // Tuesday 21:00: FAD active (runway) but oracle NOT frozen
         vm.warp(wednesdayMidnight - 3 hours);
         assertTrue(engine.isFadWindow());
 
-        // Open order should be rejected (FAD close-only)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 1);
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
@@ -1408,7 +1182,6 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
         assertGt(router.claimableEth(alice), 0, "User must be refunded on FAD rejection");
 
-        // Close order with fresh price should succeed (MEV check still active)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 51);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
@@ -1429,7 +1202,6 @@ contract FadStalenessTest is Test {
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
         uint256 runwayTime = wednesdayMidnight - 2 hours;
 
-        // Stale price (publishTime before commitTime)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), runwayTime - 60);
 
         vm.warp(runwayTime);
@@ -1464,11 +1236,9 @@ contract FadStalenessTest is Test {
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
 
-        // Tuesday 21:00: with zero runway, FAD should NOT activate
         vm.warp(wednesdayMidnight - 3 hours);
         assertFalse(engine.isFadWindow(), "Zero runway disables lookahead");
 
-        // Wednesday itself still works
         vm.warp(WEDNESDAY_NOON);
         assertTrue(engine.isFadWindow(), "Holiday day itself still FAD");
     }
@@ -1486,15 +1256,12 @@ contract InversionTest is Test {
     }
 
     function test_H03_InvertedFeedUsesCorrectPrice() public {
-        // USD/JPY = 156.70 (expo=-3 → raw price 156700 * 10^-3)
-        // Inverted: JPY/USD = 10^(8-(-3)) / 156700 = 10^11 / 156700 = 638,163
-        // That's $0.00638163 in 8 decimals
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = FEED_JPY;
         uint256[] memory w = new uint256[](1);
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
-        b[0] = 638_163; // base price is ~$0.00638 (JPY/USD at launch)
+        b[0] = 638_163;
         bool[] memory inv = new bool[](1);
         inv[0] = true;
 
@@ -1503,7 +1270,7 @@ contract InversionTest is Test {
         mockPyth.setPrice(FEED_JPY, int64(156_700), int32(-3), 1001);
         (uint256 price,) = harness.computeBasketPrice();
 
-        uint256 expectedNorm = uint256(1e11) / 156_700; // = 638,163
+        uint256 expectedNorm = uint256(1e11) / 156_700;
         uint256 expectedBasket = (expectedNorm * 1e18) / (uint256(638_163) * 1e10);
         assertEq(price, expectedBasket, "Inverted JPY should produce correct basket price");
     }
@@ -1518,15 +1285,13 @@ contract InversionTest is Test {
         uint256[] memory b = new uint256[](2);
         b[0] = 1e8;
         b[1] = 1e8;
-        bool[] memory inv = new bool[](1); // wrong length
+        bool[] memory inv = new bool[](1);
 
         vm.expectRevert(OrderRouter.OrderRouter__LengthMismatch.selector);
         new BasketPriceHarness(address(mockPyth), ids, w, b, inv);
     }
 
     function test_H03_MixedInversionsComputeCorrectBasket() public {
-        // Feed 0: EUR/USD direct, $1.08 (expo=-8, raw=108_000_000)
-        // Feed 1: USD/JPY inverted, 156.70 (expo=-3, raw=156_700) → JPY/USD = 638_163
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = FEED_EUR;
         ids[1] = FEED_JPY;
@@ -1534,8 +1299,8 @@ contract InversionTest is Test {
         w[0] = 0.5e18;
         w[1] = 0.5e18;
         uint256[] memory b = new uint256[](2);
-        b[0] = 108_000_000; // EUR/USD base = $1.08
-        b[1] = 638_163; // JPY/USD base = $0.00638163
+        b[0] = 108_000_000;
+        b[1] = 638_163;
         bool[] memory inv = new bool[](2);
         inv[0] = false;
         inv[1] = true;
@@ -1547,40 +1312,27 @@ contract InversionTest is Test {
 
         (uint256 price,) = harness.computeBasketPrice();
 
-        // EUR component: exact (direct, no rounding)
-        // JPY component: slight rounding from integer division in inversion
-        // Total ≈ $1.00 within integer rounding tolerance
         assertApproxEqAbs(price, 100_000_000, 100, "Mixed basket at base prices should be ~$1.00");
     }
 
     function test_H03_OracleEquivalence_SamePricesSameBasket() public {
-        // Real-world FX rates:
-        //   EUR/USD = 1.0800  (direct in both oracles)
-        //   USD/JPY = 156.70  (Chainlink provides JPY/USD=0.00638; Pyth provides USD/JPY=156.70 inverted)
-        //   GBP/USD = 1.2600  (direct in both)
-        //   USD/CHF = 0.8800  (Chainlink provides CHF/USD=1.1364; Pyth provides USD/CHF=0.88 inverted)
-
-        // Weights: 40% EUR, 20% JPY, 25% GBP, 15% CHF
         uint256[] memory w = new uint256[](4);
         w[0] = 0.4e18;
         w[1] = 0.2e18;
         w[2] = 0.25e18;
         w[3] = 0.15e18;
 
-        // --- Chainlink prices (all XXX/USD, 8 decimals) ---
-        int256 eurUsd8 = 108_000_000; // $1.08
-        int256 jpyUsd8 = 638_163; // $0.00638163 (= 1/156.70, truncated)
-        int256 gbpUsd8 = 126_000_000; // $1.26
-        int256 chfUsd8 = 113_636_363; // $1.13636363 (= 1/0.88, truncated)
+        int256 eurUsd8 = 108_000_000;
+        int256 jpyUsd8 = 638_163;
+        int256 gbpUsd8 = 126_000_000;
+        int256 chfUsd8 = 113_636_363;
 
-        // Base prices = same as current prices so basket ≈ $1.00
         uint256[] memory basePrices = new uint256[](4);
         basePrices[0] = uint256(eurUsd8);
         basePrices[1] = uint256(jpyUsd8);
         basePrices[2] = uint256(gbpUsd8);
         basePrices[3] = uint256(chfUsd8);
 
-        // --- BasketOracle (Chainlink) ---
         address[] memory feeds = new address[](4);
         feeds[0] = address(new MockOracle(eurUsd8, "EUR/USD"));
         feeds[1] = address(new MockOracle(jpyUsd8, "JPY/USD"));
@@ -1590,8 +1342,6 @@ contract InversionTest is Test {
         BasketOracle basket = new BasketOracle(feeds, w, basePrices, 500, 2e8, address(this));
         (, int256 chainlinkPrice,,,) = basket.latestRoundData();
 
-        // --- OrderRouter (Pyth) ---
-        // Pyth feeds: EUR/USD direct, USD/JPY inverted, GBP/USD direct, USD/CHF inverted
         bytes32[] memory pythIds = new bytes32[](4);
         pythIds[0] = bytes32(uint256(0x01));
         pythIds[1] = bytes32(uint256(0x02));
@@ -1599,21 +1349,10 @@ contract InversionTest is Test {
         pythIds[3] = bytes32(uint256(0x04));
 
         bool[] memory inv = new bool[](4);
-        inv[0] = false; // EUR/USD direct
-        inv[1] = true; // USD/JPY inverted
-        inv[2] = false; // GBP/USD direct
-        inv[3] = true; // USD/CHF inverted
-
-        // Pyth prices — direct feeds use expo=-8 (same scale as Chainlink)
-        // Inverted feeds use their natural Pyth expo
-        // EUR/USD: 1.0800 → price=108000000, expo=-8
-        // USD/JPY: 156.70 → price=15670, expo=-2
-        // GBP/USD: 1.2600 → price=126000000, expo=-8
-        // USD/CHF: 0.8800 → price=8800, expo=-4
-
-        // For inverted feeds, OrderRouter computes: 10^(8-expo) / price
-        // USD/JPY: 10^(8-(-2)) / 15670 = 10^10 / 15670 = 638,163 ✓
-        // USD/CHF: 10^(8-(-4)) / 8800 = 10^12 / 8800 = 113,636,363 ✓
+        inv[0] = false;
+        inv[1] = true;
+        inv[2] = false;
+        inv[3] = true;
 
         BasketPriceHarness harness = new BasketPriceHarness(address(mockPyth), pythIds, w, basePrices, inv);
 
@@ -1624,8 +1363,6 @@ contract InversionTest is Test {
 
         (uint256 pythPrice,) = harness.computeBasketPrice();
 
-        // Integer division in _invertPythPrice introduces ≤1 unit rounding per inverted feed.
-        // With 2 inverted feeds at 15-20% weight each, max error < 100 units out of 1e8 (~0.0001%).
         assertApproxEqAbs(
             uint256(chainlinkPrice), pythPrice, 100, "BasketOracle and OrderRouter must agree within rounding"
         );
