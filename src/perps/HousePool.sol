@@ -204,8 +204,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     ) external onlyVault whenNotPaused {
         _reconcile();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
+        if (seniorPrincipal > 0) {
+            seniorHighWaterMark = (seniorHighWaterMark * (seniorPrincipal + amount)) / seniorPrincipal;
+        } else {
+            seniorHighWaterMark += amount;
+        }
         seniorPrincipal += amount;
-        seniorHighWaterMark += amount;
     }
 
     function withdrawSenior(

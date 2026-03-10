@@ -573,12 +573,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         accumulatedFeesUsdc += execFeeUsdc;
 
-        uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
+        uint256 mmr = getMaintenanceMarginUsdc(order.sizeDelta, price);
         uint256 imr = (mmr * 150) / 100;
         if (imr < riskParams.minBountyUsdc) {
             imr = riskParams.minBountyUsdc;
         }
-        if (pos.margin < imr) {
+        if (order.marginDelta < imr) {
             revert CfdEngine__InsufficientInitialMargin();
         }
 
