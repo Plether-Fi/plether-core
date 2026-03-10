@@ -74,13 +74,19 @@ contract MarginClearinghouseTest is Test {
         splDxyOracle = new MockOracle(1e8);
 
         // Whitelist USDC (100% LTV, 6 dec, No Oracle)
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
 
         // Whitelist splDXY (95% LTV Haircut, 18 dec, Mock Oracle)
-        clearinghouse.supportAsset(address(splDxy), 18, 9500, address(splDxyOracle));
+        clearinghouse.proposeAssetConfig(address(splDxy), 18, 9500, address(splDxyOracle));
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeAssetConfig();
 
         // Authorize our mock Engine to lock/seize funds
-        clearinghouse.setOperator(engine, true);
+        clearinghouse.proposeOperator(engine, true);
+        vm.warp(144 hours + 4);
+        clearinghouse.finalizeOperator();
 
         // Fund Alice
         usdc.mint(alice, 5000 * 1e6); // $5k USDC
@@ -146,7 +152,9 @@ contract MarginClearinghouseTest is Test {
     function test_LtvHaircut_80Percent() public {
         MockToken weth = new MockToken("Wrapped ETH", "WETH", 18);
         MockOracle wethOracle = new MockOracle(2000e8);
-        clearinghouse.supportAsset(address(weth), 18, 8000, address(wethOracle));
+        clearinghouse.proposeAssetConfig(address(weth), 18, 8000, address(wethOracle));
+        vm.warp(block.timestamp + 48 hours + 1);
+        clearinghouse.finalizeAssetConfig();
 
         weth.mint(alice, 1e18);
         vm.startPrank(alice);
@@ -211,7 +219,7 @@ contract MarginClearinghouseTest is Test {
 
     function test_SupportAsset_InvalidLTV_Reverts() public {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
-        clearinghouse.supportAsset(address(0xBEEF), 18, 10_001, address(0));
+        clearinghouse.proposeAssetConfig(address(0xBEEF), 18, 10_001, address(0));
     }
 
     function test_Deposit_ZeroAmount_Reverts() public {

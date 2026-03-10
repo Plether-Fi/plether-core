@@ -198,7 +198,6 @@ contract PerpInvariantTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -219,11 +218,18 @@ contract PerpInvariantTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
 
         // Seed senior with $200k
         usdc.mint(address(this), 200_000e6);

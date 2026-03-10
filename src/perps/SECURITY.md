@@ -14,13 +14,17 @@ All perpetuals contracts are **non-upgradeable**. Once deployed, the bytecode ca
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `riskParams` (VPI, funding curve, margins, bounty) | CfdEngine | `onlyOwner` — no timelock |
-| `fadDayOverrides` | CfdEngine | `onlyOwner` |
-| `fadMaxStaleness` | CfdEngine | `onlyOwner`, must be > 0 |
-| `fadRunwaySeconds` | CfdEngine | `onlyOwner`, max 24 hours |
-| `seniorRateBps` | HousePool | `onlyOwner` — no timelock |
-| Supported assets / LTV haircuts | MarginClearinghouse | `onlyOwner` |
-| Protocol operators | MarginClearinghouse | `onlyOwner` |
+| `riskParams` (VPI, funding curve, margins, bounty) | CfdEngine | `onlyOwner` — 48-hour propose-finalize timelock |
+| `fadDayOverrides` | CfdEngine | `onlyOwner` — 48-hour propose-finalize timelock |
+| `fadMaxStaleness` | CfdEngine | `onlyOwner`, must be > 0 — 48-hour timelock |
+| `fadRunwaySeconds` | CfdEngine | `onlyOwner`, max 24 hours — 48-hour timelock |
+| `seniorRateBps` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
+| `markStalenessLimit` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
+| `maxOrderAge` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
+| `minKeeperFee` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
+| Supported assets / LTV haircuts | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
+| Protocol operators | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
+| Withdraw guard | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
 
 **One-time setters** (cannot be changed after initial configuration):
 
@@ -107,20 +111,26 @@ These properties must always hold. Violation indicates a critical bug.
 
 - **Assumption**: OpenZeppelin's implementations of ERC20, ERC4626, Ownable2Step, ReentrancyGuard, and SafeERC20 are secure
 - **Mitigation**: Pinned versions; OpenZeppelin is the most widely audited Solidity library
-- **Usage**: CfdEngine (Ownable2Step, ReentrancyGuard), TrancheVault (ERC4626), MarginClearinghouse (Ownable2Step, SafeERC20)
+- **Usage**: CfdEngine (Ownable2Step, ReentrancyGuard), OrderRouter (Ownable2Step, Pausable), HousePool (Ownable2Step, Pausable), TrancheVault (ERC4626), MarginClearinghouse (Ownable2Step, SafeERC20)
 
 ### Internal Trust Model
 
 #### Owner/Admin Role
 
-The protocol owner can:
-- Adjust all risk parameters (`vpiFactor`, funding curve, margin BPS, bounty) — **no timelock**
+The protocol owner can (all subject to 48-hour timelock):
+- Adjust all risk parameters (`vpiFactor`, funding curve, margin BPS, bounty)
 - Add/remove FAD day overrides for FX market holidays
 - Configure `fadMaxStaleness` and `fadRunwaySeconds`
-- Set the senior tranche interest rate
+- Set the senior tranche interest rate and mark staleness limit
+- Configure max order age and minimum keeper fee
 - Add supported collateral assets and configure LTV haircuts
 - Grant/revoke operator status on the MarginClearinghouse
-- Withdraw accumulated execution fees to any recipient
+- Set the withdraw guard on the MarginClearinghouse
+
+The owner can (instant, no timelock):
+- Pause/unpause OrderRouter (blocks new `commitOrder`, allows executions/liquidations)
+- Pause/unpause HousePool (blocks new deposits, allows withdrawals)
+- Withdraw accumulated execution fees to any recipient (post-solvency check)
 - Transfer ownership (via Ownable2Step two-step pattern)
 
 The owner **cannot**:
@@ -130,7 +140,7 @@ The owner **cannot**:
 - Bypass the solvency invariant (fee withdrawal checks post-solvency)
 - Modify oracle feed IDs, weights, or base prices (immutable in OrderRouter constructor)
 
-**Risk (No Timelock)**: Risk parameter changes take effect immediately. A malicious or compromised owner could set extreme VPI factors, funding rates, or margin requirements that adversely affect open positions. Users must trust the owner or monitor parameter changes via events.
+**Timelock Protection**: All risk parameter changes are subject to a 48-hour propose-finalize delay. This gives users and monitoring systems time to detect and react to proposed changes before they take effect. Proposals can be cancelled by the owner at any time.
 
 #### Keepers
 
@@ -256,11 +266,12 @@ When a position goes underwater (equity < 0):
 - **Impact**: Users cannot deposit and immediately withdraw, even if the vault's share price has not changed.
 - **Rationale**: Prevents share price manipulation via flash loans or MEV sandwich attacks on LP deposits.
 
-#### No Emergency Pause
+### Emergency Pause
 
-- **Behavior**: TrancheVault and HousePool have no pause mechanism.
-- **Impact**: If a critical bug is discovered, deposits and withdrawals cannot be halted. The withdrawal firewall (free USDC check) provides the only safety net.
-- **Mitigation**: CfdEngine's `processOrder` and `liquidatePosition` are gated by `onlyRouter`, and the OrderRouter is the single entry point. Pausing the keeper infrastructure effectively halts new trades.
+- **OrderRouter**: Owner can instantly pause via `pause()`. When paused, `commitOrder` reverts (`EnforcedPause`). `executeOrder`, `executeLiquidation`, `updateMarkPrice`, and `claimEth` remain operational — protective actions are never blocked.
+- **HousePool**: Owner can instantly pause via `pause()`. When paused, `depositSenior` and `depositJunior` revert. Withdrawals via TrancheVault remain operational — users can always exit.
+- **CfdEngine**: Not directly pausable (all entry is gated by OrderRouter's `commitOrder`).
+- **MarginClearinghouse**: Not pausable (users must always be able to deposit/withdraw margin and exit positions).
 
 ### Decimal Handling
 
@@ -283,16 +294,25 @@ When a position goes underwater (equity < 0):
 | Funding | Variable | Kinked curve: 0→15% APY (linear), 15%→300% APY (quadratic) |
 | Keeper Bounty | 15 bps (0.15%) | Floor: $5 USDC. Paid from vault on liquidation |
 
-Fees are hardcoded (execution = 6 bps, bounty = 15 bps). Funding curve parameters are admin-configurable via `setRiskParams()`.
+Fees are hardcoded (execution = 6 bps, bounty = 15 bps). Funding curve parameters are admin-configurable via `proposeRiskParams()`/`finalizeRiskParams()`.
 
 ## Emergency Procedures
 
+### Emergency Pause Procedure
+
+1. Owner calls `router.pause()` and/or `pool.pause()` — takes effect immediately
+2. No new trades can be committed; no new LP deposits accepted
+3. Existing orders continue executing; liquidations remain operational; LP withdrawals allowed
+4. Investigate the incident
+5. Owner calls `router.unpause()` and/or `pool.unpause()` to restore normal operations
+
 ### Suspected Oracle Manipulation
 
-1. Owner sets extreme `fadMaxStaleness` (e.g., 1 second) to reject all oracle prices
-2. All pending orders fail with staleness errors (FIFO queue still advances)
-3. Liquidations also halt (15s staleness threshold)
-4. Investigate and restore `fadMaxStaleness` when resolved
+1. Owner calls `router.pause()` — immediately blocks all new order commitments
+2. Existing orders still execute (keepers drain the queue) but no new ones can enter
+3. Liquidations remain operational with fresh oracle prices
+4. Investigate the oracle issue
+5. Owner calls `router.unpause()` when resolved
 
 ### Keeper Infrastructure Failure
 

@@ -8,12 +8,13 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title HousePool
 /// @notice Tranched house pool. Senior tranche gets fixed-rate yield with last-loss protection.
 ///         Junior tranche absorbs first loss but captures surplus revenue.
 /// @custom:security-contact contact@plether.com
-contract HousePool is ICfdVault, IHousePool, Ownable2Step {
+contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
@@ -33,6 +34,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     uint256 public seniorRateBps;
     uint256 public markStalenessLimit = 120;
 
+    uint256 public constant TIMELOCK_DELAY = 48 hours;
+
+    uint256 public pendingSeniorRate;
+    uint256 public seniorRateActivationTime;
+
+    uint256 public pendingMarkStalenessLimit;
+    uint256 public markStalenessLimitActivationTime;
+
     uint256 internal constant BPS = 10_000;
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
 
@@ -44,10 +53,16 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
     error HousePool__ExceedsMaxSeniorWithdraw();
     error HousePool__ExceedsMaxJuniorWithdraw();
     error HousePool__MarkPriceStale();
+    error HousePool__TimelockNotReady();
+    error HousePool__NoProposal();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
     event MarkStalenessLimitUpdated(uint256 newLimit);
+    event SeniorRateProposed(uint256 newRateBps, uint256 activationTime);
+    event SeniorRateFinalized();
+    event MarkStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
+    event MarkStalenessLimitFinalized();
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -97,19 +112,67 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         juniorVault = _vault;
     }
 
-    function setSeniorRate(
+    function proposeSeniorRate(
         uint256 _rateBps
     ) external onlyOwner {
-        _reconcile();
-        seniorRateBps = _rateBps;
-        emit SeniorRateUpdated(_rateBps);
+        pendingSeniorRate = _rateBps;
+        seniorRateActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit SeniorRateProposed(_rateBps, seniorRateActivationTime);
     }
 
-    function setMarkStalenessLimit(
+    function finalizeSeniorRate() external onlyOwner {
+        if (seniorRateActivationTime == 0) {
+            revert HousePool__NoProposal();
+        }
+        if (block.timestamp < seniorRateActivationTime) {
+            revert HousePool__TimelockNotReady();
+        }
+        _reconcile();
+        seniorRateBps = pendingSeniorRate;
+        pendingSeniorRate = 0;
+        seniorRateActivationTime = 0;
+        emit SeniorRateUpdated(seniorRateBps);
+        emit SeniorRateFinalized();
+    }
+
+    function cancelSeniorRateProposal() external onlyOwner {
+        pendingSeniorRate = 0;
+        seniorRateActivationTime = 0;
+    }
+
+    function proposeMarkStalenessLimit(
         uint256 _limit
     ) external onlyOwner {
-        markStalenessLimit = _limit;
-        emit MarkStalenessLimitUpdated(_limit);
+        pendingMarkStalenessLimit = _limit;
+        markStalenessLimitActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit MarkStalenessLimitProposed(_limit, markStalenessLimitActivationTime);
+    }
+
+    function finalizeMarkStalenessLimit() external onlyOwner {
+        if (markStalenessLimitActivationTime == 0) {
+            revert HousePool__NoProposal();
+        }
+        if (block.timestamp < markStalenessLimitActivationTime) {
+            revert HousePool__TimelockNotReady();
+        }
+        markStalenessLimit = pendingMarkStalenessLimit;
+        pendingMarkStalenessLimit = 0;
+        markStalenessLimitActivationTime = 0;
+        emit MarkStalenessLimitUpdated(markStalenessLimit);
+        emit MarkStalenessLimitFinalized();
+    }
+
+    function cancelMarkStalenessLimitProposal() external onlyOwner {
+        pendingMarkStalenessLimit = 0;
+        markStalenessLimitActivationTime = 0;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     // ==========================================
@@ -138,7 +201,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     function depositSenior(
         uint256 amount
-    ) external onlyVault {
+    ) external onlyVault whenNotPaused {
         _reconcile();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         seniorPrincipal += amount;
@@ -163,7 +226,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
     function depositJunior(
         uint256 amount
-    ) external onlyVault {
+    ) external onlyVault whenNotPaused {
         _reconcile();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         juniorPrincipal += amount;

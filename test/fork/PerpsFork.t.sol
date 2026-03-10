@@ -106,7 +106,6 @@ contract PerpsForkTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(USDC, 6, 10_000, address(0));
 
         engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(USDC, address(engine));
@@ -124,12 +123,23 @@ contract PerpsForkTest is Test {
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
         router = new OrderRouter(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        uint256 t0 = block.timestamp;
+        clearinghouse.proposeAssetConfig(USDC, 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(t0 + 48 hours + 1);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(t0 + 96 hours + 2);
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(t0 + 144 hours + 3);
+        clearinghouse.finalizeOperator();
 
         // LP deposits $1M to junior tranche
         deal(USDC, lp, 1_000_000e6);
@@ -262,17 +272,17 @@ contract PerpsForkTest is Test {
         rb[0] = 1e8;
         OrderRouter realPythRouter =
             new OrderRouter(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
-        clearinghouse.setOperator(address(realPythRouter), true);
+        uint256 t1 = block.timestamp;
+        clearinghouse.proposeOperator(address(realPythRouter), true);
+        vm.warp(t1 + 48 hours + 1);
+        clearinghouse.finalizeOperator();
 
-        // We can't set it as engine's router (already set), but we can verify the Pyth interaction
-        // by calling executeOrder — it will fail at processOrder (not authorized) but the Pyth
-        // code path (lines 108-125) runs first. If ABI was wrong, it would revert with a decode error.
         _depositToClearinghouse(alice, 10_000e6);
 
         vm.prank(alice);
         realPythRouter.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 2e8, false);
 
-        vm.warp(block.timestamp + 2);
+        vm.warp(t1 + 48 hours + 3);
         vm.prank(keeper);
         realPythRouter.executeOrder(1, empty);
 

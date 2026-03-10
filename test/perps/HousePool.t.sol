@@ -57,7 +57,7 @@ contract HousePoolTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -76,9 +76,19 @@ contract HousePoolTest is Test {
             new bool[](0)
         );
 
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(144 hours + 4);
+        clearinghouse.finalizeOperator();
+
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
     }
@@ -349,10 +359,11 @@ contract HousePoolTest is Test {
         // Generate some revenue
         usdc.mint(address(pool), 200_000 * 1e6);
 
-        vm.warp(block.timestamp + 365 days);
+        vm.warp(block.timestamp + 365 days - 48 hours - 1);
 
-        // Change rate — this triggers reconcile first
-        pool.setSeniorRate(1200); // 12% APY
+        pool.proposeSeniorRate(1200);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeSeniorRate();
 
         // Senior should have received 8% for the first year
         assertEq(pool.seniorPrincipal(), 1_080_000 * 1e6, "Senior got 8% before rate change");
@@ -592,7 +603,7 @@ contract HousePoolTest is Test {
     // ==========================================
 
     function test_C01_LiquidationClearsUnrealizedFunding() public {
-        engine.setRiskParams(
+        engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -605,6 +616,8 @@ contract HousePoolTest is Test {
                 bountyBps: 15
             })
         );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
@@ -632,7 +645,7 @@ contract HousePoolTest is Test {
     // ==========================================
 
     function test_C03_GetFreeUSDC_ReservesPositiveUnrealizedFunding() public {
-        engine.setRiskParams(
+        engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -645,6 +658,8 @@ contract HousePoolTest is Test {
                 bountyBps: 15
             })
         );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
@@ -687,7 +702,7 @@ contract HousePoolTest is Test {
     // ==========================================
 
     function test_C03b_Reconcile_ReservesPositiveUnrealizedFunding() public {
-        engine.setRiskParams(
+        engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -700,6 +715,8 @@ contract HousePoolTest is Test {
                 bountyBps: 15
             })
         );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
         uint256 juniorBefore = pool.juniorPrincipal();

@@ -62,6 +62,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
 
+    uint256 public constant TIMELOCK_DELAY = 48 hours;
+
+    CfdTypes.RiskParams public pendingRiskParams;
+    uint256 public riskParamsActivationTime;
+
+    uint256[] private _pendingAddFadDays;
+    uint256 public addFadDaysActivationTime;
+
+    uint256[] private _pendingRemoveFadDays;
+    uint256 public removeFadDaysActivationTime;
+
+    uint256 public pendingFadMaxStaleness;
+    uint256 public fadMaxStalenessActivationTime;
+
+    uint256 public pendingFadRunway;
+    uint256 public fadRunwayActivationTime;
+
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
@@ -81,6 +98,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__ZeroStaleness();
     error CfdEngine__RunwayTooLong();
     error CfdEngine__PartialCloseUnderwaterFunding();
+    error CfdEngine__TimelockNotReady();
+    error CfdEngine__NoProposal();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -94,6 +113,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
     event FadRunwayUpdated(uint256 newRunway);
+    event RiskParamsProposed(uint256 activationTime);
+    event RiskParamsFinalized();
+    event AddFadDaysProposed(uint256[] timestamps, uint256 activationTime);
+    event AddFadDaysFinalized();
+    event RemoveFadDaysProposed(uint256[] timestamps, uint256 activationTime);
+    event RemoveFadDaysFinalized();
+    event FadMaxStalenessProposed(uint256 newStaleness, uint256 activationTime);
+    event FadMaxStalenessFinalized();
+    event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
+    event FadRunwayFinalized();
 
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
@@ -135,54 +164,156 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         orderRouter = _router;
     }
 
-    function setRiskParams(
+    function proposeRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
-        riskParams = _riskParams;
+        pendingRiskParams = _riskParams;
+        riskParamsActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit RiskParamsProposed(riskParamsActivationTime);
     }
 
-    function addFadDays(
+    function finalizeRiskParams() external onlyOwner {
+        if (riskParamsActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < riskParamsActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        riskParams = pendingRiskParams;
+        delete pendingRiskParams;
+        riskParamsActivationTime = 0;
+        emit RiskParamsFinalized();
+    }
+
+    function cancelRiskParamsProposal() external onlyOwner {
+        delete pendingRiskParams;
+        riskParamsActivationTime = 0;
+    }
+
+    function proposeAddFadDays(
         uint256[] calldata timestamps
     ) external onlyOwner {
         if (timestamps.length == 0) {
             revert CfdEngine__EmptyDays();
         }
+        _pendingAddFadDays = timestamps;
+        addFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit AddFadDaysProposed(timestamps, addFadDaysActivationTime);
+    }
+
+    function finalizeAddFadDays() external onlyOwner {
+        if (addFadDaysActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < addFadDaysActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        uint256[] memory timestamps = _pendingAddFadDays;
         for (uint256 i; i < timestamps.length; i++) {
             fadDayOverrides[timestamps[i] / 86_400] = true;
         }
+        delete _pendingAddFadDays;
+        addFadDaysActivationTime = 0;
         emit FadDaysAdded(timestamps);
+        emit AddFadDaysFinalized();
     }
 
-    function removeFadDays(
+    function cancelAddFadDaysProposal() external onlyOwner {
+        delete _pendingAddFadDays;
+        addFadDaysActivationTime = 0;
+    }
+
+    function proposeRemoveFadDays(
         uint256[] calldata timestamps
     ) external onlyOwner {
         if (timestamps.length == 0) {
             revert CfdEngine__EmptyDays();
         }
+        _pendingRemoveFadDays = timestamps;
+        removeFadDaysActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit RemoveFadDaysProposed(timestamps, removeFadDaysActivationTime);
+    }
+
+    function finalizeRemoveFadDays() external onlyOwner {
+        if (removeFadDaysActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < removeFadDaysActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        uint256[] memory timestamps = _pendingRemoveFadDays;
         for (uint256 i; i < timestamps.length; i++) {
             delete fadDayOverrides[timestamps[i] / 86_400];
         }
+        delete _pendingRemoveFadDays;
+        removeFadDaysActivationTime = 0;
         emit FadDaysRemoved(timestamps);
+        emit RemoveFadDaysFinalized();
     }
 
-    function setFadMaxStaleness(
+    function cancelRemoveFadDaysProposal() external onlyOwner {
+        delete _pendingRemoveFadDays;
+        removeFadDaysActivationTime = 0;
+    }
+
+    function proposeFadMaxStaleness(
         uint256 _seconds
     ) external onlyOwner {
         if (_seconds == 0) {
             revert CfdEngine__ZeroStaleness();
         }
-        fadMaxStaleness = _seconds;
-        emit FadMaxStalenessUpdated(_seconds);
+        pendingFadMaxStaleness = _seconds;
+        fadMaxStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit FadMaxStalenessProposed(_seconds, fadMaxStalenessActivationTime);
     }
 
-    function setFadRunway(
+    function finalizeFadMaxStaleness() external onlyOwner {
+        if (fadMaxStalenessActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < fadMaxStalenessActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        fadMaxStaleness = pendingFadMaxStaleness;
+        pendingFadMaxStaleness = 0;
+        fadMaxStalenessActivationTime = 0;
+        emit FadMaxStalenessUpdated(fadMaxStaleness);
+        emit FadMaxStalenessFinalized();
+    }
+
+    function cancelFadMaxStalenessProposal() external onlyOwner {
+        pendingFadMaxStaleness = 0;
+        fadMaxStalenessActivationTime = 0;
+    }
+
+    function proposeFadRunway(
         uint256 _seconds
     ) external onlyOwner {
         if (_seconds > 24 hours) {
             revert CfdEngine__RunwayTooLong();
         }
-        fadRunwaySeconds = _seconds;
-        emit FadRunwayUpdated(_seconds);
+        pendingFadRunway = _seconds;
+        fadRunwayActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit FadRunwayProposed(_seconds, fadRunwayActivationTime);
+    }
+
+    function finalizeFadRunway() external onlyOwner {
+        if (fadRunwayActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < fadRunwayActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        fadRunwaySeconds = pendingFadRunway;
+        pendingFadRunway = 0;
+        fadRunwayActivationTime = 0;
+        emit FadRunwayUpdated(fadRunwaySeconds);
+        emit FadRunwayFinalized();
+    }
+
+    function cancelFadRunwayProposal() external onlyOwner {
+        pendingFadRunway = 0;
+        fadRunwayActivationTime = 0;
     }
 
     /// @notice Withdraws accumulated execution fees from the vault to a recipient

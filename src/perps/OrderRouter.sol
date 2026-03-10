@@ -7,12 +7,14 @@ import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev No longer holds margin escrow. Users deposit to MarginClearinghouse directly.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter {
+contract OrderRouter is Ownable2Step, Pausable {
 
     ICfdEngine public engine;
     ICfdVault public vault;
@@ -28,13 +30,22 @@ contract OrderRouter {
     uint256 public maxOrderAge;
     uint256 public minKeeperFee;
 
+    uint256 public constant TIMELOCK_DELAY = 48 hours;
+
+    uint256 public pendingMaxOrderAge;
+    uint256 public maxOrderAgeActivationTime;
+
+    uint256 public pendingMinKeeperFee;
+    uint256 public minKeeperFeeActivationTime;
+
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__InsufficientKeeperFee();
-    error OrderRouter__Unauthorized();
+    error OrderRouter__TimelockNotReady();
+    error OrderRouter__NoProposal();
     error OrderRouter__FIFOViolation();
     error OrderRouter__OrderNotPending();
     error OrderRouter__InsufficientPythFee();
@@ -64,7 +75,7 @@ contract OrderRouter {
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    ) {
+    ) Ownable(msg.sender) {
         engine = ICfdEngine(_engine);
         vault = ICfdVault(_vault);
         pyth = IPyth(_pyth);
@@ -101,22 +112,60 @@ contract OrderRouter {
     // ADMIN
     // ==========================================
 
-    function setMaxOrderAge(
+    function proposeMaxOrderAge(
         uint256 _maxOrderAge
-    ) external {
-        if (msg.sender != Ownable(address(engine)).owner()) {
-            revert OrderRouter__Unauthorized();
-        }
-        maxOrderAge = _maxOrderAge;
+    ) external onlyOwner {
+        pendingMaxOrderAge = _maxOrderAge;
+        maxOrderAgeActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
-    function setMinKeeperFee(
-        uint256 _minKeeperFee
-    ) external {
-        if (msg.sender != Ownable(address(engine)).owner()) {
-            revert OrderRouter__Unauthorized();
+    function finalizeMaxOrderAge() external onlyOwner {
+        if (maxOrderAgeActivationTime == 0) {
+            revert OrderRouter__NoProposal();
         }
-        minKeeperFee = _minKeeperFee;
+        if (block.timestamp < maxOrderAgeActivationTime) {
+            revert OrderRouter__TimelockNotReady();
+        }
+        maxOrderAge = pendingMaxOrderAge;
+        pendingMaxOrderAge = 0;
+        maxOrderAgeActivationTime = 0;
+    }
+
+    function cancelMaxOrderAgeProposal() external onlyOwner {
+        pendingMaxOrderAge = 0;
+        maxOrderAgeActivationTime = 0;
+    }
+
+    function proposeMinKeeperFee(
+        uint256 _minKeeperFee
+    ) external onlyOwner {
+        pendingMinKeeperFee = _minKeeperFee;
+        minKeeperFeeActivationTime = block.timestamp + TIMELOCK_DELAY;
+    }
+
+    function finalizeMinKeeperFee() external onlyOwner {
+        if (minKeeperFeeActivationTime == 0) {
+            revert OrderRouter__NoProposal();
+        }
+        if (block.timestamp < minKeeperFeeActivationTime) {
+            revert OrderRouter__TimelockNotReady();
+        }
+        minKeeperFee = pendingMinKeeperFee;
+        pendingMinKeeperFee = 0;
+        minKeeperFeeActivationTime = 0;
+    }
+
+    function cancelMinKeeperFeeProposal() external onlyOwner {
+        pendingMinKeeperFee = 0;
+        minKeeperFeeActivationTime = 0;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     // ==========================================
@@ -131,7 +180,7 @@ contract OrderRouter {
         uint256 marginDelta,
         uint256 targetPrice,
         bool isClose
-    ) external payable {
+    ) external payable whenNotPaused {
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
         }

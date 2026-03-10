@@ -40,6 +40,21 @@ contract MarginClearinghouse is Ownable2Step {
 
     mapping(address => bool) public isProtocolOperator;
 
+    uint256 public constant TIMELOCK_DELAY = 48 hours;
+
+    address public pendingOperatorAddress;
+    bool public pendingOperatorStatus;
+    uint256 public operatorActivationTime;
+
+    address public pendingWithdrawGuard;
+    uint256 public withdrawGuardActivationTime;
+
+    address public pendingAsset;
+    uint8 public pendingAssetDecimals;
+    uint16 public pendingAssetLtvBps;
+    address public pendingAssetOracle;
+    uint256 public assetConfigActivationTime;
+
     error MarginClearinghouse__NotOperator();
     error MarginClearinghouse__InvalidLTV();
     error MarginClearinghouse__NotAccountOwner();
@@ -49,6 +64,8 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__InsufficientFreeEquity();
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
+    error MarginClearinghouse__TimelockNotReady();
+    error MarginClearinghouse__NoProposal();
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
@@ -69,20 +86,59 @@ contract MarginClearinghouse is Ownable2Step {
     // CONFIGURATION
     // ==========================================
 
-    function setOperator(
+    function proposeOperator(
         address operator,
         bool status
     ) external onlyOwner {
-        isProtocolOperator[operator] = status;
+        pendingOperatorAddress = operator;
+        pendingOperatorStatus = status;
+        operatorActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
-    function setWithdrawGuard(
+    function finalizeOperator() external onlyOwner {
+        if (operatorActivationTime == 0) {
+            revert MarginClearinghouse__NoProposal();
+        }
+        if (block.timestamp < operatorActivationTime) {
+            revert MarginClearinghouse__TimelockNotReady();
+        }
+        isProtocolOperator[pendingOperatorAddress] = pendingOperatorStatus;
+        pendingOperatorAddress = address(0);
+        pendingOperatorStatus = false;
+        operatorActivationTime = 0;
+    }
+
+    function cancelOperatorProposal() external onlyOwner {
+        pendingOperatorAddress = address(0);
+        pendingOperatorStatus = false;
+        operatorActivationTime = 0;
+    }
+
+    function proposeWithdrawGuard(
         address _guard
     ) external onlyOwner {
-        withdrawGuard = IWithdrawGuard(_guard);
+        pendingWithdrawGuard = _guard;
+        withdrawGuardActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
-    function supportAsset(
+    function finalizeWithdrawGuard() external onlyOwner {
+        if (withdrawGuardActivationTime == 0) {
+            revert MarginClearinghouse__NoProposal();
+        }
+        if (block.timestamp < withdrawGuardActivationTime) {
+            revert MarginClearinghouse__TimelockNotReady();
+        }
+        withdrawGuard = IWithdrawGuard(pendingWithdrawGuard);
+        pendingWithdrawGuard = address(0);
+        withdrawGuardActivationTime = 0;
+    }
+
+    function cancelWithdrawGuardProposal() external onlyOwner {
+        pendingWithdrawGuard = address(0);
+        withdrawGuardActivationTime = 0;
+    }
+
+    function proposeAssetConfig(
         address asset,
         uint8 decimals,
         uint16 ltvBps,
@@ -91,12 +147,40 @@ contract MarginClearinghouse is Ownable2Step {
         if (ltvBps > 10_000) {
             revert MarginClearinghouse__InvalidLTV();
         }
+        pendingAsset = asset;
+        pendingAssetDecimals = decimals;
+        pendingAssetLtvBps = ltvBps;
+        pendingAssetOracle = oracle;
+        assetConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
+    }
 
+    function finalizeAssetConfig() external onlyOwner {
+        if (assetConfigActivationTime == 0) {
+            revert MarginClearinghouse__NoProposal();
+        }
+        if (block.timestamp < assetConfigActivationTime) {
+            revert MarginClearinghouse__TimelockNotReady();
+        }
+        address asset = pendingAsset;
         if (!assetConfigs[asset].isSupported) {
             supportedAssetsList.push(asset);
         }
+        assetConfigs[asset] = AssetConfig({
+            isSupported: true, decimals: pendingAssetDecimals, ltvBps: pendingAssetLtvBps, oracle: pendingAssetOracle
+        });
+        pendingAsset = address(0);
+        pendingAssetDecimals = 0;
+        pendingAssetLtvBps = 0;
+        pendingAssetOracle = address(0);
+        assetConfigActivationTime = 0;
+    }
 
-        assetConfigs[asset] = AssetConfig({isSupported: true, decimals: decimals, ltvBps: ltvBps, oracle: oracle});
+    function cancelAssetConfigProposal() external onlyOwner {
+        pendingAsset = address(0);
+        pendingAssetDecimals = 0;
+        pendingAssetLtvBps = 0;
+        pendingAssetOracle = address(0);
+        assetConfigActivationTime = 0;
     }
 
     // ==========================================

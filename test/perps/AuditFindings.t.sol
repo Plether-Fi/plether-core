@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -80,6 +81,10 @@ contract AuditFindingsTest is Test {
 
     receive() external payable {}
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         usdc = new MockUSDC();
 
@@ -96,7 +101,6 @@ contract AuditFindingsTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -114,12 +118,22 @@ contract AuditFindingsTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function _fundSenior(
@@ -371,7 +385,9 @@ contract AuditFindingsTest is Test {
 
     function test_Finding7_FeeOnTransferAccounting() public {
         MockFeeOnTransferToken fot = new MockFeeOnTransferToken(100); // 1% fee
-        clearinghouse.supportAsset(address(fot), 18, 10_000, address(0));
+        clearinghouse.proposeAssetConfig(address(fot), 18, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         uint256 depositAmount = 1000 * 1e18;
@@ -729,7 +745,9 @@ contract AuditFindingsTest is Test {
     // ==========================================
 
     function test_H02_StaleOrderExecutesViaExecuteOrder() public {
-        router.setMaxOrderAge(300);
+        router.proposeMaxOrderAge(300);
+        _warpPastTimelock();
+        router.finalizeMaxOrderAge();
 
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
@@ -758,7 +776,9 @@ contract AuditFindingsTest is Test {
     // ==========================================
 
     function test_H03_ZeroFeeCommitShouldRevert() public {
-        router.setMinKeeperFee(0.001 ether);
+        router.proposeMinKeeperFee(0.001 ether);
+        _warpPastTimelock();
+        router.finalizeMinKeeperFee();
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
@@ -822,8 +842,11 @@ contract C02VpiDepthTest is Test {
     address bob = address(0x222);
     address carol = address(0x333);
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
-        vm.warp(1_709_532_000);
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
@@ -839,7 +862,6 @@ contract C02VpiDepthTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -855,11 +877,20 @@ contract C02VpiDepthTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function _fundJunior(
@@ -1008,6 +1039,10 @@ contract MarginCappedMtmTest is Test {
 
     receive() external payable {}
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         usdc = new MockUSDC();
 
@@ -1024,7 +1059,6 @@ contract MarginCappedMtmTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1043,9 +1077,18 @@ contract MarginCappedMtmTest is Test {
             new bool[](0)
         );
 
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
     }
@@ -1252,6 +1295,10 @@ contract H03StaleOrderExpiryTest is Test {
     address bob = address(0x222);
     address spammer = address(0x666);
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         vm.warp(1_709_532_000);
         usdc = new MockUSDC();
@@ -1269,7 +1316,6 @@ contract H03StaleOrderExpiryTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1285,13 +1331,22 @@ contract H03StaleOrderExpiryTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        router.setMaxOrderAge(300);
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        router.proposeMaxOrderAge(300);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+        router.finalizeMaxOrderAge();
     }
 
     function _fundJunior(
@@ -1403,11 +1458,12 @@ contract H03StaleOrderExpiryTest is Test {
 
     function test_H03_SetMaxOrderAge_OnlyOwner() public {
         vm.prank(spammer);
-        vm.expectRevert(OrderRouter.OrderRouter__Unauthorized.selector);
-        router.setMaxOrderAge(600);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, spammer));
+        router.proposeMaxOrderAge(600);
 
-        // Engine owner (this contract) can set it
-        router.setMaxOrderAge(600);
+        router.proposeMaxOrderAge(600);
+        _warpPastTimelock();
+        router.finalizeMaxOrderAge();
         assertEq(router.maxOrderAge(), 600);
     }
 
@@ -1504,6 +1560,10 @@ contract MarkPriceStalenessTest is Test {
     uint256[] weights;
     uint256[] bases;
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         vm.warp(10_000);
         usdc = new MockUSDC();
@@ -1522,7 +1582,6 @@ contract MarkPriceStalenessTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1539,11 +1598,20 @@ contract MarkPriceStalenessTest is Test {
 
         router =
             new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
@@ -1583,6 +1651,10 @@ contract PhantomExecFeeTest is Test {
 
     receive() external payable {}
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         vm.warp(1000);
         usdc = new MockUSDC();
@@ -1600,7 +1672,6 @@ contract PhantomExecFeeTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1616,12 +1687,22 @@ contract PhantomExecFeeTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function test_PhantomExecFee_InflatesAccumulatedFees() public {
@@ -1643,18 +1724,18 @@ contract PhantomExecFeeTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
         vm.stopPrank();
 
-        vm.warp(1001);
+        vm.warp(block.timestamp + 1);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(1, priceData);
 
         uint256 openFee = engine.accumulatedFeesUsdc();
 
-        vm.warp(1002);
+        vm.warp(block.timestamp + 1);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
-        vm.warp(1003);
+        vm.warp(block.timestamp + 1);
         priceData[0] = abi.encode(uint256(1.5e8));
         router.executeOrder(2, priceData);
 
@@ -1690,8 +1771,17 @@ contract NegativeFundingFreeUsdcTest is Test {
 
     receive() external payable {}
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function _warpForward(
+        uint256 delta
+    ) internal {
+        vm.warp(block.timestamp + delta);
+    }
+
     function setUp() public {
-        vm.warp(1000);
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
@@ -1707,7 +1797,6 @@ contract NegativeFundingFreeUsdcTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1723,12 +1812,22 @@ contract NegativeFundingFreeUsdcTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function test_GetFreeUSDC_IgnoresNegativeFunding() public {
@@ -1749,13 +1848,13 @@ contract NegativeFundingFreeUsdcTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
         vm.stopPrank();
 
-        vm.warp(1001);
+        _warpForward(1);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(1, priceData);
 
         // Warp forward so funding accrues on the skewed bull position
-        vm.warp(1001 + 30 days);
+        _warpForward(30 days);
 
         // Open a tiny position to trigger _updateFunding inside processOrder
         address carol = address(0x333);
@@ -1767,7 +1866,7 @@ contract NegativeFundingFreeUsdcTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, carolMargin, 1e8, false);
         vm.stopPrank();
 
-        vm.warp(1001 + 30 days + 1);
+        _warpForward(1);
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(2, priceData);
 
@@ -1821,6 +1920,10 @@ contract H02StalenessGriefTest is Test {
     uint256[] weights;
     uint256[] bases;
 
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
     function setUp() public {
         vm.warp(10_000);
         usdc = new MockUSDC();
@@ -1839,7 +1942,6 @@ contract H02StalenessGriefTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -1856,12 +1958,22 @@ contract H02StalenessGriefTest is Test {
 
         router =
             new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
     }
 
     function _fundJunior(

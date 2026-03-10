@@ -57,7 +57,6 @@ contract LiquidationTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -73,12 +72,22 @@ contract LiquidationTest is Test {
             new uint256[](0),
             new bool[](0)
         );
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(144 hours + 4);
+        clearinghouse.finalizeOperator();
 
         usdc.mint(address(this), 1_000_000 * 1e6);
         usdc.approve(address(juniorVault), type(uint256).max);
@@ -227,7 +236,7 @@ contract LiquidationTest is Test {
 
     function test_LiquidationEquity_IncludesFunding() public {
         // Enable funding (setUp has baseApy=0)
-        engine.setRiskParams(
+        engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
@@ -240,6 +249,8 @@ contract LiquidationTest is Test {
                 bountyBps: 15
             })
         );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
 
         vm.warp(WEDNESDAY_NOON);
 

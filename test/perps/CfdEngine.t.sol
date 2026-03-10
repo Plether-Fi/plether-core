@@ -34,7 +34,6 @@ contract CfdEngineTest is Test {
     uint256 constant CAP_PRICE = 2e8;
 
     function setUp() public {
-        vm.warp(1_709_532_000); // Monday 2024-03-04 10:00 UTC (avoids FAD window)
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
@@ -50,17 +49,25 @@ contract CfdEngineTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(this));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
+
+        vm.warp(1_709_532_000); // Monday 2024-03-04 10:00 UTC (avoids FAD window)
 
         usdc.mint(address(this), 1_000_000 * 1e6);
         usdc.approve(address(juniorVault), type(uint256).max);
@@ -417,7 +424,7 @@ contract CfdEngineTest is Test {
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         engine.liquidatePosition(accountId, 1e8, vaultDepth);
 
-        engine.setRiskParams(
+        engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
@@ -430,6 +437,8 @@ contract CfdEngineTest is Test {
                 bountyBps: 15
             })
         );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
 
         uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth);
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");

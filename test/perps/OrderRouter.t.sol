@@ -114,7 +114,10 @@ contract OrderRouterTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        uint256 t = block.timestamp + 48 hours + 1;
+        vm.warp(t);
+        clearinghouse.finalizeAssetConfig();
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -132,9 +135,17 @@ contract OrderRouterTest is Test {
             new bool[](0)
         );
 
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        clearinghouse.proposeOperator(address(engine), true);
+        t += 48 hours + 1;
+        vm.warp(t);
+        clearinghouse.finalizeWithdrawGuard();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        t += 48 hours + 1;
+        vm.warp(t);
+        clearinghouse.finalizeOperator();
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -359,8 +370,6 @@ contract OrderRouterPythTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
-
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
@@ -376,12 +385,22 @@ contract OrderRouterPythTest is Test {
 
         router =
             new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        clearinghouse.proposeOperator(address(engine), true);
+        uint256 t = block.timestamp + 48 hours + 1;
+        vm.warp(t);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        t += 48 hours + 1;
+        vm.warp(t);
+        clearinghouse.finalizeOperator();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
@@ -395,6 +414,8 @@ contract OrderRouterPythTest is Test {
         clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
+
+        vm.warp(1);
     }
 
     function test_MevCheck_RevertsInsteadOfCancelling() public {
@@ -846,7 +867,6 @@ contract FadStalenessTest is Test {
         });
 
         clearinghouse = new MarginClearinghouse();
-        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
@@ -863,12 +883,20 @@ contract FadStalenessTest is Test {
 
         router =
             new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
-
-        clearinghouse.setOperator(address(engine), true);
-        clearinghouse.setOperator(address(router), true);
-        clearinghouse.setWithdrawGuard(address(engine));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        clearinghouse.proposeWithdrawGuard(address(engine));
+        clearinghouse.proposeOperator(address(engine), true);
+        vm.warp(48 hours + 2);
+        clearinghouse.finalizeAssetConfig();
+        clearinghouse.finalizeWithdrawGuard();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        vm.warp(96 hours + 3);
+        clearinghouse.finalizeOperator();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
@@ -897,6 +925,44 @@ contract FadStalenessTest is Test {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         require(size == 10_000 * 1e18, "setUp: position not opened");
+    }
+
+    function _currentTimestamp() internal view returns (uint256 ts) {
+        assembly {
+            ts := timestamp()
+        }
+    }
+
+    function _addFadDays(
+        uint256[] memory timestamps
+    ) internal {
+        engine.proposeAddFadDays(timestamps);
+        vm.warp(_currentTimestamp() + 48 hours + 1);
+        engine.finalizeAddFadDays();
+    }
+
+    function _removeFadDays(
+        uint256[] memory timestamps
+    ) internal {
+        engine.proposeRemoveFadDays(timestamps);
+        vm.warp(_currentTimestamp() + 48 hours + 1);
+        engine.finalizeRemoveFadDays();
+    }
+
+    function _setFadMaxStaleness(
+        uint256 val
+    ) internal {
+        engine.proposeFadMaxStaleness(val);
+        vm.warp(_currentTimestamp() + 48 hours + 1);
+        engine.finalizeFadMaxStaleness();
+    }
+
+    function _setFadRunway(
+        uint256 val
+    ) internal {
+        engine.proposeFadRunway(val);
+        vm.warp(_currentTimestamp() + 48 hours + 1);
+        engine.finalizeFadRunway();
     }
 
     function test_FadWindow_CloseOrder_AcceptsStalePrice() public {
@@ -1078,37 +1144,37 @@ contract FadStalenessTest is Test {
     // ==========================================
 
     function test_Admin_AddFadDay() public {
-        vm.warp(WEDNESDAY_NOON);
-        assertFalse(engine.isFadWindow());
-
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
+        vm.warp(WEDNESDAY_NOON);
         assertTrue(engine.isFadWindow(), "Wednesday should be FAD after admin override");
     }
 
     function test_Admin_RemoveFadDay() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
         vm.warp(WEDNESDAY_NOON);
         assertTrue(engine.isFadWindow());
 
-        engine.removeFadDays(timestamps);
+        _removeFadDays(timestamps);
+
+        vm.warp(WEDNESDAY_NOON);
         assertFalse(engine.isFadWindow(), "FAD override should be removed");
     }
 
     function test_Admin_SetFadMaxStaleness() public {
         assertEq(engine.fadMaxStaleness(), 3 days);
-        engine.setFadMaxStaleness(5 days);
+        _setFadMaxStaleness(5 days);
         assertEq(engine.fadMaxStaleness(), 5 days);
     }
 
     function test_Admin_SetFadMaxStaleness_ZeroReverts() public {
         vm.expectRevert(CfdEngine.CfdEngine__ZeroStaleness.selector);
-        engine.setFadMaxStaleness(0);
+        engine.proposeFadMaxStaleness(0);
     }
 
     function test_Admin_AddFadDays_NonOwner_Reverts() public {
@@ -1117,20 +1183,19 @@ contract FadStalenessTest is Test {
 
         vm.prank(alice);
         vm.expectRevert();
-        engine.addFadDays(timestamps);
+        engine.proposeAddFadDays(timestamps);
     }
 
     function test_Admin_EmptyDays_Reverts() public {
         uint256[] memory empty = new uint256[](0);
         vm.expectRevert(CfdEngine.CfdEngine__EmptyDays.selector);
-        engine.addFadDays(empty);
+        engine.proposeAddFadDays(empty);
     }
 
     function test_AdminFadDay_CloseOnlyEnforced() public {
-        // Mark Monday as FAD
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = MONDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
         // Price from Sunday night (~14h stale, within fadMaxStaleness)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), MONDAY_NOON - 14 hours);
@@ -1335,10 +1400,9 @@ contract FadStalenessTest is Test {
     // ==========================================
 
     function test_Runway_FadActivatesBeforeHoliday() public {
-        // Mark Wednesday as holiday
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
         // Tuesday 20:59 UTC: 3h01m before midnight => outside runway
         uint256 tuesdayBeforeRunway = WEDNESDAY_NOON - 12 hours - 1; // 23:59:59 minus 3h = 20:59:59
@@ -1363,7 +1427,7 @@ contract FadStalenessTest is Test {
     function test_Runway_OracleFrozenOnlyOnHolidayDay() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
 
@@ -1397,7 +1461,7 @@ contract FadStalenessTest is Test {
     function test_Runway_MevStillEnforcedDuringRunway() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
+        _addFadDays(timestamps);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
         uint256 runwayTime = wednesdayMidnight - 2 hours;
@@ -1420,20 +1484,20 @@ contract FadStalenessTest is Test {
 
     function test_Runway_SetFadRunway() public {
         assertEq(engine.fadRunwaySeconds(), 3 hours);
-        engine.setFadRunway(6 hours);
+        _setFadRunway(6 hours);
         assertEq(engine.fadRunwaySeconds(), 6 hours);
     }
 
     function test_Runway_TooLong_Reverts() public {
         vm.expectRevert(CfdEngine.CfdEngine__RunwayTooLong.selector);
-        engine.setFadRunway(25 hours);
+        engine.proposeFadRunway(25 hours);
     }
 
     function test_Runway_ZeroDisablesLookahead() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
-        engine.addFadDays(timestamps);
-        engine.setFadRunway(0);
+        _addFadDays(timestamps);
+        _setFadRunway(0);
 
         uint256 wednesdayMidnight = WEDNESDAY_NOON - 12 hours;
 

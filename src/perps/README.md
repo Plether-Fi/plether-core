@@ -163,9 +163,9 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 
 This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
 
-**Admin FAD Days**: The protocol owner can designate additional FAD days via `addFadDays()` / `removeFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed.
+**Admin FAD Days**: The protocol owner can designate additional FAD days via `proposeAddFadDays()` / `proposeRemoveFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed.
 
-**Deleverage Runway**: Admin holidays lack the natural 3-hour runway that weekends get (Friday 19:00→22:00). To compensate, `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable via `setFadRunway()`) triggers `isFadWindow()` N seconds before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins are enforced while the oracle remains live with normal staleness and MEV checks — giving keepers time to liquidate over-leveraged positions before the oracle freezes at midnight.
+**Deleverage Runway**: Admin holidays lack the natural 3-hour runway that weekends get (Friday 19:00→22:00). To compensate, `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable via `proposeFadRunway()`) triggers `isFadWindow()` N seconds before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins are enforced while the oracle remains live with normal staleness and MEV checks — giving keepers time to liquidate over-leveraged positions before the oracle freezes at midnight.
 
 ## Fee Structure
 
@@ -175,6 +175,39 @@ This prevents the Friday 19:00-22:00 gap from being exploitable -- during this p
 | Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
 Accumulated fees are withdrawn by the protocol owner via `withdrawFees()`.
+
+## Governance
+
+### 48-Hour Timelock
+
+All admin parameter changes follow a **propose → wait 48 hours → finalize** pattern:
+
+1. **Propose**: Owner calls `proposeX(newValue)` — stores the pending value and sets `activationTime = now + 48h`
+2. **Wait**: The 48-hour delay gives users and monitoring systems time to detect the change and react (exit positions, withdraw LP capital)
+3. **Finalize**: After 48 hours, owner calls `finalizeX()` — applies the pending value and clears the proposal
+4. **Cancel**: Owner can call `cancelXProposal()` at any time to abort a pending change
+
+Timelocked parameters:
+
+| Contract | Parameters |
+|----------|-----------|
+| CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds` |
+| HousePool | `seniorRateBps`, `markStalenessLimit` |
+| OrderRouter | `maxOrderAge`, `minKeeperFee` |
+| MarginClearinghouse | operator status, withdraw guard, asset configs (LTV, oracle) |
+
+**Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.
+
+### Emergency Pause
+
+The protocol includes an instant circuit breaker for incident response:
+
+| Contract | Paused Actions | Always Active |
+|----------|---------------|---------------|
+| OrderRouter | `commitOrder` | `executeOrder`, `executeLiquidation`, `updateMarkPrice` |
+| HousePool | `depositSenior`, `depositJunior` | `withdrawSenior`, `withdrawJunior`, `reconcile` |
+
+Only the owner can pause/unpause. Protective actions (closes, liquidations, withdrawals) are never blocked.
 
 ## Key Constants
 
