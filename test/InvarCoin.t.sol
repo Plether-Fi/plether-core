@@ -1641,34 +1641,34 @@ contract InvarCoinTest is Test {
         );
     }
 
-    function test_LpWithdraw_SurvivesStaleOracleWithPendingYield() public {
+    function test_LpWithdraw_RevertsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
-        oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
 
-        assertGt(usdcOut + bearOut, 0, "lpWithdraw should succeed despite stale oracle + pending yield");
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.lpWithdraw(shares, 0, 0);
     }
 
-    function test_Withdraw_SucceedsWithStaleOracleAndPendingYield() public {
+    function test_Withdraw_RevertsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
 
         curve.setVirtualPrice(1.05e18);
-        oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         uint256 shares = ic.balanceOf(alice);
-        vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
 
-        assertGt(usdcOut, 0, "withdraw should succeed despite stale oracle + pending yield");
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.withdraw(shares, alice, 0);
     }
 
     function test_DeployToCurve_SucceedsWithStaleOracle() public {
@@ -1878,22 +1878,19 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
-    function test_WithdrawLivenessOnStaleOracle() public {
+    function test_WithdrawRevertsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         uint256 aliceShares = ic.deposit(100_000e6, alice, 0);
 
         ic.deployToCurve(0);
 
-        // Simulate VP growth so _harvestSafe() has yield to try capturing
         curve.setVirtualPrice(curve.virtualPrice() * 105 / 100);
 
-        // Make oracle stale (older than ORACLE_TIMEOUT = 24 hours)
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
-        // withdraw should still work — _harvestSafe() skips gracefully
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(aliceShares, alice, 0);
-        assertGt(usdcOut, 0, "Withdrawal should succeed with stale oracle");
+        vm.expectRevert();
+        ic.withdraw(aliceShares, alice, 0);
     }
 
     function test_MicroHarvestPreservesCostBasis() public {
@@ -1978,7 +1975,7 @@ contract InvarCoinTest is Test {
         assertGt(usdcOut + bearOut, 0, "lpWithdraw must succeed when get_virtual_price reverts");
     }
 
-    function test_WithdrawLiveness_CurveLpPriceReverts() public {
+    function test_WithdrawReverts_CurveLpPriceRevertsWithPendingYield() public {
         vm.prank(alice);
         uint256 shares = ic.deposit(100_000e6, alice, 0);
         ic.deployToCurve(0);
@@ -1988,8 +1985,8 @@ contract InvarCoinTest is Test {
         vm.mockCallRevert(address(curve), abi.encodeWithSignature("lp_price()"), "Curve bricked");
 
         vm.prank(alice);
-        uint256 usdcOut = ic.withdraw(shares, alice, 0);
-        assertGt(usdcOut, 0, "withdraw must succeed when lp_price reverts");
+        vm.expectRevert();
+        ic.withdraw(shares, alice, 0);
     }
 
     function test_SetEmergencyMode_BrickedCurve_WithdrawViaLpWithdraw() public {
@@ -2056,12 +2053,6 @@ contract InvarCoinTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
         ic.setEmergencyMode();
-    }
-
-    function test_HarvestSafeExternal_RejectsDirectCalls() public {
-        vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__Unauthorized.selector);
-        ic.harvestSafeExternal(1000);
     }
 
     // ==========================================
@@ -3602,6 +3593,80 @@ contract InvarCoinPermitTest is Test {
         vm.prank(signer);
         vm.expectRevert(InvarCoin.InvarCoin__PermitFailed.selector);
         ic.depositWithPermit(amount, signer, 0, deadline, 27, bytes32(uint256(1)), bytes32(uint256(2)));
+    }
+
+}
+
+contract HarvestBypassTest is Test {
+
+    InvarCoin public ic;
+    StakedToken public sInvar;
+    MockUSDC6 public usdc;
+    MockBEAR public bearToken;
+    MockCurvePool public curve;
+    MockCurveLpToken public curveLp;
+    MockOracle public oracle;
+
+    address public alice = makeAddr("alice");
+
+    uint256 constant ORACLE_PRICE = 120_000_000;
+
+    function setUp() public {
+        vm.warp(100_000);
+
+        usdc = new MockUSDC6();
+        oracle = new MockOracle(int256(ORACLE_PRICE), "plDXY Basket");
+        bearToken = new MockBEAR();
+        curveLp = new MockCurveLpToken();
+        curve = new MockCurvePool(address(usdc), address(bearToken), address(curveLp));
+        curve.setPriceMultiplier(1.2e18);
+
+        ic = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+
+        sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
+        ic.setStakedInvarCoin(address(sInvar));
+
+        usdc.mint(alice, 1_000_000e6);
+        vm.prank(alice);
+        usdc.approve(address(ic), type(uint256).max);
+    }
+
+    function test_WithdrawRevertsWhenYieldPendingAndOracleStale() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(1.1e18);
+
+        assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
+
+        uint256 shares = ic.balanceOf(alice);
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.withdraw(shares / 2, alice, 0);
+    }
+
+    function test_LpWithdrawRevertsWhenYieldPendingAndOracleStale() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(1.1e18);
+
+        assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
+
+        uint256 shares = ic.balanceOf(alice);
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        ic.lpWithdraw(shares / 2, 0, 0);
     }
 
 }
