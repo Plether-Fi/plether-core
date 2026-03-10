@@ -608,9 +608,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         pos.maxProfitUsdc -= maxProfitReduction;
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
 
-        int256 proportionalVpi = (pos.vpiAccrued * int256(order.sizeDelta)) / int256(pos.size);
-        pos.vpiAccrued -= proportionalVpi;
-
         uint256 entryNotionalReduction = order.sizeDelta * pos.entryPrice;
         if (pos.side == CfdTypes.Side.BULL) {
             globalBullEntryNotional -= entryNotionalReduction;
@@ -627,8 +624,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
 
-        if (proportionalVpi + vpiUsdc < 0) {
-            vpiUsdc = -proportionalVpi;
+        uint256 originalSize = pos.size + order.sizeDelta;
+        int256 proportionalAccrual = (pos.vpiAccrued * int256(order.sizeDelta)) / int256(originalSize);
+        pos.vpiAccrued -= proportionalAccrual;
+
+        if (proportionalAccrual + vpiUsdc < 0) {
+            vpiUsdc = -proportionalAccrual;
         }
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
