@@ -232,6 +232,19 @@ When a position goes underwater (equity < 0):
 - **Impact**: MMs opening when the vault is small (earning large rebates) and closing when the vault is large (paying small charges) net a small profit from VPI alone.
 - **Mitigation**: This is symmetric risk — vault depth could also decrease between open and close, increasing the VPI charge. The MM bears directional risk during the holding period. The effect is bounded by vault depth volatility over the position's lifetime.
 
+#### Bidirectional VPI Clamp Zeroes MM Rebates
+
+- **Behavior**: On close, `proportionalAccrual + vpiUsdc` is clamped ≥ 0. An MM who heals skew on both open (earning a rebate) and close (also healing skew) has the close rebate cancelled: the clamp forces `vpiUsdc = -proportionalAccrual`, netting the lifetime VPI to zero.
+- **Impact**: MMs cannot profit from VPI rebates alone. Both the open rebate and the close rebate are zeroed out over the position lifetime.
+- **Why this is necessary**: Removing the bidirectional clamp to allow MM rebate retention enables the C02a depth-change attack: a trader opens at low vault depth (earning a large rebate), an LP inflates the vault, the trader closes at high depth (paying a small charge), netting ~$15/round-trip. This is infinitely repeatable via LP sandwich and strictly worse than zeroing MM rebates.
+- **Rationale**: MMs must earn spread through directional price movement, not VPI rebates. The protocol prioritizes preventing infinite extraction over rewarding market-making.
+
+#### Linear VPI Chunking on Partial Close
+
+- **Behavior**: On partial close, VPI accrual is released proportionally to the fraction of size closed (`vpiAccrued × sizeDelta / originalSize`). This is a linear approximation of the quadratic VPI cost curve.
+- **Impact**: Closing in N chunks costs slightly more than closing all at once. Measured: ~$4 error on a 2-chunk close of $400k notional (0.001%).
+- **Rationale**: Accepted approximation. The quadratic integral is path-independent for same start/end skew, but computing exact quadratic chunking would require tracking per-chunk entry skew. The linear approximation is bounded, simple, and prevents the C02a depth attack.
+
 ### FAD (Friday Auto-Deleverage) Edge Cases
 
 #### DST Transitions
@@ -251,7 +264,9 @@ When a position goes underwater (equity < 0):
 #### V1: USDC-Only Cross-Margin
 
 - **Behavior**: While `MarginClearinghouse` supports multiple asset types with LTV haircuts, the CfdEngine exclusively uses USDC for all margin operations (`lockMargin`, `seizeAsset`, `settleUsdc`).
-- **Impact**: Non-USDC collateral types can be deposited and contribute to buying power, but seizure calls target only USDC. If a user's USDC balance is insufficient but they hold other assets, `seizeAsset` reverts.
+- **Guard**: `lockMargin` enforces `balances[accountId][settlementAsset] >= lockedMarginUsdc[accountId] + amountUsdc` — physical USDC must back every dollar of locked margin. Non-USDC collateral inflates buying power (passing the equity check) but cannot substitute for USDC backing.
+- **Impact**: Without this guard, an attacker could deposit small USDC + large WBTC, open a position sized to the inflated buying power, take a loss exceeding their USDC, and socialize the shortfall as bad debt. The guard blocks the position at open.
+- **Remaining limitation**: Settlement-side seizure still targets only USDC. If a user's USDC is depleted by losses but they hold other assets, `seizeAsset` reverts and the deficit becomes bad debt.
 - **Planned**: V2 will add fallback logic in `seizeAsset` to sell non-USDC collateral.
 
 #### No Oracle Staleness in Clearinghouse
