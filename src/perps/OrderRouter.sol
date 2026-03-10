@@ -180,7 +180,10 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 marginDelta,
         uint256 targetPrice,
         bool isClose
-    ) external payable whenNotPaused {
+    ) external payable {
+        if (!isClose) {
+            _requireNotPaused();
+        }
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
         }

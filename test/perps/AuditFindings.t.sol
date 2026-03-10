@@ -12,6 +12,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract MockUSDC is ERC20 {
@@ -883,6 +884,35 @@ contract AuditFindingsTest is Test {
         int256 maxDrop = int256((oldAnnRate * totalElapsed * 2) / 365 days);
 
         assertLe(indexDrop, maxDrop, "Funding must not retroactively apply new rate to pre-finalize period");
+    }
+
+    function test_H03_CloseOrderAllowedWhilePaused() public {
+        _fundJunior(bob, 500_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "Position should be open");
+
+        router.pause();
+
+        vm.prank(alice);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
+
+        router.unpause();
+        router.executeOrder(2, empty);
+
+        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, 0, "Position should be fully closed");
     }
 
 }
