@@ -38,6 +38,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
 
+    uint256 public totalBullMargin;
+    uint256 public totalBearMargin;
+
     uint256 public accumulatedFeesUsdc;
 
     // ==========================================
@@ -284,6 +287,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[order.accountId];
+        uint256 marginSnapshot = pos.margin;
+        CfdTypes.Side marginSide = pos.size > 0 ? pos.side : order.side;
+
         uint256 preSkewUsdc = _getAbsSkewUsdc(price);
 
         if (pos.size > 0 && pos.side != order.side) {
@@ -341,6 +347,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (!order.isClose) {
             _assertPostSolvency();
         }
+
+        uint256 marginAfter = pos.margin;
+        if (marginAfter > marginSnapshot) {
+            if (marginSide == CfdTypes.Side.BULL) {
+                totalBullMargin += marginAfter - marginSnapshot;
+            } else {
+                totalBearMargin += marginAfter - marginSnapshot;
+            }
+        } else if (marginSnapshot > marginAfter) {
+            if (marginSide == CfdTypes.Side.BULL) {
+                totalBullMargin -= marginSnapshot - marginAfter;
+            } else {
+                totalBearMargin -= marginSnapshot - marginAfter;
+            }
+        }
+
         pos.lastUpdateTime = uint64(block.timestamp);
         return 0;
     }
@@ -682,6 +704,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
+        if (pos.side == CfdTypes.Side.BULL) {
+            totalBullMargin -= posMargin;
+        } else {
+            totalBearMargin -= posMargin;
+        }
+
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
     }
@@ -698,13 +726,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         effectiveAssets = vault.totalAssets();
         uint256 fees = accumulatedFeesUsdc;
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
-        int256 unrealizedFunding = _getUnrealizedFundingPnl();
-        if (unrealizedFunding > 0) {
-            effectiveAssets =
-                effectiveAssets > uint256(unrealizedFunding) ? effectiveAssets - uint256(unrealizedFunding) : 0;
-        } else if (unrealizedFunding < 0) {
-            effectiveAssets += uint256(-unrealizedFunding);
+        int256 cappedFunding = _getCappedFundingPnl();
+        if (cappedFunding > 0) {
+            effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
+        } else if (cappedFunding < 0) {
+            effectiveAssets += uint256(-cappedFunding);
         }
+    }
+
+    /// @notice Per-side funding PnL capped at deposited margin.
+    ///         Used by solvency checks — the vault can count funding receivables as economic
+    ///         assets, but only up to the physical margin that backs them.
+    function _getCappedFundingPnl() internal view returns (int256) {
+        int256 bullFunding =
+            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFunding =
+            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+
+        if (bullFunding < -int256(totalBullMargin)) {
+            bullFunding = -int256(totalBullMargin);
+        }
+        if (bearFunding < -int256(totalBearMargin)) {
+            bearFunding = -int256(totalBearMargin);
+        }
+
+        return bullFunding + bearFunding;
     }
 
     function _getUnrealizedFundingPnl() internal view returns (int256) {
@@ -743,6 +789,38 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 bearPnl = int256(bearOI * price) - int256(globalBearEntryNotional);
 
         return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
+    }
+
+    /// @notice Combined MtM: per-side (PnL + funding), capped at deposited margin.
+    ///         Positive = vault owes traders (liability). Negative = traders owe vault (capped asset).
+    ///         PnL and funding share the same margin pool, so they are capped together per side
+    ///         to prevent the vault from recognizing receivables that exceed seizable collateral.
+    function getVaultMtmAdjustment() external view returns (int256) {
+        uint256 price = lastMarkPrice;
+
+        int256 bullPnl;
+        int256 bearPnl;
+        if (price > 0) {
+            bullPnl = (int256(globalBullEntryNotional) - int256(bullOI * price)) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
+            bearPnl = (int256(bearOI * price) - int256(globalBearEntryNotional)) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
+        }
+
+        int256 bullFunding =
+            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFunding =
+            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+
+        int256 bullTotal = bullPnl + bullFunding;
+        int256 bearTotal = bearPnl + bearFunding;
+
+        if (bullTotal < -int256(totalBullMargin)) {
+            bullTotal = -int256(totalBullMargin);
+        }
+        if (bearTotal < -int256(totalBearMargin)) {
+            bearTotal = -int256(totalBearMargin);
+        }
+
+        return bullTotal + bearTotal;
     }
 
 }

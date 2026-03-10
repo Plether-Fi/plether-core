@@ -34,6 +34,10 @@ interface ICfdEngine {
     ///         Positive = traders are net funding receivers (vault liability).
     function getUnrealizedFundingPnl() external view returns (int256);
 
+    /// @notice Combined MtM: per-side (PnL + funding), capped at deposited margin.
+    ///         Positive = vault owes traders (liability). Negative = traders owe vault (capped asset).
+    function getVaultMtmAdjustment() external view returns (int256);
+
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
 

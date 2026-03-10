@@ -227,10 +227,10 @@ contract AuditFindingsTest is Test {
 
         address dave = address(0x444);
         _fundTrader(carol, 50_000 * 1e6);
-        _fundTrader(dave, 50_000 * 1e6);
+        _fundTrader(dave, 200_000 * 1e6);
 
         vm.prank(dave);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 200_000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
@@ -249,7 +249,7 @@ contract AuditFindingsTest is Test {
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);
 
-        assertGt(sizeAfter, sizeBefore, "Order should succeed: unsettled funding credit covers vault depletion");
+        assertGt(sizeAfter, sizeBefore, "Capped funding receivable covers vault depletion within margin bounds");
         assertLt(engine.getUnrealizedFundingPnl(), 0, "Net payers have negative unrealized funding (vault is owed)");
     }
 
@@ -988,6 +988,253 @@ contract C02VpiDepthTest is Test {
 }
 
 // ==========================================
+// Margin-Capped MtM: per-side margin cap prevents phantom profits
+// ==========================================
+
+contract MarginCappedMtmTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault seniorVault;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    receive() external payable {}
+
+    function setUp() public {
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse();
+        clearinghouse.supportAsset(address(usdc), 6, 10_000, address(0));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+
+        clearinghouse.setOperator(address(engine), true);
+        clearinghouse.setOperator(address(router), true);
+        clearinghouse.setWithdrawGuard(address(engine));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function test_MarginTracking_IncreasesOnOpen() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        assertEq(engine.totalBullMargin(), 0);
+        assertEq(engine.totalBearMargin(), 0);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        assertEq(engine.totalBullMargin(), 0, "Bull margin unchanged");
+        assertGt(engine.totalBearMargin(), 0, "Bear margin tracked after open");
+    }
+
+    function test_MarginTracking_DecreasesOnClose() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 bearMarginAfterOpen = engine.totalBearMargin();
+        assertGt(bearMarginAfterOpen, 0);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
+        router.executeOrder(2, empty);
+
+        assertEq(engine.totalBearMargin(), 0, "Bear margin zero after full close");
+    }
+
+    function test_MarginTracking_PartialClose() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 bearMarginFull = engine.totalBearMargin();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 50_000e18, 0, 1e8, true);
+        router.executeOrder(2, empty);
+
+        uint256 bearMarginHalf = engine.totalBearMargin();
+        assertLt(bearMarginHalf, bearMarginFull, "Margin decreases on partial close");
+        assertGt(bearMarginHalf, 0, "Margin still tracked for remaining position");
+    }
+
+    function test_MarginTracking_ZeroAfterLiquidation() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 2000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        assertGt(engine.totalBearMargin(), 0);
+
+        bytes[] memory liqPrice = new bytes[](1);
+        liqPrice[0] = abi.encode(uint256(0.5e8));
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        router.executeLiquidation(accountId, liqPrice);
+
+        assertEq(engine.totalBearMargin(), 0, "Bear margin zero after liquidation");
+    }
+
+    function test_PhantomProfitCappedAtMargin() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        // Price drops to $0.50 — BEAR loses $100k notionally but only has $10k margin
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.5e8));
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
+        router.executeOrder(2, priceData);
+
+        int256 uncappedPnl = engine.getUnrealizedTraderPnl();
+        int256 cappedMtm = engine.getVaultMtmAdjustment();
+
+        // Uncapped shows a huge vault gain (traders losing more than margin)
+        assertLt(uncappedPnl, -int256(engine.totalBearMargin()), "Uncapped loss exceeds deposited margin");
+        // Capped MtM bounds it at physical margin
+        assertGe(cappedMtm, -int256(engine.totalBearMargin() + engine.totalBullMargin()), "Capped MtM bounded");
+        assertGt(cappedMtm, uncappedPnl, "Capped MtM is less aggressive than uncapped");
+    }
+
+    function test_ReconcileDoesNotInflateBeyondMargin() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+
+        // Price drops to $0.50 — massive notional loss for BEAR, capped at margin
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.5e8));
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
+        router.executeOrder(2, priceData);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 juniorAfter = pool.juniorPrincipal();
+
+        uint256 revenue = juniorAfter > juniorBefore ? juniorAfter - juniorBefore : 0;
+        // Revenue recognized must not exceed total deposited margin
+        assertLe(
+            revenue,
+            engine.totalBearMargin() + engine.totalBullMargin(),
+            "Recognized revenue must not exceed seizable margin"
+        );
+    }
+
+    function test_MtmAdjustment_PositiveWhenTradersWinning() public {
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        // Price rises to $1.20 — BEAR profits (vault liability)
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1.2e8));
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
+        router.executeOrder(2, priceData);
+
+        int256 mtm = engine.getVaultMtmAdjustment();
+        assertGt(mtm, 0, "Positive MtM = vault liability when traders are winning (no cap needed)");
+    }
+
+    function test_MtmAdjustment_ZeroWithNoPositions() public {
+        _fundJunior(bob, 500_000e6);
+        assertEq(engine.getVaultMtmAdjustment(), 0, "MtM should be zero with no positions");
+    }
+
+}
+
+// ==========================================
 // H-03: Stale order auto-expiry prevents zero-fee queue spam
 // ==========================================
 
@@ -1536,10 +1783,10 @@ contract NegativeFundingFreeUsdcTest is Test {
         uint256 reservedWithoutFunding = maxLiability + pendingFees;
         uint256 freeWithoutFunding = bal > reservedWithoutFunding ? bal - reservedWithoutFunding : 0;
 
-        // getFreeUSDC currently returns the same as if negative funding didn't exist
-        // After the fix, it should return MORE (negative funding = house asset = less reserved)
-        assertGt(
-            freeUsdcNow, freeWithoutFunding, "getFreeUSDC should account for negative funding by reducing reserved"
+        // getFreeUSDC uses asymmetric accounting for physical liquidity:
+        // negative funding (vault receivable) must NOT reduce reserves, since it's illiquid
+        assertEq(
+            freeUsdcNow, freeWithoutFunding, "getFreeUSDC must not reduce reserves by illiquid funding receivables"
         );
     }
 

@@ -55,6 +55,14 @@ These properties must always hold. Violation indicates a critical bug.
 | **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
+### Mark-to-Market Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **Per-Side Margin Cap** | `getVaultMtmAdjustment()` computes per-side `(PnL + funding)` capped at `totalBullMargin` / `totalBearMargin` — the vault never recognizes unrealized receivables exceeding deposited collateral |
+| **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive funding/PnL). Illiquid receivables never reduce physical reserves |
+| **Margin Tracking** | `totalBullMargin + totalBearMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
+
 ### Funding Invariants
 
 | Invariant | Description |

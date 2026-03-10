@@ -196,9 +196,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
         int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
         if (unrealizedFunding > 0) {
             reserved += uint256(unrealizedFunding);
-        } else if (unrealizedFunding < 0) {
-            uint256 fundingAsset = uint256(-unrealizedFunding);
-            reserved = reserved > fundingAsset ? reserved - fundingAsset : 0;
         }
         return bal > reserved ? bal - reserved : 0;
     }
@@ -250,23 +247,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step {
 
         uint256 bal = USDC.balanceOf(address(this));
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
-        uint256 reserved = pendingFees;
-        int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
-        uint256 effectiveBal = bal;
-        if (unrealizedFunding > 0) {
-            reserved += uint256(unrealizedFunding);
-        } else if (unrealizedFunding < 0) {
-            effectiveBal += uint256(-unrealizedFunding);
-        }
-        uint256 cashMinusReserved = effectiveBal > reserved ? effectiveBal - reserved : 0;
+        uint256 cashMinusFees = bal > pendingFees ? bal - pendingFees : 0;
 
-        int256 traderPnl = ENGINE.getUnrealizedTraderPnl();
+        int256 mtm = ENGINE.getVaultMtmAdjustment();
         uint256 distributable;
-        if (traderPnl >= 0) {
-            uint256 mtmReserve = uint256(traderPnl);
-            distributable = cashMinusReserved > mtmReserve ? cashMinusReserved - mtmReserve : 0;
+        if (mtm >= 0) {
+            distributable = cashMinusFees > uint256(mtm) ? cashMinusFees - uint256(mtm) : 0;
         } else {
-            distributable = cashMinusReserved + uint256(-traderPnl);
+            distributable = cashMinusFees + uint256(-mtm);
         }
 
         if (distributable > claimedEquity) {

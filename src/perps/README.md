@@ -96,6 +96,38 @@ Zone 2 creates a "wall of APY" that forces arbitrageurs to delta-neutralize the 
 
 Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track funding owed per unit of size at 18-decimal (WAD) precision to prevent truncation at short keeper intervals. User funding PnL = `size × (currentIndex - entryIndex) / FUNDING_INDEX_SCALE`. No gas-heavy loops across users.
 
+## Margin-Capped Mark-to-Market
+
+The engine values LP equity using O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`, funding indexes). This gives real-time aggregate PnL without iterating positions, but introduces a subtlety: the linear formula can report vault "gains" that exceed the physical margin deposited by losing traders. With high leverage, a side's aggregate unrealized loss can far exceed their aggregate deposited margin — the vault would only ever seize the margin, not the full linear loss.
+
+### Per-Side Margin Cap
+
+Two counters — `totalBullMargin` and `totalBearMargin` — track the aggregate deposited margin for each side. The combined MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding` and caps each side's receivable at its deposited margin:
+
+```
+bullTotal = bullPnl + bullFunding
+bearTotal = bearPnl + bearFunding
+
+if bullTotal < -totalBullMargin: bullTotal = -totalBullMargin
+if bearTotal < -totalBearMargin: bearTotal = -totalBearMargin
+
+return bullTotal + bearTotal
+```
+
+PnL and funding share the same margin pool (a position's equity = margin + PnL + funding), so they must be capped together to avoid double-counting.
+
+### Layered Conservatism
+
+Different protocol functions require different levels of conservatism:
+
+| Function | Purpose | Approach | Rationale |
+|----------|---------|----------|-----------|
+| `_reconcile()` | LP equity valuation | Capped symmetric MtM | Accurate share pricing, bounded by physical margin |
+| `getFreeUSDC()` | LP withdrawal limits | Asymmetric (liabilities only) | Cash leaving the vault must exist physically — never offset reserves by uncollected receivables |
+| `_getEffectiveAssets()` | Position solvency | Capped symmetric funding | Economic solvency allows counting receivables up to margin cap |
+
+The junior tranche naturally absorbs any realized bad debt through the existing reconciliation waterfall — no insurance fund or ADL mechanism is needed.
+
 ## Risk Management & Liquidations
 
 ### Opposing Position Restriction
