@@ -965,8 +965,7 @@ contract FadStalenessTest is Test {
         engine.finalizeFadRunway();
     }
 
-    function test_FadWindow_CloseOrder_AcceptsStalePrice() public {
-        // Friday price (~18h stale) should be accepted during Saturday FAD
+    function test_FadWindow_CloseOrder_BlockedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -974,14 +973,11 @@ contract FadStalenessTest is Test {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Close should succeed during FAD with stale price");
     }
 
-    function test_FadWindow_OpenOrder_Rejected() public {
+    function test_FadWindow_OpenOrder_BlockedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -989,15 +985,11 @@ contract FadStalenessTest is Test {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
-
-        assertEq(router.nextExecuteId(), 3, "Queue must advance");
-        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
-    function test_FadWindow_MevCheckBypassed() public {
-        // publishTime from Friday < commitTime on Saturday → would normally trigger MEV cancel
-        // During FAD this is expected (frozen prices) and should NOT cancel
+    function test_FadWindow_MevCheckMoot_FrozenReverts() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -1005,15 +997,11 @@ contract FadStalenessTest is Test {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Close should succeed - MEV check bypassed during FAD");
     }
 
-    function test_FadWindow_ExcessStaleness_StillCancels() public {
-        // Price from 4 days ago exceeds 3-day fadMaxStaleness
+    function test_FadWindow_ExcessStaleness_FrozenReverts() public {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -1022,11 +1010,8 @@ contract FadStalenessTest is Test {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "Position unchanged - excess staleness still cancels during FAD");
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
@@ -1054,38 +1039,19 @@ contract FadStalenessTest is Test {
         router.executeLiquidation(aliceId, empty);
     }
 
-    function test_FadBatch_CloseOnlyEnforced() public {
-        address carol = address(0x333);
-        usdc.mint(carol, 10_000 * 1e6);
-        vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
-        vm.stopPrank();
-
+    function test_FadBatch_BlockedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
-
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        router.executeOrderBatch(3, empty);
-
-        assertEq(router.nextExecuteId(), 4, "All orders consumed");
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
-        assertEq(aliceSize, 5000 * 1e18, "Alice close partially succeeded");
-
-        bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
-        assertEq(carolSize, 0, "Carol open rejected during FAD");
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
+        router.executeOrderBatch(2, empty);
     }
 
-    function test_FadBatch_ExcessStaleness_Reverts() public {
+    function test_FadBatch_ExcessStaleness_FrozenReverts() public {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -1094,7 +1060,7 @@ contract FadStalenessTest is Test {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrderBatch(2, empty);
     }
 
@@ -1192,12 +1158,11 @@ contract FadStalenessTest is Test {
         engine.proposeAddFadDays(empty);
     }
 
-    function test_AdminFadDay_CloseOnlyEnforced() public {
+    function test_AdminFadDay_BlockedDuringFrozen() public {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = MONDAY_NOON;
         _addFadDays(timestamps);
 
-        // Price from Sunday night (~14h stale, within fadMaxStaleness)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), MONDAY_NOON - 14 hours);
 
         vm.warp(MONDAY_NOON);
@@ -1207,10 +1172,8 @@ contract FadStalenessTest is Test {
 
         vm.warp(MONDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
-
-        assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
     }
 
     // ==========================================
@@ -1278,7 +1241,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
+        assertGt(router.claimableEth(alice), 0, "User must be refunded on FAD rejection");
     }
 
     function test_FridayGap_StalenessStill60s() public {
@@ -1373,7 +1336,7 @@ contract FadStalenessTest is Test {
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
+        assertGt(router.claimableEth(alice), 0, "User must be refunded on FAD rejection");
     }
 
     function test_SundayDst_WinterStalenessRejects() public {
@@ -1443,7 +1406,7 @@ contract FadStalenessTest is Test {
         vm.warp(wednesdayMidnight - 3 hours + 50);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
-        assertEq(router.claimableEth(alice), 0, "User fault: keeper gets fee, not user");
+        assertGt(router.claimableEth(alice), 0, "User must be refunded on FAD rejection");
 
         // Close order with fresh price should succeed (MEV check still active)
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 51);
