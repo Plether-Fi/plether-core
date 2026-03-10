@@ -354,10 +354,9 @@ contract AuditFindingsTest is Test {
             clearinghouse.balances(accountId, address(usdc)) - clearinghouse.lockedMarginUsdc(accountId);
         assertGt(freeBalance, 0, "Alice should have free balance");
 
-        uint256 balBefore = usdc.balanceOf(alice);
         vm.prank(alice);
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(accountId, address(usdc), freeBalance);
-        assertEq(usdc.balanceOf(alice) - balBefore, freeBalance, "Free equity withdrawable with open position");
     }
 
     function test_Finding8_WithdrawAllowedAfterClose() public {
@@ -913,6 +912,30 @@ contract AuditFindingsTest is Test {
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Position should be fully closed");
+    }
+
+    function test_C01_WithdrawGuardBlocksWithdrawWithOpenPosition() public {
+        _fundJunior(bob, 500_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "Position should be open");
+
+        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 usdcBal = clearinghouse.balances(accountId, address(usdc));
+        uint256 free = usdcBal - locked;
+        assertGt(free, 0, "Alice should have free USDC to withdraw");
+
+        vm.prank(alice);
+        vm.expectRevert();
+        clearinghouse.withdraw(accountId, address(usdc), free);
     }
 
 }

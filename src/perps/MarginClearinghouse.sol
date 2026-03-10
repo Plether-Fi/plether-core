@@ -228,6 +228,9 @@ contract MarginClearinghouse is Ownable2Step {
         if (bytes32(uint256(uint160(msg.sender))) != accountId) {
             revert MarginClearinghouse__NotAccountOwner();
         }
+        if (address(withdrawGuard) != address(0)) {
+            withdrawGuard.checkWithdraw(accountId);
+        }
         if (balances[accountId][asset] < amount) {
             revert MarginClearinghouse__InsufficientBalance();
         }
