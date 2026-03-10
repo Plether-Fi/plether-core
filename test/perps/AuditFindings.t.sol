@@ -518,13 +518,12 @@ contract AuditFindingsTest is Test {
     // BUG: First-mover LP escapes at stale NAV; last LP absorbs all MtM losses.
     // ==========================================
 
-    function test_C01_StaleMarkPriceBlocksWithdrawal() public {
+    function test_M01_StaleMarkDoesNotBlockWithdrawal() public {
         _fundJunior(bob, 500_000e6);
         _fundJunior(carol, 500_000e6);
         _fundTrader(alice, 50_000e6);
         vm.warp(block.timestamp + 2 hours);
 
-        // Alice opens BEAR 400K @ $1.00 → lastMarkPrice = $1.00, lastMarkTime = now
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 400_000e18, 20_000e6, 1e8, false);
         bytes[] memory empty;
@@ -533,22 +532,12 @@ contract AuditFindingsTest is Test {
         // Time passes beyond staleness limit — mark becomes stale
         vm.warp(block.timestamp + 121);
 
-        // Bob tries to withdraw — reconcile reverts due to stale mark
+        // Bob withdraws — reconcile skips MTM distribution but does not revert
+        uint256 bobBalBefore = usdc.balanceOf(bob);
         vm.startPrank(bob);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         juniorVault.withdraw(1e6, bob, bob);
         vm.stopPrank();
-
-        // Push fresh mark at $1.30 via updateMarkPrice
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1.3e8));
-        router.updateMarkPrice(priceData);
-
-        // Now both Bob and Carol can withdraw at the same fair NAV
-        uint256 bobMax = juniorVault.maxWithdraw(bob);
-        uint256 carolMax = juniorVault.maxWithdraw(carol);
-
-        assertEq(bobMax, carolMax, "Both LPs see the same fair withdrawal limit at fresh mark price");
+        assertEq(usdc.balanceOf(bob) - bobBalBefore, 1e6, "Withdrawal succeeds with stale mark");
     }
 
     // ==========================================

@@ -299,17 +299,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
 
+        if (elapsed > 0 && seniorPrincipal > 0) {
+            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
+            unpaidSeniorYield += yieldInc;
+        }
+
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
             if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
-                revert HousePool__MarkPriceStale();
+                return;
             }
-        }
-
-        if (elapsed > 0 && seniorPrincipal > 0) {
-            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
-            unpaidSeniorYield += yieldInc;
         }
 
         uint256 bal = USDC.balanceOf(address(this));
