@@ -7,22 +7,9 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 import {Test} from "forge-std/Test.sol";
-
-contract MockUSDC is ERC20 {
-
-    constructor() ERC20("Mock USDC", "USDC") {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
 
 contract PerpHandler is Test {
 
@@ -168,24 +155,13 @@ contract PerpHandler is Test {
 
 }
 
-contract PerpInvariantTest is Test {
+contract PerpInvariantTest is BasePerpTest {
 
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    MarginClearinghouse clearinghouse;
-    OrderRouter router;
-    TrancheVault seniorVault;
-    TrancheVault juniorVault;
     PerpHandler handler;
-
-    uint256 constant CAP_PRICE = 2e8;
     uint256 seniorHighWaterMark;
 
-    function setUp() public {
-        usdc = new MockUSDC();
-
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
@@ -196,62 +172,24 @@ contract PerpInvariantTest is Test {
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
+    }
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 200_000e6;
+    }
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 500_000e6;
+    }
 
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
-
-        pool.setSeniorVault(address(seniorVault));
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        // Seed senior with $200k
-        usdc.mint(address(this), 200_000e6);
-        usdc.approve(address(seniorVault), 200_000e6);
-        seniorVault.deposit(200_000e6, address(this));
-
-        // Seed junior with $500k
-        usdc.mint(address(this), 500_000e6);
-        usdc.approve(address(juniorVault), 500_000e6);
-        juniorVault.deposit(500_000e6, address(this));
+    function setUp() public override {
+        super.setUp();
 
         handler = new PerpHandler(usdc, engine, pool, clearinghouse, router, juniorVault);
 
-        // Seed 3 traders with $10k each in clearinghouse
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
-            bytes32 accountId = bytes32(uint256(uint160(trader)));
-            usdc.mint(trader, 10_000e6);
-            vm.startPrank(trader);
-            usdc.approve(address(clearinghouse), 10_000e6);
-            clearinghouse.deposit(accountId, address(usdc), 10_000e6);
-            vm.stopPrank();
+            _fundTrader(trader, 10_000e6);
         }
 
         seniorHighWaterMark = pool.seniorPrincipal();

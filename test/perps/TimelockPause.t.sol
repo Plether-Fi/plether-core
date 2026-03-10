@@ -6,99 +6,25 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
-import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {Test} from "forge-std/Test.sol";
 
-contract MockUSDC is ERC20 {
+contract TimelockPauseTest is BasePerpTest {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
-
-    function mint(
-        address to,
-        uint256 amount
-    ) external {
-        _mint(to, amount);
-    }
-
-}
-
-contract TimelockPauseTest is Test {
-
-    MockUSDC usdc;
-    CfdEngine engine;
-    HousePool pool;
-    TrancheVault seniorVault;
-    TrancheVault juniorVault;
-    OrderRouter router;
-    MarginClearinghouse clearinghouse;
-
-    uint256 constant CAP_PRICE = 2e8;
     address alice = address(0x111);
     address nonOwner = address(0xBAD);
 
-    receive() external payable {}
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 500_000 * 1e6;
+    }
 
-    function setUp() public {
-        usdc = new MockUSDC();
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 500_000 * 1e6;
+    }
 
-        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
-            vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
-            maintMarginBps: 100,
-            fadMarginBps: 300,
-            minBountyUsdc: 5 * 1e6,
-            bountyBps: 15
-        });
-
-        clearinghouse = new MarginClearinghouse(address(usdc));
-
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
-        vm.warp(48 hours + 1);
-        clearinghouse.finalizeAssetConfig();
-
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
-        pool = new HousePool(address(usdc), address(engine));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC");
-        pool.setSeniorVault(address(seniorVault));
-        pool.setJuniorVault(address(juniorVault));
-        engine.setVault(address(pool));
-
-        router = new OrderRouter(
-            address(engine),
-            address(pool),
-            address(0),
-            new bytes32[](0),
-            new uint256[](0),
-            new uint256[](0),
-            new bool[](0)
-        );
-
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 2);
-        clearinghouse.finalizeWithdrawGuard();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(144 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        engine.setOrderRouter(address(router));
-        pool.setOrderRouter(address(router));
-
-        usdc.mint(address(this), 1_000_000 * 1e6);
-        usdc.approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(500_000 * 1e6, address(this));
-        usdc.approve(address(seniorVault), type(uint256).max);
-        seniorVault.deposit(500_000 * 1e6, address(this));
+    function setUp() public override {
+        super.setUp();
 
         usdc.mint(alice, 50_000 * 1e6);
         vm.startPrank(alice);
@@ -106,18 +32,6 @@ contract TimelockPauseTest is Test {
         clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 50_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
-    }
-
-    function _currentTimestamp() internal view returns (uint256 ts) {
-        assembly {
-            ts := timestamp()
-        }
-    }
-
-    function _warpForward(
-        uint256 delta
-    ) internal {
-        vm.warp(_currentTimestamp() + delta);
     }
 
     // ==========================================
