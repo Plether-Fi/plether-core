@@ -238,6 +238,9 @@ contract MarginClearinghouse is Ownable2Step {
         if (remainingEquity < lockedMarginUsdc[accountId]) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
+        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId]) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        }
 
         IERC20(asset).safeTransfer(msg.sender, amount);
         emit Withdraw(accountId, asset, amount);

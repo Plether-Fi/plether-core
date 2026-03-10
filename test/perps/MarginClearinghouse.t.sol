@@ -217,6 +217,26 @@ contract MarginClearinghouseTest is Test {
         assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Locked margin should be zero after defensive unlock");
     }
 
+    function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {
+        vm.startPrank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+        clearinghouse.deposit(aliceId, address(splDxy), 10_000 * 1e18);
+        vm.stopPrank();
+
+        // splDXY equity = 10_000 * $1.00 * 95% = $9,500
+        // Total equity = $1,000 + $9,500 = $10,500
+
+        vm.prank(engine);
+        clearinghouse.lockMargin(aliceId, 1000 * 1e6);
+        // lockMargin passes: USDC balance (1000) >= locked (1000) ✓
+
+        // Withdraw all USDC. Remaining equity ($9,500 from splDXY) > locked ($1,000),
+        // so the generic equity check passes — but the settlement asset is now $0.
+        vm.prank(alice);
+        vm.expectRevert();
+        clearinghouse.withdraw(aliceId, address(usdc), 1000 * 1e6);
+    }
+
     function test_SupportAsset_InvalidLTV_Reverts() public {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
         clearinghouse.proposeAssetConfig(address(0xBEEF), 18, 10_001, address(0));
