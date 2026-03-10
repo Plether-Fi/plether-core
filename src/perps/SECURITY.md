@@ -339,6 +339,30 @@ Fees are hardcoded (execution = 6 bps, bounty = 15 bps). Funding curve parameter
    - Let keepers clear remaining positions
    - LPs bear losses pro-rata through reduced share value
 
+## Strict Asset Isolation: No External Yield in Core Perpetuals
+
+While the spot synthetic side of Plether utilizes idle USDC for yield generation (via Morpho), the Perpetuals HousePool strictly holds 100% pure, unencumbered USDC. External yield integrations (such as deploying excess House Pool capital to lending markets) are explicitly prohibited at the core clearing layer for the following security and solvency reasons:
+
+### 1. Preservation of Mathematically Bounded Solvency
+
+Plether's primary invariant is its O(1) solvency invariant: the Vault must always hold enough raw capital to pay out the absolute maximum liability of all open positions simultaneously (`vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)`).
+
+Replacing physical USDC with third-party IOUs (e.g., ERC-4626 lending shares) degrades this mathematical guarantee into a third-party liquidity assumption. The protocol would no longer have the cash; it would only have a promise that an external protocol will provide the cash upon request.
+
+### 2. Liquidity Mismatch and Correlation of Crises
+
+Perpetual contracts require instantaneous liquidity. When a market volatility event occurs (e.g., a sudden crash in the US Dollar Index), winning traders will immediately realize profits and withdraw USDC.
+
+However, in DeFi, liquidity crises are highly correlated. During extreme market volatility, lending markets frequently hit 100% utilization as borrowers scramble to avoid liquidations or lenders panic-withdraw. If House Pool capital were deployed to a lending protocol that reached 100% utilization, on-demand withdrawals would revert. This would functionally brick the perpetuals exchange, preventing winning traders from withdrawing their payouts precisely when they need them most.
+
+### 3. Contagion and Smart Contract Risk
+
+Integrating an external yield protocol into the HousePool forces all system participants — Traders, Junior LPs, and Senior LPs — to implicitly assume the smart contract risk, oracle risk, and bad debt risk of that external protocol. Maintaining a strictly isolated USDC pool ensures that an exploit or bad debt event on an external lending market cannot cause systemic contagion that drains the Plether clearinghouse.
+
+### 4. Opt-In Yield via Overlay Vaults
+
+Yield starvation for Senior LPs during low-volume periods is a recognized trade-off for systemic safety. If users demand baseline yield, it must be architected as a separate, opt-in overlay vault built on top of the base protocol. This allows yield-seeking LPs to voluntarily take on external smart contract and utilization risks without compromising the 100% pure USDC backing of the core CfdEngine and active traders.
+
 ## Security Contact
 
 For responsible disclosure of security vulnerabilities, please contact:
