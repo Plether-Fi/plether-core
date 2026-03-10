@@ -25,6 +25,7 @@ contract InvarCoinHandler is Test {
     uint256 public ghost_totalDeposited;
     uint256 public ghost_totalWithdrawn;
     uint256 public ghost_totalDustSent;
+    uint256 public ghost_totalYieldAccrued;
 
     uint256 public depositCalls;
     uint256 public withdrawCalls;
@@ -233,6 +234,8 @@ contract InvarCoinHandler is Test {
         uint256 bpsDelta,
         uint256 priceBpsDelta
     ) external {
+        uint256 assetsBefore = ic.totalAssets();
+
         uint256 currentVp = curve.virtualPrice();
         bpsDelta = bound(bpsDelta, 1, 50);
         uint256 newVp = currentVp + (currentVp * bpsDelta) / 10_000;
@@ -243,6 +246,11 @@ contract InvarCoinHandler is Test {
             uint256 currentPm = curve.priceMultiplier();
             uint256 newPm = currentPm + (currentPm * priceBpsDelta) / 10_000;
             curve.setPriceMultiplier(newPm);
+        }
+
+        uint256 assetsAfter = ic.totalAssets();
+        if (assetsAfter > assetsBefore) {
+            ghost_totalYieldAccrued += assetsAfter - assetsBefore;
         }
 
         simulateCurveYieldCalls++;
@@ -341,7 +349,8 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
     /// @notice Withdrawal output must never exceed total assets (no value creation from thin air).
     /// Checked indirectly: ghost_totalWithdrawn should never exceed ghost_totalDeposited + yield.
     function invariant_NoValueCreation() public view {
-        uint256 totalIn = handler.ghost_totalDeposited() + handler.ghost_totalDustSent();
+        uint256 totalIn =
+            handler.ghost_totalDeposited() + handler.ghost_totalDustSent() + handler.ghost_totalYieldAccrued();
         uint256 totalWithdrawn = handler.ghost_totalWithdrawn();
         uint256 tolerance = 1000 + (totalIn * 100) / 1e6;
         assertLe(totalWithdrawn, totalIn + tolerance, "INVARIANT: More withdrawn than total value in");
