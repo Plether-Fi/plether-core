@@ -96,25 +96,29 @@ Zone 2 creates a "wall of APY" that forces arbitrageurs to delta-neutralize the 
 
 Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track funding owed per unit of size at 18-decimal (WAD) precision to prevent truncation at short keeper intervals. User funding PnL = `size × (currentIndex - entryIndex) / FUNDING_INDEX_SCALE`. No gas-heavy loops across users.
 
-## Margin-Capped Mark-to-Market
+## Conservative Mark-to-Market
 
-The engine values LP equity using O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`, funding indexes). This gives real-time aggregate PnL without iterating positions, but introduces a subtlety: the linear formula can report vault "gains" that exceed the physical margin deposited by losing traders. With high leverage, a side's aggregate unrealized loss can far exceed their aggregate deposited margin — the vault would only ever seize the margin, not the full linear loss.
+The engine values LP equity using O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`, funding indexes). This gives real-time aggregate PnL without iterating positions.
 
-### Per-Side Margin Cap
+### Per-Side Zero Clamp
 
-Two counters — `totalBullMargin` and `totalBearMargin` — track the aggregate deposited margin for each side. The combined MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding` and caps each side's receivable at its deposited margin:
+The MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding` and clamps each side at zero — the vault never recognizes unrealized trader losses as assets:
 
 ```
 bullTotal = bullPnl + bullFunding
 bearTotal = bearPnl + bearFunding
 
-if bullTotal < -totalBullMargin: bullTotal = -totalBullMargin
-if bearTotal < -totalBearMargin: bearTotal = -totalBearMargin
+if bullTotal < 0: bullTotal = 0
+if bearTotal < 0: bearTotal = 0
 
 return bullTotal + bearTotal
 ```
 
-PnL and funding share the same margin pool (a position's equity = margin + PnL + funding), so they must be capped together to avoid double-counting.
+The return value represents the vault's aggregate unrealized liability to profitable traders. When traders are losing on net, MtM returns zero rather than a positive vault asset. Realized losses flow through physical USDC transfers (settlements, liquidations) which naturally increase the pool's balance.
+
+**Why not cap at `-totalSideMargin`?** Per-side netting creates phantom vault assets: a profitable position's real liability gets offset against another position's bad debt, even though margins are isolated. Clamping at zero eliminates this class of accounting error entirely.
+
+**Trade-off**: The vault temporarily undercounts its assets when traders owe unrealized funding or have unrealized losses. This is conservative — junior principal may dip temporarily until traders close or are liquidated, at which point physical USDC transfers restore the balance. This is preferable to the alternative where paper profits inflate LP principal and get withdrawn as real USDC.
 
 ### Layered Conservatism
 
@@ -122,7 +126,7 @@ Different protocol functions require different levels of conservatism:
 
 | Function | Purpose | Approach | Rationale |
 |----------|---------|----------|-----------|
-| `_reconcile()` | LP equity valuation | Capped symmetric MtM | Accurate share pricing, bounded by physical margin |
+| `_reconcile()` | LP equity valuation | Zero-clamped MtM | Conservative share pricing — vault only counts liabilities, never unrealized gains |
 | `getFreeUSDC()` | LP withdrawal limits | Asymmetric (liabilities only) | Cash leaving the vault must exist physically — never offset reserves by uncollected receivables |
 | `_getEffectiveAssets()` | Position solvency | Capped symmetric funding | Economic solvency allows counting receivables up to margin cap |
 

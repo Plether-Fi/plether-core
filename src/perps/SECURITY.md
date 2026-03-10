@@ -63,7 +63,7 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Per-Side Margin Cap** | `getVaultMtmAdjustment()` computes per-side `(PnL + funding)` capped at `totalBullMargin` / `totalBearMargin` — the vault never recognizes unrealized receivables exceeding deposited collateral |
+| **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` computes per-side `(PnL + funding)` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
 | **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive funding/PnL). Illiquid receivables never reduce physical reserves |
 | **Margin Tracking** | `totalBullMargin + totalBearMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
 
@@ -175,6 +175,17 @@ Operators **cannot**:
 
 - **Behavior**: `_computeBasketPrice()` computes `Σ (price × quantity) / (basePrice × 1e10)`. Each term truncates independently.
 - **Impact**: With 6 feeds, cumulative truncation error is at most 6 wei in 8-decimal space (~$0.00000006). Negligible for all practical purposes.
+
+### Zero-Clamped MtM Conservatism
+
+#### Temporary Junior NAV Dilution
+
+- **Behavior**: `getVaultMtmAdjustment()` clamps each side's unrealized (PnL + funding) at zero. When the vault has physically paid out to winning traders but losing traders haven't settled yet, the MtM returns zero instead of reflecting the owed debt as an asset.
+- **Impact**: `_reconcile()` sees `distributable < claimedEquity` and triggers `_absorbLoss()`, writing down `juniorPrincipal`. When losers eventually settle (close or liquidation), cash flows in as revenue, but recovery goes through the waterfall (senior restoration → senior yield → junior), so junior doesn't recover dollar-for-dollar.
+- **Severity**: Proportional to unsettled funding. In testing: ~0.3% dip ($3k on $1M) after 90 days of skewed funding with one side settled. Could be larger with sustained heavy skew.
+- **Secondary effect**: New LP depositors during the dip get underpriced shares, diluting existing junior LPs.
+- **Rationale**: Accepted trade-off to eliminate phantom profit bugs (C-02/C-03). The vault can never overestimate its position, which is strictly safer than the alternative where paper MtM profits get withdrawn as real USDC. This follows the accounting conservatism principle: recognize liabilities (trader profits), don't recognize unrealized assets (trader losses) until realized through physical settlement.
+- **Why this is the best O(1) solution**: The ideal fix would be per-position capping (`Σ min(loss_i, margin_i)`), but `min()` is nonlinear — each position clips at a different threshold depending on its entry price and margin, so it cannot be decomposed into global accumulators. Any cap that references aggregate margin (e.g., `-totalSideMargin`) reintroduces the netting bug to some degree. Zero-clamping is the only O(1) approach that fully eliminates phantom profits.
 
 ### Funding Precision
 

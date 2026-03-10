@@ -459,6 +459,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                     clearinghouse.unlockMargin(order.accountId, loss);
                 }
             }
+        }
+        if (pos.size > 0) {
             int256 newIdx = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
             int256 fundingDelta = int256(pos.size) * (newIdx - pos.entryFundingIndex);
             if (pos.side == CfdTypes.Side.BULL) {
@@ -922,10 +924,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
     }
 
-    /// @notice Combined MtM: per-side (PnL + funding), capped at deposited margin.
-    ///         Positive = vault owes traders (liability). Negative = traders owe vault (capped asset).
-    ///         PnL and funding share the same margin pool, so they are capped together per side
-    ///         to prevent the vault from recognizing receivables that exceed seizable collateral.
+    /// @notice Combined MtM: per-side (PnL + funding), clamped at zero.
+    ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
+    ///         The vault never counts unrealized trader losses as assets — realized losses flow
+    ///         through physical USDC transfers (settlements, liquidations).
     function getVaultMtmAdjustment() external view returns (int256) {
         uint256 price = lastMarkPrice;
 
@@ -944,11 +946,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 bullTotal = bullPnl + bullFunding;
         int256 bearTotal = bearPnl + bearFunding;
 
-        if (bullTotal < -int256(totalBullMargin)) {
-            bullTotal = -int256(totalBullMargin);
+        if (bullTotal < 0) {
+            bullTotal = 0;
         }
-        if (bearTotal < -int256(totalBearMargin)) {
-            bearTotal = -int256(totalBearMargin);
+        if (bearTotal < 0) {
+            bearTotal = 0;
         }
 
         return bullTotal + bearTotal;

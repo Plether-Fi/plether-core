@@ -468,7 +468,7 @@ contract AuditFindingsTest is Test {
 
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        assertGt(juniorAfter, juniorBefore, "MtM: junior principal must increase when traders are losing");
+        assertLe(juniorAfter, juniorBefore, "C-03 fix: unrealized trader losses must not inflate junior principal");
         assertLt(engine.getUnrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
     }
 
@@ -686,13 +686,15 @@ contract AuditFindingsTest is Test {
         int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
         assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
 
-        // Reconcile should NOT absorb loss — the funding debt is a vault asset
+        // With the C-02/C-03 clamping fix, the vault conservatively ignores unrealized
+        // funding debts as MtM assets. When bulls are physically paid but bears haven't
+        // settled yet, junior temporarily drops until bears realize their debt.
         uint256 juniorBefore = pool.juniorPrincipal();
         vm.prank(address(juniorVault));
         pool.reconcile();
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        assertGe(juniorAfter, juniorBefore, "negative funding must not cause spurious junior loss");
+        assertLe(juniorAfter, juniorBefore, "conservative: junior must not increase from unrealized funding debt");
     }
 
     // ==========================================
