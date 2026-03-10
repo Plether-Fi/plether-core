@@ -938,6 +938,87 @@ contract AuditFindingsTest is Test {
         clearinghouse.withdraw(accountId, address(usdc), free);
     }
 
+    function test_C03_SeniorHWMResetPreventsRestoration() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 0, 0, true);
+        bytes[] memory capPrice = new bytes[](1);
+        capPrice[0] = abi.encode(uint256(2e8));
+        router.executeOrder(2, capPrice);
+
+        // Trigger reconcile → pool drained, loss wipes both tranches
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        assertEq(pool.seniorPrincipal(), 0, "Senior wiped");
+        assertEq(pool.seniorHighWaterMark(), 0, "HWM reset to zero");
+
+        // Simulate recovery: USDC flows back to pool (e.g., price wick reverts)
+        usdc.mint(address(pool), 100_000e6);
+
+        // Trigger reconcile to distribute recovered funds
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        uint256 aliceShares = seniorVault.balanceOf(alice);
+        assertGt(aliceShares, 0, "Alice still holds senior shares");
+        assertGt(pool.seniorPrincipal(), 0, "Senior should be restored after recovery");
+    }
+
+    function test_C04_FlashDepositCrushesDeficit() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 50_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
+        bytes[] memory capPrice = new bytes[](1);
+        capPrice[0] = abi.encode(uint256(2e8));
+        router.executeOrder(2, capPrice);
+
+        // Trigger reconcile → loss wipes junior, partially hits senior
+        usdc.mint(bob, 1e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1e6);
+        juniorVault.deposit(1e6, bob);
+        vm.stopPrank();
+
+        uint256 deficitBefore = pool.seniorHighWaterMark() - pool.seniorPrincipal();
+        assertGt(deficitBefore, 0, "Senior deficit exists");
+
+        // Flash deposit into senior
+        address dave = address(0x444);
+        _fundSenior(dave, 10_000_000e6);
+
+        // Wait cooldown, then withdraw max
+        vm.warp(block.timestamp + 2 hours);
+        uint256 withdrawable = seniorVault.maxWithdraw(dave);
+        vm.prank(dave);
+        seniorVault.withdraw(withdrawable, dave, dave);
+
+        uint256 deficitAfter = pool.seniorHighWaterMark() - pool.seniorPrincipal();
+        assertGe(deficitAfter, deficitBefore / 2, "Deficit must not be slashable via flash deposit");
+    }
+
 }
 
 // ==========================================
@@ -2138,6 +2219,116 @@ contract H02StalenessGriefTest is Test {
         // Order is still in the queue
         (, uint256 sizeDelta,,,,,,) = router.orders(1);
         assertGt(sizeDelta, 0, "order must survive stale-oracle griefing attempt");
+    }
+
+}
+
+contract C05VpiImrBypassTest is Test {
+
+    MockUSDC usdc;
+    CfdEngine engine;
+    HousePool pool;
+    TrancheVault juniorVault;
+    MarginClearinghouse clearinghouse;
+    OrderRouter router;
+
+    uint256 constant CAP_PRICE = 2e8;
+    address alice = address(0x111);
+    address bob = address(0x222);
+    address carol = address(0x333);
+
+    function _warpPastTimelock() internal {
+        vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function setUp() public {
+        usdc = new MockUSDC();
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 1e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
+        pool = new HousePool(address(usdc), address(engine));
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
+        _warpPastTimelock();
+        clearinghouse.finalizeAssetConfig();
+
+        clearinghouse.proposeOperator(address(engine), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+
+        clearinghouse.proposeOperator(address(router), true);
+        _warpPastTimelock();
+        clearinghouse.finalizeOperator();
+    }
+
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), amount);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        usdc.mint(trader, amount);
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function test_C05_VpiRebateSatisfiesIMR_ZeroRiskPosition() public {
+        _fundJunior(bob, 1_000_000e6);
+
+        _fundTrader(carol, 50_000e6);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 0, "Alice starts with zero USDC");
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        assertEq(size, 0, "Position must not open with zero user capital");
     }
 
 }
