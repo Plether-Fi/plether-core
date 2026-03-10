@@ -580,7 +580,7 @@ contract HousePoolTest is Test {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), 0);
-        assertEq(pool.seniorHighWaterMark(), 0, "HWM reset on full wipeout");
+        assertGt(pool.seniorHighWaterMark(), 0, "HWM preserved for restoration after wipeout");
     }
 
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {

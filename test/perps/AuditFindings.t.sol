@@ -962,7 +962,7 @@ contract AuditFindingsTest is Test {
         vm.stopPrank();
 
         assertEq(pool.seniorPrincipal(), 0, "Senior wiped");
-        assertEq(pool.seniorHighWaterMark(), 0, "HWM reset to zero");
+        assertGt(pool.seniorHighWaterMark(), 0, "HWM preserved for restoration");
 
         // Simulate recovery: USDC flows back to pool (e.g., price wick reverts)
         usdc.mint(address(pool), 100_000e6);

@@ -368,7 +368,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
                 seniorPrincipal -= seniorLoss;
             } else {
                 seniorPrincipal = 0;
-                seniorHighWaterMark = 0;
                 unpaidSeniorYield = 0;
             }
         }
