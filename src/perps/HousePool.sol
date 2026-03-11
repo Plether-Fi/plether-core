@@ -55,6 +55,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__MarkPriceStale();
     error HousePool__TimelockNotReady();
     error HousePool__NoProposal();
+    error HousePool__SeniorImpaired();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -203,6 +204,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount
     ) external onlyVault whenNotPaused {
         _reconcile();
+        if (seniorPrincipal < seniorHighWaterMark) {
+            revert HousePool__SeniorImpaired();
+        }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         seniorHighWaterMark += amount;
         seniorPrincipal += amount;
