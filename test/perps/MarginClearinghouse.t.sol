@@ -475,7 +475,8 @@ contract NonUsdcCollateralTest is Test {
                 isClose: false
             }),
             price,
-            depth
+            depth,
+            uint64(block.timestamp)
         );
     }
 

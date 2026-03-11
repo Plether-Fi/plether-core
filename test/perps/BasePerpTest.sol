@@ -177,7 +177,8 @@ abstract contract BasePerpTest is Test {
                 isClose: false
             }),
             price,
-            depth
+            depth,
+            uint64(block.timestamp)
         );
     }
 
@@ -210,7 +211,8 @@ abstract contract BasePerpTest is Test {
                 isClose: true
             }),
             price,
-            depth
+            depth,
+            uint64(block.timestamp)
         );
     }
 

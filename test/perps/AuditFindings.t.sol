@@ -46,7 +46,7 @@ contract AuditC01_HwmInflation is BasePerpTest {
         // Reconcile: distributable ≈ cash - mtm, loss ≈ $80k
         // Junior absorbs $50k, senior absorbs $30k → senior = $70k, HWM = $100k
         vm.prank(address(router));
-        engine.updateMarkPrice(1.8e8);
+        engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -133,7 +133,8 @@ contract AuditC03_MarginCheck is BasePerpTest {
                 isClose: false
             }),
             1e8,
-            depth
+            depth,
+            uint64(block.timestamp)
         );
     }
 
@@ -168,7 +169,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 
         // Crash: BULL loses when oracle rises
         vm.prank(address(router));
-        engine.updateMarkPrice(1.5e8);
+        engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -214,7 +215,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 
         // Refresh mark
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8);
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -254,7 +255,7 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
         _open(traderId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         vm.prank(address(router));
-        engine.updateMarkPrice(1.8e8);
+        engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -285,21 +286,20 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
         return 1_000_000 * 1e6;
     }
 
-    function test_H01_UpdateMarkUsesBlockTimestamp() public {
+    function test_H01_UpdateMarkUsesPublishTime() public {
         _fundTrader(address(0xAAA), 10_000 * 1e6);
         bytes32 traderId = bytes32(uint256(uint160(address(0xAAA))));
         _open(traderId, CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8);
 
         _warpForward(50);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(0.8e8);
-        router.updateMarkPrice(priceData);
+        // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
+        uint64 vaaTime = uint64(block.timestamp) - 30;
+        vm.prank(address(router));
+        engine.updateMarkPrice(0.8e8, vaaTime);
 
-        // H-01 BUG: lastMarkTime = block.timestamp (now), not the VAA's publish time.
-        // In production, a 50-second-old VAA makes HousePool think mark is fresh.
         uint64 markTime = engine.lastMarkTime();
-        assertEq(markTime, uint64(block.timestamp), "lastMarkTime uses block.timestamp, not VAA time");
+        assertEq(markTime, vaaTime, "H-01: lastMarkTime must use VAA publish time, not block.timestamp");
     }
 
 }

@@ -410,11 +410,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
     ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         lastMarkPrice = price;
-        lastMarkTime = uint64(block.timestamp);
+        lastMarkTime = publishTime;
 
         _updateFunding(price, vaultDepthUsdc);
 
@@ -759,11 +760,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         lastMarkPrice = price;
-        lastMarkTime = uint64(block.timestamp);
+        lastMarkTime = publishTime;
         _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[accountId];
@@ -901,11 +903,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function updateMarkPrice(
-        uint256 price
+        uint256 price,
+        uint64 publishTime
     ) external onlyRouter {
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
         lastMarkPrice = clamped;
-        lastMarkTime = uint64(block.timestamp);
+        lastMarkTime = publishTime;
     }
 
     // ==========================================

@@ -9,14 +9,16 @@ interface ICfdEngine {
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
     ) external returns (int256 settlementUsdc);
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 
     /// @notice Worst-case payout for all BULL positions (6 decimals)
@@ -43,7 +45,8 @@ interface ICfdEngine {
 
     /// @notice Push a fresh mark price without processing an order
     function updateMarkPrice(
-        uint256 price
+        uint256 price,
+        uint64 publishTime
     ) external;
 
     /// @notice Protocol cap price (8 decimals). Oracle prices are clamped to this.
