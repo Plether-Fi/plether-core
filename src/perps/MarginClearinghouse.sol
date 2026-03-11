@@ -268,7 +268,7 @@ contract MarginClearinghouse is Ownable2Step {
                 uint256 usdValue;
 
                 if (config.oracle == address(0)) {
-                    usdValue = bal;
+                    usdValue = bal * 1e6 / (10 ** uint256(config.decimals));
                 } else {
                     uint256 price8 = IAssetOracle(config.oracle).getPriceUnsafe();
                     usdValue = (bal * price8) / (10 ** (uint256(config.decimals) + 2));
