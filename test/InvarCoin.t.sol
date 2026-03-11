@@ -487,6 +487,21 @@ contract InvarCoinTest is Test {
         ic.withdraw(bal, alice, 0);
     }
 
+    function test_Deposit_RevertsWhenEmergencyActiveEvenIfUnpaused() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        ic.emergencyWithdrawFromCurve();
+        assertTrue(ic.emergencyActive());
+
+        ic.unpause();
+
+        vm.prank(bob);
+        vm.expectRevert();
+        ic.deposit(1000e6, bob, 0);
+    }
+
     function test_Withdraw_WorksAfterEmergencyCleared() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice, 0);
@@ -1671,14 +1686,14 @@ contract InvarCoinTest is Test {
         ic.withdraw(shares, alice, 0);
     }
 
-    function test_DeployToCurve_SucceedsWithStaleOracle() public {
+    function test_DeployToCurve_RevertsWithStaleOracle() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
 
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
         ic.deployToCurve(0);
-        assertGt(curveLp.balanceOf(address(ic)), 0, "deployToCurve should succeed with stale oracle");
     }
 
     function test_Harvest_RevertsOnStaleOracle() public {

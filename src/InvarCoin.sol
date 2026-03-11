@@ -130,6 +130,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__GaugeTimelockActive();
     error InvarCoin__InvalidProposal();
     error InvarCoin__NoGauge();
+    error InvarCoin__EmergencyActive();
 
     /// @param _usdc USDC token address.
     /// @param _bear plDXY-BEAR token address.
@@ -195,10 +196,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function _totalAssetsWithLpBal(
         uint256 lpBal
     ) private view returns (uint256) {
-        uint256 localUsdc = USDC.balanceOf(address(this));
-
         (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
         uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
+        return _totalAssetsWithPrice(lpBal, oraclePrice);
+    }
+
+    /// @dev Total assets using pre-fetched LP balance and validated oracle price.
+    function _totalAssetsWithPrice(
+        uint256 lpBal,
+        uint256 oraclePrice
+    ) private view returns (uint256) {
+        uint256 localUsdc = USDC.balanceOf(address(this));
 
         uint256 lpUsdcValue = 0;
         if (lpBal > 0) {
@@ -359,6 +367,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address receiver,
         uint256 minSharesOut
     ) public nonReentrant whenNotPaused returns (uint256 glUsdMinted) {
+        if (emergencyActive) {
+            revert InvarCoin__EmergencyActive();
+        }
         if (usdcAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
@@ -550,6 +561,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         address receiver,
         uint256 minSharesOut
     ) external nonReentrant whenNotPaused returns (uint256 glUsdMinted) {
+        if (emergencyActive) {
+            revert InvarCoin__EmergencyActive();
+        }
         if (usdcAmount == 0 && bearAmount == 0) {
             revert InvarCoin__ZeroAmount();
         }
@@ -677,7 +691,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         curveLpCostVp = currentVpValue;
 
         uint256 supply = totalSupply();
-        uint256 currentAssets = totalAssets();
+        uint256 currentAssets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 assetsBeforeYield = currentAssets > totalYieldUsdc ? currentAssets - totalYieldUsdc : 0;
 
         donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
@@ -731,7 +745,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function deployToCurve(
         uint256 maxUsdc
     ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        uint256 assets = totalAssets();
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 assets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
         uint256 localUsdc = USDC.balanceOf(address(this));
@@ -772,8 +788,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 maxLpToBurn
     ) external nonReentrant whenNotPaused returns (uint256 usdcRecovered) {
         _harvestSafe();
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
         uint256 lpBalBefore = _lpBalance();
-        uint256 assets = _totalAssetsWithLpBal(lpBalBefore);
+        uint256 assets = _totalAssetsWithPrice(lpBalBefore, oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
         uint256 currentBuffer = USDC.balanceOf(address(this));
