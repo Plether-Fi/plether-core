@@ -254,27 +254,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, "Order expired");
-            _finalizeExecution(orderId, 0, false);
+            _finalizeExecution(orderId, 0);
             return;
         }
 
-        uint256 pythFee = 0;
-        uint256 executionPrice;
-        uint64 oraclePublishTime;
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
+            _resolveOraclePrice(pythUpdateData, order.targetPrice);
 
         if (address(pyth) != address(0)) {
-            if (pythUpdateData.length > 0) {
-                pythFee = pyth.getUpdateFee(pythUpdateData);
-                if (msg.value < pythFee) {
-                    revert OrderRouter__InsufficientPythFee();
-                }
-                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-            }
-
-            uint256 minPublishTime;
-            (executionPrice, minPublishTime) = _computeBasketPrice();
-            oraclePublishTime = uint64(minPublishTime);
-
             bool isFad = engine.isFadWindow();
             bool oracleFrozen = _isOracleFrozen();
             if (oracleFrozen && !order.isClose) {
@@ -283,32 +270,20 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (isFad && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
-                _finalizeExecution(orderId, pythFee, false);
+                _finalizeExecution(orderId, pythFee);
                 return;
             }
 
-            uint256 staleness = block.timestamp - minPublishTime;
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-
-            if (staleness > maxStaleness) {
+            if (block.timestamp - oraclePublishTime > maxStaleness) {
                 emit OrderFailed(orderId, "Oracle price too stale");
-                _finalizeExecution(orderId, pythFee, false);
+                _finalizeExecution(orderId, pythFee);
                 return;
             }
 
-            if (!oracleFrozen && minPublishTime <= order.commitTime) {
+            if (!oracleFrozen && oraclePublishTime <= order.commitTime) {
                 revert OrderRouter__MevDetected();
             }
-        } else {
-            if (block.chainid != 31_337) {
-                revert OrderRouter__MockModeDisabled();
-            }
-            if (pythUpdateData.length > 0) {
-                executionPrice = abi.decode(pythUpdateData[0], (uint256));
-            } else {
-                executionPrice = order.targetPrice;
-            }
-            oraclePublishTime = uint64(block.timestamp);
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -318,7 +293,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee);
             return;
         }
 
@@ -328,15 +303,15 @@ contract OrderRouter is Ownable2Step, Pausable {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee);
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee);
             return;
         }
 
-        _finalizeExecution(orderId, pythFee, true);
+        _finalizeExecution(orderId, pythFee);
     }
 
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
@@ -355,42 +330,17 @@ contract OrderRouter is Ownable2Step, Pausable {
             revert OrderRouter__MaxOrderIdNotCommitted();
         }
 
-        uint256 pythFee;
-        uint256 executionPrice;
-        uint256 pricePublishTime;
-        uint64 oraclePublishTime;
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
+
         bool isFad;
         bool oracleFrozen;
-
         if (address(pyth) != address(0)) {
-            if (pythUpdateData.length > 0) {
-                pythFee = pyth.getUpdateFee(pythUpdateData);
-                if (msg.value < pythFee) {
-                    revert OrderRouter__InsufficientPythFee();
-                }
-                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-            }
-
-            (executionPrice, pricePublishTime) = _computeBasketPrice();
-            oraclePublishTime = uint64(pricePublishTime);
-
             isFad = engine.isFadWindow();
             oracleFrozen = _isOracleFrozen();
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-
-            if (block.timestamp - pricePublishTime > maxStaleness) {
+            if (block.timestamp - oraclePublishTime > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
             }
-        } else {
-            if (block.chainid != 31_337) {
-                revert OrderRouter__MockModeDisabled();
-            }
-            if (pythUpdateData.length > 0) {
-                executionPrice = abi.decode(pythUpdateData[0], (uint256));
-            } else {
-                executionPrice = 1e8;
-            }
-            oraclePublishTime = uint64(block.timestamp);
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -403,29 +353,29 @@ contract OrderRouter is Ownable2Step, Pausable {
             CfdTypes.Order memory order = orders[orderId];
 
             if (order.sizeDelta == 0) {
-                totalKeeperFees += _cleanupOrder(orderId, true);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, "Order expired");
-                totalKeeperFees += _cleanupOrder(orderId, false);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
             if ((isFad || oracleFrozen) && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
-                totalKeeperFees += _cleanupOrder(orderId, false);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
-            if (!oracleFrozen && pricePublishTime > 0 && pricePublishTime <= order.commitTime) {
+            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime) {
                 break;
             }
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                totalKeeperFees += _cleanupOrder(orderId, false);
+                totalKeeperFees += _cleanupOrder(orderId);
                 continue;
             }
 
@@ -445,16 +395,10 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(orderId, "Engine Math Panic");
             }
 
-            totalKeeperFees += _cleanupOrder(orderId, execSuccess);
+            totalKeeperFees += _cleanupOrder(orderId);
         }
 
-        uint256 totalOut = totalKeeperFees + (msg.value - pythFee);
-        if (totalOut > 0) {
-            (bool success,) = payable(msg.sender).call{value: totalOut}("");
-            if (!success) {
-                claimableEth[msg.sender] += totalOut;
-            }
-        }
+        _refundEth(totalKeeperFees + (msg.value - pythFee));
     }
 
     // ==========================================
@@ -495,9 +439,47 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
+    function _resolveOraclePrice(
+        bytes[] calldata pythUpdateData,
+        uint256 mockFallbackPrice
+    ) internal returns (uint256 price, uint64 publishTime, uint256 pythFee) {
+        if (address(pyth) != address(0)) {
+            if (pythUpdateData.length > 0) {
+                pythFee = pyth.getUpdateFee(pythUpdateData);
+                if (msg.value < pythFee) {
+                    revert OrderRouter__InsufficientPythFee();
+                }
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            }
+            uint256 minPublishTime;
+            (price, minPublishTime) = _computeBasketPrice();
+            publishTime = uint64(minPublishTime);
+        } else {
+            if (block.chainid != 31_337) {
+                revert OrderRouter__MockModeDisabled();
+            }
+            if (pythUpdateData.length > 0) {
+                price = abi.decode(pythUpdateData[0], (uint256));
+            } else {
+                price = mockFallbackPrice;
+            }
+            publishTime = uint64(block.timestamp);
+        }
+    }
+
+    function _refundEth(
+        uint256 amount
+    ) internal {
+        if (amount > 0) {
+            (bool ok,) = payable(msg.sender).call{value: amount}("");
+            if (!ok) {
+                claimableEth[msg.sender] += amount;
+            }
+        }
+    }
+
     function _cleanupOrder(
-        uint64 orderId,
-        bool success
+        uint64 orderId
     ) internal returns (uint256 keeperFee) {
         keeperFee = keeperFees[orderId];
         delete keeperFees[orderId];
@@ -507,33 +489,15 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     function _finalizeExecution(
         uint64 orderId,
-        uint256 pythFee,
-        bool success
+        uint256 pythFee
     ) internal {
         uint256 fee = keeperFees[orderId];
-        address user = address(uint160(uint256(orders[orderId].accountId)));
         delete keeperFees[orderId];
         delete orders[orderId];
 
         nextExecuteId++;
 
-        if (success) {
-            uint256 totalOut = fee + (msg.value - pythFee);
-            if (totalOut > 0) {
-                (bool ok,) = payable(msg.sender).call{value: totalOut}("");
-                if (!ok) {
-                    claimableEth[msg.sender] += totalOut;
-                }
-            }
-        } else {
-            uint256 totalOut = fee + (msg.value - pythFee);
-            if (totalOut > 0) {
-                (bool ok,) = payable(msg.sender).call{value: totalOut}("");
-                if (!ok) {
-                    claimableEth[msg.sender] += totalOut;
-                }
-            }
-        }
+        _refundEth(fee + (msg.value - pythFee));
     }
 
     /// @notice Claims ETH stuck from failed keeper refund transfers
@@ -654,46 +618,18 @@ contract OrderRouter is Ownable2Step, Pausable {
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable {
-        uint256 pythFee;
-        uint256 executionPrice;
-        uint64 oraclePublishTime;
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            if (pythUpdateData.length > 0) {
-                pythFee = pyth.getUpdateFee(pythUpdateData);
-                if (msg.value < pythFee) {
-                    revert OrderRouter__InsufficientPythFee();
-                }
-                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-            }
-            uint256 minPublishTime;
-            (executionPrice, minPublishTime) = _computeBasketPrice();
-            oraclePublishTime = uint64(minPublishTime);
             uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 60;
-            if (block.timestamp - minPublishTime > maxStaleness) {
+            if (block.timestamp - oraclePublishTime > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
             }
-        } else {
-            if (block.chainid != 31_337) {
-                revert OrderRouter__MockModeDisabled();
-            }
-            if (pythUpdateData.length > 0) {
-                executionPrice = abi.decode(pythUpdateData[0], (uint256));
-            } else {
-                executionPrice = 1e8;
-            }
-            oraclePublishTime = uint64(block.timestamp);
         }
 
         engine.updateMarkPrice(executionPrice, oraclePublishTime);
 
-        uint256 refund = msg.value - pythFee;
-        if (refund > 0) {
-            (bool success,) = payable(msg.sender).call{value: refund}("");
-            if (!success) {
-                claimableEth[msg.sender] += refund;
-            }
-        }
+        _refundEth(msg.value - pythFee);
     }
 
     // ==========================================
@@ -708,37 +644,13 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        uint256 pythFee = 0;
-        uint256 executionPrice;
-        uint64 oraclePublishTime;
+        (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            if (pythUpdateData.length > 0) {
-                pythFee = pyth.getUpdateFee(pythUpdateData);
-                if (msg.value < pythFee) {
-                    revert OrderRouter__InsufficientPythFee();
-                }
-                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-            }
-
-            uint256 minPublishTime;
-            (executionPrice, minPublishTime) = _computeBasketPrice();
-            oraclePublishTime = uint64(minPublishTime);
-
             uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 15;
-            if (block.timestamp - minPublishTime > maxStaleness) {
+            if (block.timestamp - oraclePublishTime > maxStaleness) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }
-        } else {
-            if (block.chainid != 31_337) {
-                revert OrderRouter__MockModeDisabled();
-            }
-            if (pythUpdateData.length > 0) {
-                executionPrice = abi.decode(pythUpdateData[0], (uint256));
-            } else {
-                executionPrice = 1e8;
-            }
-            oraclePublishTime = uint64(block.timestamp);
         }
 
         uint256 vaultDepth = vault.totalAssets();
@@ -748,13 +660,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             vault.payOut(msg.sender, keeperBountyUsdc);
         }
 
-        uint256 refund = msg.value - pythFee;
-        if (refund > 0) {
-            (bool success,) = payable(msg.sender).call{value: refund}("");
-            if (!success) {
-                claimableEth[msg.sender] += refund;
-            }
-        }
+        _refundEth(msg.value - pythFee);
     }
 
 }

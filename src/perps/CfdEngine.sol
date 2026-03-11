@@ -125,6 +125,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
     event FadRunwayFinalized();
 
+    function _requireTimelockReady(
+        uint256 activationTime
+    ) internal view {
+        if (activationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < activationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+    }
+
     modifier onlyRouter() {
         if (msg.sender != orderRouter) {
             revert CfdEngine__Unauthorized();
@@ -180,12 +191,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Applies proposed risk parameters after timelock expires; settles funding first
     function finalizeRiskParams() external onlyOwner {
-        if (riskParamsActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < riskParamsActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
+        _requireTimelockReady(riskParamsActivationTime);
         _updateFunding(lastMarkPrice, vault.totalAssets());
         riskParams = pendingRiskParams;
         delete pendingRiskParams;
@@ -213,12 +219,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Applies proposed FAD day additions after timelock expires
     function finalizeAddFadDays() external onlyOwner {
-        if (addFadDaysActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < addFadDaysActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
+        _requireTimelockReady(addFadDaysActivationTime);
         uint256[] memory timestamps = _pendingAddFadDays;
         for (uint256 i; i < timestamps.length; i++) {
             fadDayOverrides[timestamps[i] / 86_400] = true;
@@ -249,12 +250,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Applies proposed FAD day removals after timelock expires
     function finalizeRemoveFadDays() external onlyOwner {
-        if (removeFadDaysActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < removeFadDaysActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
+        _requireTimelockReady(removeFadDaysActivationTime);
         uint256[] memory timestamps = _pendingRemoveFadDays;
         for (uint256 i; i < timestamps.length; i++) {
             delete fadDayOverrides[timestamps[i] / 86_400];
@@ -285,12 +281,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Applies proposed fadMaxStaleness after timelock expires
     function finalizeFadMaxStaleness() external onlyOwner {
-        if (fadMaxStalenessActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < fadMaxStalenessActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
+        _requireTimelockReady(fadMaxStalenessActivationTime);
         fadMaxStaleness = pendingFadMaxStaleness;
         pendingFadMaxStaleness = 0;
         fadMaxStalenessActivationTime = 0;
@@ -318,12 +309,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Applies proposed fadRunway after timelock expires
     function finalizeFadRunway() external onlyOwner {
-        if (fadRunwayActivationTime == 0) {
-            revert CfdEngine__NoProposal();
-        }
-        if (block.timestamp < fadRunwayActivationTime) {
-            revert CfdEngine__TimelockNotReady();
-        }
+        _requireTimelockReady(fadRunwayActivationTime);
         fadRunwaySeconds = pendingFadRunway;
         pendingFadRunway = 0;
         fadRunwayActivationTime = 0;
@@ -477,8 +463,46 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
+        uint256 unsettledFundingDebt = _settleFunding(order, pos);
+
+        if (order.isClose) {
+            _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
+        } else {
+            _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
+        }
+
+        if (!order.isClose) {
+            _assertPostSolvency();
+        }
+
+        uint256 marginAfter = pos.margin;
+        if (marginAfter > marginSnapshot) {
+            if (marginSide == CfdTypes.Side.BULL) {
+                totalBullMargin += marginAfter - marginSnapshot;
+            } else {
+                totalBearMargin += marginAfter - marginSnapshot;
+            }
+        } else if (marginSnapshot > marginAfter) {
+            if (marginSide == CfdTypes.Side.BULL) {
+                totalBullMargin -= marginSnapshot - marginAfter;
+            } else {
+                totalBearMargin -= marginSnapshot - marginAfter;
+            }
+        }
+
+        pos.lastUpdateTime = uint64(block.timestamp);
+        return 0;
+    }
+
+    // ==========================================
+    // 3. INTERNAL LEDGER UPDATES
+    // ==========================================
+
+    function _settleFunding(
+        CfdTypes.Order memory order,
+        CfdTypes.Position storage pos
+    ) internal returns (uint256 unsettledFundingDebt) {
         int256 pendingFunding = getPendingFunding(pos);
-        uint256 unsettledFundingDebt;
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
                 uint256 gain = uint256(pendingFunding);
@@ -518,39 +542,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
             pos.entryFundingIndex = newIdx;
         }
-
-        if (order.isClose) {
-            _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
-        } else {
-            _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
-        }
-
-        if (!order.isClose) {
-            _assertPostSolvency();
-        }
-
-        uint256 marginAfter = pos.margin;
-        if (marginAfter > marginSnapshot) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                totalBullMargin += marginAfter - marginSnapshot;
-            } else {
-                totalBearMargin += marginAfter - marginSnapshot;
-            }
-        } else if (marginSnapshot > marginAfter) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                totalBullMargin -= marginSnapshot - marginAfter;
-            } else {
-                totalBearMargin -= marginSnapshot - marginAfter;
-            }
-        }
-
-        pos.lastUpdateTime = uint64(block.timestamp);
-        return 0;
     }
-
-    // ==========================================
-    // 3. INTERNAL LEDGER UPDATES
-    // ==========================================
 
     function _processIncrease(
         CfdTypes.Order memory order,
@@ -585,12 +577,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             globalBearEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
         }
 
+        CfdTypes.RiskParams memory rp = riskParams;
+
         uint256 postSkewUsdc = _getAbsSkewUsdc(price);
-        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
+        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, rp.vpiFactor);
         pos.vpiAccrued += vpiUsdc;
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        if (notionalUsdc * riskParams.bountyBps < riskParams.minBountyUsdc * 10_000) {
+        if (notionalUsdc * rp.bountyBps < rp.minBountyUsdc * 10_000) {
             revert CfdEngine__PositionTooSmall();
         }
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
@@ -622,8 +616,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
         uint256 imr = (mmr * 150) / 100;
-        if (imr < riskParams.minBountyUsdc) {
-            imr = riskParams.minBountyUsdc;
+        if (imr < rp.minBountyUsdc) {
+            imr = rp.minBountyUsdc;
         }
         uint256 effectiveMargin = pos.margin;
         if (tradeCost < 0) {
@@ -861,10 +855,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             globalBearEntryNotional -= liqEntryNotional;
         }
 
+        CfdTypes.RiskParams memory rp = riskParams;
+
         uint256 notionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        keeperBountyUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
-        if (keeperBountyUsdc < riskParams.minBountyUsdc) {
-            keeperBountyUsdc = riskParams.minBountyUsdc;
+        keeperBountyUsdc = (notionalUsdc * rp.bountyBps) / 10_000;
+        if (keeperBountyUsdc < rp.minBountyUsdc) {
+            keeperBountyUsdc = rp.minBountyUsdc;
         }
         uint256 posMargin = pos.margin;
         if (equityUsdc <= 0) {
@@ -936,11 +932,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @notice Per-side funding PnL capped at deposited margin.
     ///         Used by solvency checks — the vault can count funding receivables as economic
     ///         assets, but only up to the physical margin that backs them.
+    function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
+        bullFunding = (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        bearFunding = (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+    }
+
     function _getCappedFundingPnl() internal view returns (int256) {
-        int256 bullFunding =
-            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearFunding =
-            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
 
         if (bullFunding < -int256(totalBullMargin)) {
             bullFunding = -int256(totalBullMargin);
@@ -953,11 +951,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _getUnrealizedFundingPnl() internal view returns (int256) {
-        int256 bullPnl =
-            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearPnl =
-            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        return bullPnl + bearPnl;
+        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
+        return bullFunding + bearFunding;
     }
 
     /// @notice Aggregate unsettled funding across all positions (uncapped, for reporting only)
@@ -1012,10 +1007,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearPnl = (int256(bearOI * price) - int256(globalBearEntryNotional)) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
         }
 
-        int256 bullFunding =
-            (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearFunding =
-            (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
 
         int256 bullTotal = bullPnl + bullFunding;
         int256 bearTotal = bearPnl + bearFunding;
