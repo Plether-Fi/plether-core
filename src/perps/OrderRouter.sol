@@ -391,10 +391,8 @@ contract OrderRouter is Ownable2Step, Pausable {
                 revert OrderRouter__InsufficientGas();
             }
 
-            bool execSuccess;
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
-                execSuccess = true;
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
             } catch {
