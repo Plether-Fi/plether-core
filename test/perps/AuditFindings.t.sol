@@ -50,22 +50,15 @@ contract AuditC01_HwmInflation is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 seniorBefore = pool.seniorPrincipal();
-        uint256 hwmBefore = pool.seniorHighWaterMark();
-        uint256 deficitBefore = hwmBefore - seniorBefore;
-        assertGt(deficitBefore, 0, "Deficit must exist after crash");
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Deficit must exist after crash");
 
-        // Attacker deposits $1M into senior tranche
-        _fundSenior(attacker, 1_000_000 * 1e6);
-
-        uint256 hwmAfter = pool.seniorHighWaterMark();
-        uint256 seniorAfter = pool.seniorPrincipal();
-        uint256 deficitAfter = hwmAfter > seniorAfter ? hwmAfter - seniorAfter : 0;
-
-        // C-01 BUG: multiplicative scaling inflates the deficit.
-        // Fresh deposit should add to both principal and HWM equally → deficit unchanged.
-        // Instead: HWM = 100k * (70k + 1M) / 70k ≈ $1.53M. Deficit balloons from ~$30k to ~$460k.
-        assertLe(deficitAfter, deficitBefore, "C-01: deposit must not inflate deficit");
+        // C-01/C-05 FIX: deposit into impaired tranche is now blocked
+        usdc.mint(attacker, 1_000_000 * 1e6);
+        vm.startPrank(attacker);
+        usdc.approve(address(seniorVault), 1_000_000 * 1e6);
+        vm.expectRevert(HousePool.HousePool__SeniorImpaired.selector);
+        seniorVault.deposit(1_000_000 * 1e6, attacker);
+        vm.stopPrank();
     }
 
 }
