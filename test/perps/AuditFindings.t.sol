@@ -360,22 +360,27 @@ contract AuditH03_DustPosition is BasePerpTest {
         uint256 posSize = 50_000 * 1e18;
         _open(aliceId, CfdTypes.Side.BULL, posSize, 800 * 1e6, 1e8);
 
-        (, uint256 marginBefore,,,,,,) = engine.positions(aliceId);
-
-        // Close 99.5%: keep 250 tokens (0.5%)
-        // marginToFree = $770 * 49750 / 50000 = $766.15
-        // remaining margin = $770 - $766.15 = $3.85
+        // Close 99.5%: would leave 250 tokens with $3.85 margin < minBountyUsdc ($5)
+        // H-03 FIX: partial close now reverts to prevent unliquidatable dust
         uint256 closeSize = (posSize * 995) / 1000;
-        _close(aliceId, CfdTypes.Side.BULL, closeSize, 1e8);
-
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(aliceId);
-        assertGt(sizeAfter, 0, "Dust position remains");
-
-        // H-03 BUG: remaining margin ($3.85) is below minBountyUsdc ($5).
-        // Keeper bounty = max(0.15% * notional, $5) = max($0.375, $5) = $5.
-        // But bounty is capped at pos.margin = $3.85 < $5. No keeper will liquidate.
-        (,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
-        assertGe(marginAfter, minBountyUsdc, "H-03: remaining margin after partial close must cover min bounty");
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
+        vm.prank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: aliceId,
+                sizeDelta: closeSize,
+                marginDelta: 0,
+                targetPrice: 0,
+                commitTime: uint64(block.timestamp),
+                orderId: 0,
+                side: CfdTypes.Side.BULL,
+                isClose: true
+            }),
+            1e8,
+            depth,
+            uint64(block.timestamp)
+        );
     }
 
 }

@@ -841,8 +841,8 @@ contract CfdEngineFundingTest is BasePerpTest {
         return 5_000_000 * 1e6;
     }
 
-    // Regression: C-01 — stale funding index via partial close to 1 wei
-    function test_StaleFundingIndex_PartialCloseTo1Wei() public {
+    // Regression: C-01 — stale funding index attack blocked by H-03 dust guard
+    function test_StaleFundingIndex_DustCloseBlocked() public {
         uint256 depth = 5_000_000 * 1e6;
 
         bytes32 attackerId = bytes32(uint256(uint160(address(0xA1))));
@@ -856,34 +856,25 @@ contract CfdEngineFundingTest is BasePerpTest {
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(attackerId, CfdTypes.Side.BULL, minSize, 50_000 * 1e6, 1e8, depth);
 
+        // H-03: closing to 1 wei now reverts (remaining margin < minBountyUsdc)
         uint256 closeSize = minSize - 1;
-        _close(attackerId, CfdTypes.Side.BULL, closeSize, 1e8, depth);
-
-        (uint256 sizeAfterClose,,,, int256 entryFundingBefore,,,) = engine.positions(attackerId);
-        assertEq(sizeAfterClose, 1, "Position reduced to 1 wei");
-
-        vm.warp(block.timestamp + 90 days);
-
-        int256 bullIdx = engine.bullFundingIndex();
-        int256 indexDelta = bullIdx - entryFundingBefore;
-        int256 pendingWith1Wei = (int256(uint256(1)) * indexDelta) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        assertEq(pendingWith1Wei, 0, "Funding truncates to 0 for 1 wei position");
-
-        _open(attackerId, CfdTypes.Side.BULL, 1_000_000 * 1e18, 200_000 * 1e6, 1e8, depth);
-
-        (,,,, int256 entryFundingAfter,,,) = engine.positions(attackerId);
-
-        int256 currentBullIndex = engine.bullFundingIndex();
-        assertEq(
-            entryFundingAfter, currentBullIndex, "C-01: entryFundingIndex must be current after increase, not stale"
+        vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
+        vm.prank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: attackerId,
+                sizeDelta: closeSize,
+                marginDelta: 0,
+                targetPrice: 0,
+                commitTime: uint64(block.timestamp),
+                orderId: 0,
+                side: CfdTypes.Side.BULL,
+                isClose: true
+            }),
+            1e8,
+            depth,
+            uint64(block.timestamp)
         );
-
-        uint256 chBefore = clearinghouse.balances(attackerId, address(usdc));
-        _close(attackerId, CfdTypes.Side.BULL, 1_000_000 * 1e18 + 1, 1e8, depth);
-        uint256 chAfter = clearinghouse.balances(attackerId, address(usdc));
-
-        uint256 totalDeposited = 500_000 * 1e6;
-        assertLe(chAfter, totalDeposited, "C-01: Attacker must not profit from stale funding index");
     }
 
     // Regression: C-02 — per-side MtM cap creates phantom profit
@@ -1113,8 +1104,8 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertLe(indexDrop, maxDrop, "Funding must not retroactively apply new rate to pre-finalize period");
     }
 
-    // Regression: C-01
-    function test_WithdrawGuardBlocksWithdrawWithOpenPosition() public {
+    // H-02 FIX: free equity withdrawable with open position
+    function test_WithdrawFreeEquityWithOpenPosition() public {
         _fundJunior(bob, 500_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
@@ -1133,9 +1124,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         uint256 free = usdcBal - locked;
         assertGt(free, 0, "Alice should have free USDC to withdraw");
 
+        uint256 balBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert();
         clearinghouse.withdraw(accountId, address(usdc), free);
+        assertEq(usdc.balanceOf(alice), balBefore + free, "Free equity withdrawn");
     }
 
 }

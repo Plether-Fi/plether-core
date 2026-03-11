@@ -98,6 +98,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__ZeroStaleness();
     error CfdEngine__RunwayTooLong();
     error CfdEngine__PartialCloseUnderwaterFunding();
+    error CfdEngine__DustPosition();
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
 
@@ -619,6 +620,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         pos.size -= order.sizeDelta;
+
+        if (pos.size > 0 && pos.margin < riskParams.minBountyUsdc) {
+            revert CfdEngine__DustPosition();
+        }
 
         clearinghouse.unlockMargin(order.accountId, marginToFree);
 
