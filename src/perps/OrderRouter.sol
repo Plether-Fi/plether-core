@@ -254,7 +254,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, "Order expired");
-            _finalizeExecution(orderId, 0);
+            _finalizeExecution(orderId, 0, false);
             return;
         }
 
@@ -265,19 +265,21 @@ contract OrderRouter is Ownable2Step, Pausable {
             bool isFad = engine.isFadWindow();
             bool oracleFrozen = _isOracleFrozen();
             if (oracleFrozen && !order.isClose) {
-                revert OrderRouter__OracleFrozen();
+                emit OrderFailed(orderId, "Oracle frozen: close-only mode");
+                _finalizeExecution(orderId, pythFee, false);
+                return;
             }
 
             if (isFad && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
-                _finalizeExecution(orderId, pythFee);
+                _finalizeExecution(orderId, pythFee, false);
                 return;
             }
 
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
             if (block.timestamp - oraclePublishTime > maxStaleness) {
                 emit OrderFailed(orderId, "Oracle price too stale");
-                _finalizeExecution(orderId, pythFee);
+                _finalizeExecution(orderId, pythFee, false);
                 return;
             }
 
@@ -293,25 +295,29 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(orderId, pythFee);
+            _finalizeExecution(orderId, pythFee, false);
             return;
         }
 
         uint256 vaultDepth = vault.totalAssets();
 
+        if (gasleft() < MIN_ENGINE_GAS) {
+            revert OrderRouter__InsufficientGas();
+        }
+
         try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee);
+            _finalizeExecution(orderId, pythFee, false);
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(orderId, pythFee);
+            _finalizeExecution(orderId, pythFee, false);
             return;
         }
 
-        _finalizeExecution(orderId, pythFee);
+        _finalizeExecution(orderId, pythFee, true);
     }
 
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
@@ -398,7 +404,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             totalKeeperFees += _cleanupOrder(orderId);
         }
 
-        _refundEth(totalKeeperFees + (msg.value - pythFee));
+        _sendEth(msg.sender, totalKeeperFees + (msg.value - pythFee));
     }
 
     // ==========================================
@@ -467,13 +473,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
-    function _refundEth(
+    function _sendEth(
+        address to,
         uint256 amount
     ) internal {
         if (amount > 0) {
-            (bool ok,) = payable(msg.sender).call{value: amount}("");
+            (bool ok,) = payable(to).call{value: amount}("");
             if (!ok) {
-                claimableEth[msg.sender] += amount;
+                claimableEth[to] += amount;
             }
         }
     }
@@ -489,15 +496,22 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     function _finalizeExecution(
         uint64 orderId,
-        uint256 pythFee
+        uint256 pythFee,
+        bool success
     ) internal {
         uint256 fee = keeperFees[orderId];
+        address user = address(uint160(uint256(orders[orderId].accountId)));
         delete keeperFees[orderId];
         delete orders[orderId];
-
         nextExecuteId++;
 
-        _refundEth(fee + (msg.value - pythFee));
+        uint256 excessEth = msg.value - pythFee;
+        if (success) {
+            _sendEth(msg.sender, fee + excessEth);
+        } else {
+            _sendEth(user, fee);
+            _sendEth(msg.sender, excessEth);
+        }
     }
 
     /// @notice Claims ETH stuck from failed keeper refund transfers
@@ -629,7 +643,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         engine.updateMarkPrice(executionPrice, oraclePublishTime);
 
-        _refundEth(msg.value - pythFee);
+        _sendEth(msg.sender, msg.value - pythFee);
     }
 
     // ==========================================
@@ -660,7 +674,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             vault.payOut(msg.sender, keeperBountyUsdc);
         }
 
-        _refundEth(msg.value - pythFee);
+        _sendEth(msg.sender, msg.value - pythFee);
     }
 
 }

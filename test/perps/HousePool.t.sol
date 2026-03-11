@@ -940,29 +940,22 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 0, 0, true);
         bytes[] memory capPrice = new bytes[](1);
-        capPrice[0] = abi.encode(uint256(2e8));
+        capPrice[0] = abi.encode(uint256(1.8e8));
         router.executeOrder(2, capPrice);
 
-        usdc.mint(bob, 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1e6);
-        juniorVault.deposit(1e6, bob);
-        vm.stopPrank();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 0, "Senior wiped");
-        assertGt(pool.seniorHighWaterMark(), 0, "HWM preserved for restoration");
+        uint256 seniorAfterLoss = pool.seniorPrincipal();
+        assertGt(pool.seniorHighWaterMark(), seniorAfterLoss, "Senior below HWM");
+        assertGt(seniorAfterLoss, 0, "Senior not fully wiped");
 
         usdc.mint(address(pool), 100_000e6);
 
-        usdc.mint(bob, 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1e6);
-        juniorVault.deposit(1e6, bob);
-        vm.stopPrank();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
 
-        uint256 aliceShares = seniorVault.balanceOf(alice);
-        assertGt(aliceShares, 0, "Alice still holds senior shares");
-        assertGt(pool.seniorPrincipal(), 0, "Senior should be restored after recovery");
+        assertGt(pool.seniorPrincipal(), seniorAfterLoss, "Senior should be restored after recovery");
     }
 
     // Regression: C-05 — senior deposit reverts when tranche is impaired (seniorPrincipal < HWM)
@@ -982,11 +975,8 @@ contract HousePoolAuditTest is BasePerpTest {
         capPrice[0] = abi.encode(uint256(2e8));
         router.executeOrder(2, capPrice);
 
-        usdc.mint(bob, 1e6);
-        vm.startPrank(bob);
-        usdc.approve(address(juniorVault), 1e6);
-        juniorVault.deposit(1e6, bob);
-        vm.stopPrank();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
 
         assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
 

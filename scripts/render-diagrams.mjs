@@ -180,9 +180,92 @@ const invarWithdraw = `sequenceDiagram
     CU-->>BUF: USDC replenishment
 `;
 
+const smClasses = `
+    classDef state fill:#dbeafe,stroke:#2563eb,color:#1e40af,stroke-width:2px
+    classDef process fill:#f1f5f9,stroke:#475569,color:#1e293b,stroke-width:2px
+    classDef success fill:#dcfce7,stroke:#16a34a,color:#166534,stroke-width:2px
+    classDef softfail fill:#fef3c7,stroke:#d97706,color:#92400e,stroke-width:1.5px
+    classDef hardfail fill:#fee2e2,stroke:#dc2626,color:#991b1b,stroke-width:2px
+    classDef note fill:#fafafa,stroke:#d4d4d4,color:#737373,stroke-width:0.75px
+    classDef action fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px`;
+
+const orderLifecycle = `graph TD
+    U([Trader]) -->|commitOrder + ETH fee| Q([Queued])
+    Q -->|age > maxOrderAge| EXP([Expired])
+    Q -->|Keeper: executeOrder + Pyth VAA| CHK{Oracle Fresh?}
+    CHK -->|FX closed or holiday| FROZEN([Frozen Revert])
+    CHK -->|publishTime ≤ commitTime| MEV([MEV Revert])
+    CHK -->|staleness > 60s| STALE([Stale])
+    CHK -->|Fresh| FAD{Open During FAD?}
+    FAD -->|Yes| FADF([Close-Only])
+    FAD -->|No| SLIP{Slippage OK?}
+    SLIP -->|Exceeded| SLIPF([Slippage])
+    SLIP -->|OK| ENG{processOrder}
+    ENG -->|Revert| ENGF([Engine Fail])
+    ENG -->|Success| EXEC([Executed])
+
+    EXP --> DONE[Queue Advances · Order Deleted]
+    STALE --> DONE
+    FADF --> DONE
+    SLIPF --> DONE
+    ENGF --> DONE
+    EXEC --> DONE
+
+    FROZEN -.- FN>Hard revert · waits for FX markets]
+    MEV -.- MN>Hard revert · keeper retries with fresh price]
+    DONE -.- DN>Un-brickable: all soft outcomes advance the queue]
+
+    class U state
+    class Q action
+    class CHK,FAD,SLIP,ENG process
+    class EXEC success
+    class EXP,STALE,FADF,SLIPF,ENGF softfail
+    class FROZEN,MEV hardfail
+    class DONE,FN,MN,DN note
+${smClasses}`;
+
+const positionLifecycle = `graph TD
+    NONE([No Position]) -->|processOrder · isClose=false| OPEN([Active Position])
+    OPEN -->|Full close · size → 0| CLOSED([Closed])
+    OPEN -->|equity < MMR · keeper triggers| LIQ([Liquidated])
+
+    NONE -.- ND>IMR ≥ 150% MMR · min notional for keeper bounty]
+    OPEN -.- OD>While active: increase (same side) or partial close (dust guard) · each settles funding + VPI]
+    CLOSED -.- CD>PnL settled · position struct deleted]
+    LIQ -.- LD>Margin seized · bounty paid · FAD: elevated MMR on weekends]
+
+    class NONE state
+    class OPEN action
+    class CLOSED success
+    class LIQ hardfail
+    class ND,OD,CD,LD note
+${smClasses}`;
+
+const trancheWaterfall = `graph TD
+    T[Reconcile · before every deposit/withdrawal] --> A[Accrue Senior Yield · time-based APY]
+    A --> D{Surplus or Deficit?}
+
+    D -->|distributable > claimedEquity| R1[1 · Restore Senior Principal to HWM]
+    R1 --> R2[2 · Pay Accrued Senior Yield]
+    R2 --> R3[3 · Junior Receives Surplus]
+
+    D -->|distributable < claimedEquity| L1[1 · Junior Absorbs First Loss]
+    L1 -->|Junior wiped| L2[2 · Senior Absorbs Last Loss]
+
+    T -.- TD>distributable = USDC balance − pending fees − unrealized trader gains]
+    R3 -.- RD>Senior protected: principal and yield paid before junior sees revenue]
+    L2 -.- LD>Junior subordinated: fully wiped before senior takes any impairment]
+
+    class T action
+    class A,D process
+    class R1,R2,R3 success
+    class L1,L2 softfail
+    class TD,RD,LD note
+${smClasses}`;
+
 mkdirSync(outDir, { recursive: true });
 
-const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11] = await Promise.all([
+const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12, svg13, svg14] = await Promise.all([
   renderMermaid(howItWorks, theme),
   renderMermaid(tokenFlow, theme),
   renderMermaid(bearLeverage, theme),
@@ -194,6 +277,9 @@ const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11] = awa
   renderMermaid(invarLpDeposit, theme),
   renderMermaid(invarLpWithdraw, theme),
   renderMermaid(invarWithdraw, theme),
+  renderMermaid(orderLifecycle, theme),
+  renderMermaid(positionLifecycle, theme),
+  renderMermaid(trancheWaterfall, theme),
 ]);
 
 writeFileSync(`${outDir}/how-it-works.svg`, svg1);
@@ -207,5 +293,8 @@ writeFileSync(`${outDir}/invar-deposit.svg`, svg8);
 writeFileSync(`${outDir}/invar-lp-deposit.svg`, svg9);
 writeFileSync(`${outDir}/invar-lp-withdraw.svg`, svg10);
 writeFileSync(`${outDir}/invar-withdraw.svg`, svg11);
+writeFileSync(`${outDir}/perps-order-lifecycle.svg`, svg12);
+writeFileSync(`${outDir}/perps-position-lifecycle.svg`, svg13);
+writeFileSync(`${outDir}/perps-tranche-waterfall.svg`, svg14);
 
-console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw');
+console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw, perps-order-lifecycle, perps-position-lifecycle, perps-tranche-waterfall');

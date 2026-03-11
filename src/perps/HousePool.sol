@@ -345,7 +345,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
-            if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
+            uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+            if (block.timestamp - ENGINE.lastMarkTime() > limit) {
+                lastReconcileTime = block.timestamp;
                 return;
             }
         }

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1253.75 761.85" width="1253.75" height="761.85" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<polyline points="726.3875,76 726.3875,96 507.7,96 507.7,116" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="507.7,152 507.7,192" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="448.67550432833514,324.82550432833517 448.67550432833514,412.35 308.675,412.35 308.675,440.85" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="308.675,476.85 308.675,533.85" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="308.675,569.85 308.675,609.85" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="566.7244956716648,324.82550432833517 566.7244956716648,412.35 706.7249999999999,412.35 706.7249999999999,440.85" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="706.7249999999999,476.85 706.7249999999999,533.85" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="726.3875,76 726.3875,96 945.075,96 945.075,116" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="308.675,645.85 308.675,685.85" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="706.7249999999999,569.85 706.7249999999999,609.85" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<rect x="217.735" y="398.85" width="181.88" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="308.675" y="412.35" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">distributable &gt; claimedEquity</text>
+<rect x="615.7849999999999" y="398.85" width="181.88" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="706.7249999999999" y="412.35" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">distributable &lt; claimedEquity</text>
+<rect x="664.4049999999999" y="491.85" width="84.64" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="706.7249999999999" y="505.35" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Junior wiped</text>
+<rect x="556.6625" y="40" width="339.45000000000005" height="36" rx="0" ry="0" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5px" />
+<rect x="363" y="116" width="289.40000000000003" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<polygon points="507.7,192 603.625,287.925 507.7,383.85 411.775,287.925" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="167.55" y="440.85" width="282.25" height="36" rx="0" ry="0" fill="#dcfce7" stroke="#16a34a" stroke-width="2px" />
+<rect x="192.575" y="533.85" width="232.20000000000002" height="36" rx="0" ry="0" fill="#dcfce7" stroke="#16a34a" stroke-width="2px" />
+<rect x="196.15" y="609.85" width="225.05" height="36" rx="0" ry="0" fill="#dcfce7" stroke="#16a34a" stroke-width="2px" />
+<rect x="587.05" y="440.85" width="239.35000000000002" height="36" rx="0" ry="0" fill="#fef3c7" stroke="#d97706" stroke-width="1.5px" />
+<rect x="590.6249999999999" y="533.85" width="232.20000000000002" height="36" rx="0" ry="0" fill="#fef3c7" stroke="#d97706" stroke-width="1.5px" />
+<polygon points="688.4000000000001,116 1213.75,116 1213.75,152 688.4000000000001,152 676.4000000000001,134" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="52,685.85 577.35,685.85 577.35,721.85 52,721.85 40,703.85" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="457.19999999999993,609.85 968.2499999999999,609.85 968.2499999999999,645.85 457.19999999999993,645.85 445.19999999999993,627.85" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<text x="726.3875" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Reconcile · before every deposit/withdrawal</text>
+<text x="507.70000000000005" y="134" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">Accrue Senior Yield · time-based APY</text>
+<text x="507.7" y="287.925" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">Surplus or Deficit?</text>
+<text x="308.675" y="458.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">1 · Restore Senior Principal to HWM</text>
+<text x="308.675" y="551.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">2 · Pay Accrued Senior Yield</text>
+<text x="308.675" y="627.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">3 · Junior Receives Surplus</text>
+<text x="706.7249999999999" y="458.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#92400e">1 · Junior Absorbs First Loss</text>
+<text x="706.7249999999999" y="551.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#92400e">2 · Senior Absorbs Last Loss</text>
+<text x="945.075" y="134" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">distributable = USDC balance − pending fees − unrealized trader gains</text>
+<text x="308.675" y="703.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Senior protected: principal and yield paid before junior sees revenue</text>
+<text x="706.7249999999999" y="627.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Junior subordinated: fully wiped before senior takes any impairment</text>
+</svg>

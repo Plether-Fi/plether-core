@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plether Perps — Pool Economics Model</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --yellow: #d29922; --dim: #484f58; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: var(--bg); color: var(--text); padding: 2rem; max-width: 100%; margin: 0 auto; line-height: 1.6; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .card h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  .field { margin-bottom: 0.85rem; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); margin-bottom: 3px; }
+  .field label span.val { color: var(--accent); font-weight: 600; }
+  .field .hint { font-size: 0.7rem; color: var(--dim); margin-top: 1px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .results { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .results h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  td.right { text-align: right; }
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+  .neutral { color: var(--yellow); }
+  .section-gap { height: 6px; }
+  .row-label { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+  .row-bold td { font-weight: 700; border-top: 1px solid var(--border); }
+  .note { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; line-height: 1.5; }
+  .scenario-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .scenario-bar button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .scenario-bar button:hover { border-color: var(--accent); }
+  .scenario-bar button.active { border-color: var(--accent); background: #1a2332; }
+  .kpi-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+  .kpi { background: #1a1e24; border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .kpi h2 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+  .kpi .big { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .kpi .desc { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+  .decomp { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .decomp h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 0.5rem; font-size: 0.8rem; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-label { width: 180px; flex-shrink: 0; color: var(--muted); }
+  .bar-track { flex: 1; height: 16px; background: #21262d; border-radius: 4px; overflow: hidden; position: relative; margin: 0 10px; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+  .bar-fill.pos { background: var(--green); }
+  .bar-fill.neg { background: var(--red); }
+  .bar-val { width: 80px; flex-shrink: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<h1>Plether Perps — Pool Economics Model</h1>
+<p class="subtitle">Interactive model for HousePool tranche returns. House edge is computed from protocol parameters + market conditions.</p>
+
+<div class="scenario-bar">
+  <button onclick="loadScenario('conservative')">Conservative</button>
+  <button onclick="loadScenario('moderate')" class="active">Moderate</button>
+  <button onclick="loadScenario('optimistic')">Optimistic</button>
+  <button onclick="loadScenario('bear')">Bear Market</button>
+  <button onclick="loadScenario('highVpi')">High VPI</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Pool Parameters</h2>
+    <div class="field">
+      <label>Pool TVL <span class="val" id="v-tvl"></span></label>
+      <input type="range" id="tvl" min="100000" max="50000000" step="100000" value="5000000" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Senior : Junior ratio <span class="val" id="v-ratio"></span></label>
+      <input type="range" id="ratio" min="10" max="90" step="5" value="50" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Senior rate (APY) <span class="val" id="v-sr"></span></label>
+      <input type="range" id="sr" min="0" max="2000" step="25" value="800" oninput="calc()">
+      <div class="hint">seniorRateBps — 48h timelocked</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Protocol Parameters (On-Chain)</h2>
+    <div class="field">
+      <label>VPI Factor (k) <span class="val" id="v-vpi"></span></label>
+      <input type="range" id="vpi" min="0" max="0.2" step="0.002" value="0.02" oninput="calc()">
+      <div class="hint">vpiFactor — quadratic skew cost. 0 = disabled</div>
+    </div>
+    <div class="field">
+      <label>Execution Fee <span class="val" id="v-execfee"></span></label>
+      <input type="range" id="execfee" min="1" max="20" step="1" value="6" oninput="calc()">
+      <div class="hint">Hardcoded. Charged on notional at open + close</div>
+    </div>
+    <div class="field">
+      <label>Maintenance Margin <span class="val" id="v-mmr"></span></label>
+      <input type="range" id="mmr" min="25" max="500" step="25" value="100" oninput="calc()">
+      <div class="hint">maintMarginBps — liquidation threshold</div>
+    </div>
+    <div class="field">
+      <label>Keeper Bounty <span class="val" id="v-bounty"></span></label>
+      <input type="range" id="bounty" min="5" max="50" step="1" value="15" oninput="calc()">
+      <div class="hint">bountyBps — paid from vault to liquidation keepers</div>
+    </div>
+    <div class="field">
+      <label>Funding at Kink <span class="val" id="v-baseapy"></span></label>
+      <input type="range" id="baseapy" min="0" max="100" step="1" value="15" oninput="calc()">
+      <div class="hint">baseApy at kinkSkewRatio (25%)</div>
+    </div>
+    <div class="field">
+      <label>Funding at Max <span class="val" id="v-maxapy"></span></label>
+      <input type="range" id="maxapy" min="50" max="1000" step="10" value="300" oninput="calc()">
+      <div class="hint">maxApy at maxSkewRatio (40%)</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Market Conditions</h2>
+    <div class="field">
+      <label>Daily volume / TVL <span class="val" id="v-vol"></span></label>
+      <input type="range" id="vol" min="0.1" max="10" step="0.1" value="2" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Avg OI / TVL <span class="val" id="v-oi"></span></label>
+      <input type="range" id="oi" min="0.1" max="3" step="0.1" value="0.8" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Avg skew ratio (S/D) <span class="val" id="v-skew"></span></label>
+      <input type="range" id="skew" min="0" max="0.4" step="0.01" value="0.15" oninput="calc()">
+      <div class="hint">Fraction of OI imbalance. Drives funding + VPI</div>
+    </div>
+    <div class="field">
+      <label>Net directional flow <span class="val" id="v-ndf"></span></label>
+      <input type="range" id="ndf" min="0" max="80" step="5" value="20" oninput="calc()">
+      <div class="hint">% of volume that's skew-increasing (net toxic)</div>
+    </div>
+    <div class="field">
+      <label>Daily liquidation rate (% of OI) <span class="val" id="v-liq"></span></label>
+      <input type="range" id="liq" min="0" max="5" step="0.1" value="0.5" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Behavioral edge (bps/day on TVL) <span class="val" id="v-behav"></span></label>
+      <input type="range" id="behav" min="-10" max="20" step="1" value="5" oninput="calc()">
+      <div class="hint">Unmodeled: retail overtrading, momentum chasing, etc.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Computed Intermediates</h2>
+    <div id="intermediates"></div>
+  </div>
+</div>
+
+<div class="decomp">
+  <h2>House Edge Decomposition (Annual)</h2>
+  <div id="bars"></div>
+</div>
+
+<div class="results">
+  <h2>Annual Revenue Breakdown</h2>
+  <table>
+    <thead><tr><th>Source</th><th>Recipient</th><th>Annual</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <p class="note" id="note"></p>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <h2>Junior APY</h2>
+    <div class="big" id="jr-apy">—</div>
+    <div class="desc" id="jr-desc"></div>
+  </div>
+  <div class="kpi">
+    <h2>Senior Effective APY</h2>
+    <div class="big" id="sr-apy">—</div>
+    <div class="desc" id="sr-desc"></div>
+  </div>
+  <div class="kpi">
+    <h2>Break-Even House Edge</h2>
+    <div class="big" id="be-vol">—</div>
+    <div class="desc" id="be-desc"></div>
+  </div>
+</div>
+
+<script>
+const scenarios = {
+  conservative: { tvl:1e6, ratio:50, sr:800, vpi:0.01, execfee:6, mmr:100, bounty:15, baseapy:15, maxapy:300, vol:1, oi:0.5, skew:0.1, ndf:15, liq:0.3, behav:3 },
+  moderate:     { tvl:5e6, ratio:50, sr:800, vpi:0.02, execfee:6, mmr:100, bounty:15, baseapy:15, maxapy:300, vol:2, oi:0.8, skew:0.15, ndf:20, liq:0.5, behav:5 },
+  optimistic:   { tvl:20e6, ratio:40, sr:800, vpi:0.03, execfee:6, mmr:100, bounty:15, baseapy:15, maxapy:300, vol:3, oi:1.2, skew:0.2, ndf:25, liq:0.8, behav:8 },
+  bear:         { tvl:2e6, ratio:60, sr:800, vpi:0.02, execfee:6, mmr:100, bounty:15, baseapy:15, maxapy:300, vol:0.5, oi:0.3, skew:0.05, ndf:10, liq:1.5, behav:-5 },
+  highVpi:      { tvl:5e6, ratio:50, sr:800, vpi:0.08, execfee:6, mmr:100, bounty:15, baseapy:15, maxapy:300, vol:1.5, oi:0.6, skew:0.25, ndf:30, liq:0.4, behav:3 },
+};
+
+function loadScenario(name) {
+  const s = scenarios[name];
+  for (const [k, v] of Object.entries(s)) document.getElementById(k).value = v;
+  document.querySelectorAll('.scenario-bar button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  calc();
+}
+
+function fmt(n) {
+  const a = Math.abs(n); const sign = n < 0 ? '-' : '';
+  if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return sign + '$' + (a / 1e3).toFixed(1) + 'k';
+  return sign + '$' + a.toFixed(0);
+}
+function pct(n) { return (n * 100).toFixed(1) + '%'; }
+function bps(n) { return (n * 10000).toFixed(1) + ' bps'; }
+function cls(n) { return n > 0.001 ? 'positive' : n < -0.001 ? 'negative' : 'neutral'; }
+
+function row(label, recipient, val, cssClass) {
+  const c = cssClass || cls(val);
+  return `<tr><td>${label}</td><td>${recipient}</td><td class="${c}">${fmt(val)}</td></tr>`;
+}
+function rowBold(label, recipient, val) {
+  const c = cls(val);
+  return `<tr class="row-bold"><td><strong>${label}</strong></td><td>${recipient}</td><td class="${c}"><strong>${fmt(val)}</strong></td></tr>`;
+}
+function sep() { return '<tr class="section-gap"><td colspan="3"></td></tr>'; }
+
+function fundingApy(skewRatio, kink, baseApy, maxSkew, maxApy) {
+  if (skewRatio <= 0) return 0;
+  if (skewRatio <= kink) return baseApy * skewRatio / kink;
+  const t = (skewRatio - kink) / (maxSkew - kink);
+  return baseApy + (maxApy - baseApy) * t * t;
+}
+
+function bar(label, val, maxAbs) {
+  const pctW = Math.min(Math.abs(val) / maxAbs * 100, 100);
+  const c = val >= 0 ? 'pos' : 'neg';
+  const vc = val >= 0 ? 'positive' : 'negative';
+  return `<div class="bar-row">
+    <span class="bar-label">${label}</span>
+    <div class="bar-track"><div class="bar-fill ${c}" style="width:${pctW}%"></div></div>
+    <span class="bar-val ${vc}">${fmt(val)}</span>
+  </div>`;
+}
+
+function calc() {
+  const tvl       = +document.getElementById('tvl').value;
+  const seniorPct = +document.getElementById('ratio').value / 100;
+  const srBps     = +document.getElementById('sr').value;
+  const k         = +document.getElementById('vpi').value;
+  const execBps   = +document.getElementById('execfee').value;
+  const mmrBps    = +document.getElementById('mmr').value;
+  const bountyBps = +document.getElementById('bounty').value;
+  const baseApyPct= +document.getElementById('baseapy').value;
+  const maxApyPct = +document.getElementById('maxapy').value;
+  const volMult   = +document.getElementById('vol').value;
+  const oiMult    = +document.getElementById('oi').value;
+  const skewRatio = +document.getElementById('skew').value;
+  const ndfPct    = +document.getElementById('ndf').value / 100;
+  const liqPct    = +document.getElementById('liq').value / 100;
+  const behavBps  = +document.getElementById('behav').value;
+
+  // Display values
+  document.getElementById('v-tvl').textContent = fmt(tvl);
+  document.getElementById('v-ratio').textContent = `${(seniorPct*100).toFixed(0)}:${((1-seniorPct)*100).toFixed(0)}`;
+  document.getElementById('v-sr').textContent = (srBps / 100).toFixed(1) + '% APY';
+  document.getElementById('v-vpi').textContent = k.toFixed(3);
+  document.getElementById('v-execfee').textContent = execBps + ' bps';
+  document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(2) + '%)';
+  document.getElementById('v-bounty').textContent = bountyBps + ' bps';
+  document.getElementById('v-baseapy').textContent = baseApyPct + '% APY';
+  document.getElementById('v-maxapy').textContent = maxApyPct + '% APY';
+  document.getElementById('v-vol').textContent = volMult.toFixed(1) + 'x';
+  document.getElementById('v-oi').textContent = oiMult.toFixed(1) + 'x';
+  document.getElementById('v-skew').textContent = (skewRatio * 100).toFixed(0) + '%';
+  document.getElementById('v-ndf').textContent = (ndfPct * 100).toFixed(0) + '%';
+  document.getElementById('v-liq').textContent = (liqPct * 100).toFixed(1) + '%';
+  document.getElementById('v-behav').textContent = behavBps + ' bps';
+
+  const seniorPrincipal = tvl * seniorPct;
+  const juniorPrincipal = tvl * (1 - seniorPct);
+  const dailyVol = tvl * volMult;
+  const annualVol = dailyVol * 365;
+  const avgOI = tvl * oiMult;
+
+  // --- Execution fees (to protocol owner, NOT pool) ---
+  const execFeeAnnual = annualVol * execBps * 2 / 10000;
+
+  // --- VPI net revenue (to pool) ---
+  // Avg VPI charge per $ of toxic flow ≈ k × skewRatio
+  // Net = toxic charges - healing rebates = k × skewRatio × volume × netDirectionalPct
+  const vpiAnnual = k * skewRatio * annualVol * ndfPct;
+
+  // --- Funding rate at current skew ---
+  const kinkRatio = 0.25;
+  const maxRatio = 0.40;
+  const fApy = fundingApy(skewRatio, kinkRatio, baseApyPct / 100, maxRatio, maxApyPct / 100);
+
+  // Funding is zero-sum between traders. Pool captures it via liquidation of paying side.
+  // Annual funding flow = fApy × skew notional (what the majority side pays)
+  const skewNotional = avgOI * skewRatio;
+  const fundingFlowAnnual = fApy * skewNotional;
+
+  // Funding captured from liquidations: liquidated paying-side positions' pending funding
+  // Approximate: avgFundingPerPosition × liqRate × payingSideOI
+  // avgFundingPerPosition ≈ fApy × avgHoldTime. Assume avg hold = 7 days.
+  const avgHoldDays = 7;
+  const payingSideOI = (avgOI + avgOI * skewRatio) / 2; // majority side
+  const dailyLiqNotional = avgOI * liqPct;
+  const fundingCaptureAnnual = fApy * (avgHoldDays / 365) * dailyLiqNotional * 365 * skewRatio;
+
+  // --- Liquidation surplus (to pool) ---
+  // At liquidation: equity ≈ maintMargin. Surplus = equity - bounty.
+  const liqSurplusBps = Math.max(mmrBps - bountyBps, 0);
+  const annualLiqNotional = dailyLiqNotional * 365;
+  const liqSurplusAnnual = annualLiqNotional * liqSurplusBps / 10000;
+
+  // --- Liquidation bounties (cost, paid to keepers) ---
+  const bountyAnnual = annualLiqNotional * bountyBps / 10000;
+
+  // --- Behavioral edge ---
+  const behavAnnual = tvl * (behavBps / 10000) * 365;
+
+  // --- Total house edge (to pool) ---
+  const totalHouseEdge = vpiAnnual + liqSurplusAnnual + fundingCaptureAnnual + behavAnnual;
+  const houseEdgeBpsDay = totalHouseEdge / (tvl * 365 / 10000);
+
+  // --- Net LP revenue ---
+  const netLpRevenue = totalHouseEdge;
+
+  // --- Senior yield ---
+  const seniorYield = seniorPrincipal * srBps / 10000;
+  const seniorPayout = netLpRevenue > 0 ? Math.min(seniorYield, netLpRevenue) : 0;
+  const unpaidSeniorYield = seniorYield - seniorPayout;
+
+  // --- Junior surplus ---
+  const juniorSurplus = netLpRevenue - seniorPayout;
+  const juniorApy = juniorPrincipal > 0 ? juniorSurplus / juniorPrincipal : 0;
+  const seniorEffApy = seniorPrincipal > 0 ? seniorPayout / seniorPrincipal : 0;
+
+  // --- Break-even house edge ---
+  const beHouseEdge = seniorYield;
+  const beBpsDay = beHouseEdge / (tvl * 365 / 10000);
+
+  // --- Intermediates ---
+  const intEl = document.getElementById('intermediates');
+  intEl.innerHTML = `<table>
+    <tr><td class="row-label">Annual volume</td><td class="right">${fmt(annualVol)}</td></tr>
+    <tr><td class="row-label">Average OI</td><td class="right">${fmt(avgOI)}</td></tr>
+    <tr><td class="row-label">Skew notional</td><td class="right">${fmt(skewNotional)}</td></tr>
+    <tr><td class="row-label">Funding rate at ${(skewRatio*100).toFixed(0)}% skew</td><td class="right ${fApy > 0.5 ? 'yellow' : ''}">${(fApy*100).toFixed(1)}% APY</td></tr>
+    <tr><td class="row-label">Annual funding flow</td><td class="right">${fmt(fundingFlowAnnual)}</td></tr>
+    <tr><td class="row-label">Annual liquidated notional</td><td class="right">${fmt(annualLiqNotional)}</td></tr>
+    <tr><td class="row-label">Liq surplus per event</td><td class="right">${liqSurplusBps} bps</td></tr>
+    <tr><td class="row-label">Max leverage (1/MMR)</td><td class="right">${(10000/mmrBps).toFixed(0)}x</td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td class="row-label"><strong>Effective house edge</strong></td><td class="right"><strong class="${cls(houseEdgeBpsDay)}">${houseEdgeBpsDay.toFixed(1)} bps/day</strong></td></tr>
+  </table>`;
+
+  // --- Bar chart ---
+  const allVals = [vpiAnnual, liqSurplusAnnual, fundingCaptureAnnual, behavAnnual];
+  const maxAbs = Math.max(...allVals.map(Math.abs), 1);
+  let bars = '';
+  bars += bar('VPI net revenue', vpiAnnual, maxAbs);
+  bars += bar('Liquidation surplus', liqSurplusAnnual, maxAbs);
+  bars += bar('Funding capture (liqs)', fundingCaptureAnnual, maxAbs);
+  bars += bar('Behavioral edge', behavAnnual, maxAbs);
+  bars += `<div class="bar-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
+    <span class="bar-label"><strong>Total house edge</strong></span>
+    <div class="bar-track"><div class="bar-fill ${totalHouseEdge >= 0 ? 'pos' : 'neg'}" style="width:${Math.min(Math.abs(totalHouseEdge)/maxAbs*100,100)}%"></div></div>
+    <span class="bar-val ${cls(totalHouseEdge)}"><strong>${fmt(totalHouseEdge)}</strong></span>
+  </div>`;
+  document.getElementById('bars').innerHTML = bars;
+
+  // --- Revenue table ---
+  let tbody = '';
+  tbody += row(`Execution fees (${execBps} bps × 2)`, 'Protocol owner', execFeeAnnual);
+  tbody += sep();
+  tbody += row('VPI net revenue', 'Pool (LPs)', vpiAnnual);
+  tbody += row('Liquidation surplus', 'Pool (LPs)', liqSurplusAnnual);
+  tbody += row('Funding capture from liqs', 'Pool (LPs)', fundingCaptureAnnual);
+  tbody += row('Behavioral / directional edge', 'Pool (LPs)', behavAnnual);
+  tbody += rowBold('Total house edge', 'Pool', totalHouseEdge);
+  tbody += sep();
+  tbody += row(`Senior yield (${(srBps/100).toFixed(1)}% on ${fmt(seniorPrincipal)})`, 'Senior LPs', seniorPayout);
+  if (unpaidSeniorYield > 1) {
+    tbody += row('Unpaid senior yield (accruing)', 'Senior (deferred)', unpaidSeniorYield);
+  }
+  tbody += rowBold('Junior surplus / (deficit)', 'Junior LPs', juniorSurplus);
+  document.getElementById('tbody').innerHTML = tbody;
+
+  // --- KPIs ---
+  const jrEl = document.getElementById('jr-apy');
+  jrEl.textContent = pct(juniorApy);
+  jrEl.className = 'big ' + cls(juniorApy);
+  document.getElementById('jr-desc').textContent = `On ${fmt(juniorPrincipal)} principal`;
+
+  const srEl = document.getElementById('sr-apy');
+  srEl.textContent = pct(seniorEffApy);
+  srEl.className = 'big ' + (seniorEffApy >= srBps/10000 - 0.001 ? 'positive' : 'neutral');
+  document.getElementById('sr-desc').textContent = unpaidSeniorYield > 1
+    ? `Target: ${(srBps/100).toFixed(1)}%. ${fmt(unpaidSeniorYield)}/yr deferred`
+    : `Target: ${(srBps/100).toFixed(1)}%. Fully covered`;
+
+  document.getElementById('be-vol').textContent = beBpsDay.toFixed(1) + ' bps/day';
+  document.getElementById('be-vol').className = 'big ' + (houseEdgeBpsDay > beBpsDay ? 'positive' : 'negative');
+  document.getElementById('be-desc').textContent = `Current: ${houseEdgeBpsDay.toFixed(1)} bps/day. ${houseEdgeBpsDay > beBpsDay ? 'Above' : 'Below'} break-even.`;
+
+  // --- Note ---
+  const noteEl = document.getElementById('note');
+  if (juniorSurplus < -1) {
+    noteEl.textContent = 'Junior is in deficit — losses absorbed by junior first (first-loss tranche). Senior yield accrues but remains unpaid until surplus returns.';
+  } else if (unpaidSeniorYield > 1) {
+    noteEl.textContent = 'Net LP revenue is positive but insufficient to cover full senior yield. Unpaid yield has waterfall priority on future surplus.';
+  } else {
+    noteEl.textContent = 'Healthy: senior yield fully covered, junior earning surplus. Execution fees are separate protocol owner revenue.';
+  }
+}
+
+calc();
+</script>
+
+</body>
+</html>
