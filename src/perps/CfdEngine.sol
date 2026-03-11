@@ -337,9 +337,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function checkWithdraw(
         bytes32 accountId
     ) external view override {
-        if (positions[accountId].size > 0) {
-            revert CfdEngine__WithdrawBlockedByOpenPosition();
-        }
+        // No-op: clearinghouse enforces equity >= lockedMargin after withdrawal.
+        // Previous blanket `size > 0` revert trapped free equity unnecessarily.
     }
 
     // ==========================================

@@ -341,8 +341,8 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         assertEq(recordedBalance, actualBalance, "Recorded balance should match actual tokens received");
     }
 
-    // Regression: Finding-8 — withdraw blocked with open position
-    function test_WithdrawBlockedWithOpenPosition() public {
+    // H-02 FIX: free equity withdrawable with open position
+    function test_WithdrawFreeEquityWithOpenPosition() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 10_000 * 1e6);
 
@@ -360,9 +360,10 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             clearinghouse.balances(accountId, address(usdc)) - clearinghouse.lockedMarginUsdc(accountId);
         assertGt(freeBalance, 0, "Alice should have free balance");
 
+        uint256 balBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(accountId, address(usdc), freeBalance);
+        assertEq(usdc.balanceOf(alice), balBefore + freeBalance, "Free equity withdrawn");
     }
 
     // Regression: Finding-8 — withdraw allowed after position close
