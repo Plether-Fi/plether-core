@@ -114,20 +114,27 @@ contract AuditC03_MarginCheck is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         // Open 200k BULL tokens at $1.00
-        // Notional = 200k * 1e8 / 1e20 = $200,000
-        // MMR = 1% * $200k = $2000, IMR = 1.5x = $3000
-        // marginDelta = $3100 → passes IMR check ($3100 >= $3000)
-        // execFee = 6bps * $200k = $120, tradeCost = $120 (vpiFactor=0)
-        // pos.margin = $3100 - $120 = $2980 (BELOW the $3000 IMR!)
-        _open(aliceId, CfdTypes.Side.BULL, 200_000 * 1e18, 3100 * 1e6, 1e8);
-
-        (, uint256 posMargin,,,,,,) = engine.positions(aliceId);
-        uint256 totalMmr = engine.getMaintenanceMarginUsdc(200_000 * 1e18, 1e8);
-        uint256 totalImr = (totalMmr * 150) / 100;
-
-        // C-03 BUG: The IMR check uses order.marginDelta ($3100) not pos.margin ($2980).
-        // After exec fee deduction, the position is under-margined from inception.
-        assertGe(posMargin, totalImr, "C-03: pos.margin after fees must meet IMR for total size");
+        // Notional = $200k, MMR = 1% = $2000, IMR = 1.5x = $3000
+        // marginDelta = $3100 → pre-fee passes IMR ($3100 >= $3000)
+        // execFee = 6bps * $200k = $120 → pos.margin = $2980 < $3000
+        // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.prank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: aliceId,
+                sizeDelta: 200_000 * 1e18,
+                marginDelta: 3100 * 1e6,
+                targetPrice: 1e8,
+                commitTime: uint64(block.timestamp),
+                orderId: 0,
+                side: CfdTypes.Side.BULL,
+                isClose: false
+            }),
+            1e8,
+            depth
+        );
     }
 
 }
