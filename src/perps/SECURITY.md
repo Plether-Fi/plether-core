@@ -47,7 +47,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` — the House Pool can always pay every winner simultaneously |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
 | **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees` — LPs cannot withdraw encumbered capital |
-| **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Proportionally adjusted on withdrawals, reset to 0 on full wipeout |
+| **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), reset to 0 on full wipeout. Deposits blocked while impaired (`seniorPrincipal < seniorHighWaterMark`) |
 
 ### Position Invariants
 
@@ -55,7 +55,8 @@ These properties must always hold. Violation indicates a critical bug.
 |-----------|-------------|
 | **Single Direction** | An `accountId` holds at most one directional position (BULL or BEAR). Opening the opposite side requires closing first |
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
-| **Margin Sufficiency** | `pos.margin >= IMR` after every open, where `IMR = max(1.5 × MMR, minBountyUsdc)` |
+| **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
+| **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
 | **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
@@ -79,7 +80,7 @@ These properties must always hold. Violation indicates a critical bug.
 | Invariant | Description |
 |-----------|-------------|
 | **Balance Integrity** | `balances[accountId][asset]` always equals actual tokens attributable to that account |
-| **Withdrawal Guard** | Users can only withdraw if `remainingEquity >= lockedMarginUsdc` |
+| **Withdrawal Guard** | Users can only withdraw if `remainingEquity >= lockedMarginUsdc` and `balances[settlementAsset] >= lockedMarginUsdc`. Free equity above locked margin is withdrawable even with open positions |
 | **Seizure Bound** | `seizeAsset` reverts if `balances < amount` (no negative balances) |
 
 ## Trust Assumptions
@@ -92,6 +93,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Architecture**: OrderRouter aggregates multiple Pyth feeds into a weighted basket price replicating the spot BasketOracle formula
 - **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage
 - **Mitigation (Staleness)**: 60s max age for order execution, 15s for liquidations. Relaxed to `fadMaxStaleness` (default 3 days) during frozen oracle windows
+- **Mitigation (Mark Freshness)**: `lastMarkTime` is set from the Pyth VAA `publishTime` (not `block.timestamp`) across all engine paths (`processOrder`, `liquidatePosition`, `updateMarkPrice`). This prevents stale VAAs from appearing fresh to the HousePool's mark staleness checks
 - **Mitigation (Negative/Zero)**: `_normalizePythPrice` reverts on non-positive prices; `_computeBasketPrice` reverts if basket sum is zero
 - **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly
 - **Risk (Feed Compromise)**: If any single Pyth feed is compromised, the basket price is affected proportionally to that feed's weight. The weakest-link `minPublishTime` prevents selective staleness attacks
@@ -148,7 +150,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads and receive ETH incentive fees attached to orders
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Cancel Refunds**: When orders are cancelled for MEV/staleness reasons, the keeper fee is refunded to the user (not the keeper), preventing keeper griefing
+- **Failed Order Fees**: When orders fail (slippage, skew, engine revert), the keeper fee is paid to the keeper who spent gas executing, not refunded to the user. This prevents free queue-clogging spam
 
 #### Protocol Operators
 
@@ -202,7 +204,7 @@ The bounty is calculated as `max(notional × bountyBps, minBountyUsdc)`, then ca
 - **Positive equity**: Capped at `uint256(equityUsdc)` — keeper cannot extract more than the position's equity
 - **Negative equity**: Capped at `posMargin` — vault only pays what it can seize back, never a net payer
 
-This means keepers may receive less than `minBountyUsdc` when equity is small but positive. The minimum position size guard ensures this gap is bounded: at the threshold ($3,333 notional), the proportional bounty equals `minBountyUsdc`, so the cap only binds when PnL has eroded equity.
+This means keepers may receive less than `minBountyUsdc` when equity is small but positive. The minimum position size guard ensures this gap is bounded: at the threshold ($3,333 notional), the proportional bounty equals `minBountyUsdc`, so the cap only binds when PnL has eroded equity. Additionally, partial closes that would leave remaining margin below `minBountyUsdc` revert (`DustPosition`), preventing creation of positions too small for economic liquidation.
 
 #### Bad Debt Socialization
 
@@ -276,6 +278,12 @@ When a position goes underwater (equity < 0):
 - **Mitigation**: V1 uses only USDC with `oracle = address(0)` (1:1 pricing, no oracle needed). Future multi-asset support must add staleness checks.
 
 ### HousePool Limitations
+
+#### Stale Mark Blocks Withdrawals and Yield Accrual
+
+- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, and `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`.
+- **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
+- **Resolution**: Any keeper or user can call `router.updateMarkPrice()` with a fresh Pyth payload to unblock operations.
 
 #### Senior Yield is a Preferred Return, Not a Fixed Coupon
 
