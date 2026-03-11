@@ -454,12 +454,11 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId
     ) internal {
         uint256 fee = keeperFees[orderId];
-        address user = address(uint160(uint256(orders[orderId].accountId)));
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
         if (fee > 0) {
-            claimableEth[user] += fee;
+            claimableEth[msg.sender] += fee;
         }
     }
 
@@ -467,15 +466,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId,
         bool success
     ) internal returns (uint256 keeperFee) {
-        uint256 fee = keeperFees[orderId];
-        if (success) {
-            keeperFee = fee;
-        } else {
-            address user = address(uint160(uint256(orders[orderId].accountId)));
-            if (fee > 0) {
-                claimableEth[user] += fee;
-            }
-        }
+        keeperFee = keeperFees[orderId];
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
@@ -502,14 +493,11 @@ contract OrderRouter is Ownable2Step, Pausable {
                 }
             }
         } else {
-            if (fee > 0) {
-                claimableEth[user] += fee;
-            }
-            uint256 keeperRefund = msg.value - pythFee;
-            if (keeperRefund > 0) {
-                (bool ok,) = payable(msg.sender).call{value: keeperRefund}("");
+            uint256 totalOut = fee + (msg.value - pythFee);
+            if (totalOut > 0) {
+                (bool ok,) = payable(msg.sender).call{value: totalOut}("");
                 if (!ok) {
-                    claimableEth[msg.sender] += keeperRefund;
+                    claimableEth[msg.sender] += totalOut;
                 }
             }
         }
