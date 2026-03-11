@@ -809,8 +809,10 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
+        uint64 execBefore = router.nextExecuteId();
         router.executeOrder(2, empty);
+        uint64 execAfter = router.nextExecuteId();
+        assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during frozen");
     }
 
     function test_FadWindow_MevCheckMoot_CloseAllowedDuringFrozen() public {
@@ -999,8 +1001,10 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(MONDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
+        uint64 execBefore = router.nextExecuteId();
         router.executeOrder(2, empty);
+        uint64 execAfter = router.nextExecuteId();
+        assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during admin FAD");
     }
 
     function test_FridayGap_MevCheckStillActive() public {
@@ -2040,7 +2044,7 @@ contract KeeperFeeRefundTest is Test {
         router.finalizeMaxOrderAge();
     }
 
-    // Regression: H-01
+    // Regression: H-01 — fee refunded to user on failure
     function test_ExpiredOrderFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
@@ -2048,15 +2052,16 @@ contract KeeperFeeRefundTest is Test {
 
         vm.warp(block.timestamp + 301);
 
+        uint256 aliceBefore = alice.balance;
         bytes[] memory empty;
         vm.prank(keeper);
         router.executeOrder(1, empty);
 
-        assertEq(router.claimableEth(alice), 0, "User fee is not refunded on failure");
-        assertGt(keeper.balance, 0, "Keeper receives fee for processing expired order");
+        assertGt(alice.balance, aliceBefore, "User fee refunded on expired order");
+        assertEq(keeper.balance, 0, "Keeper gets no fee for failed order");
     }
 
-    // Regression: H-01
+    // Regression: H-01 — fee refunded to user on slippage failure
     function test_SlippageFailFeeRefundedToUser() public {
         usdc.mint(bob, 1_000_000e6);
         vm.startPrank(bob);
@@ -2075,13 +2080,14 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
+        uint256 aliceBefore = alice.balance;
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        assertEq(router.claimableEth(alice), 0, "User fee is not refunded on slippage failure");
-        assertGt(keeper.balance, 0, "Keeper receives fee for processing failed order");
+        assertGt(alice.balance, aliceBefore, "User fee refunded on slippage failure");
+        assertEq(keeper.balance, 0, "Keeper gets no fee for failed order");
     }
 
     // Regression: H-01

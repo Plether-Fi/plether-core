@@ -974,6 +974,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint64 publishTime
     ) external onlyRouter {
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
+        _updateFunding(lastMarkPrice, vault.totalAssets());
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
     }

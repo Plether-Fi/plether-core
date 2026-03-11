@@ -278,7 +278,9 @@ contract OrderRouter is Ownable2Step, Pausable {
             bool isFad = engine.isFadWindow();
             bool oracleFrozen = _isOracleFrozen();
             if (oracleFrozen && !order.isClose) {
-                revert OrderRouter__OracleFrozen();
+                emit OrderFailed(orderId, "Oracle frozen: close-only mode");
+                _finalizeExecution(orderId, pythFee, false);
+                return;
             }
 
             if (isFad && !order.isClose) {
@@ -323,6 +325,10 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
 
         uint256 vaultDepth = vault.totalAssets();
+
+        if (gasleft() < MIN_ENGINE_GAS) {
+            revert OrderRouter__InsufficientGas();
+        }
 
         try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
@@ -517,8 +523,10 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         nextExecuteId++;
 
+        uint256 excessEth = msg.value - pythFee;
+
         if (success) {
-            uint256 totalOut = fee + (msg.value - pythFee);
+            uint256 totalOut = fee + excessEth;
             if (totalOut > 0) {
                 (bool ok,) = payable(msg.sender).call{value: totalOut}("");
                 if (!ok) {
@@ -526,11 +534,16 @@ contract OrderRouter is Ownable2Step, Pausable {
                 }
             }
         } else {
-            uint256 totalOut = fee + (msg.value - pythFee);
-            if (totalOut > 0) {
-                (bool ok,) = payable(msg.sender).call{value: totalOut}("");
+            if (fee > 0) {
+                (bool ok,) = payable(user).call{value: fee}("");
                 if (!ok) {
-                    claimableEth[msg.sender] += totalOut;
+                    claimableEth[user] += fee;
+                }
+            }
+            if (excessEth > 0) {
+                (bool ok,) = payable(msg.sender).call{value: excessEth}("");
+                if (!ok) {
+                    claimableEth[msg.sender] += excessEth;
                 }
             }
         }

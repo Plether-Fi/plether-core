@@ -205,8 +205,8 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 
         uint256 yieldBefore = pool.unpaidSeniorYield();
 
-        // Make mark stale, wait 3 days
-        _warpForward(3 days);
+        // Make mark stale (warp 2 days to Friday 06:00, before FAD window starts at 19:00)
+        _warpForward(2 days);
 
         vm.prank(address(juniorVault));
         pool.reconcile();

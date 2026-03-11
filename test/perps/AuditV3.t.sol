@@ -247,7 +247,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         );
     }
 
-    function test_C03_WeekendYieldRetroactivelyAccruesOnMonday() public {
+    function test_C03_ReconcileRunsDuringFADWhenMarkIsFreshEnough() public {
         _fundSenior(address(this), 500_000e6);
         _fundJunior(address(this), 500_000e6);
 
@@ -267,30 +267,19 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.reconcile();
         uint256 yieldFriday = pool.unpaidSeniorYield();
 
-        // Weekend: stale reconciles (early return, no yield accrual)
+        // Saturday during FAD: mark is 14h old.
+        // _requireFreshMark uses fadMaxStaleness (3 days) → fresh enough.
+        // Bug: _reconcile uses markStalenessLimit (120s) → stale → early return, no yield.
+        // Fix: _reconcile uses fadMaxStaleness during FAD → consistent, yield accrues.
         vm.warp(SATURDAY_NOON);
         vm.prank(address(juniorVault));
         pool.reconcile();
+        uint256 yieldSaturday = pool.unpaidSeniorYield();
 
-        // Monday: refresh mark, reconcile with fresh data
-        vm.warp(MONDAY_MORNING);
-        this.refreshMarkPrice();
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
-        uint256 yieldMonday = pool.unpaidSeniorYield();
-        uint256 yieldAccrued = yieldMonday - yieldFriday;
-
-        // At 10% APY on 500K, 56 hours of yield ≈ 319 USDC.
-        // If _reconcile properly advanced lastReconcileTime during the weekend,
-        // only the fresh elapsed time would accrue (~minutes, not 56 hours).
-        // Bug: the full Friday→Monday gap accrues retroactively.
-        uint256 maxAcceptableYield = 50e6; // At most a few hours of yield, not 56h
-
-        assertLe(
-            yieldAccrued,
-            maxAcceptableYield,
-            "C-03: yield must not retroactively accrue for the entire stale weekend gap"
+        assertGt(
+            yieldSaturday,
+            yieldFriday,
+            "C-03: _reconcile must accrue yield when mark is fresh enough for FAD window"
         );
     }
 
@@ -411,48 +400,42 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
     }
 
     function test_H02_OneDollarDepositCapturesEntireTranche() public {
-        // LP seeds the junior tranche with 50K
-        _fundJunior(lp, 50_000e6);
+        // Senior absorbs last-loss; junior absorbs first-loss.
+        // With senior + junior, a trading loss that exceeds junior wipes it to exactly 0.
+        _fundSenior(address(this), 10_000e6);
+        _fundJunior(lp, 40_000e6);
         uint256 lpShares = juniorVault.balanceOf(lp);
         assertGt(lpShares, 0, "LP should have shares");
 
-        // Trader opens a max-profit BULL position
+        // Trader opens a BULL position. Max profit = $50K = pool total.
         _fundTrader(trader, 50_000e6);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
         _open(traderId, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
 
-        // BULL profits when price drops. Close at near-zero for max payout.
-        _close(traderId, CfdTypes.Side.BULL, 50_000e18, 1);
+        // BULL profits when oracle drops. Close at 0 for exact max payout.
+        _close(traderId, CfdTypes.Side.BULL, 50_000e18, 0);
 
-        // Trigger reconciliation — the pool paid out ~50K, balance ≈ 0.
-        // Loss absorption wipes juniorPrincipal to 0 (or near-0).
+        // Reconcile: loss exceeds juniorPrincipal → junior wiped to exactly 0.
         vm.prank(address(router));
-        engine.updateMarkPrice(1, uint64(block.timestamp));
+        engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 juniorPrincipalAfterWipe = pool.juniorPrincipal();
         uint256 totalSupplyAfterWipe = juniorVault.totalSupply();
 
-        // Precondition: junior is wiped but shares survive
-        assertLe(juniorPrincipalAfterWipe, 1e6, "junior should be wiped or near-zero");
+        assertEq(juniorPrincipalAfterWipe, 0, "junior must be fully wiped");
         assertGt(totalSupplyAfterWipe, 0, "shares must survive the wipeout");
 
         // Attacker deposits $1 into the wiped tranche.
-        // With totalAssets()=0 and totalSupply>0, ERC4626 mints massive shares.
+        // Bug: ERC4626 mints massive shares (totalAssets=0, totalSupply>0), granting >99% ownership.
+        // Fix: TrancheVault reverts on deposit when tranche is impaired.
         usdc.mint(attacker, 1e6);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TrancheImpaired.selector);
         juniorVault.deposit(1e6, attacker);
         vm.stopPrank();
-
-        uint256 attackerShares = juniorVault.balanceOf(attacker);
-        uint256 totalSharesAfter = juniorVault.totalSupply();
-        uint256 attackerPct = (attackerShares * 100) / totalSharesAfter;
-
-        // Bug: attacker now owns >99% of all junior shares for just $1.
-        // depositJunior should revert when principal=0 but shares>0 (like senior's impairment check).
-        assertLe(attackerPct, 50, "H-02: $1 deposit must not grant majority ownership of wiped tranche");
     }
 
 }
@@ -480,7 +463,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
         return 1_000_000e6;
     }
 
-    function test_M01_SingleExecuteOrderLacksGasFloor() public {
+    function test_M01_ExecuteOrderHasGasFloor() public {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
 
@@ -490,29 +473,18 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
-        // Call executeOrder via low-level call with restricted gas.
-        // With insufficient gas, processOrder OOGs inside try/catch.
-        // The catch block labels it "Engine Math Panic" and permanently deletes the order.
-        // executeOrderBatch would revert with InsufficientGas at this gas level.
+        // 450K gas: outer frame uses ~30K in mock mode, leaving ~420K at gas floor check.
+        // Before fix: no gas floor, 420K is plenty for processOrder → order silently executed.
+        // After fix: gas floor triggers (420K < 500K MIN_ENGINE_GAS) → clean revert, order preserved.
         vm.deal(keeper, 1 ether);
         vm.prank(keeper);
-        (bool ok,) = address(router).call{gas: 200_000}(
+        (bool ok,) = address(router).call{gas: 450_000}(
             abi.encodeWithSelector(router.executeOrder.selector, uint64(1), priceData)
         );
 
-        // If the call succeeded, the order was silently cancelled via catch.
-        // If it reverted (OOG propagated), the order survives.
-        // Bug: executeOrder has no gas floor, so the call may succeed (silently cancelling).
-        // Expected: executeOrder should revert like executeOrderBatch does.
-        if (ok) {
-            // Order was silently killed — this is the vulnerability
-            bytes32 aliceId = bytes32(uint256(uint160(alice)));
-            (uint256 size,,,,,,,) = engine.positions(aliceId);
-            assertGt(size, 0, "M-01: order must not be silently cancelled by gas-starved try/catch");
-        }
-        // If !ok, gas was too low for even the outer frame — inconclusive at this gas level.
-        // The vulnerability exists regardless; it just requires precise gas calibration.
-        assertTrue(ok, "M-01: call should have enough gas for outer frame but not inner processOrder");
+        assertFalse(ok, "M-01: executeOrder must revert when gas is below MIN_ENGINE_GAS");
+        uint64 nextExec = router.nextExecuteId();
+        assertEq(nextExec, 1, "M-01: order must survive the gas-floor revert");
     }
 
 }

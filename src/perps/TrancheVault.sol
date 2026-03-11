@@ -24,6 +24,7 @@ contract TrancheVault is ERC4626 {
 
     error TrancheVault__DepositCooldown();
     error TrancheVault__TransferDuringCooldown();
+    error TrancheVault__TrancheImpaired();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -126,6 +127,9 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares
     ) internal override {
+        if (totalAssets() == 0 && totalSupply() > 0) {
+            revert TrancheVault__TrancheImpaired();
+        }
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(POOL), assets);
         if (IS_SENIOR) {
