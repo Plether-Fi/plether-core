@@ -768,6 +768,48 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
+    function test_LiquidationBounty_CappedByPositionMargin() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(1234));
+        _fundTrader(address(uint160(uint256(accountId))), 200 * 1e6);
+
+        engine.proposeRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 0.15e18,
+                maxApy: 3.0e18,
+                maintMarginBps: 10,
+                fadMarginBps: 10,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 100
+            })
+        );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
+
+        CfdTypes.Order memory openOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1000 * 1e18,
+            marginDelta: 6 * 1e6,
+            targetPrice: 0,
+            commitTime: uint64(block.timestamp),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.prank(address(router));
+        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+
+        (, uint256 posMargin,,,,,,) = engine.positions(accountId);
+
+        vm.prank(address(router));
+        uint256 bounty = engine.liquidatePosition(accountId, 1.1e8, vaultDepth, uint64(block.timestamp));
+
+        assertEq(bounty, posMargin, "Keeper bounty should not exceed position margin");
+    }
+
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 50_000 * 1e6);

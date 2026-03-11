@@ -873,6 +873,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             keeperBountyUsdc = rp.minBountyUsdc;
         }
         uint256 posMargin = pos.margin;
+        if (keeperBountyUsdc > posMargin) {
+            keeperBountyUsdc = posMargin;
+        }
         clearinghouse.unlockMargin(accountId, posMargin);
 
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
