@@ -224,8 +224,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();
         }
-        seniorHighWaterMark = seniorHighWaterMark * (seniorPrincipal - amount) / seniorPrincipal;
-        seniorPrincipal -= amount;
+        uint256 remaining = seniorPrincipal - amount;
+        seniorHighWaterMark = seniorHighWaterMark * remaining / seniorPrincipal;
+        unpaidSeniorYield = unpaidSeniorYield * remaining / seniorPrincipal;
+        seniorPrincipal = remaining;
         USDC.safeTransfer(receiver, amount);
     }
 
