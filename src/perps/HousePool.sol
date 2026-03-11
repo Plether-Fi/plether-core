@@ -220,6 +220,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
         _reconcile();
+        _requireFreshMark();
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();
         }
@@ -241,6 +242,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         address receiver
     ) external onlyVault {
         _reconcile();
+        _requireFreshMark();
         if (amount > getMaxJuniorWithdraw()) {
             revert HousePool__ExceedsMaxJuniorWithdraw();
         }
@@ -290,6 +292,16 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         _reconcile();
     }
 
+    function _requireFreshMark() internal view {
+        uint256 bullMax = ENGINE.globalBullMaxProfit();
+        uint256 bearMax = ENGINE.globalBearMaxProfit();
+        if (bullMax + bearMax > 0) {
+            if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
+                revert HousePool__MarkPriceStale();
+            }
+        }
+    }
+
     function _reconcile() internal {
         uint256 elapsed = block.timestamp - lastReconcileTime;
         lastReconcileTime = block.timestamp;
@@ -299,17 +311,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
 
-        if (elapsed > 0 && seniorPrincipal > 0) {
-            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
-            unpaidSeniorYield += yieldInc;
-        }
-
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
             if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
                 return;
             }
+        }
+
+        if (elapsed > 0 && seniorPrincipal > 0) {
+            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
+            unpaidSeniorYield += yieldInc;
         }
 
         uint256 bal = USDC.balanceOf(address(this));

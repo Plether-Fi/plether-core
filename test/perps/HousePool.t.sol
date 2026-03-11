@@ -769,7 +769,7 @@ contract HousePoolAuditTest is BasePerpTest {
     }
 
     // Regression: M-01 — stale mark does not block withdrawal
-    function test_StaleMarkDoesNotBlockWithdrawal() public {
+    function test_StaleMarkBlocksWithdrawal() public {
         _fundJunior(bob, 500_000e6);
         _fundJunior(carol, 500_000e6);
         _fundTrader(alice, 50_000e6);
@@ -782,11 +782,9 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 121);
 
-        uint256 bobBalBefore = usdc.balanceOf(bob);
-        vm.startPrank(bob);
+        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.prank(bob);
         juniorVault.withdraw(1e6, bob, bob);
-        vm.stopPrank();
-        assertEq(usdc.balanceOf(bob) - bobBalBefore, 1e6, "Withdrawal succeeds with stale mark");
     }
 
     // Regression: C-02 — funding spread not permanently locked after positions close
@@ -967,8 +965,8 @@ contract HousePoolAuditTest is BasePerpTest {
         assertGt(pool.seniorPrincipal(), 0, "Senior should be restored after recovery");
     }
 
-    // Regression: C-04 — flash deposit must not crush senior deficit
-    function test_FlashDepositCrushesDeficit() public {
+    // Regression: C-05 — senior deposit reverts when tranche is impaired (seniorPrincipal < HWM)
+    function test_FlashDepositBlockedWhenSeniorImpaired() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 50_000e6);
 
@@ -990,19 +988,15 @@ contract HousePoolAuditTest is BasePerpTest {
         juniorVault.deposit(1e6, bob);
         vm.stopPrank();
 
-        uint256 deficitBefore = pool.seniorHighWaterMark() - pool.seniorPrincipal();
-        assertGt(deficitBefore, 0, "Senior deficit exists");
+        assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
 
         address dave = address(0x444);
-        _fundSenior(dave, 10_000_000e6);
-
-        vm.warp(block.timestamp + 2 hours);
-        uint256 withdrawable = seniorVault.maxWithdraw(dave);
-        vm.prank(dave);
-        seniorVault.withdraw(withdrawable, dave, dave);
-
-        uint256 deficitAfter = pool.seniorHighWaterMark() - pool.seniorPrincipal();
-        assertGe(deficitAfter, deficitBefore / 2, "Deficit must not be slashable via flash deposit");
+        usdc.mint(dave, 10_000_000e6);
+        vm.startPrank(dave);
+        usdc.approve(address(seniorVault), 10_000_000e6);
+        vm.expectRevert(HousePool.HousePool__SeniorImpaired.selector);
+        seniorVault.deposit(10_000_000e6, dave);
+        vm.stopPrank();
     }
 
 }
