@@ -386,6 +386,41 @@ contract AuditH03_DustPosition is BasePerpTest {
 }
 
 // ============================================================
+// N-01: Share Transfer Bypasses Deposit Cooldown
+// ============================================================
+
+contract AuditN01_TransferBypassesCooldown is BasePerpTest {
+
+    address alice = address(0x111);
+    address bob = address(0x222);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_N01_TransferRecipientBypassesCooldown() public {
+        uint256 t0 = SETUP_TIMESTAMP;
+        _fundJunior(alice, 100_000 * 1e6);
+
+        // Wait for Alice's cooldown to expire
+        vm.warp(t0 + 1 hours);
+
+        // Alice transfers to bob (fresh address, lastDepositTime=0)
+        uint256 shares = juniorVault.balanceOf(alice);
+        vm.prank(alice);
+        juniorVault.transfer(bob, shares);
+
+        // Fix: Bob inherits Alice's deposit time instead of keeping zero default.
+        // Since sender cooldown is already expired when transfers are allowed,
+        // this is defense-in-depth — it ensures lastDepositTime is never 0 for
+        // an address holding shares, which matters if cooldown logic evolves.
+        assertEq(juniorVault.lastDepositTime(bob), t0, "Bob inherits Alice's deposit time");
+        assertGt(juniorVault.lastDepositTime(bob), 0, "Zero default is eliminated");
+    }
+
+}
+
+// ============================================================
 // H-04: Unpaid Senior Yield Not Scaled on Withdrawal
 // ============================================================
 

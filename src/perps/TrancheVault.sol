@@ -50,6 +50,9 @@ contract TrancheVault is ERC4626 {
             if (block.timestamp < lastDepositTime[from] + DEPOSIT_COOLDOWN) {
                 revert TrancheVault__TransferDuringCooldown();
             }
+            if (lastDepositTime[to] < lastDepositTime[from]) {
+                lastDepositTime[to] = lastDepositTime[from];
+            }
         }
         super._update(from, to, amount);
     }
