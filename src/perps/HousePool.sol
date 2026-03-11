@@ -347,7 +347,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (bullMax + bearMax > 0) {
             uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
             if (block.timestamp - ENGINE.lastMarkTime() > limit) {
-                lastReconcileTime = block.timestamp;
                 return;
             }
         }
@@ -420,6 +419,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             } else {
                 seniorPrincipal = 0;
                 unpaidSeniorYield = 0;
+                seniorHighWaterMark = 0;
             }
         }
 

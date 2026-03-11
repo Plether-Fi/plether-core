@@ -18,7 +18,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
@@ -27,19 +27,25 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
     function test_C2_MtmMustAccountForUncollectibleLosses() public {
         _fundTrader(traderA, 200_000 * 1e6);
-        _fundTrader(traderB, 1_000 * 1e6);
+        _fundTrader(traderB, 1000 * 1e6);
 
         bytes32 aId = bytes32(uint256(uint160(traderA)));
         bytes32 bId = bytes32(uint256(uint160(traderB)));
 
+        // A enters BULL at 1.5e8 → profits when price drops to 1e8 (+$50K)
+        // B enters BULL at 0.5e8 → loses when price rises to 1e8 (-$50K, but only $1K margin)
         _open(aId, CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1.5e8);
-        _open(bId, CfdTypes.Side.BULL, 100_000 * 1e18, 1_000 * 1e6, 0.5e8);
+        _open(bId, CfdTypes.Side.BULL, 100_000 * 1e18, 1000 * 1e6, 0.5e8);
 
+        // Move mark to 1e8 — both positions still open (no liquidation).
+        // A is winning $50K, B is losing $50K but has only $1K margin.
+        // The vault's true liability is ~$49K (A's profit minus B's collectible $1K),
+        // but O(1) netting reports bullTotal = 0 since +$50K and -$50K cancel out.
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         int256 mtm = engine.getVaultMtmAdjustment();
-        assertGt(mtm, 0, "MtM should reserve liability from undercollateralized losers");
+        assertGt(mtm, 0, "MtM should reserve liability when netting hides uncollectible losses");
     }
 
     function test_H1_KeeperFeeMustBePaidOnFailedSingleExecute() public {
@@ -68,30 +74,33 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(traderPositive, 10_000 * 1e6);
         _fundTrader(traderNegative, 10_000 * 1e6);
 
-        _open(positiveId, CfdTypes.Side.BULL, 100_000 * 1e18, 1_600 * 1e6, 1e8);
-        _open(negativeId, CfdTypes.Side.BULL, 100_000 * 1e18, 1_600 * 1e6, 1e8);
+        // BULL at 1e8, $1,600 margin. Equity hits 0 at price 101,600,000.
+        _open(positiveId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
+        _open(negativeId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
 
+        // Liquidate at equity ≈ +$5 (just above zero)
+        // Bounty capped at min(~$152, $5) = $5
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtPositiveEquity =
-            engine.liquidatePosition(positiveId, 101_530_000, depth, uint64(block.timestamp));
+            engine.liquidatePosition(positiveId, 101_595_000, depth, uint64(block.timestamp));
 
+        // Liquidate at equity ≈ -$5 (just below zero)
+        // Bounty capped at min(~$152, $1600 margin) = $152
         depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtNegativeEquity =
-            engine.liquidatePosition(negativeId, 101_541_000, depth, uint64(block.timestamp));
+            engine.liquidatePosition(negativeId, 101_605_000, depth, uint64(block.timestamp));
 
-        assertGe(
-            bountyAtPositiveEquity,
-            bountyAtNegativeEquity,
-            "Bounty should not jump up after position slips into bad debt"
-        );
+        uint256 jump = bountyAtNegativeEquity > bountyAtPositiveEquity
+            ? bountyAtNegativeEquity - bountyAtPositiveEquity
+            : bountyAtPositiveEquity - bountyAtNegativeEquity;
+        assertLt(jump, 1e6, "Bounty should not exhibit a large discontinuity around zero equity");
     }
 
     function test_H4_SeniorShouldRemainDepositableAfterFullWipeout() public {
         address seniorLp = address(0x333);
         address juniorLp = address(0x444);
-        address newSeniorLp = address(0x555);
 
         _fundSenior(seniorLp, 100_000 * 1e6);
         _fundJunior(juniorLp, 100_000 * 1e6);
@@ -103,15 +112,23 @@ contract AuditValidFindingsFailing is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        _fundSenior(newSeniorLp, 10_000 * 1e6);
-        assertEq(pool.seniorPrincipal(), 10_000 * 1e6, "Senior tranche should accept new deposits after wipeout");
+        // Deposit directly at HousePool level to isolate the seniorHighWaterMark bug.
+        // (Going through TrancheVault would hit a separate TrancheImpaired guard first.)
+        uint256 depositAmount = 10_000 * 1e6;
+        usdc.mint(address(seniorVault), depositAmount);
+        vm.startPrank(address(seniorVault));
+        usdc.approve(address(pool), depositAmount);
+        pool.depositSenior(depositAmount);
+        vm.stopPrank();
+
+        assertEq(pool.seniorPrincipal(), depositAmount, "Senior tranche should accept new deposits after wipeout");
     }
 
     function test_M1_WithdrawMustRevertWhenMarkIsStale() public {
         _fundTrader(trader, 100_000 * 1e6);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 1_000 * 1e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
 

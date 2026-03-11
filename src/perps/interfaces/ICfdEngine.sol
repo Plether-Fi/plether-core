@@ -6,6 +6,9 @@ import {CfdTypes} from "../CfdTypes.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    /// @notice Margin clearinghouse address used for account margin locking/unlocking
+    function clearinghouse() external view returns (address);
+
     /// @notice Settles funding and processes an open/close order at the given oracle price
     /// @param order              Order to execute (contains accountId, market, direction, size)
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)

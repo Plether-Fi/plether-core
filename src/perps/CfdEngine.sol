@@ -42,6 +42,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public totalBearMargin;
 
     uint256 public accumulatedFeesUsdc;
+    uint256 public accumulatedBadDebtUsdc;
 
     // ==========================================
     // FUNDING ACCUMULATORS
@@ -99,6 +100,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__RunwayTooLong();
     error CfdEngine__PartialCloseUnderwaterFunding();
     error CfdEngine__DustPosition();
+    error CfdEngine__MarkPriceStale();
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
 
@@ -355,6 +357,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
+        uint256 maxStaleness = isFadWindow() ? fadMaxStaleness : 60;
+        if (block.timestamp - lastMarkTime > maxStaleness) {
+            revert CfdEngine__MarkPriceStale();
+        }
+
         int256 pendingFunding = getPendingFunding(pos);
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
@@ -601,15 +608,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         if (netMarginChange > 0) {
-            clearinghouse.lockMargin(order.accountId, uint256(netMarginChange));
             pos.margin += uint256(netMarginChange);
         } else if (netMarginChange < 0) {
             uint256 deficit = uint256(-netMarginChange);
             if (pos.margin < deficit) {
                 revert CfdEngine__MarginDrainedByFees();
             }
-            clearinghouse.unlockMargin(order.accountId, deficit);
             pos.margin -= deficit;
+        }
+
+        uint256 currentLocked = clearinghouse.lockedMarginUsdc(order.accountId);
+        if (currentLocked < pos.margin) {
+            clearinghouse.lockMargin(order.accountId, pos.margin - currentLocked);
+        } else if (currentLocked > pos.margin) {
+            clearinghouse.unlockMargin(order.accountId, currentLocked - pos.margin);
         }
 
         accumulatedFeesUsdc += execFeeUsdc;
@@ -679,10 +691,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 proportionalAccrual = (pos.vpiAccrued * int256(order.sizeDelta)) / int256(originalSize);
         pos.vpiAccrued -= proportionalAccrual;
 
-        if (proportionalAccrual + vpiUsdc < 0) {
-            vpiUsdc = -proportionalAccrual;
-        }
-
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
 
@@ -703,6 +711,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
             uint256 shortfall = owed - toSeize;
             actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
+            uint256 badDebt = shortfall > execFeeUsdc ? shortfall - execFeeUsdc : 0;
+            accumulatedBadDebtUsdc += badDebt;
         }
 
         accumulatedFeesUsdc += actualFee;
@@ -863,13 +873,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             keeperBountyUsdc = rp.minBountyUsdc;
         }
         uint256 posMargin = pos.margin;
-        if (equityUsdc <= 0) {
-            if (keeperBountyUsdc > posMargin) {
-                keeperBountyUsdc = posMargin;
-            }
-        } else if (keeperBountyUsdc > uint256(equityUsdc)) {
-            keeperBountyUsdc = uint256(equityUsdc);
-        }
         clearinghouse.unlockMargin(accountId, posMargin);
 
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
@@ -896,6 +899,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             if (freeUsdc > 0) {
                 uint256 toSeize = freeUsdc < deficit ? freeUsdc : deficit;
                 clearinghouse.seizeAsset(accountId, address(USDC), toSeize, address(vault));
+                deficit -= toSeize;
+            }
+            if (deficit > 0) {
+                accumulatedBadDebtUsdc += deficit;
             }
         }
 
@@ -921,6 +928,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         effectiveAssets = vault.totalAssets();
         uint256 fees = accumulatedFeesUsdc;
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
+        uint256 badDebt = accumulatedBadDebtUsdc;
+        effectiveAssets = effectiveAssets > badDebt ? effectiveAssets - badDebt : 0;
         int256 cappedFunding = _getCappedFundingPnl();
         if (cappedFunding > 0) {
             effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
@@ -1020,7 +1029,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearTotal = 0;
         }
 
-        return bullTotal + bearTotal;
+        return bullTotal + bearTotal + int256(accumulatedBadDebtUsdc);
     }
 
 }

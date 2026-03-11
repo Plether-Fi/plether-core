@@ -6,6 +6,7 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -41,6 +42,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
+    mapping(uint64 => uint256) public committedMargins;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
@@ -215,6 +217,11 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId = nextCommitId++;
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
 
+        if (!isClose && marginDelta > 0) {
+            IMarginClearinghouse(engine.clearinghouse()).lockMargin(accountId, marginDelta);
+            committedMargins[orderId] = marginDelta;
+        }
+
         orders[orderId] = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: sizeDelta,
@@ -359,19 +366,19 @@ contract OrderRouter is Ownable2Step, Pausable {
             CfdTypes.Order memory order = orders[orderId];
 
             if (order.sizeDelta == 0) {
-                totalKeeperFees += _cleanupOrder(orderId);
+                totalKeeperFees += _cleanupOrder(orderId, false);
                 continue;
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, "Order expired");
-                totalKeeperFees += _cleanupOrder(orderId);
+                totalKeeperFees += _cleanupOrder(orderId, false);
                 continue;
             }
 
             if ((isFad || oracleFrozen) && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
-                totalKeeperFees += _cleanupOrder(orderId);
+                totalKeeperFees += _cleanupOrder(orderId, false);
                 continue;
             }
 
@@ -381,7 +388,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                totalKeeperFees += _cleanupOrder(orderId);
+                totalKeeperFees += _cleanupOrder(orderId, false);
                 continue;
             }
 
@@ -393,13 +400,14 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
+                totalKeeperFees += _cleanupOrder(orderId, true);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
+                totalKeeperFees += _cleanupOrder(orderId, false);
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
+                totalKeeperFees += _cleanupOrder(orderId, false);
             }
-
-            totalKeeperFees += _cleanupOrder(orderId);
         }
 
         _sendEth(msg.sender, totalKeeperFees + (msg.value - pythFee));
@@ -435,6 +443,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId
     ) internal {
         uint256 fee = keeperFees[orderId];
+        _unlockCommittedMargin(orderId);
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
@@ -484,9 +493,13 @@ contract OrderRouter is Ownable2Step, Pausable {
     }
 
     function _cleanupOrder(
-        uint64 orderId
+        uint64 orderId,
+        bool success
     ) internal returns (uint256 keeperFee) {
         keeperFee = keeperFees[orderId];
+        if (!success) {
+            _unlockCommittedMargin(orderId);
+        }
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
@@ -498,7 +511,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal {
         uint256 fee = keeperFees[orderId];
-        address user = address(uint160(uint256(orders[orderId].accountId)));
+        if (!success) {
+            _unlockCommittedMargin(orderId);
+        }
         delete keeperFees[orderId];
         delete orders[orderId];
         nextExecuteId++;
@@ -507,9 +522,20 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (success) {
             _sendEth(msg.sender, fee + excessEth);
         } else {
-            _sendEth(user, fee);
-            _sendEth(msg.sender, excessEth);
+            _sendEth(msg.sender, fee + excessEth);
         }
+    }
+
+    function _unlockCommittedMargin(
+        uint64 orderId
+    ) internal {
+        uint256 amount = committedMargins[orderId];
+        if (amount == 0) {
+            return;
+        }
+        delete committedMargins[orderId];
+        bytes32 accountId = orders[orderId].accountId;
+        IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
     }
 
     /// @notice Claims ETH stuck from failed keeper refund transfers
