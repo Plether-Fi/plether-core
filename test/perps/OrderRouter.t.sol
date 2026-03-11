@@ -786,7 +786,7 @@ contract FadStalenessTest is BasePerpTest {
         engine.finalizeFadRunway();
     }
 
-    function test_FadWindow_CloseOrder_BlockedDuringFrozen() public {
+    function test_FadWindow_CloseOrder_AllowedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -794,8 +794,11 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close order should execute during frozen oracle");
     }
 
     function test_FadWindow_OpenOrder_BlockedDuringFrozen() public {
@@ -810,7 +813,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
     }
 
-    function test_FadWindow_MevCheckMoot_FrozenReverts() public {
+    function test_FadWindow_MevCheckMoot_CloseAllowedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -818,11 +821,14 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Close order should execute with stale price during frozen oracle");
     }
 
-    function test_FadWindow_ExcessStaleness_FrozenReverts() public {
+    function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -831,8 +837,12 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 3, "Queue advances despite staleness cancel");
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertGt(size, 0, "Position unchanged - close was cancelled, not executed");
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
@@ -859,7 +869,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeLiquidation(aliceId, empty);
     }
 
-    function test_FadBatch_BlockedDuringFrozen() public {
+    function test_FadBatch_CloseAllowedDuringFrozen() public {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -867,8 +877,11 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
         router.executeOrderBatch(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 5000 * 1e18, "Partial close should reduce position");
     }
 
     function test_FadBatch_ExcessStaleness_FrozenReverts() public {
@@ -880,7 +893,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
-        vm.expectRevert(OrderRouter.OrderRouter__OracleFrozen.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrderBatch(2, empty);
     }
 
@@ -1932,10 +1945,10 @@ contract VpiImrBypassTest is Test {
         vm.stopPrank();
     }
 
-    // Regression: C-03 / C-05 — IMR check uses pos.margin (post-fee, includes VPI rebate)
-    // With vpiFactor=1e18 the skew-reducing rebate exceeds IMR, so the position
-    // legitimately opens with VPI-funded margin even though marginDelta is zero.
-    function test_VpiRebateSatisfiesIMR_ZeroRiskPosition() public {
+    // M-01 fix: IMR check excludes VPI rebates from effective margin.
+    // With zero deposited margin, the position should be rejected even if the VPI
+    // rebate would otherwise exceed IMR.
+    function test_VpiRebateDoesNotSatisfyIMR_AfterFix() public {
         _fundJunior(bob, 1_000_000e6);
 
         _fundTrader(carol, 50_000e6);
@@ -1951,9 +1964,8 @@ contract VpiImrBypassTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
         router.executeOrder(2, empty);
 
-        (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceAccount);
-        assertGt(size, 0, "Position opens: VPI rebate provides sufficient margin");
-        assertGt(margin, 0, "Position margin funded entirely by VPI rebate");
+        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        assertEq(size, 0, "Position rejected: VPI rebate alone cannot satisfy IMR");
     }
 
 }
@@ -2192,7 +2204,7 @@ contract WeekendArbitrageTest is Test {
         clearinghouse.finalizeOperator();
     }
 
-    // Regression: H-02
+    // C-03 fix: close orders execute during frozen oracle with stale Friday price
     function test_CloseOrderExecutesAtStaleFridayPrice() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
@@ -2228,8 +2240,10 @@ contract WeekendArbitrageTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
 
-        vm.expectRevert();
         router.executeOrder(2, updateData);
+
+        (size,,,,,,,) = engine.positions(aliceAccount);
+        assertEq(size, 0, "Close order should execute during frozen oracle");
     }
 
 }

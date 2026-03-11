@@ -204,6 +204,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount
     ) external onlyVault whenNotPaused {
         _reconcile();
+        _requireFreshMark();
         if (seniorPrincipal < seniorHighWaterMark) {
             revert HousePool__SeniorImpaired();
         }
@@ -235,6 +236,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount
     ) external onlyVault whenNotPaused {
         _reconcile();
+        _requireFreshMark();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         juniorPrincipal += amount;
     }
@@ -298,7 +300,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
-            if (block.timestamp - ENGINE.lastMarkTime() > markStalenessLimit) {
+            uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+            if (block.timestamp - ENGINE.lastMarkTime() > limit) {
                 revert HousePool__MarkPriceStale();
             }
         }
@@ -306,10 +309,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     function _reconcile() internal {
         uint256 elapsed = block.timestamp - lastReconcileTime;
-        lastReconcileTime = block.timestamp;
 
         uint256 claimedEquity = seniorPrincipal + juniorPrincipal;
         if (claimedEquity == 0) {
+            lastReconcileTime = block.timestamp;
             return;
         }
 
@@ -320,6 +323,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
                 return;
             }
         }
+
+        lastReconcileTime = block.timestamp;
 
         if (elapsed > 0 && seniorPrincipal > 0) {
             uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);

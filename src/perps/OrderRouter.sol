@@ -31,6 +31,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 public minKeeperFee;
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 internal constant MIN_ENGINE_GAS = 500_000;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -63,6 +64,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__EmptyFeeds();
     error OrderRouter__MevDetected();
     error OrderRouter__OracleFrozen();
+    error OrderRouter__InsufficientGas();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -255,10 +257,9 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             bool isFad = engine.isFadWindow();
             bool oracleFrozen = _isOracleFrozen();
-            if (oracleFrozen) {
+            if (oracleFrozen && !order.isClose) {
                 revert OrderRouter__OracleFrozen();
             }
-            uint256 staleness = block.timestamp - minPublishTime;
 
             if (isFad && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
@@ -266,13 +267,16 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            if (staleness > 60) {
+            uint256 staleness = block.timestamp - minPublishTime;
+            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
+
+            if (staleness > maxStaleness) {
                 emit OrderFailed(orderId, "Oracle price too stale");
                 _finalizeExecution(orderId, pythFee, false);
                 return;
             }
 
-            if (minPublishTime <= order.commitTime) {
+            if (!oracleFrozen && minPublishTime <= order.commitTime) {
                 revert OrderRouter__MevDetected();
             }
         } else {
@@ -350,9 +354,6 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             isFad = engine.isFadWindow();
             oracleFrozen = _isOracleFrozen();
-            if (oracleFrozen) {
-                revert OrderRouter__OracleFrozen();
-            }
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
 
             if (block.timestamp - pricePublishTime > maxStaleness) {
@@ -390,7 +391,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if (isFad && !order.isClose) {
+            if ((isFad || oracleFrozen) && !order.isClose) {
                 emit OrderFailed(orderId, "FAD: close-only mode");
                 totalKeeperFees += _cleanupOrder(orderId, false);
                 continue;
@@ -407,6 +408,10 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
 
             uint256 vaultDepth = vault.totalAssets();
+
+            if (gasleft() < MIN_ENGINE_GAS) {
+                revert OrderRouter__InsufficientGas();
+            }
 
             bool execSuccess;
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {

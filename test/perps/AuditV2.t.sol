@@ -60,6 +60,11 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
 
     address alice = address(0xA11CE);
 
+    function refreshMarkPrice() external {
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+    }
+
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 500_000e6;
     }
@@ -91,27 +96,34 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
-        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 yieldBefore = pool.unpaidSeniorYield();
+
+        // Capture base timestamp before any warps (block.timestamp is cached per frame)
+        uint256 baseTs = SETUP_TIMESTAMP + 48 hours + 1;
 
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1e8, uint64(baseTs));
 
-        _warpForward(200);
-
+        // Warp past staleness limit, then reconcile repeatedly with stale mark.
+        // Use absolute timestamps to avoid optimizer caching timestamp().
+        uint256 staleStart = baseTs + 200;
         for (uint256 i = 0; i < 48; i++) {
+            vm.warp(staleStart + i * 1 hours);
             vm.prank(address(juniorVault));
             pool.reconcile();
-            _warpForward(1 hours);
         }
 
+        // Refresh mark at end of stale period
+        uint256 freshTs = staleStart + 48 hours;
+        vm.warp(freshTs);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1e8, uint64(freshTs));
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 seniorAfter = pool.seniorPrincipal();
-        uint256 yieldAccrued = seniorAfter - seniorBefore;
+        uint256 yieldAfter = pool.unpaidSeniorYield();
+        uint256 yieldAccrued = yieldAfter - yieldBefore;
 
         // 48h at 10% APY on 500K ≈ 274e6
         uint256 expectedMinYield = 200e6;
@@ -349,7 +361,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
-            vpiFactor: 0.001e18,
+            vpiFactor: 0.05e18,
             maxSkewRatio: 0.4e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0.15e18,
@@ -362,17 +374,21 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
     }
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
-        return 1_000_000e6;
+        return 2_000_000e6;
     }
 
     function test_M01_ZeroMarginPositionViaVPIRebate() public {
-        _fundTrader(alice, 100_000e6);
+        _fundTrader(alice, 200_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 30_000e6, 1e8);
+        // Alice creates BULL skew; pays VPI to open
+        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
 
+        // Bob opens opposing BEAR with 0 margin — the VPI rebate (skew reduction)
+        // should NOT satisfy IMR. With vpiFactor=0.05, rebate ≈ 2250 USDC > exec fee 180.
         _fundTrader(bob, 1e6);
         bytes32 bobId = bytes32(uint256(uint160(bob)));
 
+        uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         engine.processOrder(
@@ -387,7 +403,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
                 isClose: false
             }),
             1e8,
-            pool.totalAssets(),
+            vaultDepth,
             uint64(block.timestamp)
         );
     }

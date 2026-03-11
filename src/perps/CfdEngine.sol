@@ -338,8 +338,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function checkWithdraw(
         bytes32 accountId
     ) external view override {
-        // No-op: clearinghouse enforces equity >= lockedMargin after withdrawal.
-        // Previous blanket `size > 0` revert trapped free equity unnecessarily.
+        CfdTypes.Position memory pos = positions[accountId];
+        if (pos.size == 0) {
+            return;
+        }
+
+        uint256 price = lastMarkPrice;
+        if (price == 0) {
+            return;
+        }
+
+        int256 pendingFunding = getPendingFunding(pos);
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
+
+        int256 equity = int256(pos.margin) + pendingFunding;
+        equity = isProfit ? equity + int256(pnlAbs) : equity - int256(pnlAbs);
+
+        uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
+        if (equity < int256(mmr)) {
+            revert CfdEngine__WithdrawBlockedByOpenPosition();
+        }
     }
 
     // ==========================================
@@ -579,7 +597,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (imr < riskParams.minBountyUsdc) {
             imr = riskParams.minBountyUsdc;
         }
-        if (pos.margin < imr) {
+        uint256 effectiveMargin = pos.margin;
+        if (tradeCost < 0) {
+            uint256 rebate = uint256(-tradeCost);
+            effectiveMargin = effectiveMargin > rebate ? effectiveMargin - rebate : 0;
+        }
+        if (effectiveMargin < imr) {
             revert CfdEngine__InsufficientInitialMargin();
         }
 
