@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+/// @notice Cross-margin account system that holds collateral and settles PnL for CFD positions.
 interface IMarginClearinghouse {
 
     /// @notice Returns the balance of an asset for an account

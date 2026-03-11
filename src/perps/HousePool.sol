@@ -72,6 +72,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         _;
     }
 
+    /// @param _usdc USDC token address used as collateral
+    /// @param _engine CfdEngine that manages positions and PnL
     constructor(
         address _usdc,
         address _engine
@@ -86,6 +88,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     // ADMIN (set-once pattern)
     // ==========================================
 
+    /// @notice Set the OrderRouter address (one-time, immutable after set)
     function setOrderRouter(
         address _router
     ) external onlyOwner {
@@ -95,6 +98,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         orderRouter = _router;
     }
 
+    /// @notice Set the senior tranche vault address (one-time, immutable after set)
     function setSeniorVault(
         address _vault
     ) external onlyOwner {
@@ -104,6 +108,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         seniorVault = _vault;
     }
 
+    /// @notice Set the junior tranche vault address (one-time, immutable after set)
     function setJuniorVault(
         address _vault
     ) external onlyOwner {
@@ -113,6 +118,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         juniorVault = _vault;
     }
 
+    /// @notice Propose a new senior yield rate, subject to 48h timelock
     function proposeSeniorRate(
         uint256 _rateBps
     ) external onlyOwner {
@@ -121,6 +127,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit SeniorRateProposed(_rateBps, seniorRateActivationTime);
     }
 
+    /// @notice Finalize the proposed senior rate after timelock expires
     function finalizeSeniorRate() external onlyOwner {
         if (seniorRateActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -136,11 +143,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit SeniorRateFinalized();
     }
 
+    /// @notice Cancel the pending senior rate proposal
     function cancelSeniorRateProposal() external onlyOwner {
         pendingSeniorRate = 0;
         seniorRateActivationTime = 0;
     }
 
+    /// @notice Propose a new mark-price staleness limit, subject to 48h timelock
     function proposeMarkStalenessLimit(
         uint256 _limit
     ) external onlyOwner {
@@ -149,6 +158,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit MarkStalenessLimitProposed(_limit, markStalenessLimitActivationTime);
     }
 
+    /// @notice Finalize the proposed staleness limit after timelock expires
     function finalizeMarkStalenessLimit() external onlyOwner {
         if (markStalenessLimitActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -163,6 +173,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit MarkStalenessLimitFinalized();
     }
 
+    /// @notice Cancel the pending staleness limit proposal
     function cancelMarkStalenessLimitProposal() external onlyOwner {
         pendingMarkStalenessLimit = 0;
         markStalenessLimitActivationTime = 0;
@@ -186,6 +197,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     /// @notice Transfers USDC from the pool. Callable by CfdEngine (PnL/funding) or OrderRouter (keeper bounties).
+    /// @param recipient Address to receive USDC
+    /// @param amount USDC amount to transfer (6 decimals)
     function payOut(
         address recipient,
         uint256 amount
@@ -200,6 +213,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     // TRANCHE DEPOSITS & WITHDRAWALS
     // ==========================================
 
+    /// @notice Deposit USDC into the senior tranche. Reverts if senior is impaired (below high-water mark).
+    /// @param amount USDC to deposit (6 decimals)
     function depositSenior(
         uint256 amount
     ) external onlyVault whenNotPaused {
@@ -213,6 +228,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         seniorPrincipal += amount;
     }
 
+    /// @notice Withdraw USDC from the senior tranche. Scales high-water mark and unpaid yield proportionally.
+    /// @param amount USDC to withdraw (6 decimals)
+    /// @param receiver Address to receive USDC
     function withdrawSenior(
         uint256 amount,
         address receiver
@@ -232,6 +250,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC.safeTransfer(receiver, amount);
     }
 
+    /// @notice Deposit USDC into the junior tranche.
+    /// @param amount USDC to deposit (6 decimals)
     function depositJunior(
         uint256 amount
     ) external onlyVault whenNotPaused {
@@ -241,6 +261,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         juniorPrincipal += amount;
     }
 
+    /// @notice Withdraw USDC from the junior tranche. Limited to free USDC above senior's claim.
+    /// @param amount USDC to withdraw (6 decimals)
+    /// @param receiver Address to receive USDC
     function withdrawJunior(
         uint256 amount,
         address receiver
@@ -259,6 +282,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     // ==========================================
 
     /// @notice Returns USDC not reserved for worst-case position payouts (max of bull/bear liability)
+    /// @return Free USDC available for withdrawals (6 decimals)
     function getFreeUSDC() public view returns (uint256) {
         uint256 bal = USDC.balanceOf(address(this));
         uint256 bullMax = ENGINE.globalBullMaxProfit();
@@ -274,12 +298,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     /// @notice Max USDC the senior tranche can withdraw (limited by free USDC)
+    /// @return Withdrawable senior USDC, capped at seniorPrincipal (6 decimals)
     function getMaxSeniorWithdraw() public view returns (uint256) {
         uint256 free = getFreeUSDC();
         return free < seniorPrincipal ? free : seniorPrincipal;
     }
 
     /// @notice Max USDC the junior tranche can withdraw (subordinated behind senior)
+    /// @return Withdrawable junior USDC, capped at juniorPrincipal (6 decimals)
     function getMaxJuniorWithdraw() public view returns (uint256) {
         uint256 free = getFreeUSDC();
         uint256 subordinated = free > seniorPrincipal ? free - seniorPrincipal : 0;

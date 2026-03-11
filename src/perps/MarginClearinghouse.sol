@@ -82,6 +82,7 @@ contract MarginClearinghouse is Ownable2Step {
         _;
     }
 
+    /// @param _settlementAsset USDC address used for PnL settlement and margin backing
     constructor(
         address _settlementAsset
     ) Ownable(msg.sender) {
@@ -92,6 +93,7 @@ contract MarginClearinghouse is Ownable2Step {
     // CONFIGURATION
     // ==========================================
 
+    /// @notice Proposes granting or revoking operator privileges (48h timelock)
     function proposeOperator(
         address operator,
         bool status
@@ -101,6 +103,7 @@ contract MarginClearinghouse is Ownable2Step {
         operatorActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
+    /// @notice Finalizes the pending operator proposal after timelock expires
     function finalizeOperator() external onlyOwner {
         if (operatorActivationTime == 0) {
             revert MarginClearinghouse__NoProposal();
@@ -114,12 +117,14 @@ contract MarginClearinghouse is Ownable2Step {
         operatorActivationTime = 0;
     }
 
+    /// @notice Cancels the pending operator proposal
     function cancelOperatorProposal() external onlyOwner {
         pendingOperatorAddress = address(0);
         pendingOperatorStatus = false;
         operatorActivationTime = 0;
     }
 
+    /// @notice Proposes a new withdraw guard contract (48h timelock)
     function proposeWithdrawGuard(
         address _guard
     ) external onlyOwner {
@@ -127,6 +132,7 @@ contract MarginClearinghouse is Ownable2Step {
         withdrawGuardActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
+    /// @notice Finalizes the pending withdraw guard proposal after timelock expires
     function finalizeWithdrawGuard() external onlyOwner {
         if (withdrawGuardActivationTime == 0) {
             revert MarginClearinghouse__NoProposal();
@@ -139,11 +145,15 @@ contract MarginClearinghouse is Ownable2Step {
         withdrawGuardActivationTime = 0;
     }
 
+    /// @notice Cancels the pending withdraw guard proposal
     function cancelWithdrawGuardProposal() external onlyOwner {
         pendingWithdrawGuard = address(0);
         withdrawGuardActivationTime = 0;
     }
 
+    /// @notice Proposes adding or updating a collateral asset configuration (48h timelock)
+    /// @param ltvBps Loan-to-value haircut in basis points (max 10000)
+    /// @param oracle Price feed returning 8-decimal USD price, or address(0) for stablecoins
     function proposeAssetConfig(
         address asset,
         uint8 decimals,
@@ -160,6 +170,7 @@ contract MarginClearinghouse is Ownable2Step {
         assetConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
+    /// @notice Finalizes the pending asset config proposal after timelock expires
     function finalizeAssetConfig() external onlyOwner {
         if (assetConfigActivationTime == 0) {
             revert MarginClearinghouse__NoProposal();
@@ -181,6 +192,7 @@ contract MarginClearinghouse is Ownable2Step {
         assetConfigActivationTime = 0;
     }
 
+    /// @notice Cancels the pending asset config proposal
     function cancelAssetConfigProposal() external onlyOwner {
         pendingAsset = address(0);
         pendingAssetDecimals = 0;
@@ -195,6 +207,9 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Deposits a supported asset into the specified margin account.
     ///         Uses balance-before/after pattern to support fee-on-transfer tokens.
+    /// @param accountId Deterministic account ID derived from msg.sender address
+    /// @param asset ERC20 token to deposit (must be in supportedAssetsList)
+    /// @param amount Token amount to transfer in (actual credited amount may differ for fee-on-transfer)
     function deposit(
         bytes32 accountId,
         address asset,
@@ -220,6 +235,9 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Withdraws assets from a margin account. Only callable by the account owner.
     ///         Reverts if withdrawal would push equity below locked margin requirements.
+    /// @param accountId Deterministic account ID derived from msg.sender address
+    /// @param asset ERC20 token to withdraw
+    /// @param amount Token amount to withdraw
     function withdraw(
         bytes32 accountId,
         address asset,
@@ -254,6 +272,8 @@ contract MarginClearinghouse is Ownable2Step {
     // ==========================================
 
     /// @notice Returns the total USD Buying Power of the account (6 decimals)
+    /// @param accountId Account to value
+    /// @return totalEquityUsdc Sum of all asset balances valued in USDC with LTV haircuts applied
     function getAccountEquityUsdc(
         bytes32 accountId
     ) public view returns (uint256 totalEquityUsdc) {
@@ -281,6 +301,8 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Returns strictly unencumbered purchasing power
+    /// @param accountId Account to query
+    /// @return Equity minus locked margin, floored at zero (6 decimals)
     function getFreeBuyingPowerUsdc(
         bytes32 accountId
     ) public view returns (uint256) {
@@ -295,6 +317,8 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Locks margin to back a new CFD trade.
     ///         Requires sufficient USDC to back settlement (non-USDC equity alone is insufficient).
+    /// @param accountId Account to lock margin on
+    /// @param amountUsdc USDC amount to lock (6 decimals)
     function lockMargin(
         bytes32 accountId,
         uint256 amountUsdc
@@ -310,6 +334,8 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Unlocks margin when a CFD trade closes
+    /// @param accountId Account to unlock margin on
+    /// @param amountUsdc USDC amount to unlock (6 decimals), clamped to current locked amount
     function unlockMargin(
         bytes32 accountId,
         uint256 amountUsdc
@@ -324,6 +350,9 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
+    /// @param accountId Account to settle
+    /// @param usdc Settlement token address (must match settlementAsset in practice)
+    /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)
     function settleUsdc(
         bytes32 accountId,
         address usdc,
@@ -341,6 +370,10 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Transfers assets from an account to a recipient (losses, fees, VPI charges, or bad debt)
+    /// @param accountId Account to seize from
+    /// @param asset ERC20 token to seize
+    /// @param amount Token amount to seize
+    /// @param recipient Address to receive the seized tokens
     function seizeAsset(
         bytes32 accountId,
         address asset,

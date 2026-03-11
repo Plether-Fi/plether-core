@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+/// @notice Two-tranche USDC pool that acts as counterparty to CFD traders.
+///         Senior tranche earns fixed yield; junior absorbs first-loss and excess profit.
 interface IHousePool {
 
     /// @notice Total USDC attributed to the senior tranche (6 decimals)

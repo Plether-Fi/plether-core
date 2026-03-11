@@ -70,6 +70,13 @@ contract OrderRouter is Ownable2Step, Pausable {
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, string reason);
 
+    /// @param _engine CfdEngine that processes trades and liquidations
+    /// @param _vault CfdVault used for vault depth queries and keeper payouts
+    /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
+    /// @param _feedIds Pyth price feed IDs for each basket component
+    /// @param _quantities Weight of each component (must sum to 1e18)
+    /// @param _basePrices Base price per component for normalization (8 decimals)
+    /// @param _inversions Whether to invert each feed (e.g. USD/JPY -> JPY/USD)
     constructor(
         address _engine,
         address _vault,
@@ -115,6 +122,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     // ADMIN
     // ==========================================
 
+    /// @notice Proposes a new maxOrderAge value, subject to 48h timelock.
     function proposeMaxOrderAge(
         uint256 _maxOrderAge
     ) external onlyOwner {
@@ -122,6 +130,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         maxOrderAgeActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
+    /// @notice Finalizes the pending maxOrderAge after timelock expires.
     function finalizeMaxOrderAge() external onlyOwner {
         if (maxOrderAgeActivationTime == 0) {
             revert OrderRouter__NoProposal();
@@ -134,11 +143,13 @@ contract OrderRouter is Ownable2Step, Pausable {
         maxOrderAgeActivationTime = 0;
     }
 
+    /// @notice Cancels the pending maxOrderAge proposal.
     function cancelMaxOrderAgeProposal() external onlyOwner {
         pendingMaxOrderAge = 0;
         maxOrderAgeActivationTime = 0;
     }
 
+    /// @notice Proposes a new minKeeperFee value, subject to 48h timelock.
     function proposeMinKeeperFee(
         uint256 _minKeeperFee
     ) external onlyOwner {
@@ -146,6 +157,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         minKeeperFeeActivationTime = block.timestamp + TIMELOCK_DELAY;
     }
 
+    /// @notice Finalizes the pending minKeeperFee after timelock expires.
     function finalizeMinKeeperFee() external onlyOwner {
         if (minKeeperFeeActivationTime == 0) {
             revert OrderRouter__NoProposal();
@@ -158,6 +170,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         minKeeperFeeActivationTime = 0;
     }
 
+    /// @notice Cancels the pending minKeeperFee proposal.
     function cancelMinKeeperFeeProposal() external onlyOwner {
         pendingMinKeeperFee = 0;
         minKeeperFeeActivationTime = 0;
@@ -177,6 +190,11 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     /// @notice Submits a trade intent to the FIFO queue. Attach ETH as keeper incentive.
     ///         No margin is escrowed here — users deposit to MarginClearinghouse beforehand.
+    /// @param side BULL or BEAR
+    /// @param sizeDelta Position size change (18 decimals)
+    /// @param marginDelta Margin to add or remove (6 decimals, USDC)
+    /// @param targetPrice Slippage limit price (8 decimals, 0 = market order)
+    /// @param isClose True to allow execution even when paused or in FAD close-only mode
     function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,
@@ -220,6 +238,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     ///         Validates oracle freshness (publishTime > commitTime, age ≤ 60s),
     ///         checks slippage, then delegates to CfdEngine. On any failure the queue
     ///         still advances (un-brickable design).
+    /// @param orderId Must equal nextExecuteId (stale orders are auto-skipped)
+    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
@@ -322,6 +342,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
     ///         Updates Pyth once, then loops through the FIFO queue. Refunds all keeper
     ///         fees and excess ETH in a single transfer at the end.
+    /// @param maxOrderId Inclusive upper bound of order IDs to process (must be committed)
+    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
@@ -628,6 +650,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     /// @notice Push a fresh mark price to the engine without processing an order.
     ///         Required before LP deposits/withdrawals when mark is stale.
+    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function updateMarkPrice(
         bytes[] calldata pythUpdateData
     ) external payable {
@@ -679,6 +702,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     /// @notice Keeper-triggered liquidation with stricter staleness (≤ 15s).
     ///         Pays the keeper bounty in USDC directly from the vault.
+    /// @param accountId The account to liquidate (bytes32-encoded address)
+    /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
         bytes32 accountId,
         bytes[] calldata pythUpdateData

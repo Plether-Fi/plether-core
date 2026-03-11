@@ -132,6 +132,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _;
     }
 
+    /// @param _usdc USDC token used as margin and settlement currency
+    /// @param _clearinghouse Margin clearinghouse that custodies trader balances
+    /// @param _capPrice Maximum oracle price — positions are clamped here (also determines BULL max profit)
+    /// @param _riskParams Initial risk parameters (margin requirements, funding curve, bounty config)
     constructor(
         address _usdc,
         address _clearinghouse,
@@ -165,6 +169,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         orderRouter = _router;
     }
 
+    /// @notice Proposes new risk parameters (margin BPS, funding curve, bounty config) subject to timelock
     function proposeRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
@@ -173,6 +178,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit RiskParamsProposed(riskParamsActivationTime);
     }
 
+    /// @notice Applies proposed risk parameters after timelock expires; settles funding first
     function finalizeRiskParams() external onlyOwner {
         if (riskParamsActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -187,11 +193,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit RiskParamsFinalized();
     }
 
+    /// @notice Cancels a pending risk parameters proposal
     function cancelRiskParamsProposal() external onlyOwner {
         delete pendingRiskParams;
         riskParamsActivationTime = 0;
     }
 
+    /// @notice Proposes adding FAD (Friday Afternoon Deleverage) override days — elevated margin on those dates
     function proposeAddFadDays(
         uint256[] calldata timestamps
     ) external onlyOwner {
@@ -203,6 +211,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit AddFadDaysProposed(timestamps, addFadDaysActivationTime);
     }
 
+    /// @notice Applies proposed FAD day additions after timelock expires
     function finalizeAddFadDays() external onlyOwner {
         if (addFadDaysActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -220,11 +229,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit AddFadDaysFinalized();
     }
 
+    /// @notice Cancels a pending add-FAD-days proposal
     function cancelAddFadDaysProposal() external onlyOwner {
         delete _pendingAddFadDays;
         addFadDaysActivationTime = 0;
     }
 
+    /// @notice Proposes removing FAD override days (restores normal margin on those dates)
     function proposeRemoveFadDays(
         uint256[] calldata timestamps
     ) external onlyOwner {
@@ -236,6 +247,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit RemoveFadDaysProposed(timestamps, removeFadDaysActivationTime);
     }
 
+    /// @notice Applies proposed FAD day removals after timelock expires
     function finalizeRemoveFadDays() external onlyOwner {
         if (removeFadDaysActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -253,11 +265,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit RemoveFadDaysFinalized();
     }
 
+    /// @notice Cancels a pending remove-FAD-days proposal
     function cancelRemoveFadDaysProposal() external onlyOwner {
         delete _pendingRemoveFadDays;
         removeFadDaysActivationTime = 0;
     }
 
+    /// @notice Proposes a new fadMaxStaleness — max age of the last mark price before FAD kicks in
     function proposeFadMaxStaleness(
         uint256 _seconds
     ) external onlyOwner {
@@ -269,6 +283,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit FadMaxStalenessProposed(_seconds, fadMaxStalenessActivationTime);
     }
 
+    /// @notice Applies proposed fadMaxStaleness after timelock expires
     function finalizeFadMaxStaleness() external onlyOwner {
         if (fadMaxStalenessActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -283,11 +298,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit FadMaxStalenessFinalized();
     }
 
+    /// @notice Cancels a pending fadMaxStaleness proposal
     function cancelFadMaxStalenessProposal() external onlyOwner {
         pendingFadMaxStaleness = 0;
         fadMaxStalenessActivationTime = 0;
     }
 
+    /// @notice Proposes a new fadRunway — how many seconds before an FAD day the elevated margin activates
     function proposeFadRunway(
         uint256 _seconds
     ) external onlyOwner {
@@ -299,6 +316,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit FadRunwayProposed(_seconds, fadRunwayActivationTime);
     }
 
+    /// @notice Applies proposed fadRunway after timelock expires
     function finalizeFadRunway() external onlyOwner {
         if (fadRunwayActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -313,6 +331,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit FadRunwayFinalized();
     }
 
+    /// @notice Cancels a pending fadRunway proposal
     function cancelFadRunwayProposal() external onlyOwner {
         pendingFadRunway = 0;
         fadRunwayActivationTime = 0;
@@ -335,6 +354,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     // WITHDRAW GUARD (IWithdrawGuard)
     // ==========================================
 
+    /// @notice Reverts if the account has an open position that would be undercollateralized after withdrawal
+    /// @param accountId Clearinghouse account to check
     function checkWithdraw(
         bytes32 accountId
     ) external view override {
@@ -408,6 +429,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice Returns unsettled funding owed to (+) or by (-) a position in USDC (6 decimals)
+    /// @param pos The position to compute pending funding for
+    /// @return fundingUsdc Positive if the position is owed funding, negative if it owes
     function getPendingFunding(
         CfdTypes.Position memory pos
     ) public view returns (int256 fundingUsdc) {
@@ -425,6 +448,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Executes an order: settles funding, then increases or decreases the position.
     ///         Called exclusively by OrderRouter after MEV and slippage checks pass.
+    /// @param order The order to execute (account, side, size delta, margin delta, isClose)
+    /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
+    /// @param vaultDepthUsdc HousePool total assets — used to scale funding rate
+    /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
+    /// @return Always 0 (reserved for future use)
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -772,6 +800,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Returns the maintenance margin requirement in USDC (6 decimals).
     ///         Uses fadMarginBps during the FAD window, maintMarginBps otherwise.
+    /// @param size Position size in tokens (18 decimals)
+    /// @param currentOraclePrice Oracle price (8 decimals)
     function getMaintenanceMarginUsdc(
         uint256 size,
         uint256 currentOraclePrice
@@ -784,6 +814,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @notice Liquidates an undercollateralized position.
     ///         Surplus equity (after bounty) is returned to the user.
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
+    /// @param accountId Clearinghouse account that owns the position
+    /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
+    /// @param vaultDepthUsdc HousePool total assets — used to scale funding rate
+    /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
+    /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
@@ -925,10 +960,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return bullPnl + bearPnl;
     }
 
+    /// @notice Aggregate unsettled funding across all positions (uncapped, for reporting only)
+    /// @return Net funding PnL in USDC (6 decimals), positive = traders are owed funding
     function getUnrealizedFundingPnl() external view returns (int256) {
         return _getUnrealizedFundingPnl();
     }
 
+    /// @notice Updates the cached mark price without settling funding or processing trades
+    /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
+    /// @param publishTime Pyth publish timestamp
     function updateMarkPrice(
         uint256 price,
         uint64 publishTime
@@ -944,6 +984,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
+    /// @return Net trader PnL in USDC (6 decimals), sign from the traders' perspective
     function getUnrealizedTraderPnl() external view returns (int256) {
         uint256 price = lastMarkPrice;
         if (price == 0) {
@@ -960,6 +1001,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
     ///         The vault never counts unrealized trader losses as assets — realized losses flow
     ///         through physical USDC transfers (settlements, liquidations).
+    /// @return Net MtM adjustment the vault must reserve (always >= 0), in USDC (6 decimals)
     function getVaultMtmAdjustment() external view returns (int256) {
         uint256 price = lastMarkPrice;
 

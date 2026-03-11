@@ -25,6 +25,11 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__DepositCooldown();
     error TrancheVault__TransferDuringCooldown();
 
+    /// @param _usdc         Underlying USDC token used as the vault asset
+    /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
+    /// @param _isSenior     True for the senior tranche, false for junior
+    /// @param _name         ERC20 share token name
+    /// @param _symbol       ERC20 share token symbol
     constructor(
         IERC20 _usdc,
         address _pool,
@@ -41,6 +46,9 @@ contract TrancheVault is ERC4626 {
         return 3;
     }
 
+    /// @notice Enforces a deposit cooldown on share transfers.
+    ///         Prevents flash-deposit-then-transfer to bypass the withdrawal cooldown.
+    ///         Propagates the sender's cooldown to the receiver if it is more recent.
     function _update(
         address from,
         address to,

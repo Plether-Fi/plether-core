@@ -3,9 +3,15 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
 
+/// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
     /// @notice Settles funding and processes an open/close order at the given oracle price
+    /// @param order              Order to execute (contains accountId, market, direction, size)
+    /// @param currentOraclePrice Mark price from the oracle (8 decimals)
+    /// @param vaultDepthUsdc     Available vault liquidity, used for open-interest caps (6 decimals)
+    /// @param publishTime        Oracle publish timestamp, used for funding rate accrual
+    /// @return settlementUsdc    Net USDC to transfer: positive = vault pays trader, negative = trader pays vault
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -14,6 +20,11 @@ interface ICfdEngine {
     ) external returns (int256 settlementUsdc);
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
+    /// @param accountId          Account holding the position to liquidate
+    /// @param currentOraclePrice Mark price from the oracle (8 decimals)
+    /// @param vaultDepthUsdc     Available vault liquidity (6 decimals)
+    /// @param publishTime        Oracle publish timestamp
+    /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
@@ -44,6 +55,8 @@ interface ICfdEngine {
     function lastMarkTime() external view returns (uint64);
 
     /// @notice Push a fresh mark price without processing an order
+    /// @param price       New mark price (8 decimals)
+    /// @param publishTime Oracle publish timestamp for the price update
     function updateMarkPrice(
         uint256 price,
         uint64 publishTime
