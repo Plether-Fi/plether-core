@@ -226,5 +226,12 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
+| IMR | 1.5× MMR (1.5%) | Initial margin requirement |
+| Execution fee | 6 bps (0.06%) | Charged on notional at open/close |
+| Normal oracle staleness | 60s | Max Pyth price age for execution |
+| Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
+| `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
+| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup |
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
+| `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |
