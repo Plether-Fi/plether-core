@@ -282,7 +282,7 @@ contract PerpsForkTest is Test {
         vm.prank(alice);
         realPythRouter.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 2e8, false);
 
-        vm.warp(t1 + 48 hours + 3);
+        vm.warp(t1 + 5 days + 3); // skip past weekend to avoid oracle-frozen revert
         vm.prank(keeper);
         realPythRouter.executeOrder(1, empty);
 
@@ -299,29 +299,39 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(alice, 10_000e6);
         bytes[] memory empty;
         bytes32 aliceId = _accountId(alice);
-        uint256 t0 = block.timestamp;
+        uint256 t = block.timestamp;
 
-        // MEV shield: publishTime <= commitTime → order cancelled
-        // commitTime = t0 (current block.timestamp)
+        // All timestamps computed from t to avoid block.timestamp caching after vm.warp.
+        // commitTime = block.timestamp at commitOrder, which equals the last vm.warp value.
+
+        // 1. MEV shield: publishTime == commitTime → hard revert
+        // commitTime = t (no warp yet)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0); // publishTime == commitTime → stale
-        vm.warp(t0 + 2);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t);
+        vm.warp(t + 2);
 
+        vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        router.executeOrder(1, empty);
+
+        // Drain order 1 via staleness (publishTime > commitTime but 61s stale)
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 1);
+        vm.warp(t + 62); // staleness = 62 - 1 = 61 > 60
         vm.prank(keeper);
         router.executeOrder(1, empty);
 
         (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "MEV stale price should cancel order");
+        assertEq(size, 0, "MEV-tainted order should not open position");
 
-        // 60-second order staleness boundary — too stale
-        // block.timestamp is now t0+2; commitOrder records commitTime = t0+2
+        // 2. 61-second staleness — too stale (soft cancel)
+        // commitTime = t + 62 (last warp)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 3); // publishTime > commitTime
-        vm.warp(t0 + 64); // block.timestamp - publishTime = 61 > 60 → too stale
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 63); // > commitTime
+        vm.warp(t + 124); // staleness = 124 - 63 = 61 > 60
 
         vm.prank(keeper);
         router.executeOrder(2, empty);
@@ -329,13 +339,13 @@ contract PerpsForkTest is Test {
         (size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "61-second stale price should cancel order");
 
-        // Within boundary: should succeed
-        // block.timestamp is now t0+64; commitTime = t0+64
+        // 3. Within boundary: 59s → should succeed
+        // commitTime = t + 124 (last warp)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 65); // publishTime > commitTime
-        vm.warp(t0 + 124); // block.timestamp - publishTime = 59 <= 60 → OK
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 125); // > commitTime
+        vm.warp(t + 184); // staleness = 184 - 125 = 59 <= 60
 
         vm.prank(keeper);
         router.executeOrder(3, empty);
@@ -343,32 +353,31 @@ contract PerpsForkTest is Test {
         (size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "59-second-old price should succeed");
 
-        // Cleanup: close position
-        // block.timestamp is now t0+124; commitTime = t0+124
+        // 4. Cleanup: close position
+        // commitTime = t + 184
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 125);
-        vm.warp(t0 + 126);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 185);
+        vm.warp(t + 186);
         vm.prank(keeper);
         router.executeOrder(4, empty);
 
-        // 15-second liquidation staleness
+        // 5. 15-second liquidation staleness
         _depositToClearinghouse(alice, 10_000e6);
-        // block.timestamp is now t0+126
+        // commitTime = t + 186
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 127);
-        vm.warp(t0 + 128);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 187);
+        vm.warp(t + 188);
         vm.prank(keeper);
         router.executeOrder(5, empty);
 
-        // publishTime + 16 > 15 → stale for liquidation
-        // block.timestamp is now t0+128
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t0 + 128);
-        vm.warp(t0 + 145); // 145 - 128 = 17 > 15
+        // staleness = 205 - 189 = 16 > 15 → too stale for liquidation
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 189);
+        vm.warp(t + 205);
 
         vm.prank(keeper);
-        vm.expectRevert("MEV: Oracle price too stale");
+        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
         router.executeLiquidation(aliceId, empty);
     }
 
