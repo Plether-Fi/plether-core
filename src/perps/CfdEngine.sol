@@ -617,11 +617,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             pos.margin -= deficit;
         }
 
-        uint256 currentLocked = clearinghouse.lockedMarginUsdc(order.accountId);
-        if (currentLocked < pos.margin) {
-            clearinghouse.lockMargin(order.accountId, pos.margin - currentLocked);
-        } else if (currentLocked > pos.margin) {
-            clearinghouse.unlockMargin(order.accountId, currentLocked - pos.margin);
+        int256 lockDelta = netMarginChange - int256(order.marginDelta);
+        if (lockDelta > 0) {
+            clearinghouse.lockMargin(order.accountId, uint256(lockDelta));
+        } else if (lockDelta < 0) {
+            clearinghouse.unlockMargin(order.accountId, uint256(-lockDelta));
         }
 
         accumulatedFeesUsdc += execFeeUsdc;

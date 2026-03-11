@@ -191,7 +191,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     // ==========================================
 
     /// @notice Submits a trade intent to the FIFO queue. Attach ETH as keeper incentive.
-    ///         No margin is escrowed here — users deposit to MarginClearinghouse beforehand.
+    ///         For opens/increases with positive marginDelta, margin is locked immediately.
     /// @param side BULL or BEAR
     /// @param sizeDelta Position size change (18 decimals)
     /// @param marginDelta Margin to add or remove (6 decimals, USDC)
@@ -497,7 +497,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal returns (uint256 keeperFee) {
         keeperFee = keeperFees[orderId];
-        if (!success) {
+        if (success) {
+            _clearCommittedMargin(orderId);
+        } else {
             _unlockCommittedMargin(orderId);
         }
         delete keeperFees[orderId];
@@ -511,7 +513,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal {
         uint256 fee = keeperFees[orderId];
-        if (!success) {
+        if (success) {
+            _clearCommittedMargin(orderId);
+        } else {
             _unlockCommittedMargin(orderId);
         }
         delete keeperFees[orderId];
@@ -536,6 +540,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         delete committedMargins[orderId];
         bytes32 accountId = orders[orderId].accountId;
         IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+    }
+
+    function _clearCommittedMargin(
+        uint64 orderId
+    ) internal {
+        if (committedMargins[orderId] > 0) {
+            delete committedMargins[orderId];
+        }
     }
 
     /// @notice Claims ETH stuck from failed keeper refund transfers

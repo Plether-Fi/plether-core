@@ -124,6 +124,38 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(2, empty);
     }
 
+    function test_MultiPendingOrders_DoNotCorruptLockedMarginOnFail() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5_000 * 1e18, 500 * 1e6, 2e8, false);
+        vm.stopPrank();
+
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6, "Both committed margins should be locked");
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        (, uint256 posMargin,,,,,,) = engine.positions(accountId);
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            posMargin + 500 * 1e6,
+            "Lock should preserve pending committed margin for order 2"
+        );
+        assertEq(router.committedMargins(1), 0, "Order 1 committed margin must be cleared on success");
+
+        router.executeOrder(2, empty);
+
+        (, uint256 posMarginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            posMarginAfter,
+            "Failed order 2 should only unlock its own committed margin"
+        );
+        assertEq(router.committedMargins(2), 0, "Order 2 committed margin must be cleared on failure");
+    }
+
     function test_BatchExecution_AllSucceed() public {
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);
