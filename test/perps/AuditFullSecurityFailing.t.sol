@@ -69,11 +69,6 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
 
         bytes32 traderId = bytes32(uint256(uint160(trader)));
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        usdc.mint(address(pool), 60e6);
-
-        uint256 before = pool.lastReconcileTime();
-        uint256 oldRate = pool.seniorRateBps();
-        uint256 initialSeniorPrincipal = pool.seniorPrincipal();
 
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 121);
@@ -84,13 +79,9 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 elapsed = block.timestamp - before;
-        uint256 expectedSeniorPrincipal =
-            initialSeniorPrincipal + ((initialSeniorPrincipal * oldRate * elapsed) / (10_000 * 365 days));
-
         assertEq(
-            pool.seniorPrincipal(),
-            expectedSeniorPrincipal,
+            pool.unpaidSeniorYield(),
+            0,
             "New senior rate must not back-accrue senior yield over stale-mark time"
         );
     }

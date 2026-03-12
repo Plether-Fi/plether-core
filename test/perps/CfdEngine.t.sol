@@ -874,6 +874,8 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
 
         uint256 clearAmount = badDebt / 2;
+        usdc.mint(address(this), clearAmount);
+        usdc.approve(address(engine), clearAmount);
         engine.clearBadDebt(clearAmount);
         assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
 

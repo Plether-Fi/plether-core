@@ -25,6 +25,7 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__DepositCooldown();
     error TrancheVault__TransferDuringCooldown();
     error TrancheVault__TrancheImpaired();
+    error TrancheVault__ThirdPartyDepositForExistingHolder();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -127,6 +128,10 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares
     ) internal override {
+        uint256 receiverBalanceBefore = balanceOf(receiver);
+        if (caller != receiver && receiverBalanceBefore > 0) {
+            revert TrancheVault__ThirdPartyDepositForExistingHolder();
+        }
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(POOL), assets);
         if (IS_SENIOR) {
@@ -135,9 +140,7 @@ contract TrancheVault is ERC4626 {
             POOL.depositJunior(assets);
         }
         _mint(receiver, shares);
-        if (caller == receiver) {
-            lastDepositTime[receiver] = block.timestamp;
-        }
+        lastDepositTime[receiver] = block.timestamp;
         emit Deposit(caller, receiver, assets, shares);
     }
 

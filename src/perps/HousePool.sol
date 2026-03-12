@@ -136,6 +136,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__TimelockNotReady();
         }
         _reconcile();
+        lastReconcileTime = block.timestamp;
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;
         seniorRateActivationTime = 0;

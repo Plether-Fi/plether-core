@@ -152,7 +152,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
     address alice = address(0xA11CE);
     address attacker = address(0xBAD);
 
-    function test_H1_ThirdPartyDustDepositMustNotResetVictimCooldown() public {
+    function test_H1_ThirdPartyDustDepositToExistingHolderMustRevert() public {
         _fundJunior(alice, 100_000e6);
 
         vm.warp(block.timestamp + 50 minutes);
@@ -160,6 +160,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
         usdc.mint(attacker, 1);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1);
+        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(1, alice);
         vm.stopPrank();
 

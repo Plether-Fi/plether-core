@@ -390,6 +390,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
         }
+        if (amount > 0) {
+            USDC.safeTransferFrom(msg.sender, address(vault), amount);
+        }
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
     }
@@ -985,29 +988,27 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         clearinghouse.unlockMargin(accountId, posMargin);
 
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
+        uint256 accountBalance = clearinghouse.balances(accountId, address(USDC));
 
         if (residual >= 0) {
-            if (uint256(residual) <= posMargin) {
-                uint256 toSeize = posMargin - uint256(residual);
-                if (toSeize > 0) {
-                    _seizeUsdcToVault(accountId, toSeize);
-                }
-            } else {
-                uint256 toPay = uint256(residual) - posMargin;
+            uint256 targetBalance = uint256(residual);
+            if (accountBalance > targetBalance) {
+                uint256 toSeize = accountBalance - targetBalance;
+                _seizeUsdcToVault(accountId, toSeize);
+            } else if (targetBalance > accountBalance) {
+                uint256 toPay = targetBalance - accountBalance;
                 vault.payOut(address(clearinghouse), toPay);
                 clearinghouse.settleUsdc(accountId, address(USDC), int256(toPay));
             }
         } else {
-            if (posMargin > 0) {
-                _seizeUsdcToVault(accountId, posMargin);
+            if (accountBalance > 0) {
+                _seizeUsdcToVault(accountId, accountBalance);
             }
             uint256 deficit = uint256(-residual);
-            if (freeUsdc > 0) {
-                uint256 toSeize = freeUsdc < deficit ? freeUsdc : deficit;
-                if (toSeize > 0) {
-                    _seizeUsdcToVault(accountId, toSeize);
-                    deficit -= toSeize;
-                }
+            if (accountBalance >= deficit) {
+                deficit = 0;
+            } else {
+                deficit -= accountBalance;
             }
             if (deficit > 0) {
                 accumulatedBadDebtUsdc += deficit;

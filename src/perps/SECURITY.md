@@ -296,7 +296,7 @@ When a position goes underwater (equity < 0):
 
 #### Deposit Cooldown
 
-- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal.
+- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal. Self-deposits and first-time third-party deposits start the cooldown; third-party deposits to existing holders are rejected to prevent griefing and cooldown bypasses.
 - **Impact**: Users cannot deposit and immediately withdraw, even if the vault's share price has not changed.
 - **Rationale**: Prevents share price manipulation via flash loans or MEV sandwich attacks on LP deposits.
 
