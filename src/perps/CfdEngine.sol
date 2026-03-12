@@ -102,6 +102,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__DustPosition();
     error CfdEngine__MarkPriceStale();
     error CfdEngine__MarkPriceOutOfOrder();
+    error CfdEngine__NotAccountOwner();
+    error CfdEngine__NoOpenPosition();
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
     error CfdEngine__BadDebtTooLarge();
@@ -114,6 +116,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event PositionLiquidated(
         bytes32 indexed accountId, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
     );
+    event MarginAdded(bytes32 indexed accountId, uint256 amount);
     event FadDaysAdded(uint256[] timestamps);
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
@@ -339,6 +342,36 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         accumulatedFeesUsdc = 0;
         vault.payOut(recipient, fees);
         _assertPostSolvency();
+    }
+
+    /// @notice Adds isolated margin to an existing open position without changing size.
+    function addMargin(
+        bytes32 accountId,
+        uint256 amount
+    ) external nonReentrant {
+        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+            revert CfdEngine__NotAccountOwner();
+        }
+        if (amount == 0) {
+            revert CfdEngine__PositionTooSmall();
+        }
+
+        CfdTypes.Position storage pos = positions[accountId];
+        if (pos.size == 0) {
+            revert CfdEngine__NoOpenPosition();
+        }
+
+        clearinghouse.lockMargin(accountId, amount);
+        pos.margin += amount;
+        if (pos.side == CfdTypes.Side.BULL) {
+            totalBullMargin += amount;
+        } else {
+            totalBearMargin += amount;
+        }
+        pos.lastUpdateTime = uint64(block.timestamp);
+        _assertPostSolvency();
+
+        emit MarginAdded(accountId, amount);
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization

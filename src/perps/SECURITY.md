@@ -289,7 +289,7 @@ When a position goes underwater (equity < 0):
 
 - **Behavior**: `unpaidSeniorYield` accrues continuously but is only paid from surplus revenue in `_distributeRevenue`. During break-even periods (no trading surplus), yield accumulates without being transferred from junior to senior.
 - **Impact**: Senior LPs receive 0% during break-even while their capital is locked behind position liabilities. `unpaidSeniorYield` has waterfall priority — it is paid first from future surplus, before any revenue flows to junior.
-- **Rationale**: Design choice to preserve junior's loss-absorption buffer. Transferring yield from junior capital during inactivity would create a death-spiral risk: junior shares decline → LPs withdraw → smaller buffer → pool fragility. In practice, 6 bps execution fees on every trade generate continuous surplus, making extended zero-yield periods unlikely.
+- **Rationale**: Design choice to preserve junior's loss-absorption buffer. Transferring yield from junior capital during inactivity would create a death-spiral risk: junior shares decline -> LPs withdraw -> smaller buffer -> pool fragility. Execution fees are protocol revenue and are excluded from LP equity; LP yield comes from VPI charges, funding spreads, and realized trader losses.
 - **Alternative considered**: Transferring yield from `juniorPrincipal` to `seniorPrincipal` each reconciliation (true fixed coupon). Rejected because it weakens the loss buffer and introduces reflexive withdrawal incentives for junior LPs.
 
 ### TrancheVault Limitations

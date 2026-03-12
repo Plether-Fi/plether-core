@@ -191,10 +191,10 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1003);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1003);
 
-        vm.warp(1001);
+        vm.warp(1003);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 

@@ -33,6 +33,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MIN_ENGINE_GAS = 500_000;
+    uint256 internal constant MIN_MEV_PUBLISH_DELAY = 2;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -43,6 +44,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(uint64 => uint256) public committedMargins;
+    mapping(uint64 => uint64) public commitBlocks;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
@@ -238,6 +240,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         });
 
         keeperFees[orderId] = msg.value;
+        commitBlocks[orderId] = uint64(block.number);
         emit OrderCommitted(orderId, accountId, side);
     }
 
@@ -294,7 +297,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            if (!oracleFrozen && oraclePublishTime <= order.commitTime) {
+            if (!oracleFrozen && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
                 revert OrderRouter__MevDetected();
             }
         }
@@ -388,7 +391,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime) {
+            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
                 break;
             }
 
@@ -453,6 +456,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 fee = keeperFees[orderId];
         _unlockCommittedMargin(orderId);
         delete keeperFees[orderId];
+        delete commitBlocks[orderId];
         delete orders[orderId];
         nextExecuteId++;
         if (fee > 0) {
@@ -511,6 +515,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             _unlockCommittedMargin(orderId);
         }
         delete keeperFees[orderId];
+        delete commitBlocks[orderId];
         delete orders[orderId];
         nextExecuteId++;
     }

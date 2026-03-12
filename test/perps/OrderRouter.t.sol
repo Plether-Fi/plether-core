@@ -335,7 +335,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
-        mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1003);
         vm.warp(1050);
 
         bytes[] memory empty;
@@ -364,7 +364,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_LiquidationStaleness_15SecBoundary() public {
         vm.warp(1000);
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -399,7 +399,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1003);
         vm.warp(1050);
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -412,7 +412,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2003);
         vm.warp(2050);
         router.executeOrder(2, empty);
 
@@ -424,7 +424,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3003);
         vm.warp(3050);
         router.executeOrder(3, empty);
 
@@ -435,7 +435,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(trader2);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 4001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 4003);
         vm.warp(4050);
         router.executeOrder(4, empty);
 
@@ -445,7 +445,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_Slippage_CloseOrders_Protected() public {
         vm.warp(1000);
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
@@ -459,7 +459,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertTrue(size > 0, "Position should exist");
 
         vm.warp(2000);
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 0, 150_000_000, true);
@@ -531,8 +531,8 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_BasketMath_WeightedAverage() public {
         vm.warp(1000);
 
-        mockPyth.setPrice(FEED_A, int64(110_000_000), int32(-8), 1001);
-        mockPyth.setPrice(FEED_B, int64(90_000_000), int32(-8), 1001);
+        mockPyth.setPrice(FEED_A, int64(110_000_000), int32(-8), 1003);
+        mockPyth.setPrice(FEED_B, int64(90_000_000), int32(-8), 1003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -601,7 +601,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_Slippage_ClampedBeforeCheck_BullClose() public {
         vm.warp(1000);
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1001);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -615,7 +615,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertGt(size, 0, "BULL position should exist");
 
         vm.warp(2000);
-        mockPyth.setAllPrices(feedIds, int64(250_000_000), int32(-8), 2001);
+        mockPyth.setAllPrices(feedIds, int64(250_000_000), int32(-8), 2003);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 240_000_000, true);
@@ -766,7 +766,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.stopPrank();
 
         vm.warp(FRIDAY_18UTC);
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 3);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
@@ -932,13 +932,13 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Weekday_StalenessUnchanged() public {
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 3);
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
-        vm.warp(WEDNESDAY_NOON + 62);
+        vm.warp(WEDNESDAY_NOON + 64);
         bytes[] memory empty = new bytes[](0);
         router.executeOrder(2, empty);
 
@@ -955,7 +955,7 @@ contract FadStalenessTest is BasePerpTest {
         clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
         vm.stopPrank();
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 3);
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(carol);
@@ -1062,7 +1062,7 @@ contract FadStalenessTest is BasePerpTest {
     function test_FridayGap_FreshPriceStillWorks() public {
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 3);
 
         vm.warp(FRIDAY_20UTC);
 
@@ -1127,7 +1127,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_OracleUnfrozenAt21() public {
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 3);
 
         vm.warp(SUNDAY_21UTC);
 
@@ -1224,7 +1224,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(wednesdayMidnight - 3 hours);
         assertTrue(engine.isFadWindow());
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 1);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 3);
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
@@ -1233,7 +1233,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
         assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 51);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 53);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
@@ -2272,7 +2272,7 @@ contract WeekendArbitrageTest is Test {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 0, false);
-        vm.warp(block.timestamp + 1);
+        vm.warp(block.timestamp + 3);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
         router.executeOrder(1, updateData);
 

@@ -237,7 +237,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.deal(alice, 10 ether);
     }
 
-    function test_H2_CrossBlockPublishAfterCommitExecutes() public {
+    function test_H2_CrossBlockPublishAfterCommitReverts() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -249,11 +249,8 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.warp(1001);
         bytes[] memory empty;
 
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
-
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertGt(size, 0, "Cross-block publish after commit should execute under timestamp-based MEV checks");
     }
 
 }

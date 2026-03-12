@@ -21,12 +21,15 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
 
-        vm.deal(alice, 1 ether);
+        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
+        engine.addMargin(accountId, 500e6);
+
+        (, uint256 margin,,,,,,) = engine.positions(accountId);
+        assertEq(margin, marginBefore + 500e6, "User should be able to add margin without changing size");
     }
 
-    function test_M1_ExecutionFeesShouldIncreaseLpEquity() public {
+    function test_M1_ExecutionFeesAreProtocolRevenue() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 50_000e6);
 
@@ -39,7 +42,8 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore + 120e6, "Execution fees should accrue to LP equity");
+        assertEq(equityAfter, equityBefore, "Execution fees should not increase LP equity");
+        assertEq(engine.accumulatedFeesUsdc(), 120e6, "Execution fees should accrue to protocol fees");
     }
 
 }
