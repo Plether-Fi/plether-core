@@ -75,7 +75,9 @@ contract OrderRouterTest is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
 
-        assertEq(clearinghouse.balances(accountId, address(usdc)), 10_000 * 1e6, "Clearinghouse balance untouched");
+        assertEq(
+            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Only the reserved keeper fee should leave Alice's balance"
+        );
     }
 
     function test_WithdrawalFirewall() public {
@@ -91,7 +93,7 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 29_000_000, "Protocol should retain 6bps minus the 1 USDC keeper reward");
+        assertEq(fees, 30_000_000, "Protocol should still retain the full 6 bps execution fee");
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Keeper should receive the 1 USDC capped reward"
         );
@@ -383,13 +385,15 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
+        uint256 keeperUsdcBefore = usdc.balanceOf(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)), 10_000 * 1e6, "Balance untouched after slippage cancel"
+            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Reserved keeper fee should be charged on failure"
         );
+        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive the reserved keeper fee");
     }
 
     function test_InsufficientPythFee_Reverts() public {
@@ -2105,7 +2109,14 @@ contract VpiImrBypassTest is Test {
         router.executeOrder(1, empty);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 0, "Alice starts with zero USDC");
+
+        vm.startPrank(alice);
+        usdc.mint(alice, 1e6);
+        usdc.approve(address(clearinghouse), 1e6);
+        clearinghouse.deposit(aliceAccount, address(usdc), 1e6);
+        vm.stopPrank();
+
+        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved keeper fee");
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);

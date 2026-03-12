@@ -1123,8 +1123,8 @@ contract CfdEngineAuditTest is BasePerpTest {
         _fundJunior(bob, 210_000 * 1e6);
 
         address dave = address(0x444);
-        _fundTrader(carol, 50_000 * 1e6);
-        _fundTrader(dave, 200_000 * 1e6);
+        _fundTrader(carol, 50_001 * 1e6);
+        _fundTrader(dave, 200_001 * 1e6);
 
         vm.prank(dave);
         router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 200_000 * 1e6, 1e8, false);
@@ -1486,7 +1486,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         juniorVault.deposit(lpDeposit, bob);
         vm.stopPrank();
 
-        uint256 margin = 1000e6;
+        uint256 margin = 1001e6;
         usdc.mint(alice, margin);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), margin);
@@ -1494,7 +1494,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         clearinghouse.deposit(accountId, address(usdc), margin);
 
         uint256 size = 50_000e18;
-        router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, size, 1000e6, 1e8, false);
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1);
@@ -1513,9 +1513,8 @@ contract PhantomExecFeeTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         uint256 totalFees = engine.accumulatedFeesUsdc();
-        uint256 keeperRewardUsdc = 1e6;
 
-        assertEq(totalFees + keeperRewardUsdc, openFee, "close exec fee should be 0 when shortfall exceeds fee");
+        assertEq(totalFees, openFee, "close exec fee should be 0 when shortfall exceeds fee");
     }
 
 }
@@ -1555,7 +1554,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         juniorVault.deposit(1_000_000e6, bob);
         vm.stopPrank();
 
-        uint256 margin = 100_000e6;
+        uint256 margin = 100_001e6;
         usdc.mint(alice, margin);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), margin);
@@ -1563,7 +1562,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         clearinghouse.deposit(accountId, address(usdc), margin);
 
         uint256 size = 200_000e18;
-        router.commitOrder(CfdTypes.Side.BULL, size, margin, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, size, 100_000e6, 1e8, false);
         vm.stopPrank();
 
         _warpForward(1);
@@ -1574,12 +1573,12 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         _warpForward(30 days);
 
         address carol = address(0x333);
-        uint256 carolMargin = 10_000e6;
+        uint256 carolMargin = 10_001e6;
         usdc.mint(carol, carolMargin);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), carolMargin);
         clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), carolMargin);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, carolMargin, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 10_000e6, 1e8, false);
         vm.stopPrank();
 
         _warpForward(1);

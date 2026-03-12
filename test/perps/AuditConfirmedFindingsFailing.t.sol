@@ -119,7 +119,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch(2, updateData);
 
-        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 1e6, "Keeper only paid for the successful order");
+        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 2e6, "Keeper should be paid for both the successful and expired orders");
         assertEq(alice.balance - aliceBefore, 0, "Expired order should not change the user's ETH balance");
     }
 

@@ -1,0 +1,4 @@
+- [x] Inspect the USDC keeper-fee change for lost anti-griefing protections
+- [x] Restore an upfront per-order USDC reserve that keeps queue clearing incentivized on failures and expiries
+- [x] Update tests and docs for the reserved-fee model
+- [x] Verify targeted perps suites still pass

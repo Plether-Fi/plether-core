@@ -320,8 +320,8 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     }
 
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
-        // Demonstrate that only successful execution pays the keeper.
-        // Failed single-order execution refunds the user instead.
+        // Demonstrate that both successful and failed processing pay the keeper
+        // from the order's reserved USDC fee.
         router.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
         router.finalizeMaxOrderAge();
@@ -351,7 +351,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
         assertEq(keeperPayoutSuccess, 1e6, "H-01: successful execution should pay the keeper in USDC");
-        assertEq(keeperPayoutFailed, 0, "H-01: failed execution should not pay the keeper");
+        assertEq(keeperPayoutFailed, 1e6, "H-01: failed execution should still pay the reserved keeper fee");
     }
 
 }

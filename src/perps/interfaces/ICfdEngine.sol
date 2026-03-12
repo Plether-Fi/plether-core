@@ -2,12 +2,19 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
+
+    /// @notice Settlement token used for fees, margin, and payouts
+    function USDC() external view returns (IERC20);
+
+    /// @notice Last mark price observed by the engine (8 decimals)
+    function lastMarkPrice() external view returns (uint256);
 
     /// @notice Settles funding and processes an open/close order at the given oracle price
     /// @param order              Order to execute (contains accountId, market, direction, size)
@@ -21,15 +28,6 @@ interface ICfdEngine {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external returns (int256 settlementUsdc);
-
-    /// @notice Pays an order execution keeper from accrued protocol fees.
-    /// @param recipient          Keeper address receiving the USDC payout
-    /// @param requestedAmountUsdc Requested keeper payout (6 decimals)
-    /// @return paidAmountUsdc    Actual payout after fee-pool caps (6 decimals)
-    function payOrderKeeper(
-        address recipient,
-        uint256 requestedAmountUsdc
-    ) external returns (uint256 paidAmountUsdc);
 
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param accountId          Account holding the position to liquidate

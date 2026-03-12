@@ -22,7 +22,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
-        clearinghouse.withdraw(accountId, address(usdc), 10_000 * 1e6);
+        clearinghouse.withdraw(accountId, address(usdc), 9_999 * 1e6);
     }
 
     function test_C2_MtmMustAccountForUncollectibleLosses() public {

@@ -369,9 +369,9 @@ contract HousePoolTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // 100k BULL at $1.00: protocol retains $60 less the 1 USDC keeper reward
+        // 100k BULL at $1.00: protocol accrues the full $60 execution fee.
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 59_000_000, "Protocol fees should net out the 1 USDC keeper reward");
+        assertEq(fees, 60_000_000, "Protocol fees should remain separate from the reserved keeper fee");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = usdc.balanceOf(address(pool));

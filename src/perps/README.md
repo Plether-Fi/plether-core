@@ -41,7 +41,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for 100% protocol liveness. Successful fills pay the keeper in USDC from accrued execution fees, capped at `min(1 bp of notional, 1 USDC)`.
+**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for 100% protocol liveness. Each order prepays a reserved USDC keeper fee at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark), and that reserve is paid to the keeper who processes the order even if the fill fails or expires.
 
 ### IV. CfdEngine — The Mathematical Ledger
 

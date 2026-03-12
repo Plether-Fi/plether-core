@@ -146,10 +146,10 @@ The owner **cannot**:
 #### Keepers
 
 Keepers are permissionless — anyone can execute orders and liquidations:
-- **Order Execution**: Keepers push Pyth price payloads and receive USDC rewards funded from accrued execution fees, capped at `min(1 bp of notional, 1 USDC)` per successful fill
+- **Order Execution**: Keepers push Pyth price payloads and receive a reserved USDC fee collected at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine, with a `$1.00` fallback before the first mark is observed
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired orders do not pay an order keeper reward; keepers are only paid on successful fills
+- **Failed Orders**: Failed or expired orders still pay the reserved keeper fee to the executor, so stale or invalid orders remain costly for the submitter and economically worthwhile for keepers to clear
 
 #### Protocol Operators
 
