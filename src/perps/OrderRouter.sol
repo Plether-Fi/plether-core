@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
+import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
@@ -21,20 +22,10 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
-    enum OracleAction { OrderExecution, MarkRefresh, Liquidation }
-
     struct AccountEscrow {
         uint256 committedMarginUsdc;
         uint256 keeperReserveUsdc;
         uint256 pendingOrderCount;
-    }
-
-    struct OracleExecutionPolicy {
-        bool oracleFrozen;
-        bool isFad;
-        bool closeOnly;
-        bool mevChecks;
-        uint256 maxStaleness;
     }
 
     ICfdEngine public engine;
@@ -299,14 +290,21 @@ contract OrderRouter is Ownable2Step, Pausable {
             _resolveOraclePrice(pythUpdateData, order.targetPrice);
 
         if (address(pyth) != address(0)) {
-            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.OrderExecution);
+            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+                OrderOraclePolicyLib.OracleAction.OrderExecution,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.fadMaxStaleness()
+            );
             if (policy.closeOnly && !order.isClose) {
                 emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
                 _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
                 return;
             }
 
-            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
 
             if (policy.mevChecks && block.number == order.commitBlock) {
                 revert OrderRouter__MevDetected();
@@ -370,10 +368,17 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
-        OracleExecutionPolicy memory policy;
+        OrderOraclePolicyLib.OracleExecutionPolicy memory policy;
         if (address(pyth) != address(0)) {
-            policy = _getOracleExecutionPolicy(OracleAction.OrderExecution);
-            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
+            policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+                OrderOraclePolicyLib.OracleAction.OrderExecution,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.fadMaxStaleness()
+            );
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -706,43 +711,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         return executionPrice <= order.targetPrice;
     }
 
-    function _getOracleExecutionPolicy(
-        OracleAction action
-    ) internal view returns (OracleExecutionPolicy memory policy) {
-        policy.oracleFrozen = _isOracleFrozen();
-        policy.isFad = engine.isFadWindow();
-
-        if (action == OracleAction.OrderExecution) {
-            policy.closeOnly = policy.oracleFrozen || policy.isFad;
-            policy.mevChecks = !policy.oracleFrozen;
-            policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 60;
-            return policy;
-        }
-
-        if (action == OracleAction.MarkRefresh) {
-            policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 60;
-            return policy;
-        }
-
-        policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 15;
-        return policy;
-    }
-
-    function _validateOracleFreshness(
-        uint64 oraclePublishTime,
-        uint256 maxStaleness,
-        bool mevStyleError
-    ) internal view {
-        uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
-        if (age <= maxStaleness) {
-            return;
-        }
-        if (mevStyleError) {
-            revert OrderRouter__MevOraclePriceTooStale();
-        }
-        revert OrderRouter__OraclePriceTooStale();
-    }
-
     /// @dev Returns true only when FX markets are actually closed and Pyth feeds have stopped publishing.
     ///      Distinct from isFadWindow() which starts 3 hours earlier for margin purposes.
     ///      Uses Friday 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
@@ -806,8 +774,15 @@ contract OrderRouter is Ownable2Step, Pausable {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.MarkRefresh);
-            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
+            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+                OrderOraclePolicyLib.OracleAction.MarkRefresh,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.fadMaxStaleness()
+            );
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                revert OrderRouter__OraclePriceTooStale();
+            }
         }
 
         engine.updateMarkPrice(executionPrice, oraclePublishTime);
@@ -830,8 +805,15 @@ contract OrderRouter is Ownable2Step, Pausable {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.Liquidation);
-            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, true);
+            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+                OrderOraclePolicyLib.OracleAction.Liquidation,
+                _isOracleFrozen(),
+                engine.isFadWindow(),
+                engine.fadMaxStaleness()
+            );
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+                revert OrderRouter__MevOraclePriceTooStale();
+            }
         }
 
         uint256 vaultDepth = vault.totalAssets();

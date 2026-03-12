@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
+import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -17,27 +18,6 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
-
-    struct WithdrawalSnapshot {
-        uint256 physicalAssets;
-        uint256 maxLiability;
-        uint256 protocolFees;
-        uint256 reserved;
-        uint256 freeUsdc;
-    }
-
-    struct ReconcileSnapshot {
-        uint256 physicalAssets;
-        uint256 protocolFees;
-        uint256 cashMinusFees;
-        int256 mtm;
-        uint256 distributable;
-    }
-
-    struct MarkFreshnessPolicy {
-        bool required;
-        uint256 maxStaleness;
-    }
 
     IERC20 public immutable USDC;
     ICfdEngine public immutable ENGINE;
@@ -350,11 +330,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireFreshMark() internal view {
-        MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
         if (!policy.required) {
             return;
         }
-        if (!_isMarkFresh(policy.maxStaleness)) {
+        if (!HousePoolAccountingLib.isMarkFresh(ENGINE.lastMarkTime(), policy.maxStaleness, block.timestamp)) {
             revert HousePool__MarkPriceStale();
         }
     }
@@ -379,7 +359,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             unpaidSeniorYield += yieldInc;
         }
 
-        ReconcileSnapshot memory snapshot = _getReconcileSnapshot();
+        HousePoolAccountingLib.ReconcileSnapshot memory snapshot = _getReconcileSnapshot();
 
         if (snapshot.distributable > claimedEquity) {
             _distributeRevenue(snapshot.distributable - claimedEquity);
@@ -388,58 +368,36 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
-    function _getWithdrawalSnapshot() internal view returns (WithdrawalSnapshot memory snapshot) {
-        snapshot.physicalAssets = USDC.balanceOf(address(this));
-        snapshot.maxLiability = ENGINE.getMaxLiability();
-        snapshot.protocolFees = ENGINE.accumulatedFeesUsdc();
-        snapshot.reserved = ENGINE.getWithdrawalReservedUsdc();
-        snapshot.freeUsdc = snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
+    function _getWithdrawalSnapshot() internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
+        return HousePoolAccountingLib.buildWithdrawalSnapshot(
+            USDC.balanceOf(address(this)), ENGINE.getMaxLiability(), ENGINE.accumulatedFeesUsdc(), ENGINE.getWithdrawalReservedUsdc()
+        );
     }
 
-    function _getReconcileSnapshot() internal view returns (ReconcileSnapshot memory snapshot) {
-        snapshot.physicalAssets = USDC.balanceOf(address(this));
-        snapshot.protocolFees = ENGINE.accumulatedFeesUsdc();
-        snapshot.cashMinusFees = snapshot.physicalAssets > snapshot.protocolFees ? snapshot.physicalAssets - snapshot.protocolFees : 0;
-        snapshot.mtm = ENGINE.getVaultMtmAdjustment();
-
-        if (snapshot.mtm >= 0) {
-            snapshot.distributable = snapshot.cashMinusFees > uint256(snapshot.mtm)
-                ? snapshot.cashMinusFees - uint256(snapshot.mtm)
-                : 0;
-        } else {
-            snapshot.distributable = snapshot.cashMinusFees + uint256(-snapshot.mtm);
-        }
+    function _getReconcileSnapshot() internal view returns (HousePoolAccountingLib.ReconcileSnapshot memory snapshot) {
+        return HousePoolAccountingLib.buildReconcileSnapshot(
+            USDC.balanceOf(address(this)), ENGINE.accumulatedFeesUsdc(), ENGINE.getVaultMtmAdjustment()
+        );
     }
 
     function _markIsFreshForReconcile() internal view returns (bool) {
-        MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
         if (!policy.required) {
             return true;
         }
 
-        return _isMarkFresh(policy.maxStaleness);
+        return HousePoolAccountingLib.isMarkFresh(ENGINE.lastMarkTime(), policy.maxStaleness, block.timestamp);
     }
 
-    function _getMarkFreshnessPolicy() internal view returns (MarkFreshnessPolicy memory policy) {
-        policy.required = _hasLiveLiability();
-        if (!policy.required) {
-            return policy;
-        }
-        policy.maxStaleness = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+    function _getMarkFreshnessPolicy() internal view returns (HousePoolAccountingLib.MarkFreshnessPolicy memory policy) {
+        return HousePoolAccountingLib.getMarkFreshnessPolicy(
+            _hasLiveLiability(), ENGINE.isOracleFrozen(), ENGINE.fadMaxStaleness(), markStalenessLimit
+        );
     }
 
     function _hasLiveLiability() internal view returns (bool) {
         return ENGINE.hasLiveLiability();
     }
-
-    function _isMarkFresh(
-        uint256 limit
-    ) internal view returns (bool) {
-        uint256 lastMarkTime = ENGINE.lastMarkTime();
-        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        return age <= limit;
-    }
-
     function _accrueSeniorYieldOnly() internal {
         uint256 elapsed = block.timestamp - lastReconcileTime;
         lastReconcileTime = block.timestamp;
