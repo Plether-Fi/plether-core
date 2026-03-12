@@ -210,6 +210,39 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         router.executeOrder(1, empty);
     }
 
+    function test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 1_000e6, 100_000_000);
+
+        uint64 commitTime = uint64(block.timestamp + 1000);
+        uint64 stalePublishTime = commitTime + 6;
+        uint64 freshPublishTime = commitTime + 56;
+
+        vm.warp(commitTime);
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 1e18, 0, 0, true);
+
+        mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
+        mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);
+
+        vm.warp(freshPublishTime);
+        vm.roll(block.number + 1);
+        bytes[] memory empty = new bytes[](1);
+        empty[0] = "";
+        router.updateMarkPrice(empty);
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), stalePublishTime);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), stalePublishTime);
+
+        vm.roll(block.number + 1);
+        vm.prank(alice);
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(accountId, address(usdc), 10_000e6);
+    }
+
 }
 
 contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
