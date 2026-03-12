@@ -128,10 +128,7 @@ contract TrancheVault is ERC4626 {
         uint256 shares
     ) internal override {
         if (totalAssets() == 0 && totalSupply() > 0) {
-            uint256 tranchePrincipal = IS_SENIOR ? POOL.seniorPrincipal() : POOL.juniorPrincipal();
-            if (tranchePrincipal > 0) {
-                revert TrancheVault__TrancheImpaired();
-            }
+            revert TrancheVault__TrancheImpaired();
         }
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(POOL), assets);

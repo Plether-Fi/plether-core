@@ -46,6 +46,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
+    error OrderRouter__CloseMarginDeltaNotAllowed();
     error OrderRouter__InsufficientKeeperFee();
     error OrderRouter__TimelockNotReady();
     error OrderRouter__NoProposal();
@@ -207,8 +208,11 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (!isClose) {
             _requireNotPaused();
         }
-        if (sizeDelta == 0) {
+        if (sizeDelta == 0 && (isClose || marginDelta == 0)) {
             revert OrderRouter__ZeroSize();
+        }
+        if (isClose && marginDelta > 0) {
+            revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         if (msg.value < minKeeperFee) {
             revert OrderRouter__InsufficientKeeperFee();
@@ -290,7 +294,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            if (!oracleFrozen && oraclePublishTime <= order.commitTime) {
+            if (!oracleFrozen && oraclePublishTime > order.commitTime) {
                 revert OrderRouter__MevDetected();
             }
         }
@@ -382,7 +386,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime) {
+            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime > order.commitTime) {
                 break;
             }
 

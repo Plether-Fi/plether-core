@@ -94,6 +94,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__PostOpSolvencyBreach();
     error CfdEngine__InsufficientInitialMargin();
     error CfdEngine__PositionTooSmall();
+    error CfdEngine__NoOpenPositionForMarginUpdate();
     error CfdEngine__WithdrawBlockedByOpenPosition();
     error CfdEngine__EmptyDays();
     error CfdEngine__ZeroStaleness();
@@ -479,6 +480,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         uint256 preSkewUsdc = _getAbsSkewUsdc(price);
 
+        if (!order.isClose && order.sizeDelta == 0) {
+            if (order.marginDelta == 0) {
+                revert CfdEngine__PositionTooSmall();
+            }
+            if (pos.size == 0) {
+                revert CfdEngine__NoOpenPositionForMarginUpdate();
+            }
+            pos.margin += order.marginDelta;
+            _assertPostSolvency();
+            pos.lastUpdateTime = uint64(block.timestamp);
+            return 0;
+        }
+
         if (pos.size > 0 && pos.side != order.side) {
             if (!order.isClose) {
                 revert CfdEngine__MustCloseOpposingPosition();
@@ -639,8 +653,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             clearinghouse.unlockMargin(order.accountId, uint256(-lockDelta));
         }
 
-        accumulatedFeesUsdc += execFeeUsdc;
-
         uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
         uint256 imr = (mmr * 150) / 100;
         if (imr < rp.minBountyUsdc) {
@@ -704,6 +716,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         uint256 originalSize = pos.size + order.sizeDelta;
         int256 proportionalAccrual = (pos.vpiAccrued * int256(order.sizeDelta)) / int256(originalSize);
+        if (proportionalAccrual + vpiUsdc < 0) {
+            vpiUsdc = -proportionalAccrual;
+        }
         pos.vpiAccrued -= proportionalAccrual;
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
@@ -711,7 +726,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
-        uint256 actualFee = execFeeUsdc;
         if (netSettlement > 0) {
             vault.payOut(address(clearinghouse), uint256(netSettlement));
             clearinghouse.settleUsdc(order.accountId, address(USDC), netSettlement);
@@ -725,12 +739,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));
             }
             uint256 shortfall = owed - toSeize;
-            actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
             uint256 badDebt = shortfall > execFeeUsdc ? shortfall - execFeeUsdc : 0;
             accumulatedBadDebtUsdc += badDebt;
         }
-
-        accumulatedFeesUsdc += actualFee;
 
         emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
 
@@ -1047,7 +1058,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearTotal = 0;
         }
 
-        return bullTotal + bearTotal + int256(accumulatedBadDebtUsdc);
+        return bullTotal + bearTotal;
     }
 
 }

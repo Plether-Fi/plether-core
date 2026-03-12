@@ -76,8 +76,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
 
+        uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
-        router.commitOrder{value: router.minKeeperFee()}(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
+        router.commitOrder{value: keeperFee}(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
     }
 
     function test_M1_ExecutionFeesShouldAccrueToLpEquity() public {
@@ -123,9 +124,10 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
 
+        uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder{value: router.minKeeperFee()}(CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true);
+        router.commitOrder{value: keeperFee}(CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true);
     }
 
 }
