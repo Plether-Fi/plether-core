@@ -296,10 +296,8 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
         // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
         uint64 vaaTime = uint64(block.timestamp) - 30;
         vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(0.8e8, vaaTime);
-
-        uint64 markTime = engine.lastMarkTime();
-        assertEq(markTime, vaaTime, "H-01: lastMarkTime must use VAA publish time, not block.timestamp");
     }
 
 }

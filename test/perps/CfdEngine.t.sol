@@ -768,7 +768,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
-    function test_LiquidationBounty_CappedByPositionMargin() public {
+    function test_LiquidationBounty_CappedByPositiveEquity() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1234));
         _fundTrader(address(uint160(uint256(accountId))), 200 * 1e6);
@@ -807,7 +807,8 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 1.1e8, vaultDepth, uint64(block.timestamp));
 
-        assertEq(bounty, posMargin, "Keeper bounty should not exceed position margin");
+        assertEq(bounty, posMargin, "Keeper bounty should be capped by available positive equity in this scenario");
+        assertEq(bounty, 5_400_000, "Keeper bounty should follow the equity cap");
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {

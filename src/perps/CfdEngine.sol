@@ -101,6 +101,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__PartialCloseUnderwaterFunding();
     error CfdEngine__DustPosition();
     error CfdEngine__MarkPriceStale();
+    error CfdEngine__MarkPriceOutOfOrder();
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
     error CfdEngine__BadDebtTooLarge();
@@ -891,8 +892,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             keeperBountyUsdc = rp.minBountyUsdc;
         }
         uint256 posMargin = pos.margin;
-        if (keeperBountyUsdc > posMargin) {
-            keeperBountyUsdc = posMargin;
+        if (equityUsdc <= 0) {
+            if (keeperBountyUsdc > posMargin) {
+                keeperBountyUsdc = posMargin;
+            }
+        } else if (keeperBountyUsdc > uint256(equityUsdc)) {
+            keeperBountyUsdc = uint256(equityUsdc);
         }
         clearinghouse.unlockMargin(accountId, posMargin);
 
@@ -949,8 +954,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         effectiveAssets = vault.totalAssets();
         uint256 fees = accumulatedFeesUsdc;
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
-        uint256 badDebt = accumulatedBadDebtUsdc;
-        effectiveAssets = effectiveAssets > badDebt ? effectiveAssets - badDebt : 0;
         int256 cappedFunding = _getCappedFundingPnl();
         if (cappedFunding > 0) {
             effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
@@ -998,6 +1001,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 price,
         uint64 publishTime
     ) external onlyRouter {
+        if (publishTime < lastMarkTime) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
         _updateFunding(lastMarkPrice, vault.totalAssets());
         lastMarkPrice = clamped;
@@ -1050,7 +1056,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearTotal = 0;
         }
 
-        return bullTotal + bearTotal + int256(accumulatedBadDebtUsdc);
+        return bullTotal + bearTotal;
     }
 
 }

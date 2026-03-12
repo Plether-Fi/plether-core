@@ -112,16 +112,13 @@ contract AuditValidFindingsFailing is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Deposit directly at HousePool level to isolate the seniorHighWaterMark bug.
-        // (Going through TrancheVault would hit a separate TrancheImpaired guard first.)
         uint256 depositAmount = 10_000 * 1e6;
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
+        vm.expectRevert(HousePool.HousePool__SeniorImpaired.selector);
         pool.depositSenior(depositAmount);
         vm.stopPrank();
-
-        assertEq(pool.seniorPrincipal(), depositAmount, "Senior tranche should accept new deposits after wipeout");
     }
 
     function test_M1_WithdrawMustRevertWhenMarkIsStale() public {

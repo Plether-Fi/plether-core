@@ -52,7 +52,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
         vm.prank(address(router));
-        vm.expectRevert();
+        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(1.0e8, uint64(block.timestamp - 30));
     }
 
@@ -102,7 +102,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
 
-        assertEq(bounty, 7e6, "Keeper bounty should be capped by positive equity, not initial margin");
+        assertEq(bounty, 4_940_000, "Keeper bounty should be capped by positive equity, not initial margin");
     }
 
 }

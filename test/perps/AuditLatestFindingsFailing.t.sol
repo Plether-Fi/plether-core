@@ -35,7 +35,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         return 1_000_000e6;
     }
 
-    function test_C1_RealizedBadDebtIsTrackedInMtMAdjustment() public {
+    function test_C1_RealizedBadDebtShouldNotBeDoubleCountedInMtM() public {
         address winner = address(0xAAA1);
         address loser = address(0xBBB1);
         bytes32 winnerId = bytes32(uint256(uint160(winner)));
@@ -60,7 +60,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         int256 bullPnl = (int256(engine.globalBullEntryNotional()) - int256(engine.bullOI() * price)) / int256(1e20);
         int256 bearPnl = (int256(engine.bearOI() * price) - int256(engine.globalBearEntryNotional())) / int256(1e20);
 
-        int256 expectedMtm = int256(engine.accumulatedBadDebtUsdc());
+        int256 expectedMtm = 0;
         if (bullPnl > 0) {
             expectedMtm += bullPnl;
         }
@@ -68,7 +68,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             expectedMtm += bearPnl;
         }
 
-        assertEq(engine.getVaultMtmAdjustment(), expectedMtm, "Realized bad debt should be reflected in MtM");
+        assertEq(engine.getVaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
