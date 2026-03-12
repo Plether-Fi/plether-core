@@ -1696,6 +1696,30 @@ contract InvarCoinTest is Test {
         ic.deployToCurve(0);
     }
 
+    function test_TotalAssetsValidated_MatchesTotalAssetsWhenOracleFresh() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 permissive = ic.totalAssets();
+        uint256 strict = ic.totalAssetsValidated();
+
+        assertEq(strict, permissive, "strict and permissive assets should match when oracle is fresh");
+    }
+
+    function test_TotalAssetsValidated_RevertsOnStaleOracle() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        oracle.setUpdatedAt(block.timestamp - 25 hours);
+
+        vm.expectRevert(OracleLib.OracleLib__StalePrice.selector);
+        ic.totalAssetsValidated();
+
+        assertGt(ic.totalAssets(), 0, "permissive totalAssets should remain callable");
+    }
+
     function test_Harvest_RevertsOnStaleOracle() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);

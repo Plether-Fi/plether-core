@@ -192,6 +192,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return _totalAssetsWithLpBal(_lpBalance());
     }
 
+    /// @notice Total assets backing INVAR with strict oracle validation (USDC, 6 decimals).
+    /// @dev Reverts if sequencer/oracle checks fail (stale, invalid, or within sequencer grace period).
+    function totalAssetsValidated() external view returns (uint256) {
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        return _totalAssetsWithPrice(_lpBalance(), oraclePrice);
+    }
+
     /// @dev Total assets using a pre-fetched LP balance (avoids redundant gauge.balanceOf calls).
     function _totalAssetsWithLpBal(
         uint256 lpBal
