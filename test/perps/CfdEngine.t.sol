@@ -810,6 +810,42 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(bounty, posMargin, "Keeper bounty should not exceed position margin");
     }
 
+    function test_ClearBadDebt_ReducesOutstandingDebt() public {
+        bytes32 accountId = bytes32(uint256(0xBADD));
+        _fundTrader(address(uint160(uint256(accountId))), 4_000 * 1e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 3_000 * 1e6, 1e8);
+
+        uint256 depth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.liquidatePosition(accountId, 1.2e8, depth, uint64(block.timestamp));
+
+        uint256 badDebt = engine.accumulatedBadDebtUsdc();
+        assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
+
+        uint256 clearAmount = badDebt / 2;
+        engine.clearBadDebt(clearAmount);
+        assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
+
+        vm.expectRevert(CfdEngine.CfdEngine__BadDebtTooLarge.selector);
+        engine.clearBadDebt(badDebt + 1);
+    }
+
+    function test_CheckWithdraw_UsesPoolMarkStalenessLimit() public {
+        pool.proposeMarkStalenessLimit(300);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeMarkStalenessLimit();
+        assertEq(pool.markStalenessLimit(), 300);
+
+        bytes32 accountId = bytes32(uint256(0x5157));
+        _fundTrader(address(uint160(uint256(accountId))), 5_000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 20_000 * 1e18, 2_000 * 1e6, 1e8);
+
+        vm.warp(block.timestamp + 180);
+
+        engine.checkWithdraw(accountId);
+    }
+
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 50_000 * 1e6);

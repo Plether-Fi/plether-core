@@ -103,6 +103,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__MarkPriceStale();
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
+    error CfdEngine__BadDebtTooLarge();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -126,6 +127,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event FadMaxStalenessFinalized();
     event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
     event FadRunwayFinalized();
+    event BadDebtCleared(uint256 amount, uint256 remaining);
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -338,6 +340,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _assertPostSolvency();
     }
 
+    /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
+    /// @param amount USDC amount of bad debt to clear (6 decimals)
+    function clearBadDebt(
+        uint256 amount
+    ) external onlyOwner {
+        uint256 badDebt = accumulatedBadDebtUsdc;
+        if (amount > badDebt) {
+            revert CfdEngine__BadDebtTooLarge();
+        }
+        accumulatedBadDebtUsdc = badDebt - amount;
+        emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
+    }
+
     // ==========================================
     // WITHDRAW GUARD (IWithdrawGuard)
     // ==========================================
@@ -357,7 +372,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
-        uint256 maxStaleness = isFadWindow() ? fadMaxStaleness : 60;
+        uint256 maxStaleness = isFadWindow() ? fadMaxStaleness : vault.markStalenessLimit();
         if (block.timestamp - lastMarkTime > maxStaleness) {
             revert CfdEngine__MarkPriceStale();
         }

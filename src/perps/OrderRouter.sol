@@ -523,11 +523,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         nextExecuteId++;
 
         uint256 excessEth = msg.value - pythFee;
-        if (success) {
-            _sendEth(msg.sender, fee + excessEth);
-        } else {
-            _sendEth(msg.sender, fee + excessEth);
-        }
+        _sendEth(msg.sender, fee + excessEth);
     }
 
     function _unlockCommittedMargin(

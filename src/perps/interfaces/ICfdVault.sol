@@ -14,4 +14,7 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
+    /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
+    function markStalenessLimit() external view returns (uint256);
+
 }
