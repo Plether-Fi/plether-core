@@ -341,6 +341,22 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Order stays in queue for honest keeper");
     }
 
+    function test_SameBlockExecution_Reverts() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
+        vm.warp(1050);
+
+        bytes[] memory empty;
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
+    }
+
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 

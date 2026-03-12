@@ -220,7 +220,7 @@ contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
 
         _fundSenior(address(0xBEEF), 100_000e6);
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
+        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));
@@ -230,4 +230,5 @@ contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
     }
+
 }

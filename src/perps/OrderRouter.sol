@@ -297,7 +297,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            if (!oracleFrozen && block.number <= order.commitBlock) {
+            if (!oracleFrozen && block.number == order.commitBlock) {
                 revert OrderRouter__MevDetected();
             }
 
@@ -399,7 +399,9 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (
                 address(pyth) != address(0) && !oracleFrozen
-                    && (block.number <= order.commitBlock || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
+                    // Stop at the first same-block order so newer queued orders remain pending too.
+                    && (block.number == order.commitBlock
+                        || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
             ) {
                 break;
             }

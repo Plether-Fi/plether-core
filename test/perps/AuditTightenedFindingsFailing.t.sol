@@ -37,7 +37,9 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         vm.prank(alice);
         clearinghouse.withdraw(accountId, address(usdc), 5000 * 1e6);
 
-        assertLt(clearinghouse.balances(accountId, address(usdc)), 5000 * 1e6, "Withdrawal should reduce remaining free USDC");
+        assertLt(
+            clearinghouse.balances(accountId, address(usdc)), 5000 * 1e6, "Withdrawal should reduce remaining free USDC"
+        );
     }
 
     function test_H2_LowGasKeeperCallMustNotConsumeValidOrder() public {

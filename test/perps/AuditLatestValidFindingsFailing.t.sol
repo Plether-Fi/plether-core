@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
@@ -69,7 +69,8 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

@@ -41,7 +41,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -57,7 +57,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -98,7 +98,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -114,7 +114,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 500 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -157,7 +157,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -179,7 +179,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 500 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -202,7 +202,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -234,7 +234,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1000 * 1e6,
             targetPrice: 0.8e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -248,7 +248,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1000 * 1e6,
             targetPrice: 0.8e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -269,7 +269,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -285,7 +285,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -307,7 +307,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1000 * 1e6,
             targetPrice: 0.8e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -325,7 +325,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1.2e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -349,7 +349,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -367,7 +367,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: true
@@ -390,7 +390,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 2000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -434,7 +434,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 500 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -460,7 +460,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -474,7 +474,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: true
@@ -495,7 +495,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 50 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -517,7 +517,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -538,7 +538,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 0.5e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: true
@@ -570,7 +570,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 100 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -593,7 +593,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1600 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -609,7 +609,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 3200 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -624,7 +624,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 3,
             side: CfdTypes.Side.BEAR,
             isClose: true
@@ -653,7 +653,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 20_000 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -667,7 +667,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 20_000 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -689,7 +689,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 3,
             side: CfdTypes.Side.BULL,
             isClose: true
@@ -712,7 +712,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 1600 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -754,7 +754,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 20_000 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -768,7 +768,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 20_000 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BEAR,
             isClose: false
@@ -827,7 +827,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 6 * 1e6,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -893,7 +893,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 10_000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 1,
             side: CfdTypes.Side.BULL,
             isClose: false
@@ -911,7 +911,7 @@ contract CfdEngineTest is BasePerpTest {
             marginDelta: 0,
             targetPrice: 0,
             commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+            commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: true

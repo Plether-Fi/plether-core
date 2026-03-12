@@ -68,4 +68,5 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
     }
+
 }
