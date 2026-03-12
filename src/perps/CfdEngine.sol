@@ -414,7 +414,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 pendingFunding = getPendingFunding(pos);
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        int256 equity = int256(pos.margin) + pendingFunding;
+        uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
+        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
+
+        int256 equity = int256(pos.margin) + int256(freeUsdc) + pendingFunding;
         equity = isProfit ? equity + int256(pnlAbs) : equity - int256(pnlAbs);
 
         uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);

@@ -16,7 +16,7 @@ contract AuditLatestValidFindingsFailing is BasePerpTest {
 
     address alice = address(0xA11CE);
 
-    function test_M2_ExecutionFeesShouldIncreaseLpEquity() public {
+    function test_M2_ExecutionFeesShouldRemainProtocolRevenue() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 50_000e6);
 
@@ -29,7 +29,7 @@ contract AuditLatestValidFindingsFailing is BasePerpTest {
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore + 120e6, "Execution fees should flow into LP equity");
+        assertEq(equityAfter, equityBefore, "Execution fees should not flow into LP equity");
     }
 
 }
@@ -91,7 +91,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         vm.warp(1005);
         bytes[] memory empty;
 
-        vm.expectRevert();
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
     }
 

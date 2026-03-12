@@ -255,6 +255,10 @@ contract MarginClearinghouse is Ownable2Step {
 
         balances[accountId][asset] -= amount;
 
+        if (address(withdrawGuard) != address(0)) {
+            withdrawGuard.checkWithdraw(accountId);
+        }
+
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
         if (remainingEquity < lockedMarginUsdc[accountId]) {
             revert MarginClearinghouse__InsufficientFreeEquity();

@@ -32,8 +32,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 public minKeeperFee;
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
-    uint256 internal constant MIN_ENGINE_GAS = 500_000;
-    uint256 internal constant MIN_MEV_PUBLISH_DELAY = 2;
+    uint256 internal constant MIN_ENGINE_GAS = 600_000;
+    uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -289,7 +289,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
 
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-            if (block.timestamp - oraclePublishTime > maxStaleness) {
+            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
+            if (age > maxStaleness) {
                 emit OrderFailed(orderId, "Oracle price too stale");
                 _finalizeExecution(orderId, pythFee, false);
                 return;
@@ -313,7 +314,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         uint256 vaultDepth = vault.totalAssets();
 
-        if (gasleft() < MIN_ENGINE_GAS) {
+        uint256 forwardedGas = gasleft() - (gasleft() / 64);
+        if (forwardedGas < MIN_ENGINE_GAS) {
             revert OrderRouter__InsufficientGas();
         }
 
@@ -358,7 +360,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             isFad = engine.isFadWindow();
             oracleFrozen = _isOracleFrozen();
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-            if (block.timestamp - oraclePublishTime > maxStaleness) {
+            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
+            if (age > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -404,7 +407,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             uint256 vaultDepth = vault.totalAssets();
 
-            if (gasleft() < MIN_ENGINE_GAS) {
+            uint256 forwardedGas = gasleft() - (gasleft() / 64);
+            if (forwardedGas < MIN_ENGINE_GAS) {
                 revert OrderRouter__InsufficientGas();
             }
 
@@ -692,7 +696,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (address(pyth) != address(0)) {
             uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 60;
-            if (block.timestamp - oraclePublishTime > maxStaleness) {
+            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
+            if (age > maxStaleness) {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -718,7 +723,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (address(pyth) != address(0)) {
             uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 15;
-            if (block.timestamp - oraclePublishTime > maxStaleness) {
+            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
+            if (age > maxStaleness) {
                 revert OrderRouter__MevOraclePriceTooStale();
             }
         }
