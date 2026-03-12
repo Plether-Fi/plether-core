@@ -66,6 +66,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory emptyPayload;
+        vm.roll(block.number + 1);
         router.executeOrder(1, emptyPayload);
 
         assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
@@ -82,6 +83,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(engine.globalBullMaxProfit(), 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
@@ -107,9 +109,11 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
+        vm.roll(10);
         router.executeOrder(2, empty);
     }
 
@@ -121,6 +125,7 @@ contract OrderRouterTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__FIFOViolation.selector);
+        vm.roll(10);
         router.executeOrder(2, empty);
     }
 
@@ -135,6 +140,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6, "Both committed margins should be locked");
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
@@ -145,6 +151,7 @@ contract OrderRouterTest is BasePerpTest {
         );
         assertEq(router.committedMargins(1), 0, "Order 1 committed margin must be cleared on success");
 
+        vm.roll(10);
         router.executeOrder(2, empty);
 
         (, uint256 posMarginAfter,,,,,,) = engine.positions(accountId);
@@ -174,6 +181,7 @@ contract OrderRouterTest is BasePerpTest {
 
         bytes[] memory empty;
         uint256 keeperBefore = address(this).balance;
+        vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
         assertEq(router.nextExecuteId(), 4, "All 3 orders should be processed");
@@ -201,6 +209,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
         assertEq(router.nextExecuteId(), 4, "All 3 should be consumed");
@@ -213,6 +222,7 @@ contract OrderRouterTest is BasePerpTest {
     function test_BatchExecution_NoOrders_Reverts() public {
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(0, empty);
     }
 
@@ -222,6 +232,7 @@ contract OrderRouterTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__MaxOrderIdNotCommitted.selector);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(5, empty);
     }
 
@@ -324,6 +335,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Order stays in queue for honest keeper");
@@ -339,6 +351,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -359,6 +372,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         vm.expectRevert(OrderRouter.OrderRouter__InsufficientPythFee.selector);
+        vm.roll(block.number + 1);
         router.executeOrder(1, data);
     }
 
@@ -371,6 +385,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -402,6 +417,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1050);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -414,6 +430,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2006);
         vm.warp(2050);
+        vm.roll(10);
         router.executeOrder(2, empty);
 
         bytes32 trader2Id = bytes32(uint256(uint160(trader2)));
@@ -426,6 +443,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
         vm.warp(3050);
+        vm.roll(20);
         router.executeOrder(3, empty);
 
         (size,,,,,,,) = engine.positions(aliceId);
@@ -437,6 +455,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 4006);
         vm.warp(4050);
+        vm.roll(30);
         router.executeOrder(4, empty);
 
         (size,,,,,,,) = engine.positions(trader2Id);
@@ -452,6 +471,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -465,6 +485,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 0, 150_000_000, true);
 
         vm.warp(2050);
+        vm.roll(10);
         router.executeOrder(2, empty);
 
         (size,,,,,,,) = engine.positions(accountId);
@@ -486,6 +507,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
         assertEq(router.nextExecuteId(), 2, "Batch breaks at MEV-stale order, leaving it in queue");
@@ -509,6 +531,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty;
         vm.prank(keeper);
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Order preserved for honest keeper");
@@ -525,6 +548,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
 
@@ -539,6 +563,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -579,6 +604,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Weakest-link stale feed reverts, order preserved");
@@ -596,6 +622,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1001);
         bytes[] memory empty;
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
     }
 
@@ -608,6 +635,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -621,6 +649,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 240_000_000, true);
 
         vm.warp(2050);
+        vm.roll(10);
         router.executeOrder(2, empty);
 
         (size,,,,,,,) = engine.positions(accountId);
@@ -773,6 +802,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_18UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -826,6 +856,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -842,6 +873,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
         uint64 execBefore = router.nextExecuteId();
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
         uint64 execAfter = router.nextExecuteId();
         assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during frozen");
@@ -855,6 +887,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -871,6 +904,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3, "Queue advances despite staleness cancel");
@@ -911,6 +945,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -928,6 +963,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
     }
 
@@ -940,6 +976,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON + 67);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -963,6 +1000,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
@@ -1034,6 +1072,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(MONDAY_NOON + 50);
         bytes[] memory empty = new bytes[](0);
         uint64 execBefore = router.nextExecuteId();
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
         uint64 execAfter = router.nextExecuteId();
         assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during admin FAD");
@@ -1052,6 +1091,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_20UTC + 30);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1071,6 +1111,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_20UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1089,6 +1130,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_20UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
@@ -1107,6 +1149,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_20UTC + 63);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1136,6 +1179,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1154,6 +1198,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SUNDAY_21UTC + 30);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1171,6 +1216,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         assertEq(router.nextExecuteId(), 3);
@@ -1187,6 +1233,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1230,6 +1277,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(wednesdayMidnight - 3 hours + 50);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
         assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
 
@@ -1238,6 +1286,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(wednesdayMidnight - 3 hours + 100);
+        vm.roll(10);
         router.executeOrder(3, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1261,6 +1310,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(runwayTime + 30);
         bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
@@ -1453,6 +1503,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         vm.prank(carol);
@@ -1460,6 +1511,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(uint256(1.5e8));
+        vm.roll(10);
         router.executeOrder(2, pythData);
 
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
@@ -1479,6 +1531,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         bytes[] memory empty;
 
         vm.expectRevert(OrderRouter.OrderRouter__MockModeDisabled.selector);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
     }
 
@@ -1501,6 +1554,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 600);
 
+        vm.roll(block.number + 1);
         router.executeOrder(commitId, priceData);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -1527,6 +1581,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -1543,6 +1598,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
         router.unpause();
+        vm.roll(10);
         router.executeOrder(2, empty);
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
@@ -1601,6 +1657,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.warp(block.timestamp + 301);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(6, empty);
 
         assertEq(router.nextExecuteId(), 7, "Queue advanced past spam + real order");
@@ -1615,6 +1672,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 2);
@@ -1638,6 +1696,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         address keeper = address(0x999);
         bytes[] memory empty;
         vm.prank(keeper);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         assertEq(router.claimableEth(spammer), 0, "Expired order fee not refunded to user");
@@ -1661,6 +1720,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.warp(block.timestamp + 301);
 
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrderBatch(4, empty);
 
         assertEq(router.nextExecuteId(), 5, "Batch advanced past stale + real order");
@@ -1696,6 +1756,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         address keeper = address(0x999);
         bytes[] memory empty;
         vm.prank(keeper);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         assertEq(router.claimableEth(spammer), 0, "Expired order fee should not be refunded to user");
@@ -1887,6 +1948,7 @@ contract StalenessGriefTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.prank(attacker);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
@@ -1995,6 +2057,7 @@ contract VpiImrBypassTest is Test {
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
@@ -2002,6 +2065,7 @@ contract VpiImrBypassTest is Test {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
         (uint256 size,,,,,,,) = engine.positions(aliceAccount);
@@ -2097,6 +2161,7 @@ contract KeeperFeeRefundTest is Test {
         uint256 keeperBefore = keeper.balance;
         bytes[] memory empty;
         vm.prank(keeper);
+        vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(router.claimableEth(alice), 0, "User should not receive failed-order fee refund");
@@ -2126,6 +2191,7 @@ contract KeeperFeeRefundTest is Test {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
+        vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
         assertEq(router.claimableEth(alice), 0, "User should not receive slippage-failure fee refund");
@@ -2148,6 +2214,7 @@ contract KeeperFeeRefundTest is Test {
 
         uint256 keeperBefore = address(this).balance;
         bytes[] memory empty;
+        vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
 
         assertEq(router.claimableEth(alice), 0, "User fee is not refunded on batch expiry");
@@ -2276,6 +2343,7 @@ contract WeekendArbitrageTest is Test {
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 0, false);
         vm.warp(block.timestamp + 6);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+        vm.roll(block.number + 1);
         router.executeOrder(1, updateData);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
@@ -2297,6 +2365,7 @@ contract WeekendArbitrageTest is Test {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
 
+        vm.roll(10);
         router.executeOrder(2, updateData);
 
         (size,,,,,,,) = engine.positions(aliceAccount);

@@ -172,6 +172,7 @@ abstract contract BasePerpTest is Test {
                 marginDelta: margin,
                 targetPrice: price,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: side,
                 isClose: false
@@ -206,6 +207,7 @@ abstract contract BasePerpTest is Test {
                 marginDelta: 0,
                 targetPrice: 0,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: side,
                 isClose: true

@@ -128,6 +128,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
                 marginDelta: 3100 * 1e6,
                 targetPrice: 1e8,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: CfdTypes.Side.BULL,
                 isClose: false
@@ -371,6 +372,7 @@ contract AuditH03_DustPosition is BasePerpTest {
                 marginDelta: 0,
                 targetPrice: 0,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: CfdTypes.Side.BULL,
                 isClose: true

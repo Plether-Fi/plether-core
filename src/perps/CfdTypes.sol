@@ -32,6 +32,7 @@ library CfdTypes {
         uint256 marginDelta; // [6 dec] Amount of margin to add/remove
         uint256 targetPrice; // [8 dec] Slippage protection limit
         uint64 commitTime; // Timestamp of intent submission (MEV shield)
+        uint64 commitBlock; // Block number of intent submission (same-block execution shield)
         uint64 orderId; // Strict FIFO execution queue ID
         Side side; // [uint8] BULL or BEAR
         bool isClose; // [bool] True if strictly closing/reducing

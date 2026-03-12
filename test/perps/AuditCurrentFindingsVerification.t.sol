@@ -200,6 +200,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1006);
 
         vm.warp(1006);
+        vm.roll(block.number + 1);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 

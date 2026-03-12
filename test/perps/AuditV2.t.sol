@@ -393,6 +393,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
                 marginDelta: 0,
                 targetPrice: 1e8,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: CfdTypes.Side.BEAR,
                 isClose: false

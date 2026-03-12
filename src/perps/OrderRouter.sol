@@ -233,6 +233,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             marginDelta: marginDelta,
             targetPrice: targetPrice,
             commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
             orderId: orderId,
             side: side,
             isClose: isClose
@@ -294,6 +295,10 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(orderId, "Oracle price too stale");
                 _finalizeExecution(orderId, pythFee, false);
                 return;
+            }
+
+            if (!oracleFrozen && block.number <= order.commitBlock) {
+                revert OrderRouter__MevDetected();
             }
 
             if (!oracleFrozen && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
@@ -394,7 +399,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (
                 address(pyth) != address(0) && !oracleFrozen
-                    && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY
+                    && (block.number <= order.commitBlock || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
             ) {
                 break;
             }

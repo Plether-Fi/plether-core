@@ -471,6 +471,7 @@ contract NonUsdcCollateralTest is Test {
                 marginDelta: margin,
                 targetPrice: price,
                 commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
                 orderId: 0,
                 side: side,
                 isClose: false
