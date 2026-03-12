@@ -957,6 +957,8 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        vm.prank(address(router));
+        engine.updateMarkPrice(86_000_000, uint64(block.timestamp));
         vm.prank(alice);
         clearinghouse.withdraw(aliceId, address(usdc), 9300e6);
 

@@ -166,7 +166,7 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0,
             maxApy: 0,

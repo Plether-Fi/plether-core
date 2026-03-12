@@ -198,14 +198,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         uint256 keeperFeeReserveUsdc = _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
 
-        if (isClose) {
-            if (!engine.hasOpenPosition(accountId)) {
-                revert OrderRouter__NoOpenPosition();
-            }
-            if (engine.getPositionSide(accountId) != side) {
-                revert OrderRouter__CloseSideMismatch();
-            }
-        }
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
 

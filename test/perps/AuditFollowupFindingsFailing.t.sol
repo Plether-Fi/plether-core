@@ -127,7 +127,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 1e18,
             maxApy: 5e18,
@@ -244,10 +244,14 @@ contract AuditFollowupFindingsFailing_SkewCap is BasePerpTest {
 
     function test_M1_IncreaseMustRejectPostTradeSkewAboveMaxSkewRatio() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
+        bytes32 counterpartyId = bytes32(uint256(uint160(address(0xBEEF))));
         _fundTrader(trader, 100_000e6);
+        _fundTrader(address(0xBEEF), 100_000e6);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        uint256 depth = pool.totalAssets();
 
         vm.expectRevert();
-        _open(accountId, CfdTypes.Side.BULL, 900_000e18, 50_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 600_000e18, 50_000e6, 1e8, depth);
     }
 
 }

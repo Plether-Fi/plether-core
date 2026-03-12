@@ -111,6 +111,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__NoProposal();
     error CfdEngine__BadDebtTooLarge();
     error CfdEngine__InvalidRiskParams();
+    error CfdEngine__SkewTooHigh();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -165,6 +166,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams
     ) Ownable(msg.sender) {
+        _validateRiskParams(_riskParams);
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
@@ -196,9 +198,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function proposeRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
-        if (_riskParams.kinkSkewRatio == 0 || _riskParams.maxSkewRatio <= _riskParams.kinkSkewRatio) {
-            revert CfdEngine__InvalidRiskParams();
-        }
+        _validateRiskParams(_riskParams);
         pendingRiskParams = _riskParams;
         riskParamsActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RiskParamsProposed(riskParamsActivationTime);
@@ -416,7 +416,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
-        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : vault.markStalenessLimit();
+        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : 30;
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         if (age > maxStaleness) {
             revert CfdEngine__MarkPriceStale();
@@ -654,7 +654,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdTypes.RiskParams memory rp = riskParams;
 
-        uint256 postSkewUsdc = _getAbsSkewUsdc(price);
+        uint256 postSkewUsdc = _getPostTradeAbsSkewUsdc(order.side, order.sizeDelta, price);
+        if (bullOI > 0 && bearOI > 0 && vaultDepthUsdc > 0 && ((postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
+            revert CfdEngine__SkewTooHigh();
+        }
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, rp.vpiFactor);
         pos.vpiAccrued += vpiUsdc;
 
@@ -774,8 +777,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         } else if (netSettlement < 0) {
             uint256 owed = uint256(-netSettlement);
             uint256 chBalance = clearinghouse.balances(order.accountId, address(USDC));
-            uint256 locked = clearinghouse.lockedMarginUsdc(order.accountId);
-            uint256 available = chBalance > locked ? chBalance - locked : 0;
+            uint256 available = chBalance > pos.margin ? chBalance - pos.margin : 0;
             uint256 toSeize = available < owed ? available : owed;
             if (toSeize > 0) {
                 _seizeUsdcToVault(order.accountId, toSeize);
@@ -800,6 +802,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal view returns (uint256) {
         uint256 bullUsdc = (bullOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 bearUsdc = (bearOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
+    }
+
+    function _getPostTradeAbsSkewUsdc(
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 currentOraclePrice
+    ) internal view returns (uint256) {
+        uint256 bullOiAfter = bullOI;
+        uint256 bearOiAfter = bearOI;
+        if (side == CfdTypes.Side.BULL) {
+            bullOiAfter += sizeDelta;
+        } else {
+            bearOiAfter += sizeDelta;
+        }
+
+        uint256 bullUsdc = (bullOiAfter * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (bearOiAfter * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
@@ -950,8 +970,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
         uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
-        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
+        uint256 freeUsdc = chBalance > pos.margin ? chBalance - pos.margin : 0;
 
         int256 equityUsdc = int256(pos.margin) + int256(freeUsdc) + pendingFunding;
         equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
@@ -982,8 +1001,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             if (keeperBountyUsdc > posMargin) {
                 keeperBountyUsdc = posMargin;
             }
-        } else if (keeperBountyUsdc > uint256(equityUsdc)) {
-            keeperBountyUsdc = uint256(equityUsdc);
         }
         clearinghouse.unlockMargin(accountId, posMargin);
 
@@ -1005,11 +1022,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 _seizeUsdcToVault(accountId, accountBalance);
             }
             uint256 deficit = uint256(-residual);
-            if (accountBalance >= deficit) {
-                deficit = 0;
-            } else {
-                deficit -= accountBalance;
-            }
             if (deficit > 0) {
                 accumulatedBadDebtUsdc += deficit;
             }
@@ -1055,15 +1067,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _getCappedFundingPnl() internal view returns (int256) {
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-
-        if (bullFunding < -int256(totalBullMargin)) {
-            bullFunding = -int256(totalBullMargin);
+        int256 vaultLiability;
+        if (bullFunding > 0) {
+            vaultLiability += bullFunding;
         }
-        if (bearFunding < -int256(totalBearMargin)) {
-            bearFunding = -int256(totalBearMargin);
+        if (bearFunding > 0) {
+            vaultLiability += bearFunding;
         }
 
-        return bullFunding + bearFunding;
+        return vaultLiability;
+    }
+
+    function _validateRiskParams(
+        CfdTypes.RiskParams memory _riskParams
+    ) internal pure {
+        if (_riskParams.kinkSkewRatio == 0 || _riskParams.maxSkewRatio <= _riskParams.kinkSkewRatio) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.maxSkewRatio > CfdMath.WAD) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.baseApy > _riskParams.maxApy) {
+            revert CfdEngine__InvalidRiskParams();
+        }
     }
 
     function _getUnrealizedFundingPnl() internal view returns (int256) {

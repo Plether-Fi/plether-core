@@ -152,7 +152,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
     address alice = address(0xA11CE);
     address attacker = address(0xBAD);
 
-    function test_H1_ThirdPartyDustDepositToExistingHolderMustRevert() public {
+    function test_H1_ThirdPartyDustDepositToExistingHolderMustNotResetVictimCooldown() public {
         _fundJunior(alice, 100_000e6);
 
         vm.warp(block.timestamp + 50 minutes);
@@ -160,7 +160,6 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
         usdc.mint(attacker, 1);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
         juniorVault.deposit(1, alice);
         vm.stopPrank();
 
@@ -281,8 +280,8 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         assertLt(bullFunding, -int256(bullMargin), "Setup must make bull funding debt exceed backing margin");
         assertGt(bearFunding, 0, "Setup must leave the bear side owed funding");
 
-        int256 cappedFunding = -int256(bullMargin) + bearFunding;
-        assertGt(cappedFunding, 0, "Capped net funding should expose reserve deficit");
+        int256 cappedFunding = bearFunding;
+        assertGt(cappedFunding, 0, "Positive funding liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = engine.globalBullMaxProfit();
@@ -293,7 +292,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         assertEq(
             pool.getFreeUSDC(),
             expectedFree,
-            "Free USDC should reserve capped funding liabilities, not uncapped net funding"
+            "Free USDC should reserve positive funding liabilities without netting against uncollectible debt"
         );
     }
 

@@ -193,15 +193,16 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
 
     address alice = address(0xA11CE);
 
-    function test_5_RouterRejectsCloseWithMismatchedSide() public {
+    function test_5_RouterAllowsQueuedCloseWithMismatchedSide() public {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__CloseSideMismatch.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
+
+        assertEq(router.nextCommitId(), 2, "Queued close intent should be accepted asynchronously");
     }
 
 }

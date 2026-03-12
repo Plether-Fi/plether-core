@@ -128,10 +128,6 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares
     ) internal override {
-        uint256 receiverBalanceBefore = balanceOf(receiver);
-        if (caller != receiver && receiverBalanceBefore > 0) {
-            revert TrancheVault__ThirdPartyDepositForExistingHolder();
-        }
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(POOL), assets);
         if (IS_SENIOR) {
@@ -140,7 +136,9 @@ contract TrancheVault is ERC4626 {
             POOL.depositJunior(assets);
         }
         _mint(receiver, shares);
-        lastDepositTime[receiver] = block.timestamp;
+        if (caller == receiver) {
+            lastDepositTime[receiver] = block.timestamp;
+        }
         emit Deposit(caller, receiver, assets, shares);
     }
 

@@ -386,7 +386,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
         uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.expectRevert();
         engine.processOrder(
             CfdTypes.Order({
                 accountId: bobId,

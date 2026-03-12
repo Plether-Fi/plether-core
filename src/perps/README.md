@@ -231,7 +231,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Normal oracle staleness | 60s | Max Pyth price age for execution |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
-| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; third-party deposits to existing holders are rejected |
+| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; third-party deposits do not reset existing holders' cooldown |
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
 | `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |
