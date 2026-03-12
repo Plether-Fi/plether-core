@@ -555,6 +555,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal {
         uint256 fee = keeperFees[orderId];
+        address accountOwner = _accountOwnerAddress(orderId);
         if (success) {
             _clearCommittedMargin(orderId);
         } else {
@@ -565,7 +566,18 @@ contract OrderRouter is Ownable2Step, Pausable {
         nextExecuteId++;
 
         uint256 excessEth = msg.value - pythFee;
-        _sendEth(msg.sender, fee + excessEth);
+        if (success) {
+            _sendEth(msg.sender, fee + excessEth);
+        } else {
+            _sendEth(accountOwner, fee);
+            _sendEth(msg.sender, excessEth);
+        }
+    }
+
+    function _accountOwnerAddress(
+        uint64 orderId
+    ) internal view returns (address) {
+        return address(uint160(uint256(orders[orderId].accountId)));
     }
 
     function _unlockCommittedMargin(

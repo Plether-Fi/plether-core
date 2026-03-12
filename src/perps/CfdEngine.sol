@@ -110,6 +110,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__TimelockNotReady();
     error CfdEngine__NoProposal();
     error CfdEngine__BadDebtTooLarge();
+    error CfdEngine__InvalidRiskParams();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -195,6 +196,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function proposeRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
+        if (_riskParams.kinkSkewRatio == 0 || _riskParams.maxSkewRatio <= _riskParams.kinkSkewRatio) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         pendingRiskParams = _riskParams;
         riskParamsActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RiskParamsProposed(riskParamsActivationTime);
@@ -630,10 +634,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 newNotional = pos.size * pos.entryPrice;
 
         if (order.side == CfdTypes.Side.BULL) {
-            globalBullEntryNotional += newNotional - oldNotional;
+            if (newNotional >= oldNotional) {
+                globalBullEntryNotional += newNotional - oldNotional;
+            } else {
+                globalBullEntryNotional -= oldNotional - newNotional;
+            }
             globalBullEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
         } else {
-            globalBearEntryNotional += newNotional - oldNotional;
+            if (newNotional >= oldNotional) {
+                globalBearEntryNotional += newNotional - oldNotional;
+            } else {
+                globalBearEntryNotional -= oldNotional - newNotional;
+            }
             globalBearEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
         }
 
@@ -1062,6 +1074,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @return Net funding PnL in USDC (6 decimals), positive = traders are owed funding
     function getUnrealizedFundingPnl() external view returns (int256) {
         return _getUnrealizedFundingPnl();
+    }
+
+    /// @notice Aggregate unsettled funding across all positions with uncollectible debts capped by margin.
+    /// @return Net funding PnL in USDC (6 decimals), positive = traders are owed funding
+    function getCappedFundingPnl() external view returns (int256) {
+        return _getCappedFundingPnl();
     }
 
     /// @notice Updates the cached mark price without settling funding or processing trades

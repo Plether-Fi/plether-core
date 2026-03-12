@@ -2198,8 +2198,9 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.claimableEth(alice), 0, "User should not receive failed-order fee refund");
-        assertEq(keeper.balance - keeperBefore, 0.01 ether, "Keeper gets fee for failed order");
+        assertEq(router.claimableEth(alice), 0, "Refund should be sent directly to the user");
+        assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive failed-order fee");
+        assertEq(alice.balance, 1 ether, "User receives failed-order fee refund");
     }
 
     // Regression: H-01 — fee refunded to user on slippage failure
@@ -2228,8 +2229,9 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        assertEq(router.claimableEth(alice), 0, "User should not receive slippage-failure fee refund");
-        assertEq(keeper.balance - keeperBefore, 0.01 ether, "Keeper gets fee on slippage failure");
+        assertEq(router.claimableEth(alice), 0, "Refund should be sent directly to the user");
+        assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
+        assertEq(alice.balance, 1 ether, "User receives slippage-failure refund");
     }
 
     // Regression: H-01

@@ -135,7 +135,9 @@ contract TrancheVault is ERC4626 {
             POOL.depositJunior(assets);
         }
         _mint(receiver, shares);
-        lastDepositTime[receiver] = block.timestamp;
+        if (caller == receiver) {
+            lastDepositTime[receiver] = block.timestamp;
+        }
         emit Deposit(caller, receiver, assets, shares);
     }
 

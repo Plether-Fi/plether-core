@@ -295,7 +295,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = maxLiability + pendingFees;
-        int256 unrealizedFunding = ENGINE.getUnrealizedFundingPnl();
+        int256 unrealizedFunding = ENGINE.getCappedFundingPnl();
         if (unrealizedFunding > 0) {
             reserved += uint256(unrealizedFunding);
         }

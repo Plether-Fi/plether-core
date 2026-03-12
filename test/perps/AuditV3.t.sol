@@ -315,12 +315,13 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertEq(keeper.balance, 0.01 ether, "H-01: keeper should be paid for failed order execution");
+        assertEq(keeper.balance, 0, "H-01: keeper should not be paid for failed order execution");
+        assertEq(alice.balance, 1 ether, "H-01: failed-order fee should be refunded to the user");
     }
 
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
-        // Demonstrate that _finalizeExecution treats success=true and success=false identically.
-        // Two identical orders: one succeeds, one expires. Both give keeper the same payout.
+        // Demonstrate that only successful execution pays the keeper.
+        // Failed single-order execution refunds the user instead.
         router.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
         router.finalizeMaxOrderAge();
@@ -349,11 +350,8 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 keeperPayoutFailed = keeper.balance;
 
-        assertEq(
-            keeperPayoutSuccess,
-            keeperPayoutFailed,
-            "H-01: keeper payout should match on successful and failed execution"
-        );
+        assertEq(keeperPayoutSuccess, 0.01 ether, "H-01: successful execution should pay the keeper");
+        assertEq(keeperPayoutFailed, 0, "H-01: failed execution should not pay the keeper");
     }
 
 }

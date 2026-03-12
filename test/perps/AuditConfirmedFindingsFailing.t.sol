@@ -234,20 +234,44 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
     }
 
     function test_H2_ScalingLargePositionWithDustIncreaseMustNotUnderflow() public {
-        address trader = address(0x1111);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 10_000e6);
-        vm.deal(trader, 1 ether);
+        bytes32 accountId = bytes32(uint256(1));
+        _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 2_000e6, 150_000_001, false);
-        vm.roll(block.number + 1);
-        router.executeOrder(1, new bytes[](0));
+        vm.startPrank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: accountId,
+                sizeDelta: 1000e18,
+                marginDelta: 2_000e6,
+                targetPrice: 150_000_001,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 1,
+                side: CfdTypes.Side.BULL,
+                isClose: false
+            }),
+            150_000_001,
+            pool.totalAssets(),
+            uint64(block.timestamp)
+        );
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 150_000_000, false);
-        vm.roll(block.number + 1);
-        router.executeOrder(2, new bytes[](0));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: accountId,
+                sizeDelta: 1,
+                marginDelta: 0,
+                targetPrice: 150_000_000,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 2,
+                side: CfdTypes.Side.BULL,
+                isClose: false
+            }),
+            150_000_000,
+            pool.totalAssets(),
+            uint64(block.timestamp)
+        );
+        vm.stopPrank();
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 1000e18 + 1, "Dust increase should succeed without arithmetic underflow");

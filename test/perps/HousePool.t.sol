@@ -392,7 +392,7 @@ contract HousePoolTest is BasePerpTest {
         juniorVault.withdraw(500_000 * 1e6, carol, carol);
     }
 
-    function test_DustDepositResetsCooldown() public {
+    function test_DustDepositDoesNotResetVictimCooldown() public {
         _fundJunior(alice, 100_000 * 1e6);
 
         vm.warp(block.timestamp + 50 minutes);
@@ -405,11 +405,12 @@ contract HousePoolTest is BasePerpTest {
         juniorVault.deposit(1, alice);
         vm.stopPrank();
 
-        // Any new deposit resets Alice's cooldown entirely.
+        // Third-party deposits must not grief Alice's cooldown.
         vm.warp(block.timestamp + 11 minutes);
         vm.prank(alice);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         juniorVault.withdraw(100_000 * 1e6, alice, alice);
+
+        assertEq(usdc.balanceOf(alice), 100_000 * 1e6, "Victim withdraw should succeed after original cooldown");
     }
 
     function test_SeniorPrincipal_RestoredBeforeJuniorSurplus() public {
