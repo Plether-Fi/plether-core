@@ -543,6 +543,10 @@ contract OrderRouter is Ownable2Step, Pausable {
             _clearCommittedMargin(orderId);
         } else {
             _unlockCommittedMargin(orderId);
+            if (keeperFee > 0) {
+                _sendEth(_accountOwnerAddress(orderId), keeperFee);
+            }
+            keeperFee = 0;
         }
         delete keeperFees[orderId];
         delete orders[orderId];

@@ -2253,10 +2253,8 @@ contract KeeperFeeRefundTest is Test {
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
 
-        assertEq(router.claimableEth(alice), 0, "User fee is not refunded on batch expiry");
-        assertEq(
-            address(this).balance - keeperBefore, 0.01 ether, "Keeper receives fee for processing expired batch order"
-        );
+        assertEq(alice.balance, 1 ether, "User fee refunded on batch expiry");
+        assertEq(address(this).balance - keeperBefore, 0, "Keeper should not receive fee for expired batch order");
     }
 
 }

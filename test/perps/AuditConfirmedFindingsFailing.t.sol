@@ -56,6 +56,35 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.deal(keeper, 1 ether);
     }
 
+    function test_C1_BatchExecuteShouldRefundUserNotKeeper() public {
+        router.proposeMaxOrderAge(60);
+        vm.warp(block.timestamp + 48 hours + 1);
+        router.finalizeMaxOrderAge();
+
+        uint256 commitTime = block.timestamp;
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), commitTime);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), commitTime);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        vm.warp(commitTime + 61);
+        vm.roll(block.number + 1);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), commitTime + 61);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), commitTime + 61);
+
+        uint256 keeperBalanceBefore = keeper.balance;
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.prank(keeper);
+        router.executeOrderBatch(1, updateData);
+
+        assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not profit from expired orders in batch execution");
+    }
+
     function test_C1_StaleSingleExecuteShouldRefundUserNotKeeper() public {
         vm.warp(1000);
 
@@ -172,10 +201,20 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice,, int256 bullEntryFunding, CfdTypes.Side bullSide,,) =
-            engine.positions(bullId);
-        (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice,, int256 bearEntryFunding, CfdTypes.Side bearSide,,) =
-            engine.positions(bearId);
+        (
+            uint256 bullSize,
+            uint256 bullMargin,
+            uint256 bullEntryPrice,,
+            int256 bullEntryFunding,
+            CfdTypes.Side bullSide,,
+        ) = engine.positions(bullId);
+        (
+            uint256 bearSize,
+            uint256 bearMargin,
+            uint256 bearEntryPrice,,
+            int256 bearEntryFunding,
+            CfdTypes.Side bearSide,,
+        ) = engine.positions(bearId);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: bullSize,
@@ -212,7 +251,11 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedFunding);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;
 
-        assertEq(pool.getFreeUSDC(), expectedFree, "Free USDC should reserve capped funding liabilities, not uncapped net funding");
+        assertEq(
+            pool.getFreeUSDC(),
+            expectedFree,
+            "Free USDC should reserve capped funding liabilities, not uncapped net funding"
+        );
     }
 
 }
@@ -242,7 +285,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: 1000e18,
-                marginDelta: 2_000e6,
+                marginDelta: 2000e6,
                 targetPrice: 150_000_001,
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
