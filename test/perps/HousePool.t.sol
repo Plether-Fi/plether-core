@@ -11,7 +11,6 @@ contract HousePoolTest is BasePerpTest {
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
-
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
     }
@@ -793,6 +792,42 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
         vm.prank(bob);
         juniorVault.withdraw(1e6, bob, bob);
+    }
+
+    function test_Reconcile_AllowsStaleMarkWithoutLiveLiability() public {
+        _fundJunior(bob, 500_000e6);
+
+        usdc.mint(address(pool), 10_000e6);
+        vm.warp(block.timestamp + 121);
+
+        uint256 juniorBefore = pool.juniorPrincipal();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertGt(pool.juniorPrincipal(), juniorBefore, "Without live liability, reconcile should not require a fresh mark");
+    }
+
+    function test_FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals() public {
+        uint256 saturdayFrozen = 1_710_021_600;
+        _fundJunior(bob, 500_000e6);
+        _fundTrader(alice, 50_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.warp(saturdayFrozen);
+        assertTrue(engine.isOracleFrozen(), "Test setup should advance into a frozen oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 3 hours));
+
+        uint256 bobUsdcBefore = usdc.balanceOf(bob);
+        vm.prank(bob);
+        juniorVault.withdraw(1e6, bob, bob);
+
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore + 1e6, "Frozen-oracle withdrawals should use the relaxed freshness limit");
     }
 
     // Regression: C-02 — funding spread not permanently locked after positions close

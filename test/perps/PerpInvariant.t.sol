@@ -27,6 +27,7 @@ contract PerpHandler is Test {
     uint256 public ghost_totalLpDeposited;
     uint256 public ghost_liquidationCount;
     uint256 public ghost_tradeCount;
+    uint256 public ghost_totalLpWithdrawn;
 
     constructor(
         MockUSDC _usdc,
@@ -151,6 +152,7 @@ contract PerpHandler is Test {
 
         vm.prank(lp);
         juniorVault.withdraw(amountFuzz, lp, lp);
+        ghost_totalLpWithdrawn += amountFuzz;
     }
 
 }
@@ -282,6 +284,37 @@ contract PerpInvariantTest is BasePerpTest {
         }
 
         assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Router USDC must back queued keeper reserves exactly");
+    }
+
+    function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {
+        uint256 trackedBalances;
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            trackedBalances += clearinghouse.balances(accountId, address(usdc));
+        }
+
+        assertEq(
+            usdc.balanceOf(address(clearinghouse)),
+            trackedBalances,
+            "Clearinghouse USDC custody must equal tracked trader balances"
+        );
+    }
+
+    function invariant_KnownActorUsdcConservation() public {
+        uint256 actorBalances = usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
+        for (uint256 i = 0; i < 3; i++) {
+            actorBalances += usdc.balanceOf(handler.traders(i));
+        }
+
+        uint256 contractBalances = usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router))
+            + usdc.balanceOf(address(clearinghouse));
+
+        uint256 expectedSupply = 730_000e6 + handler.ghost_totalDeposited() + handler.ghost_totalLpDeposited();
+        assertEq(
+            actorBalances + contractBalances,
+            expectedSupply,
+            "Known actors plus protocol contracts must conserve the minted USDC supply"
+        );
     }
 
     function invariant_AggregateOIMatchesPositions() public {

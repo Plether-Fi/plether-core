@@ -410,6 +410,106 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive the reserved keeper fee");
     }
 
+    function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
+        vm.warp(1000);
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 8_000 * 1e18, 400 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        OrderRouter.AccountEscrow memory beforeEscrow = router.getAccountEscrow(accountId);
+        assertEq(beforeEscrow.pendingOrderCount, 2, "Both orders should be queued");
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
+        vm.warp(1000);
+        bytes[] memory empty = _pythUpdateData();
+
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrder(1, empty);
+
+        OrderRouter.AccountEscrow memory afterRevertEscrow = router.getAccountEscrow(accountId);
+        assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
+        assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
+        vm.warp(1050);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(2, empty);
+
+        OrderRouter.AccountEscrow memory finalEscrow = router.getAccountEscrow(accountId);
+        assertEq(router.nextExecuteId(), 3, "Honest keeper should later consume both queued orders");
+        assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
+    }
+
+    function test_StateMachine_BatchCancelsTerminalHeadAndPreservesNonTerminalTail() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
+
+        vm.roll(block.number + 1);
+        vm.warp(1050);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        bytes[] memory empty = _pythUpdateData();
+
+        mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
+        router.executeOrderBatch(2, empty);
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should consume only the head order");
+        assertEq(escrow.pendingOrderCount, 1, "Trailing queued order should remain pending after batch break");
+        assertEq(router.keeperFeeReserves(2), 1e6, "Trailing order keeper reserve should remain escrowed");
+    }
+
+    function testFuzz_StaleOracleRevertPreservesEscrowAndQueue(
+        uint64 age
+    ) public {
+        age = uint64(bound(age, 61, 600));
+        vm.warp(2000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrder(1, empty);
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
+        assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
+        assertEq(usdc.balanceOf(address(router)), 1e6, "Router should continue escrowing the keeper reserve");
+    }
+
+    function testFuzz_SlippageFailureClearsEscrowAndAdvancesQueue(
+        uint256 adverseTarget
+    ) public {
+        adverseTarget = bound(adverseTarget, 100_000_000, 150_000_000);
+        vm.warp(3000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, adverseTarget, false);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
+        assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
+        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out and no longer escrowed");
+    }
+
     function test_InsufficientPythFee_Reverts() public {
         vm.warp(1000);
         mockPyth.setFee(1 ether);

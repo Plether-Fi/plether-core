@@ -277,6 +277,33 @@ contract CfdEngineTest is BasePerpTest {
         engine.addMargin(accountId, 0);
     }
 
+    function test_CloseLoss_DoesNotConsumeQueuedCommittedMargin() public {
+        address trader = address(0xABD0);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900e6, type(uint256).max, false);
+
+        uint256 lockedBeforeClose = clearinghouse.lockedMarginUsdc(accountId);
+        (, uint256 liveMarginBeforeClose,,,,,,) = engine.positions(accountId);
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
+
+        assertEq(router.committedMargins(1), 7_900e6, "Queued committed margin should remain reserved after the earlier close");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBeforeClose - liveMarginBeforeClose,
+            "Close settlement should release only the live position margin, not the later committed margin"
+        );
+        assertGt(
+            engine.accumulatedBadDebtUsdc(), badDebtBefore, "Any uncovered close loss should become bad debt instead of consuming queued margin"
+        );
+    }
+
     function test_OpposingPosition_Reverts() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
@@ -1074,20 +1101,13 @@ contract CfdEngineFundingTest is BasePerpTest {
 
         bytes32 bobId = bytes32(uint256(uint160(address(0xB2))));
         _fundTrader(address(0xB2), 100_000 * 1e6);
-        _open(bobId, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 0.8e8, depth);
+        _open(bobId, CfdTypes.Side.BEAR, 100_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
         int256 mtm = engine.getVaultMtmAdjustment();
-
-        uint256 totalBullMargin = engine.totalBullMargin();
-
-        assertGe(
-            mtm,
-            int256(0),
-            "C-02: Per-side cap must not create phantom profit by netting bad debt against profitable positions"
-        );
+        assertEq(mtm, 5_000e6, "Only the profitable bull side should count toward vault MtM; losing bear exposure must clamp to zero");
     }
 
     // Regression: C-03 — unrealized MtM profits distributed as withdrawable cash
