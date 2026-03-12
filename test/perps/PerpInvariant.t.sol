@@ -199,17 +199,19 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_GlobalSolvency() public {
         uint256 effectiveAssets = pool.totalAssets();
-        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
-        if (unrealizedFunding < 0) {
-            effectiveAssets += uint256(-unrealizedFunding);
-        } else if (unrealizedFunding > 0) {
-            effectiveAssets =
-                effectiveAssets > uint256(unrealizedFunding) ? effectiveAssets - uint256(unrealizedFunding) : 0;
+        uint256 fees = engine.accumulatedFeesUsdc();
+        effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
+
+        int256 cappedFunding = engine.getCappedFundingPnl();
+        if (cappedFunding < 0) {
+            effectiveAssets += uint256(-cappedFunding);
+        } else if (cappedFunding > 0) {
+            effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
         }
-        uint256 maxLiability = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
-            ? engine.globalBullMaxProfit()
-            : engine.globalBearMaxProfit();
-        assertGe(effectiveAssets, maxLiability, "Pool must cover worst-case liability");
+
+        if (!engine.degradedMode()) {
+            assertGe(effectiveAssets, engine.getMaxLiability(), "Non-degraded engine must cover worst-case liability");
+        }
     }
 
     function invariant_TranchePriority() public {
@@ -249,6 +251,37 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 poolBalance = pool.totalAssets();
         assertLe(fees, poolBalance, "Accumulated fees must not exceed vault balance");
+    }
+
+    function invariant_WithdrawalAccountingMatchesEngineReserve() public {
+        uint256 poolAssets = pool.totalAssets();
+        uint256 reserved = engine.getWithdrawalReservedUsdc();
+        uint256 expectedFree = poolAssets > reserved ? poolAssets - reserved : 0;
+
+        assertEq(pool.getFreeUSDC(), expectedFree, "HousePool free USDC must match engine withdrawal reserve");
+        assertLe(pool.getFreeUSDC(), poolAssets, "Free USDC cannot exceed physical assets");
+    }
+
+    function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public {
+        bool hasLiveLiability = engine.hasLiveLiability();
+        bool hasDirectionalLiability = engine.getMaxLiability() > 0;
+        assertEq(hasLiveLiability, hasDirectionalLiability, "Live-liability flag must match nonzero bounded liability");
+    }
+
+    function invariant_PendingKeeperReservesBackedByRouterUsdc() public {
+        uint256 pendingKeeperReserves;
+        uint64 nextExecuteId = router.nextExecuteId();
+        uint64 nextCommitId = router.nextCommitId();
+
+        for (uint64 orderId = nextExecuteId; orderId < nextCommitId; orderId++) {
+            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
+            if (accountId == bytes32(0) || sizeDelta == 0) {
+                continue;
+            }
+            pendingKeeperReserves += router.keeperFeeReserves(orderId);
+        }
+
+        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Router USDC must back queued keeper reserves exactly");
     }
 
     function invariant_AggregateOIMatchesPositions() public {
@@ -298,10 +331,18 @@ contract PerpInvariantTest is BasePerpTest {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+            uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+
             if (size > 0) {
-                uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
                 assertGe(locked, margin, "Clearinghouse must back position margin");
             }
+
+            assertGe(
+                locked,
+                margin + escrow.committedMarginUsdc,
+                "Locked margin must back open-position margin plus pending committed margin"
+            );
         }
     }
 

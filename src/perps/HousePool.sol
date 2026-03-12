@@ -18,6 +18,27 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
+    struct WithdrawalSnapshot {
+        uint256 physicalAssets;
+        uint256 maxLiability;
+        uint256 protocolFees;
+        uint256 reserved;
+        uint256 freeUsdc;
+    }
+
+    struct ReconcileSnapshot {
+        uint256 physicalAssets;
+        uint256 protocolFees;
+        uint256 cashMinusFees;
+        int256 mtm;
+        uint256 distributable;
+    }
+
+    struct MarkFreshnessPolicy {
+        bool required;
+        uint256 maxStaleness;
+    }
+
     IERC20 public immutable USDC;
     ICfdEngine public immutable ENGINE;
 
@@ -300,17 +321,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @notice Returns USDC not reserved for worst-case position payouts (max of bull/bear liability)
     /// @return Free USDC available for withdrawals (6 decimals)
     function getFreeUSDC() public view returns (uint256) {
-        uint256 bal = USDC.balanceOf(address(this));
-        uint256 bullMax = ENGINE.globalBullMaxProfit();
-        uint256 bearMax = ENGINE.globalBearMaxProfit();
-        uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
-        uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
-        uint256 reserved = maxLiability + pendingFees;
-        int256 unrealizedFunding = ENGINE.getLiabilityOnlyFundingPnl();
-        if (unrealizedFunding > 0) {
-            reserved += uint256(unrealizedFunding);
-        }
-        return bal > reserved ? bal - reserved : 0;
+        return _getWithdrawalSnapshot().freeUsdc;
     }
 
     /// @notice Max USDC the senior tranche can withdraw (limited by free USDC)
@@ -339,15 +350,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireFreshMark() internal view {
-        uint256 bullMax = ENGINE.globalBullMaxProfit();
-        uint256 bearMax = ENGINE.globalBearMaxProfit();
-        if (bullMax + bearMax > 0) {
-            uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
-            uint256 lastMarkTime = ENGINE.lastMarkTime();
-            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-            if (age > limit) {
-                revert HousePool__MarkPriceStale();
-            }
+        MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        if (!policy.required) {
+            return;
+        }
+        if (!_isMarkFresh(policy.maxStaleness)) {
+            revert HousePool__MarkPriceStale();
         }
     }
 
@@ -371,33 +379,62 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             unpaidSeniorYield += yieldInc;
         }
 
-        uint256 bal = USDC.balanceOf(address(this));
-        uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
-        uint256 cashMinusFees = bal > pendingFees ? bal - pendingFees : 0;
+        ReconcileSnapshot memory snapshot = _getReconcileSnapshot();
 
-        int256 mtm = ENGINE.getVaultMtmAdjustment();
-        uint256 distributable;
-        if (mtm >= 0) {
-            distributable = cashMinusFees > uint256(mtm) ? cashMinusFees - uint256(mtm) : 0;
-        } else {
-            distributable = cashMinusFees + uint256(-mtm);
+        if (snapshot.distributable > claimedEquity) {
+            _distributeRevenue(snapshot.distributable - claimedEquity);
+        } else if (snapshot.distributable < claimedEquity) {
+            _absorbLoss(claimedEquity - snapshot.distributable);
         }
+    }
 
-        if (distributable > claimedEquity) {
-            _distributeRevenue(distributable - claimedEquity);
-        } else if (distributable < claimedEquity) {
-            _absorbLoss(claimedEquity - distributable);
+    function _getWithdrawalSnapshot() internal view returns (WithdrawalSnapshot memory snapshot) {
+        snapshot.physicalAssets = USDC.balanceOf(address(this));
+        snapshot.maxLiability = ENGINE.getMaxLiability();
+        snapshot.protocolFees = ENGINE.accumulatedFeesUsdc();
+        snapshot.reserved = ENGINE.getWithdrawalReservedUsdc();
+        snapshot.freeUsdc = snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
+    }
+
+    function _getReconcileSnapshot() internal view returns (ReconcileSnapshot memory snapshot) {
+        snapshot.physicalAssets = USDC.balanceOf(address(this));
+        snapshot.protocolFees = ENGINE.accumulatedFeesUsdc();
+        snapshot.cashMinusFees = snapshot.physicalAssets > snapshot.protocolFees ? snapshot.physicalAssets - snapshot.protocolFees : 0;
+        snapshot.mtm = ENGINE.getVaultMtmAdjustment();
+
+        if (snapshot.mtm >= 0) {
+            snapshot.distributable = snapshot.cashMinusFees > uint256(snapshot.mtm)
+                ? snapshot.cashMinusFees - uint256(snapshot.mtm)
+                : 0;
+        } else {
+            snapshot.distributable = snapshot.cashMinusFees + uint256(-snapshot.mtm);
         }
     }
 
     function _markIsFreshForReconcile() internal view returns (bool) {
-        uint256 bullMax = ENGINE.globalBullMaxProfit();
-        uint256 bearMax = ENGINE.globalBearMaxProfit();
-        if (bullMax + bearMax == 0) {
+        MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        if (!policy.required) {
             return true;
         }
 
-        uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+        return _isMarkFresh(policy.maxStaleness);
+    }
+
+    function _getMarkFreshnessPolicy() internal view returns (MarkFreshnessPolicy memory policy) {
+        policy.required = _hasLiveLiability();
+        if (!policy.required) {
+            return policy;
+        }
+        policy.maxStaleness = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+    }
+
+    function _hasLiveLiability() internal view returns (bool) {
+        return ENGINE.hasLiveLiability();
+    }
+
+    function _isMarkFresh(
+        uint256 limit
+    ) internal view returns (bool) {
         uint256 lastMarkTime = ENGINE.lastMarkTime();
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         return age <= limit;

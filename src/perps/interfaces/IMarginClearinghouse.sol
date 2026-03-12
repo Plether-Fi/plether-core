@@ -46,4 +46,17 @@ interface IMarginClearinghouse {
         bytes32 accountId
     ) external view returns (uint256);
 
+    /// @notice Returns free settlement-asset balance after subtracting locked margin (6 decimals)
+    function getFreeSettlementBalanceUsdc(
+        bytes32 accountId
+    ) external view returns (uint256);
+
+    /// @notice Returns settlement-asset balance reachable during position settlement.
+    /// @dev Includes currently free settlement balance plus the specific position margin
+    ///      that is expected to be unlocked as part of the settlement flow.
+    function getLiquidationReachableUsdc(
+        bytes32 accountId,
+        uint256 positionMarginUsdc
+    ) external view returns (uint256);
+
 }

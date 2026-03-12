@@ -191,6 +191,19 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.withdraw(aliceId, address(usdc), 1000 * 1e6);
     }
 
+    function test_FreeSettlementBalance_TracksLockedUsdcOnly() public {
+        vm.startPrank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+        clearinghouse.deposit(aliceId, address(splDxy), 10_000 * 1e18);
+        vm.stopPrank();
+
+        vm.prank(engine);
+        clearinghouse.lockMargin(aliceId, 600 * 1e6);
+
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(aliceId), 9900 * 1e6, "Buying power should include discounted non-USDC collateral");
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 400 * 1e6, "Free settlement balance should only count unencumbered USDC");
+    }
+
     function test_Deposit_UnsupportedAsset_Reverts() public {
         MockToken randomToken = new MockToken("Random", "RND", 18);
         randomToken.mint(alice, 1000e18);

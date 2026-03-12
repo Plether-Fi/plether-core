@@ -169,6 +169,20 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.committedMargins(2), 0, "Order 2 committed margin must be cleared on failure");
     }
 
+    function test_AccountEscrowView_TracksPendingOrders() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5_000 * 1e18, 0, 1e8, true);
+        vm.stopPrank();
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
+        assertEq(escrow.keeperReserveUsdc, 1_500_000, "Escrow view should sum keeper reserves");
+        assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
+    }
+
     function test_BatchExecution_AllSucceed() public {
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);

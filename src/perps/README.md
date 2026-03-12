@@ -10,6 +10,17 @@ Traditional perpetuals face infinite upside tail risk. Plether's synthetic asset
 
 Five contracts strictly decouple custody, execution, and ledger math to isolate systemic risk.
 
+For the target accounting model that should govern future refactors, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md).
+
+### Architectural Changelog
+
+- Accounting is now split more explicitly by purpose: solvency, LP withdrawals, liquidation settlement, and queued-order escrow no longer rely on the same ad hoc helper paths.
+- `CfdEngine` now builds typed internal funding and solvency snapshots, and `HousePool` consumes clearer engine-side liability and reserve answers instead of rebuilding them from scattered getters.
+- `OrderRouter` now treats pending-order state as first-class escrow with explicit keeper-fee and committed-margin handling, plus a per-account escrow view for tests and audits.
+- `MarginClearinghouse` now exposes clearer balance semantics for free settlement USDC and liquidation-reachable USDC, reducing dependence on raw balance reads in settlement logic.
+- Close and liquidation flows in `CfdEngine` now share centralized settlement helpers for deficit collection, residual payout/seizure, and bad-debt realization.
+- Oracle and mark freshness policy is now centralized around action-specific helpers, and the invariant suite now checks accounting-boundary properties such as reserve backing, liability signaling, and withdrawal-reserve consistency.
+
 ### I. MarginClearinghouse — The Prime Broker
 
 [`MarginClearinghouse.sol`](MarginClearinghouse.sol)

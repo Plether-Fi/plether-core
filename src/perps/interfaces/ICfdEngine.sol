@@ -46,8 +46,12 @@ interface ICfdEngine {
     function globalBullMaxProfit() external view returns (uint256);
     /// @notice Worst-case payout for all BEAR positions (6 decimals)
     function globalBearMaxProfit() external view returns (uint256);
+    /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
+    function getMaxLiability() external view returns (uint256);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
+    /// @notice Total withdrawal reserve required by current protocol liabilities.
+    function getWithdrawalReservedUsdc() external view returns (uint256);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
@@ -73,6 +77,9 @@ interface ICfdEngine {
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
+
+    /// @notice Returns true when the engine currently has open bounded liability that depends on mark freshness.
+    function hasLiveLiability() external view returns (bool);
 
     /// @notice Push a fresh mark price without processing an order
     /// @param price       New mark price (8 decimals)

@@ -316,6 +316,29 @@ contract MarginClearinghouse is Ownable2Step {
         return equity > locked ? equity - locked : 0;
     }
 
+    /// @notice Returns free settlement balance after subtracting locked margin.
+    /// @dev This is the physically reachable USDC left after backing active positions.
+    ///      It differs from `getFreeBuyingPowerUsdc` by ignoring non-USDC collateral value.
+    function getFreeSettlementBalanceUsdc(
+        bytes32 accountId
+    ) public view returns (uint256) {
+        uint256 balance = balances[accountId][settlementAsset];
+        uint256 locked = lockedMarginUsdc[accountId];
+        return balance > locked ? balance - locked : 0;
+    }
+
+    /// @notice Returns settlement balance reachable by a position-reducing settlement path.
+    /// @dev Adds the specified position margin back on top of currently free settlement balance,
+    ///      but never exceeds the actual settlement-asset balance.
+    function getLiquidationReachableUsdc(
+        bytes32 accountId,
+        uint256 positionMarginUsdc
+    ) public view returns (uint256) {
+        uint256 reachable = getFreeSettlementBalanceUsdc(accountId) + positionMarginUsdc;
+        uint256 balance = balances[accountId][settlementAsset];
+        return reachable > balance ? balance : reachable;
+    }
+
     // ==========================================
     // PROTOCOL INTEGRATION (OrderRouter / Engine)
     // ==========================================

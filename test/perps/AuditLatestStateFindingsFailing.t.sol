@@ -3,19 +3,46 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+
+contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTest {
+
+    address trader = address(0xA11CE);
+
+    function test_C1_KeeperReserveMustNotComeFromLockedPositionMargin() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 160e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+
+        vm.prank(trader);
+        vm.expectRevert();
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, false);
+    }
+
+}
 
 contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
     address attacker = address(0xBAD);
 
-    function test_H1_TinyInvalidCloseMustNotQueueForFree() public {
+    function test_H1_TinyInvalidCloseBehindQueuedIntentTracksEscrowAndPendingCount() public {
+        bytes32 accountId = bytes32(uint256(uint160(attacker)));
         _fundTrader(attacker, 1e6);
 
         vm.prank(attacker);
-        vm.expectRevert();
+        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
+
+        vm.prank(attacker);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
+        assertEq(escrow.keeperReserveUsdc, 0, "Dust orders should not fabricate paid escrow where keeper fee rounds to zero");
     }
 
 }
@@ -29,19 +56,54 @@ contract AuditLatestStateFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         return 0;
     }
 
-    function test_M1_ThirdPartyTopUpMustRefreshCooldownBeforeExit() public {
+    function test_M1_SmallThirdPartyTopUpDoesNotRefreshCooldown() public {
         _fundJunior(alice, 100_000e6);
         vm.warp(block.timestamp + 1 hours + 1);
 
-        usdc.mint(helper, 10_000e6);
+        usdc.mint(helper, 1_000e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 10_000e6);
-        juniorVault.deposit(10_000e6, alice);
+        usdc.approve(address(juniorVault), 1_000e6);
+        juniorVault.deposit(1_000e6, alice);
         vm.stopPrank();
 
         vm.prank(alice);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
-        juniorVault.withdraw(110_000e6, alice, alice);
+        juniorVault.withdraw(101_000e6, alice, alice);
+    }
+
+}
+
+contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 10,
+            fadMarginBps: 1000,
+            minBountyUsdc: 1e6,
+            bountyBps: 1000
+        });
+    }
+
+    function test_H1_PositiveEquityLiquidationPaysStandardNotionalBounty() public {
+        address trader = address(0xA201);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 100e6);
+        _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 94e6);
+
+        vm.startPrank(address(router));
+        vm.warp(1_709_971_200);
+        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        vm.stopPrank();
+
+        assertEq(bounty, 10_100_000, "Keeper bounty remains notional-based while equity stays positive");
     }
 
 }

@@ -20,6 +20,33 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 
+    struct FundingSnapshot {
+        int256 bullFunding;
+        int256 bearFunding;
+        int256 solvencyFunding;
+        int256 withdrawalFundingLiability;
+    }
+
+    struct SolvencySnapshot {
+        uint256 physicalAssets;
+        uint256 protocolFees;
+        uint256 netPhysicalAssets;
+        uint256 maxLiability;
+        int256 solvencyFunding;
+        uint256 effectiveSolvencyAssets;
+    }
+
+    struct DebtCollectionResult {
+        uint256 seizedUsdc;
+        uint256 shortfallUsdc;
+    }
+
+    struct LiquidationSettlementResult {
+        uint256 seizedUsdc;
+        uint256 payoutUsdc;
+        uint256 badDebtUsdc;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -445,9 +472,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 pendingFunding = getPendingFunding(pos);
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
-        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
+        uint256 freeUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
         int256 equity = int256(pos.margin) + int256(freeUsdc) + pendingFunding;
         equity = isProfit ? equity + int256(pnlAbs) : equity - int256(pnlAbs);
@@ -791,26 +816,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
-        uint256 actualFee = execFeeUsdc;
-        if (netSettlement > 0) {
-            vault.payOut(address(clearinghouse), uint256(netSettlement));
-            clearinghouse.settleUsdc(order.accountId, address(USDC), netSettlement);
-        } else if (netSettlement < 0) {
-            uint256 owed = uint256(-netSettlement);
-            uint256 chBalance = clearinghouse.balances(order.accountId, address(USDC));
-            uint256 available = chBalance > pos.margin ? chBalance - pos.margin : 0;
-            uint256 toSeize = available < owed ? available : owed;
-            if (toSeize > 0) {
-                _seizeUsdcToVault(order.accountId, toSeize);
-            }
-            uint256 shortfall = owed - toSeize;
-            if (shortfall > 0 && pos.size > 0) {
-                revert CfdEngine__PartialCloseUnderwaterFunding();
-            }
-            actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
-            uint256 badDebt = shortfall > execFeeUsdc ? shortfall - execFeeUsdc : 0;
-            accumulatedBadDebtUsdc += badDebt;
-        }
+        uint256 actualFee = _settleCloseNetSettlement(order.accountId, netSettlement, execFeeUsdc, pos.size > 0);
 
         accumulatedFeesUsdc += actualFee;
 
@@ -859,6 +865,72 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             globalBearMaxProfit -= maxProfitUsdc;
             bearOI -= sizeDelta;
         }
+    }
+
+    function _settleCloseNetSettlement(
+        bytes32 accountId,
+        int256 netSettlement,
+        uint256 execFeeUsdc,
+        bool positionRemainsOpen
+    ) internal returns (uint256 actualFeeUsdc) {
+        actualFeeUsdc = execFeeUsdc;
+
+        if (netSettlement > 0) {
+            vault.payOut(address(clearinghouse), uint256(netSettlement));
+            clearinghouse.settleUsdc(accountId, address(USDC), netSettlement);
+            return actualFeeUsdc;
+        }
+
+        if (netSettlement == 0) {
+            return actualFeeUsdc;
+        }
+
+        DebtCollectionResult memory collection = _collectSettlementDeficit(accountId, uint256(-netSettlement));
+        if (collection.shortfallUsdc > 0 && positionRemainsOpen) {
+            revert CfdEngine__PartialCloseUnderwaterFunding();
+        }
+
+        actualFeeUsdc = execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
+        uint256 badDebtUsdc = collection.shortfallUsdc > execFeeUsdc ? collection.shortfallUsdc - execFeeUsdc : 0;
+        accumulatedBadDebtUsdc += badDebtUsdc;
+    }
+
+    function _collectSettlementDeficit(
+        bytes32 accountId,
+        uint256 owedUsdc
+    ) internal returns (DebtCollectionResult memory result) {
+        uint256 available = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        result.seizedUsdc = available < owedUsdc ? available : owedUsdc;
+        if (result.seizedUsdc > 0) {
+            _seizeUsdcToVault(accountId, result.seizedUsdc);
+        }
+        result.shortfallUsdc = owedUsdc - result.seizedUsdc;
+    }
+
+    function _settleLiquidationResidual(
+        bytes32 accountId,
+        int256 residualUsdc
+    ) internal returns (LiquidationSettlementResult memory result) {
+        uint256 accountBalance = clearinghouse.balances(accountId, address(USDC));
+
+        if (residualUsdc >= 0) {
+            uint256 targetBalance = uint256(residualUsdc);
+            if (accountBalance > targetBalance) {
+                result.seizedUsdc = accountBalance - targetBalance;
+                _seizeUsdcToVault(accountId, result.seizedUsdc);
+            } else if (targetBalance > accountBalance) {
+                result.payoutUsdc = targetBalance - accountBalance;
+                vault.payOut(address(clearinghouse), result.payoutUsdc);
+                clearinghouse.settleUsdc(accountId, address(USDC), int256(result.payoutUsdc));
+            }
+            return result;
+        }
+
+        if (accountBalance > 0) {
+            result.seizedUsdc = accountBalance;
+            _seizeUsdcToVault(accountId, accountBalance);
+        }
+        result.badDebtUsdc = uint256(-residualUsdc);
     }
 
     // ==========================================
@@ -975,8 +1047,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
-        uint256 freeUsdc = chBalance > pos.margin ? chBalance - pos.margin : 0;
+        uint256 freeUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
         int256 equityUsdc = int256(pos.margin) + int256(freeUsdc) + pendingFunding;
         equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
@@ -1011,27 +1082,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         clearinghouse.unlockMargin(accountId, posMargin);
 
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
-        uint256 accountBalance = clearinghouse.balances(accountId, address(USDC));
-
-        if (residual >= 0) {
-            uint256 targetBalance = uint256(residual);
-            if (accountBalance > targetBalance) {
-                uint256 toSeize = accountBalance - targetBalance;
-                _seizeUsdcToVault(accountId, toSeize);
-            } else if (targetBalance > accountBalance) {
-                uint256 toPay = targetBalance - accountBalance;
-                vault.payOut(address(clearinghouse), toPay);
-                clearinghouse.settleUsdc(accountId, address(USDC), int256(toPay));
-            }
-        } else {
-            if (accountBalance > 0) {
-                _seizeUsdcToVault(accountId, accountBalance);
-            }
-            uint256 deficit = uint256(-residual);
-            if (deficit > 0) {
-                accumulatedBadDebtUsdc += deficit;
-            }
-        }
+        LiquidationSettlementResult memory settlement = _settleLiquidationResidual(accountId, residual);
+        accumulatedBadDebtUsdc += settlement.badDebtUsdc;
 
         if (pos.side == CfdTypes.Side.BULL) {
             totalBullMargin -= posMargin;
@@ -1045,9 +1097,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _assertPostSolvency() internal view {
-        uint256 maxLiability = _maxLiability();
-        uint256 effectiveAssets = _getEffectiveAssets();
-        if (effectiveAssets < maxLiability) {
+        SolvencySnapshot memory snapshot = _getSolvencySnapshot();
+        if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             revert CfdEngine__PostOpSolvencyBreach();
         }
     }
@@ -1056,62 +1107,81 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
     }
 
+    function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
+        reservedUsdc = _maxLiability() + accumulatedFeesUsdc;
+        int256 fundingLiability = _getLiabilityOnlyFundingPnl();
+        if (fundingLiability > 0) {
+            reservedUsdc += uint256(fundingLiability);
+        }
+    }
+
     function _enterDegradedModeIfInsolvent(
         bytes32 accountId
     ) internal {
         if (degradedMode) {
             return;
         }
-        uint256 effectiveAssets = _getEffectiveAssets();
-        uint256 maxLiability = _maxLiability();
-        if (effectiveAssets < maxLiability) {
+        SolvencySnapshot memory snapshot = _getSolvencySnapshot();
+        if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             degradedMode = true;
-            emit DegradedModeEntered(effectiveAssets, maxLiability, accountId);
+            emit DegradedModeEntered(snapshot.effectiveSolvencyAssets, snapshot.maxLiability, accountId);
         }
     }
 
     function _getEffectiveAssets() internal view returns (uint256 effectiveAssets) {
-        effectiveAssets = vault.totalAssets();
-        uint256 fees = accumulatedFeesUsdc;
-        effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
-        int256 cappedFunding = _getSolvencyCappedFundingPnl();
-        if (cappedFunding > 0) {
-            effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
-        } else if (cappedFunding < 0) {
-            effectiveAssets += uint256(-cappedFunding);
-        }
+        return _getSolvencySnapshot().effectiveSolvencyAssets;
     }
 
-    /// @notice Per-side funding PnL capped at deposited margin.
-    ///         Used by solvency checks — the vault can count funding receivables as economic
-    ///         assets, but only up to the physical margin that backs them.
     function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
         bullFunding = (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
         bearFunding = (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
+    function _getFundingSnapshot() internal view returns (FundingSnapshot memory snapshot) {
+        (snapshot.bullFunding, snapshot.bearFunding) = _computeGlobalFundingPnl();
+
+        int256 cappedBullFunding = snapshot.bullFunding;
+        int256 cappedBearFunding = snapshot.bearFunding;
+        if (cappedBullFunding < -int256(totalBullMargin)) {
+            cappedBullFunding = -int256(totalBullMargin);
+        }
+        if (cappedBearFunding < -int256(totalBearMargin)) {
+            cappedBearFunding = -int256(totalBearMargin);
+        }
+
+        snapshot.solvencyFunding = cappedBullFunding + cappedBearFunding;
+        if (snapshot.bullFunding > 0) {
+            snapshot.withdrawalFundingLiability += snapshot.bullFunding;
+        }
+        if (snapshot.bearFunding > 0) {
+            snapshot.withdrawalFundingLiability += snapshot.bearFunding;
+        }
+    }
+
+    function _getSolvencySnapshot() internal view returns (SolvencySnapshot memory snapshot) {
+        snapshot.physicalAssets = vault.totalAssets();
+        snapshot.protocolFees = accumulatedFeesUsdc;
+        snapshot.netPhysicalAssets = snapshot.physicalAssets > snapshot.protocolFees ? snapshot.physicalAssets - snapshot.protocolFees : 0;
+        snapshot.maxLiability = _maxLiability();
+
+        FundingSnapshot memory funding = _getFundingSnapshot();
+        snapshot.solvencyFunding = funding.solvencyFunding;
+        snapshot.effectiveSolvencyAssets = snapshot.netPhysicalAssets;
+        if (snapshot.solvencyFunding > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > uint256(snapshot.solvencyFunding)
+                ? snapshot.effectiveSolvencyAssets - uint256(snapshot.solvencyFunding)
+                : 0;
+        } else if (snapshot.solvencyFunding < 0) {
+            snapshot.effectiveSolvencyAssets += uint256(-snapshot.solvencyFunding);
+        }
+    }
+
     function _getSolvencyCappedFundingPnl() internal view returns (int256) {
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        if (bullFunding < -int256(totalBullMargin)) {
-            bullFunding = -int256(totalBullMargin);
-        }
-        if (bearFunding < -int256(totalBearMargin)) {
-            bearFunding = -int256(totalBearMargin);
-        }
-        return bullFunding + bearFunding;
+        return _getFundingSnapshot().solvencyFunding;
     }
 
     function _getLiabilityOnlyFundingPnl() internal view returns (int256) {
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        int256 vaultLiability;
-        if (bullFunding > 0) {
-            vaultLiability += bullFunding;
-        }
-        if (bearFunding > 0) {
-            vaultLiability += bearFunding;
-        }
-
-        return vaultLiability;
+        return _getFundingSnapshot().withdrawalFundingLiability;
     }
 
     function _validateRiskParams(
@@ -1151,6 +1221,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return _getLiabilityOnlyFundingPnl();
     }
 
+    /// @notice Returns the protocol's worst-case directional liability.
+    function getMaxLiability() external view returns (uint256) {
+        return _maxLiability();
+    }
+
+    /// @notice Returns the total USDC reserve required for withdrawals.
+    function getWithdrawalReservedUsdc() external view returns (uint256) {
+        return _getWithdrawalReservedUsdc();
+    }
+
     /// @notice Updates the cached mark price without settling funding or processing trades
     /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
     /// @param publishTime Pyth publish timestamp
@@ -1175,6 +1255,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             lastMarkPrice = price;
             lastMarkTime = publishTime;
         }
+    }
+
+    /// @notice Returns true when the protocol still has live bounded directional liability.
+    function hasLiveLiability() external view returns (bool) {
+        return globalBullMaxProfit + globalBearMaxProfit > 0;
     }
 
     function _seizeUsdcToVault(

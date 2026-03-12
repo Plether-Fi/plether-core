@@ -21,6 +21,22 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
+    enum OracleAction { OrderExecution, MarkRefresh, Liquidation }
+
+    struct AccountEscrow {
+        uint256 committedMarginUsdc;
+        uint256 keeperReserveUsdc;
+        uint256 pendingOrderCount;
+    }
+
+    struct OracleExecutionPolicy {
+        bool oracleFrozen;
+        bool isFad;
+        bool closeOnly;
+        bool mevChecks;
+        uint256 maxStaleness;
+    }
+
     ICfdEngine public engine;
     ICfdVault public vault;
     IPyth public pyth;
@@ -206,18 +222,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
 
-        if (keeperFeeReserveUsdc > 0) {
-            if (clearinghouse.getFreeBuyingPowerUsdc(accountId) < keeperFeeReserveUsdc) {
-                revert OrderRouter__InsufficientFreeEquity();
-            }
-            clearinghouse.seizeAsset(accountId, address(USDC), keeperFeeReserveUsdc, address(this));
-            keeperFeeReserves[orderId] = keeperFeeReserveUsdc;
-        }
-
-        if (!isClose && marginDelta > 0) {
-            clearinghouse.lockMargin(accountId, marginDelta);
-            committedMargins[orderId] = marginDelta;
-        }
+        _reserveKeeperFee(clearinghouse, accountId, orderId, keeperFeeReserveUsdc);
+        _reserveCommittedMargin(clearinghouse, accountId, orderId, isClose, marginDelta);
 
         orders[orderId] = CfdTypes.Order({
             accountId: accountId,
@@ -242,6 +248,22 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 sizeDelta
     ) external view returns (uint256 keeperFeeUsdc) {
         return _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
+    }
+
+    /// @notice Returns the total escrowed state for an account across all queued orders.
+    function getAccountEscrow(
+        bytes32 accountId
+    ) external view returns (AccountEscrow memory escrow) {
+        uint64 maxOrderId = nextCommitId;
+        for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
+            CfdTypes.Order memory order = orders[orderId];
+            if (order.accountId != accountId || order.sizeDelta == 0) {
+                continue;
+            }
+            escrow.committedMarginUsdc += committedMargins[orderId];
+            escrow.keeperReserveUsdc += keeperFeeReserves[orderId];
+            escrow.pendingOrderCount++;
+        }
     }
 
     // ==========================================
@@ -277,31 +299,20 @@ contract OrderRouter is Ownable2Step, Pausable {
             _resolveOraclePrice(pythUpdateData, order.targetPrice);
 
         if (address(pyth) != address(0)) {
-            bool isFad = engine.isFadWindow();
-            bool oracleFrozen = _isOracleFrozen();
-            if (oracleFrozen && !order.isClose) {
-                emit OrderFailed(orderId, "Oracle frozen: close-only mode");
+            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.OrderExecution);
+            if (policy.closeOnly && !order.isClose) {
+                emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
                 _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
                 return;
             }
 
-            if (isFad && !order.isClose) {
-                emit OrderFailed(orderId, "FAD: close-only mode");
-                _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
-                return;
-            }
+            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
 
-            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
-            if (age > maxStaleness) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
-
-            if (!oracleFrozen && block.number == order.commitBlock) {
+            if (policy.mevChecks && block.number == order.commitBlock) {
                 revert OrderRouter__MevDetected();
             }
 
-            if (!oracleFrozen && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
+            if (policy.mevChecks && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
                 revert OrderRouter__MevDetected();
             }
         }
@@ -359,16 +370,10 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
-        bool isFad;
-        bool oracleFrozen;
+        OracleExecutionPolicy memory policy;
         if (address(pyth) != address(0)) {
-            isFad = engine.isFadWindow();
-            oracleFrozen = _isOracleFrozen();
-            uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
-            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
-            if (age > maxStaleness) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
+            policy = _getOracleExecutionPolicy(OracleAction.OrderExecution);
+            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -391,14 +396,14 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if ((isFad || oracleFrozen) && !order.isClose) {
-                emit OrderFailed(orderId, "FAD: close-only mode");
+            if (policy.closeOnly && !order.isClose) {
+                emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
                 totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
                 continue;
             }
 
             if (
-                address(pyth) != address(0) && !oracleFrozen
+                address(pyth) != address(0) && policy.mevChecks
                     // Stop at the first same-block order so newer queued orders remain pending too.
                     && (block.number == order.commitBlock
                         || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
@@ -511,18 +516,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId,
         bool success
     ) internal returns (uint256 keeperRewardUsdc) {
-        if (success) {
-            _clearCommittedMargin(orderId);
-        } else {
-            _unlockCommittedMargin(orderId);
-        }
-        keeperRewardUsdc = _collectKeeperFeeReserve(orderId);
-        bytes32 accountId = orders[orderId].accountId;
-        delete orders[orderId];
-        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
-            pendingOrderCounts[accountId]--;
-        }
-        nextExecuteId++;
+        keeperRewardUsdc = _consumeOrderEscrow(orderId, success);
+        _deleteOrder(orderId);
     }
 
     function _finalizeExecution(
@@ -531,17 +526,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success,
         uint256 keeperRewardUsdc
     ) internal {
-        bytes32 accountId = orders[orderId].accountId;
-        if (success) {
-            _clearCommittedMargin(orderId);
-        } else {
-            _unlockCommittedMargin(orderId);
-        }
-        delete orders[orderId];
-        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
-            pendingOrderCounts[accountId]--;
-        }
-        nextExecuteId++;
+        _consumeOrderEscrow(orderId, success);
+        _deleteOrder(orderId);
 
         if (keeperRewardUsdc > 0) {
             USDC.safeTransfer(msg.sender, keeperRewardUsdc);
@@ -587,6 +573,59 @@ contract OrderRouter is Ownable2Step, Pausable {
         delete committedMargins[orderId];
         bytes32 accountId = orders[orderId].accountId;
         IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+    }
+
+    function _reserveKeeperFee(
+        IMarginClearinghouse clearinghouse,
+        bytes32 accountId,
+        uint64 orderId,
+        uint256 keeperFeeReserveUsdc
+    ) internal {
+        if (keeperFeeReserveUsdc == 0) {
+            return;
+        }
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < keeperFeeReserveUsdc) {
+            revert OrderRouter__InsufficientFreeEquity();
+        }
+        clearinghouse.seizeAsset(accountId, address(USDC), keeperFeeReserveUsdc, address(this));
+        keeperFeeReserves[orderId] = keeperFeeReserveUsdc;
+    }
+
+    function _reserveCommittedMargin(
+        IMarginClearinghouse clearinghouse,
+        bytes32 accountId,
+        uint64 orderId,
+        bool isClose,
+        uint256 marginDelta
+    ) internal {
+        if (isClose || marginDelta == 0) {
+            return;
+        }
+        clearinghouse.lockMargin(accountId, marginDelta);
+        committedMargins[orderId] = marginDelta;
+    }
+
+    function _consumeOrderEscrow(
+        uint64 orderId,
+        bool success
+    ) internal returns (uint256 keeperRewardUsdc) {
+        if (success) {
+            _clearCommittedMargin(orderId);
+        } else {
+            _unlockCommittedMargin(orderId);
+        }
+        return _collectKeeperFeeReserve(orderId);
+    }
+
+    function _deleteOrder(
+        uint64 orderId
+    ) internal {
+        bytes32 accountId = orders[orderId].accountId;
+        delete orders[orderId];
+        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
+            pendingOrderCounts[accountId]--;
+        }
+        nextExecuteId++;
     }
 
     function _clearCommittedMargin(
@@ -667,6 +706,43 @@ contract OrderRouter is Ownable2Step, Pausable {
         return executionPrice <= order.targetPrice;
     }
 
+    function _getOracleExecutionPolicy(
+        OracleAction action
+    ) internal view returns (OracleExecutionPolicy memory policy) {
+        policy.oracleFrozen = _isOracleFrozen();
+        policy.isFad = engine.isFadWindow();
+
+        if (action == OracleAction.OrderExecution) {
+            policy.closeOnly = policy.oracleFrozen || policy.isFad;
+            policy.mevChecks = !policy.oracleFrozen;
+            policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 60;
+            return policy;
+        }
+
+        if (action == OracleAction.MarkRefresh) {
+            policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 60;
+            return policy;
+        }
+
+        policy.maxStaleness = policy.oracleFrozen ? engine.fadMaxStaleness() : 15;
+        return policy;
+    }
+
+    function _validateOracleFreshness(
+        uint64 oraclePublishTime,
+        uint256 maxStaleness,
+        bool mevStyleError
+    ) internal view {
+        uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
+        if (age <= maxStaleness) {
+            return;
+        }
+        if (mevStyleError) {
+            revert OrderRouter__MevOraclePriceTooStale();
+        }
+        revert OrderRouter__OraclePriceTooStale();
+    }
+
     /// @dev Returns true only when FX markets are actually closed and Pyth feeds have stopped publishing.
     ///      Distinct from isFadWindow() which starts 3 hours earlier for margin purposes.
     ///      Uses Friday 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
@@ -730,11 +806,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 60;
-            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
-            if (age > maxStaleness) {
-                revert OrderRouter__OraclePriceTooStale();
-            }
+            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.MarkRefresh);
+            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, false);
         }
 
         engine.updateMarkPrice(executionPrice, oraclePublishTime);
@@ -757,11 +830,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         if (address(pyth) != address(0)) {
-            uint256 maxStaleness = _isOracleFrozen() ? engine.fadMaxStaleness() : 15;
-            uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
-            if (age > maxStaleness) {
-                revert OrderRouter__MevOraclePriceTooStale();
-            }
+            OracleExecutionPolicy memory policy = _getOracleExecutionPolicy(OracleAction.Liquidation);
+            _validateOracleFreshness(oraclePublishTime, policy.maxStaleness, true);
         }
 
         uint256 vaultDepth = vault.totalAssets();
