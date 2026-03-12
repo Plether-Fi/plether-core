@@ -409,7 +409,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
-        uint256 maxStaleness = isFadWindow() ? fadMaxStaleness : vault.markStalenessLimit();
+        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : vault.markStalenessLimit();
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         if (age > maxStaleness) {
             revert CfdEngine__MarkPriceStale();
@@ -520,9 +520,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 preSkewUsdc = _getAbsSkewUsdc(price);
 
         if (pos.size > 0 && pos.side != order.side) {
-            if (!order.isClose) {
-                revert CfdEngine__MustCloseOpposingPosition();
-            }
+            revert CfdEngine__MustCloseOpposingPosition();
         }
 
         uint256 unsettledFundingDebt = _settleFunding(order, pos);
@@ -858,6 +856,37 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         return false;
+    }
+
+    /// @notice Returns true only when FX markets are closed and oracle freshness can be relaxed.
+    ///         Distinct from FAD, which starts earlier for deleveraging risk controls.
+    function isOracleFrozen() public view returns (bool) {
+        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
+        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
+
+        if (dayOfWeek == 5 && hourOfDay >= 22) {
+            return true;
+        }
+        if (dayOfWeek == 6) {
+            return true;
+        }
+        if (dayOfWeek == 0 && hourOfDay < 21) {
+            return true;
+        }
+
+        return fadDayOverrides[block.timestamp / 86_400];
+    }
+
+    function hasOpenPosition(
+        bytes32 accountId
+    ) external view returns (bool) {
+        return positions[accountId].size > 0;
+    }
+
+    function getPositionSide(
+        bytes32 accountId
+    ) external view returns (CfdTypes.Side) {
+        return positions[accountId].side;
     }
 
     /// @notice Returns the maintenance margin requirement in USDC (6 decimals).

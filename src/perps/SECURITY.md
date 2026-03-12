@@ -47,7 +47,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` — the House Pool can always pay every winner simultaneously |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
 | **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees` — LPs cannot withdraw encumbered capital |
-| **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), reset to 0 on full wipeout. Deposits blocked while impaired (`seniorPrincipal < seniorHighWaterMark`) |
+| **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets on the first post-wipeout recapitalization. Deposits stay blocked while partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`) |
 
 ### Position Invariants
 
@@ -281,7 +281,7 @@ When a position goes underwater (equity < 0):
 
 #### Stale Mark Blocks Withdrawals and Yield Accrual
 
-- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, and `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`.
+- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, and `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`. During genuine oracle-frozen windows, these paths use `fadMaxStaleness` instead.
 - **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
 - **Resolution**: Any keeper or user can call `router.updateMarkPrice()` with a fresh Pyth payload to unblock operations.
 

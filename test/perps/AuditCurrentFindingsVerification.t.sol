@@ -128,7 +128,7 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
     }
 
-    function test_M1_ImpairedTrancheDepositAlreadyReverts() public {
+    function test_M1_WipedTrancheCanBeRecapitalized() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
 
@@ -144,9 +144,10 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
 
         vm.startPrank(recapLp);
         usdc.approve(address(seniorVault), type(uint256).max);
-        vm.expectRevert(TrancheVault.TrancheVault__TrancheImpaired.selector);
         seniorVault.deposit(10_000e6, recapLp);
         vm.stopPrank();
+
+        assertGt(pool.seniorPrincipal(), 0, "Wiped tranche should accept recapitalization");
     }
 
 }

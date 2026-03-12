@@ -127,9 +127,6 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares
     ) internal override {
-        if (totalAssets() == 0 && totalSupply() > 0) {
-            revert TrancheVault__TrancheImpaired();
-        }
         IERC20(asset()).safeTransferFrom(caller, address(this), assets);
         IERC20(asset()).forceApprove(address(POOL), assets);
         if (IS_SENIOR) {

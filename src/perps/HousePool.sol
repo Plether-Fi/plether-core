@@ -220,10 +220,15 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     ) external onlyVault whenNotPaused {
         _reconcile();
         _requireFreshMark();
-        if (seniorPrincipal < seniorHighWaterMark) {
+        if (seniorPrincipal < seniorHighWaterMark && seniorPrincipal > 0) {
             revert HousePool__SeniorImpaired();
         }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
+        if (seniorPrincipal == 0) {
+            seniorHighWaterMark = amount;
+            seniorPrincipal = amount;
+            return;
+        }
         seniorHighWaterMark += amount;
         seniorPrincipal += amount;
     }
@@ -326,7 +331,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
-            uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+            uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
             uint256 lastMarkTime = ENGINE.lastMarkTime();
             uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
             if (age > limit) {
@@ -347,7 +352,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bullMax = ENGINE.globalBullMaxProfit();
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
-            uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+            uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
             uint256 lastMarkTime = ENGINE.lastMarkTime();
             uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
             if (age > limit) {

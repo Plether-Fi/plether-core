@@ -26,7 +26,7 @@ The House Pool is the USDC counterparty backing all trader payouts. It implement
 
 **Withdrawal Firewall**: `maxWithdraw` / `maxRedeem` compute `freeUSDC = totalAssets() - maxSystemLiability`. LPs can only withdraw unencumbered capital. At 100% utilization, capital is temporarily locked to guarantee all active trader payouts.
 
-**Senior High-Water Mark**: A `seniorHighWaterMark` tracks the peak senior principal. After a catastrophic loss impairs senior capital, revenue first restores `seniorPrincipal` to the high-water mark before any surplus flows to junior. This prevents junior from profiting while senior remains impaired. The mark increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets to zero on full wipeout. Deposits are blocked while the senior tranche is impaired (`seniorPrincipal < seniorHighWaterMark`).
+**Senior High-Water Mark**: A `seniorHighWaterMark` tracks the peak senior principal. After a catastrophic loss impairs senior capital, revenue first restores `seniorPrincipal` to the high-water mark before any surplus flows to junior. This prevents junior from profiting while senior remains impaired. The mark increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and a fully wiped senior tranche can be recapitalized from zero without carrying the stale pre-wipeout mark forward. Deposits remain blocked while senior is partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`).
 
 ### III. OrderRouter — The MEV Shield & Queue
 

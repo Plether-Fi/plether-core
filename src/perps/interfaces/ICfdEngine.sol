@@ -75,6 +75,19 @@ interface ICfdEngine {
     /// @notice Maximum oracle staleness allowed during FAD windows
     function fadMaxStaleness() external view returns (uint256);
 
+    /// @notice True only when FX markets are actually closed and oracle freshness can be relaxed.
+    function isOracleFrozen() external view returns (bool);
+
+    /// @notice Returns true when the account currently has an open position.
+    function hasOpenPosition(
+        bytes32 accountId
+    ) external view returns (bool);
+
+    /// @notice Returns the stored side for an open position.
+    function getPositionSide(
+        bytes32 accountId
+    ) external view returns (CfdTypes.Side);
+
     /// @notice Whether a given day number is an admin-configured FAD override
     function fadDayOverrides(
         uint256 dayNumber

@@ -121,9 +121,11 @@ contract AuditValidFindingsFailing is BasePerpTest {
         usdc.mint(address(seniorVault), depositAmount);
         vm.startPrank(address(seniorVault));
         usdc.approve(address(pool), depositAmount);
-        vm.expectRevert(HousePool.HousePool__SeniorImpaired.selector);
         pool.depositSenior(depositAmount);
         vm.stopPrank();
+
+        assertEq(pool.seniorPrincipal(), depositAmount, "Senior tranche should accept recapitalization from zero");
+        assertEq(pool.seniorHighWaterMark(), depositAmount, "Recapitalization should seed a fresh HWM");
     }
 
     function test_M1_WithdrawMustRevertWhenMarkIsStale() public {

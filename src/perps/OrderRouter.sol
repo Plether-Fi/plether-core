@@ -34,12 +34,15 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
+    uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint256 internal constant DEFAULT_MIN_KEEPER_FEE = 0.01 ether;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
 
     uint256 public pendingMinKeeperFee;
     uint256 public minKeeperFeeActivationTime;
+    bool public keeperFeeEnforced;
 
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
@@ -70,6 +73,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__MissingPythUpdateData();
     error OrderRouter__OracleFrozen();
     error OrderRouter__InsufficientGas();
+    error OrderRouter__NoOpenPosition();
+    error OrderRouter__CloseSideMismatch();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -94,6 +99,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         engine = ICfdEngine(_engine);
         vault = ICfdVault(_vault);
         pyth = IPyth(_pyth);
+        maxOrderAge = DEFAULT_MAX_ORDER_AGE;
+        minKeeperFee = DEFAULT_MIN_KEEPER_FEE;
+        keeperFeeEnforced = block.chainid != 31_337;
 
         if (_pyth != address(0)) {
             if (_feedIds.length == 0) {
@@ -173,6 +181,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         minKeeperFee = pendingMinKeeperFee;
         pendingMinKeeperFee = 0;
         minKeeperFeeActivationTime = 0;
+        keeperFeeEnforced = true;
     }
 
     /// @notice Cancels the pending minKeeperFee proposal.
@@ -216,12 +225,20 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (isClose && marginDelta > 0) {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
-        if (msg.value < minKeeperFee) {
+        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (isClose) {
+            if (!engine.hasOpenPosition(accountId)) {
+                revert OrderRouter__NoOpenPosition();
+            }
+            if (engine.getPositionSide(accountId) != side) {
+                revert OrderRouter__CloseSideMismatch();
+            }
+        }
+        if (keeperFeeEnforced && msg.value < minKeeperFee) {
             revert OrderRouter__InsufficientKeeperFee();
         }
 
         uint64 orderId = nextCommitId++;
-        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
 
         if (!isClose && marginDelta > 0) {
             IMarginClearinghouse(engine.clearinghouse()).lockMargin(accountId, marginDelta);
