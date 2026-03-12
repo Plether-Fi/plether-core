@@ -61,6 +61,11 @@ interface ICfdEngine {
     ///         Positive = traders are net funding receivers after clipping uncollectible debts.
     function getCappedFundingPnl() external view returns (int256);
 
+    /// @notice Aggregate funding liabilities only, excluding any trader debts owed to the vault.
+    ///         Used by withdrawal firewalls that must assume funding receivables are uncollectible
+    ///         until physically seized.
+    function getLiabilityOnlyFundingPnl() external view returns (int256);
+
     /// @notice Combined MtM liability: per-side (PnL + funding), clamped at zero.
     ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
     ///         Unrealized trader losses are not counted as vault assets.

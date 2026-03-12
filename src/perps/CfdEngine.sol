@@ -675,8 +675,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdTypes.RiskParams memory rp = riskParams;
 
-        uint256 postSkewUsdc = _getPostTradeAbsSkewUsdc(order.side, order.sizeDelta, price);
-        if (bullOI > 0 && bearOI > 0 && vaultDepthUsdc > 0 && ((postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
+        uint256 postSkewUsdc = _getAbsSkewUsdc(price);
+        if (vaultDepthUsdc > 0 && ((postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
             revert CfdEngine__SkewTooHigh();
         }
         int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, rp.vpiFactor);
@@ -804,6 +804,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 _seizeUsdcToVault(order.accountId, toSeize);
             }
             uint256 shortfall = owed - toSeize;
+            if (shortfall > 0 && pos.size > 0) {
+                revert CfdEngine__PartialCloseUnderwaterFunding();
+            }
             actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
             uint256 badDebt = shortfall > execFeeUsdc ? shortfall - execFeeUsdc : 0;
             accumulatedBadDebtUsdc += badDebt;
@@ -823,24 +826,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal view returns (uint256) {
         uint256 bullUsdc = (bullOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 bearUsdc = (bearOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
-    }
-
-    function _getPostTradeAbsSkewUsdc(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 currentOraclePrice
-    ) internal view returns (uint256) {
-        uint256 bullOiAfter = bullOI;
-        uint256 bearOiAfter = bearOI;
-        if (side == CfdTypes.Side.BULL) {
-            bullOiAfter += sizeDelta;
-        } else {
-            bearOiAfter += sizeDelta;
-        }
-
-        uint256 bullUsdc = (bullOiAfter * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOiAfter * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
@@ -1056,6 +1041,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
+        _enterDegradedModeIfInsolvent(accountId);
     }
 
     function _assertPostSolvency() internal view {
@@ -1088,7 +1074,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         effectiveAssets = vault.totalAssets();
         uint256 fees = accumulatedFeesUsdc;
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
-        int256 cappedFunding = _getCappedFundingPnl();
+        int256 cappedFunding = _getSolvencyCappedFundingPnl();
         if (cappedFunding > 0) {
             effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
         } else if (cappedFunding < 0) {
@@ -1104,7 +1090,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bearFunding = (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
-    function _getCappedFundingPnl() internal view returns (int256) {
+    function _getSolvencyCappedFundingPnl() internal view returns (int256) {
+        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
+        if (bullFunding < -int256(totalBullMargin)) {
+            bullFunding = -int256(totalBullMargin);
+        }
+        if (bearFunding < -int256(totalBearMargin)) {
+            bearFunding = -int256(totalBearMargin);
+        }
+        return bullFunding + bearFunding;
+    }
+
+    function _getLiabilityOnlyFundingPnl() internal view returns (int256) {
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
         int256 vaultLiability;
         if (bullFunding > 0) {
@@ -1145,7 +1142,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @notice Aggregate unsettled funding across all positions with uncollectible debts capped by margin.
     /// @return Net funding PnL in USDC (6 decimals), positive = traders are owed funding
     function getCappedFundingPnl() external view returns (int256) {
-        return _getCappedFundingPnl();
+        return _getSolvencyCappedFundingPnl();
+    }
+
+    /// @notice Aggregate unsettled funding liabilities only, ignoring trader debts owed to the vault.
+    /// @return Funding liabilities the vault should conservatively reserve for withdrawals (6 decimals)
+    function getLiabilityOnlyFundingPnl() external view returns (int256) {
+        return _getLiabilityOnlyFundingPnl();
     }
 
     /// @notice Updates the cached mark price without settling funding or processing trades

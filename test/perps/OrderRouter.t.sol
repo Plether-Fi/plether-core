@@ -947,12 +947,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(2, empty);
-
-        assertEq(router.nextExecuteId(), 3, "Queue advances despite staleness cancel");
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertGt(size, 0, "Position unchanged - close was cancelled, not executed");
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
@@ -1139,11 +1135,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "MEV check must block stale-price close during Friday gap");
     }
 
     function test_FridayGap_FreshPriceStillWorks() public {
@@ -1246,11 +1239,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "MEV check must block stale close at Sunday 21:00");
     }
 
     function test_SundayDst_StillFadAt21() public {
@@ -1281,11 +1271,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "Winter stale price correctly rejected at Sunday 21:00");
     }
 
     function test_Runway_FadActivatesBeforeHoliday() public {
@@ -1358,11 +1345,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(runwayTime + 30);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "MEV check must block stale price during runway");
     }
 
     function test_Runway_SetFadRunway() public {

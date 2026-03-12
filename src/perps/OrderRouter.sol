@@ -48,6 +48,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(uint64 => uint256) public committedMargins;
     mapping(uint64 => uint256) public keeperFeeReserves;
     mapping(address => uint256) public claimableEth;
+    mapping(bytes32 => uint256) public pendingOrderCounts;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -74,6 +75,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__InsufficientGas();
     error OrderRouter__NoOpenPosition();
     error OrderRouter__CloseSideMismatch();
+    error OrderRouter__InsufficientFreeEquity();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -196,12 +198,18 @@ contract OrderRouter is Ownable2Step, Pausable {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
+            revert OrderRouter__NoOpenPosition();
+        }
         uint256 keeperFeeReserveUsdc = _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
 
         if (keeperFeeReserveUsdc > 0) {
+            if (clearinghouse.getFreeBuyingPowerUsdc(accountId) < keeperFeeReserveUsdc) {
+                revert OrderRouter__InsufficientFreeEquity();
+            }
             clearinghouse.seizeAsset(accountId, address(USDC), keeperFeeReserveUsdc, address(this));
             keeperFeeReserves[orderId] = keeperFeeReserveUsdc;
         }
@@ -222,6 +230,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             side: side,
             isClose: isClose
         });
+        pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
     }
 
@@ -285,9 +294,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             uint256 maxStaleness = oracleFrozen ? engine.fadMaxStaleness() : 60;
             uint256 age = block.timestamp > oraclePublishTime ? block.timestamp - oraclePublishTime : 0;
             if (age > maxStaleness) {
-                emit OrderFailed(orderId, "Oracle price too stale");
-                _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
-                return;
+                revert OrderRouter__OraclePriceTooStale();
             }
 
             if (!oracleFrozen && block.number == order.commitBlock) {
@@ -510,7 +517,11 @@ contract OrderRouter is Ownable2Step, Pausable {
             _unlockCommittedMargin(orderId);
         }
         keeperRewardUsdc = _collectKeeperFeeReserve(orderId);
+        bytes32 accountId = orders[orderId].accountId;
         delete orders[orderId];
+        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
+            pendingOrderCounts[accountId]--;
+        }
         nextExecuteId++;
     }
 
@@ -520,12 +531,16 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success,
         uint256 keeperRewardUsdc
     ) internal {
+        bytes32 accountId = orders[orderId].accountId;
         if (success) {
             _clearCommittedMargin(orderId);
         } else {
             _unlockCommittedMargin(orderId);
         }
         delete orders[orderId];
+        if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
+            pendingOrderCounts[accountId]--;
+        }
         nextExecuteId++;
 
         if (keeperRewardUsdc > 0) {

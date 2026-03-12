@@ -29,6 +29,20 @@ contract AuditC01_HwmInflation is BasePerpTest {
         return 0;
     }
 
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
     function test_C01_DepositInflatesDeficit() public {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(alice, 50_000 * 1e6);
@@ -245,6 +259,20 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
 
     function _initialSeniorDeposit() internal pure override returns (uint256) {
         return 0;
+    }
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
     }
 
     function test_C05_DepositAllowedWhenImpaired() public {

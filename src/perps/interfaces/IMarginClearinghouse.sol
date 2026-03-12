@@ -41,4 +41,9 @@ interface IMarginClearinghouse {
         bytes32 accountId
     ) external view returns (uint256);
 
+    /// @notice Returns strictly free buying power after subtracting locked margin (6 decimals)
+    function getFreeBuyingPowerUsdc(
+        bytes32 accountId
+    ) external view returns (uint256);
+
 }

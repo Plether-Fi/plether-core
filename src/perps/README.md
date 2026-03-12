@@ -41,7 +41,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for 100% protocol liveness. Each order prepays a reserved USDC keeper fee at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark), and that reserve is paid to the keeper who processes the order even if the fill fails or expires.
+**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Each order prepays a reserved USDC keeper fee at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark). Important nuance: tiny orders can currently round this reserve down to zero, so FIFO remains logically unbrickable but may still become economically unattractive for keepers if invalid dust orders accumulate.
 
 ### IV. CfdEngine — The Mathematical Ledger
 
@@ -57,7 +57,7 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)
 ```
 
-Because prices cannot exceed CAP or drop below zero, this single check guarantees full solvency.
+Because prices cannot exceed CAP or drop below zero, this check bounds solvency at trade entry. Realized close payouts can still reveal post-trade insolvency, which is why the engine now latches `degradedMode` and blocks further risk expansion until recapitalized.
 
 ### V. CfdMath — The Quantitative Library
 

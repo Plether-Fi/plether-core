@@ -140,6 +140,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.warp(1001);
         vm.roll(block.number + 1);
         vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, updateData);
 
         assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not collect fee when cancelling a stale order");
@@ -356,6 +357,64 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 1000e18 + 1, "Dust increase should succeed without arithmetic underflow");
+    }
+
+}
+
+contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.15e18,
+            kinkSkewRatio: 0.10e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_C3_OpenSkewCapMustUseSingleSizeDelta() public {
+        address bearTrader = address(0xBEA2);
+        address bullTrader = address(0xB011);
+
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+
+        _fundTrader(bearTrader, 60_000e6);
+        _fundTrader(bullTrader, 120_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+
+        (uint256 bullSize,,,,,,,) = engine.positions(bullId);
+        assertEq(bullSize, 200_000e18, "Open-path skew cap should use the intended post-trade skew");
+    }
+
+}
+
+contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest {
+
+    address trader = address(0xA11CE);
+
+    function test_C4_KeeperFeeReserveMustReduceLiquidationEquity() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 200e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 160e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+
+        uint256 vaultDepth = pool.totalAssets();
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        engine.liquidatePosition(accountId, 100_530_000, vaultDepth, uint64(block.timestamp));
     }
 
 }

@@ -40,7 +40,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0,
             maxApy: 0,
@@ -192,7 +192,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0,
             maxApy: 0,
@@ -375,7 +375,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0,
             maxApy: 0,

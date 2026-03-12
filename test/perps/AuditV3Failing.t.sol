@@ -150,6 +150,20 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         return 500_000e6;
     }
 
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
     function test_4_SeniorCanBeRecapitalizedAfterFullWipeout() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
         _fundTrader(address(0xA11CE), 600_000e6);

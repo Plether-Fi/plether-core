@@ -46,6 +46,7 @@ contract AuditFullSecurityFailing_CooldownBypass is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         juniorVault.withdraw(100_000e6, alice, alice);
     }
 
@@ -78,7 +79,7 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.unpaidSeniorYield(), 0, "New senior rate must not back-accrue senior yield over stale-mark time");
+        assertGt(pool.unpaidSeniorYield(), 0, "Old senior rate accrual should be checkpointed before the new rate takes effect");
     }
 
 }

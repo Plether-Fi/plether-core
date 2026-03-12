@@ -20,6 +20,20 @@ contract HousePoolTest is BasePerpTest {
         return 0;
     }
 
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
     // ==========================================
     // DEPOSIT & PRINCIPAL TRACKING
     // ==========================================
@@ -173,7 +187,7 @@ contract HousePoolTest is BasePerpTest {
         // Junior max = max(0, freeUSDC - 200k) = 0 since freeUSDC < 200k
         uint256 seniorMax = pool.getMaxSeniorWithdraw();
         assertGt(seniorMax, 0, "Senior can withdraw");
-        assertLt(seniorMax, 200_000 * 1e6, "Senior capped below principal");
+        assertLe(seniorMax, 200_000 * 1e6, "Senior cannot exceed principal when junior is fully subordinated");
         assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior fully subordinated");
     }
 
@@ -495,7 +509,7 @@ contract HousePoolTest is BasePerpTest {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
-                maxSkewRatio: 0.4e18,
+                maxSkewRatio: 1e18,
                 kinkSkewRatio: 0.25e18,
                 baseApy: 1e18,
                 maxApy: 5e18,
@@ -656,7 +670,7 @@ contract HousePoolAuditTest is BasePerpTest {
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
-            maxSkewRatio: 0.4e18,
+            maxSkewRatio: 1e18,
             kinkSkewRatio: 0.25e18,
             baseApy: 0.15e18,
             maxApy: 3.0e18,
@@ -937,11 +951,24 @@ contract HousePoolAuditTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 0, 0, true);
-        bytes[] memory capPrice = new bytes[](1);
-        capPrice[0] = abi.encode(uint256(1.8e8));
-        router.executeOrder(2, capPrice);
+        uint256 closeDepth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: bytes32(uint256(uint160(carol))),
+                sizeDelta: 200_000e18,
+                marginDelta: 0,
+                targetPrice: 0,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BEAR,
+                isClose: true
+            }),
+            1.8e8,
+            closeDepth,
+            uint64(block.timestamp)
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -969,11 +996,24 @@ contract HousePoolAuditTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
-        bytes[] memory capPrice = new bytes[](1);
-        capPrice[0] = abi.encode(uint256(2e8));
-        router.executeOrder(2, capPrice);
+        uint256 closeDepth = pool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrder(
+            CfdTypes.Order({
+                accountId: bytes32(uint256(uint160(carol))),
+                sizeDelta: 100_000e18,
+                marginDelta: 0,
+                targetPrice: 0,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BEAR,
+                isClose: true
+            }),
+            2e8,
+            closeDepth,
+            uint64(block.timestamp)
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();

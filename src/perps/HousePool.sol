@@ -136,8 +136,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (block.timestamp < seniorRateActivationTime) {
             revert HousePool__TimelockNotReady();
         }
-        _reconcile();
-        lastReconcileTime = block.timestamp;
+        if (_markIsFreshForReconcile()) {
+            _reconcile();
+        } else {
+            _accrueSeniorYieldOnly();
+        }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;
         seniorRateActivationTime = 0;
@@ -303,7 +306,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 maxLiability = bullMax > bearMax ? bullMax : bearMax;
         uint256 pendingFees = ENGINE.accumulatedFeesUsdc();
         uint256 reserved = maxLiability + pendingFees;
-        int256 unrealizedFunding = ENGINE.getCappedFundingPnl();
+        int256 unrealizedFunding = ENGINE.getLiabilityOnlyFundingPnl();
         if (unrealizedFunding > 0) {
             reserved += uint256(unrealizedFunding);
         }
@@ -357,15 +360,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
 
-        uint256 bullMax = ENGINE.globalBullMaxProfit();
-        uint256 bearMax = ENGINE.globalBearMaxProfit();
-        if (bullMax + bearMax > 0) {
-            uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
-            uint256 lastMarkTime = ENGINE.lastMarkTime();
-            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-            if (age > limit) {
-                return;
-            }
+        if (!_markIsFreshForReconcile()) {
+            return;
         }
 
         lastReconcileTime = block.timestamp;
@@ -392,6 +388,30 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         } else if (distributable < claimedEquity) {
             _absorbLoss(claimedEquity - distributable);
         }
+    }
+
+    function _markIsFreshForReconcile() internal view returns (bool) {
+        uint256 bullMax = ENGINE.globalBullMaxProfit();
+        uint256 bearMax = ENGINE.globalBearMaxProfit();
+        if (bullMax + bearMax == 0) {
+            return true;
+        }
+
+        uint256 limit = ENGINE.isOracleFrozen() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
+        uint256 lastMarkTime = ENGINE.lastMarkTime();
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        return age <= limit;
+    }
+
+    function _accrueSeniorYieldOnly() internal {
+        uint256 elapsed = block.timestamp - lastReconcileTime;
+        lastReconcileTime = block.timestamp;
+        if (elapsed == 0 || seniorPrincipal == 0) {
+            return;
+        }
+
+        uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
+        unpaidSeniorYield += yieldInc;
     }
 
     function _distributeRevenue(
