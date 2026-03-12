@@ -46,6 +46,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
+    bool public degradedMode;
 
     // ==========================================
     // FUNDING ACCUMULATORS
@@ -112,6 +113,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__BadDebtTooLarge();
     error CfdEngine__InvalidRiskParams();
     error CfdEngine__SkewTooHigh();
+    error CfdEngine__DegradedMode();
+    error CfdEngine__NotDegraded();
+    error CfdEngine__StillInsolvent();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -137,6 +141,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
     event FadRunwayFinalized();
     event BadDebtCleared(uint256 amount, uint256 remaining);
+    event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, bytes32 indexed triggeringAccount);
+    event DegradedModeCleared();
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -397,6 +403,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
     }
 
+    function clearDegradedMode() external onlyOwner {
+        if (!degradedMode) {
+            revert CfdEngine__NotDegraded();
+        }
+        if (_getEffectiveAssets() < _maxLiability()) {
+            revert CfdEngine__StillInsolvent();
+        }
+        degradedMode = false;
+        emit DegradedModeCleared();
+    }
+
     // ==========================================
     // WITHDRAW GUARD (IWithdrawGuard)
     // ==========================================
@@ -409,6 +426,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdTypes.Position memory pos = positions[accountId];
         if (pos.size == 0) {
             return;
+        }
+        if (degradedMode) {
+            revert CfdEngine__DegradedMode();
         }
 
         uint256 price = lastMarkPrice;
@@ -534,11 +554,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         if (order.isClose) {
             _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
+            _enterDegradedModeIfInsolvent(order.accountId);
         } else {
+            if (degradedMode) {
+                revert CfdEngine__DegradedMode();
+            }
             _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
-        }
-
-        if (!order.isClose) {
             _assertPostSolvency();
         }
 
@@ -1038,10 +1059,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _assertPostSolvency() internal view {
-        uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+        uint256 maxLiability = _maxLiability();
         uint256 effectiveAssets = _getEffectiveAssets();
         if (effectiveAssets < maxLiability) {
             revert CfdEngine__PostOpSolvencyBreach();
+        }
+    }
+
+    function _maxLiability() internal view returns (uint256) {
+        return globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+    }
+
+    function _enterDegradedModeIfInsolvent(
+        bytes32 accountId
+    ) internal {
+        if (degradedMode) {
+            return;
+        }
+        uint256 effectiveAssets = _getEffectiveAssets();
+        uint256 maxLiability = _maxLiability();
+        if (effectiveAssets < maxLiability) {
+            degradedMode = true;
+            emit DegradedModeEntered(effectiveAssets, maxLiability, accountId);
         }
     }
 

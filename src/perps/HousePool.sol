@@ -56,6 +56,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__TimelockNotReady();
     error HousePool__NoProposal();
     error HousePool__SeniorImpaired();
+    error HousePool__DegradedMode();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -244,6 +245,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount == 0) {
             return;
         }
+        if (ENGINE.degradedMode()) {
+            revert HousePool__DegradedMode();
+        }
         _reconcile();
         _requireFreshMark();
         if (amount > getMaxSeniorWithdraw()) {
@@ -274,6 +278,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount,
         address receiver
     ) external onlyVault {
+        if (ENGINE.degradedMode()) {
+            revert HousePool__DegradedMode();
+        }
         _reconcile();
         _requireFreshMark();
         if (amount > getMaxJuniorWithdraw()) {

@@ -51,6 +51,104 @@ contract AuditFollowupFindingsFailing_StaleWithdrawals is BasePerpTest {
 
 }
 
+contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
+
+    address bullTrader = address(0xB011);
+    address bearTrader = address(0xBEA2);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_C3_ProfitableCloseEntersDegradedModeInsteadOfReverting() public {
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        assertTrue(engine.degradedMode(), "Profitable close should latch degraded mode when it reveals insolvency");
+    }
+
+    function test_C3_DegradedModeBlocksNewOpensUntilRecapitalized() public {
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address newTrader = address(0xCAFE);
+        bytes32 newTraderId = bytes32(uint256(uint160(newTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(newTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        assertTrue(engine.degradedMode(), "Setup must enter degraded mode");
+        vm.prank(address(router));
+        (bool ok,) = address(engine).call(
+            abi.encodeWithSelector(
+                engine.processOrder.selector,
+                CfdTypes.Order({
+                    accountId: newTraderId,
+                    sizeDelta: 10_000e18,
+                    marginDelta: 1_000e6,
+                    targetPrice: 1e8,
+                    commitTime: uint64(block.timestamp),
+                    commitBlock: uint64(block.number),
+                    orderId: 0,
+                    side: CfdTypes.Side.BULL,
+                    isClose: false
+                }),
+                1e8,
+                pool.totalAssets(),
+                uint64(block.timestamp)
+            )
+        );
+        assertFalse(ok, "Degraded mode must block new opens until recapitalized");
+    }
+
+    function test_C3_OwnerCanClearDegradedModeAfterRecapitalization() public {
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        address newTrader = address(0xCAFE);
+        bytes32 newTraderId = bytes32(uint256(uint160(newTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(newTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        vm.expectRevert(CfdEngine.CfdEngine__StillInsolvent.selector);
+        engine.clearDegradedMode();
+
+        _fundJunior(address(this), 500_000e6);
+        engine.clearDegradedMode();
+
+        assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");
+        _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8);
+    }
+
+}
+
 contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
 
     address trader = address(0xA11CE);

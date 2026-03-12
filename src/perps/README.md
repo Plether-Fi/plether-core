@@ -49,6 +49,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 Core state machine. **Holds zero physical funds.** Receives validated intents, enforces O(1) solvency bounds, handles position mutations, calculates PnL, and instructs the Clearinghouse/HousePool on exactly who to pay.
 
+**Degraded Mode**: If a profitable close reveals that realized payouts have pushed `effectiveAssets` below the remaining worst-case liability bound, the close still succeeds but the engine latches `degradedMode`. While degraded, new opens and position-backed withdrawals are blocked, while closes, liquidations, mark updates, and recapitalization remain available until the owner clears the mode after solvency is restored.
+
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
 ```

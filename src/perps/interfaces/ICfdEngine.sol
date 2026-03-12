@@ -99,6 +99,9 @@ interface ICfdEngine {
         bytes32 accountId
     ) external view returns (CfdTypes.Side);
 
+    /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
+    function degradedMode() external view returns (bool);
+
     /// @notice Whether a given day number is an admin-configured FAD override
     function fadDayOverrides(
         uint256 dayNumber
