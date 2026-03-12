@@ -511,8 +511,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(lastMarkPrice, vaultDepthUsdc);
-        lastMarkPrice = price;
-        lastMarkTime = publishTime;
+        _cacheMarkPriceIfNewer(price, publishTime);
 
         CfdTypes.Position storage pos = positions[order.accountId];
         uint256 marginSnapshot = pos.margin;
@@ -890,8 +889,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(lastMarkPrice, vaultDepthUsdc);
-        lastMarkPrice = price;
-        lastMarkTime = publishTime;
+        _cacheMarkPriceIfNewer(price, publishTime);
 
         CfdTypes.Position storage pos = positions[accountId];
         if (pos.size == 0) {
@@ -1051,6 +1049,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _updateFunding(lastMarkPrice, vault.totalAssets());
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
+    }
+
+    function _cacheMarkPriceIfNewer(
+        uint256 price,
+        uint64 publishTime
+    ) internal {
+        if (publishTime >= lastMarkTime) {
+            lastMarkPrice = price;
+            lastMarkTime = publishTime;
+        }
     }
 
     function _seizeUsdcToVault(
