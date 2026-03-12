@@ -327,7 +327,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
             uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
-            if (block.timestamp - ENGINE.lastMarkTime() > limit) {
+            uint256 lastMarkTime = ENGINE.lastMarkTime();
+            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+            if (age > limit) {
                 revert HousePool__MarkPriceStale();
             }
         }
@@ -346,7 +348,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 bearMax = ENGINE.globalBearMaxProfit();
         if (bullMax + bearMax > 0) {
             uint256 limit = ENGINE.isFadWindow() ? ENGINE.fadMaxStaleness() : markStalenessLimit;
-            if (block.timestamp - ENGINE.lastMarkTime() > limit) {
+            uint256 lastMarkTime = ENGINE.lastMarkTime();
+            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+            if (age > limit) {
                 return;
             }
         }

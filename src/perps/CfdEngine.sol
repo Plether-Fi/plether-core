@@ -407,7 +407,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         uint256 maxStaleness = isFadWindow() ? fadMaxStaleness : vault.markStalenessLimit();
-        if (block.timestamp - lastMarkTime > maxStaleness) {
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        if (age > maxStaleness) {
             revert CfdEngine__MarkPriceStale();
         }
 

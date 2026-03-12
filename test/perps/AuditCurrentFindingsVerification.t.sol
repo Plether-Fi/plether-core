@@ -209,3 +209,24 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
     }
 
 }
+
+contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
+
+    address alice = address(0xA11CE);
+
+    function test_FutureLastMarkTime_DoesNotBreakWithdrawGuardOrReconcile() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        _fundSenior(address(0xBEEF), 100_000e6);
+        _fundTrader(alice, 50_000e6);
+        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));
+
+        engine.checkWithdraw(aliceId);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+    }
+}
