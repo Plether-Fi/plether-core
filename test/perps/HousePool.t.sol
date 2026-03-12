@@ -212,14 +212,8 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Junior principal should NOT include protocol fees
-        // Total pool balance = initial 1M + seized margin from trader
-        // Distributable = balance - fees
-        // If distributable > juniorPrincipal, surplus is revenue
-        // The fee portion stays as unaccounted balance (owned by protocol)
         uint256 totalBalance = pool.totalAssets();
-        uint256 claimedEquity = pool.juniorPrincipal();
-        assertLe(claimedEquity, totalBalance - fees, "Claimed equity excludes pending protocol fees");
+        assertEq(pool.juniorPrincipal(), totalBalance - fees, "Reconcile should exclude protocol fees exactly");
     }
 
     // ==========================================
@@ -389,9 +383,9 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 expectedReserved = 100_000 * 1e6 + fees;
 
-        assertTrue(freeUSDC <= vaultBal - maxLiability - fees, "Free USDC must exclude pending fees");
+        assertEq(freeUSDC, vaultBal - expectedReserved, "Free USDC should reserve both directional liability and fees exactly");
     }
 
     function test_M10_JitLP_BlockedByCooldown() public {

@@ -239,6 +239,21 @@ contract MarginClearinghouseTest is Test {
         assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Locked margin should be zero after defensive unlock");
     }
 
+    function test_SeizeAsset_RecipientMustEqualOperator() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidSeizeRecipient.selector);
+        clearinghouse.seizeAsset(aliceId, address(usdc), 100 * 1e6, address(0xBEEF));
+    }
+
+    function test_SettleUsdc_RejectsNonSettlementAsset() public {
+        vm.prank(engine);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__AssetNotSupported.selector);
+        clearinghouse.settleUsdc(aliceId, address(splDxy), 1e6);
+    }
+
     function test_C01_WithdrawUsdcBelowLockedMargin_ShouldRevert() public {
         vm.startPrank(alice);
         clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);

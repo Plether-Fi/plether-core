@@ -224,6 +224,59 @@ contract CfdEngineTest is BasePerpTest {
         engine.withdrawFees(treasury);
     }
 
+    function test_AddMargin_UpdatesPositionAndSideTotals() public {
+        address trader = address(0xABCD);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
+
+        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 totalBullMarginBefore = engine.totalBullMargin();
+
+        vm.prank(trader);
+        engine.addMargin(accountId, 500 * 1e6);
+
+        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(marginAfter, marginBefore + 500 * 1e6, "Position margin should increase by the added amount");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBefore + 500 * 1e6,
+            "Clearinghouse locked margin should increase by the same amount"
+        );
+        assertEq(
+            engine.totalBullMargin(), totalBullMarginBefore + 500 * 1e6, "Global bull margin should track addMargin"
+        );
+    }
+
+    function test_AddMargin_RequiresAccountOwner() public {
+        address trader = address(0xABCE);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8);
+
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(CfdEngine.CfdEngine__NotAccountOwner.selector);
+        engine.addMargin(accountId, 100 * 1e6);
+    }
+
+    function test_AddMargin_RevertsForZeroAmountAndMissingPosition() public {
+        address trader = address(0xABCF);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__NoOpenPosition.selector);
+        engine.addMargin(accountId, 100 * 1e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8);
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
+        engine.addMargin(accountId, 0);
+    }
+
     function test_OpposingPosition_Reverts() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
@@ -1595,6 +1648,93 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         assertEq(
             freeUsdcNow, freeWithoutFunding, "getFreeUSDC must not reduce reserves by illiquid funding receivables"
         );
+    }
+
+}
+
+contract DegradedModeLifecycleTest is BasePerpTest {
+
+    address bullTrader = address(0xD001);
+    address bearTrader = address(0xD002);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function _enterDegradedMode() internal {
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+    }
+
+    function test_DegradedMode_LatchesAndBlocksNewOpens() public {
+        address newTrader = address(0xD003);
+        bytes32 newTraderId = bytes32(uint256(uint160(newTrader)));
+        _fundTrader(newTrader, 100_000e6);
+
+        _enterDegradedMode();
+
+        assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
+
+        vm.prank(address(router));
+        (bool ok,) = address(engine).call(
+            abi.encodeWithSelector(
+                engine.processOrder.selector,
+                CfdTypes.Order({
+                    accountId: newTraderId,
+                    sizeDelta: 10_000e18,
+                    marginDelta: 1_000e6,
+                    targetPrice: 1e8,
+                    commitTime: uint64(block.timestamp),
+                    commitBlock: uint64(block.number),
+                    orderId: 0,
+                    side: CfdTypes.Side.BULL,
+                    isClose: false
+                }),
+                1e8,
+                pool.totalAssets(),
+                uint64(block.timestamp)
+            )
+        );
+        assertFalse(ok, "Degraded mode must block new opens");
+    }
+
+    function test_DegradedMode_ClearRequiresRecapitalization() public {
+        _enterDegradedMode();
+
+        vm.expectRevert(CfdEngine.CfdEngine__StillInsolvent.selector);
+        engine.clearDegradedMode();
+
+        _fundJunior(address(this), 500_000e6);
+        engine.clearDegradedMode();
+
+        assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization");
+    }
+
+    function test_DegradedMode_BlocksJuniorWithdrawals() public {
+        _enterDegradedMode();
+        assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
+
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.prank(address(juniorVault));
+        vm.expectRevert(HousePool.HousePool__DegradedMode.selector);
+        pool.withdrawJunior(1e6, address(this));
     }
 
 }
