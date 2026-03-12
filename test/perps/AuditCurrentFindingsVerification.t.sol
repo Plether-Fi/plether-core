@@ -24,10 +24,10 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         bytes32 loserId = bytes32(uint256(uint160(loser)));
 
         _fundTrader(winner, 200_000e6);
-        _fundTrader(loser, 2_000e6);
+        _fundTrader(loser, 2000e6);
 
         _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1_000e6, 0.5e8);
+        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -41,8 +41,12 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         int256 bearPnl = (int256(engine.bearOI() * price) - int256(engine.globalBearEntryNotional())) / int256(1e20);
 
         int256 expectedMtm = 0;
-        if (bullPnl > 0) expectedMtm += bullPnl;
-        if (bearPnl > 0) expectedMtm += bearPnl;
+        if (bullPnl > 0) {
+            expectedMtm += bullPnl;
+        }
+        if (bearPnl > 0) {
+            expectedMtm += bearPnl;
+        }
 
         assertEq(engine.getVaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");
     }
@@ -175,7 +179,8 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

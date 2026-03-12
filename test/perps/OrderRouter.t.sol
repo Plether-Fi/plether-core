@@ -129,7 +129,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5_000 * 1e18, 500 * 1e6, 2e8, false);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
         vm.stopPrank();
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6, "Both committed margins should be locked");
@@ -2151,7 +2151,9 @@ contract KeeperFeeRefundTest is Test {
         router.executeOrderBatch(1, empty);
 
         assertEq(router.claimableEth(alice), 0, "User fee is not refunded on batch expiry");
-        assertEq(address(this).balance - keeperBefore, 0.01 ether, "Keeper receives fee for processing expired batch order");
+        assertEq(
+            address(this).balance - keeperBefore, 0.01 ether, "Keeper receives fee for processing expired batch order"
+        );
     }
 
 }

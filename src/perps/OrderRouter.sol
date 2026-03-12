@@ -389,7 +389,10 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
+            if (
+                address(pyth) != address(0) && !oracleFrozen
+                    && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY
+            ) {
                 break;
             }
 

@@ -813,9 +813,9 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {
         bytes32 accountId = bytes32(uint256(0xBADD));
-        _fundTrader(address(uint160(uint256(accountId))), 4_000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 4000 * 1e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 3_000 * 1e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8);
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -839,8 +839,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pool.markStalenessLimit(), 300);
 
         bytes32 accountId = bytes32(uint256(0x5157));
-        _fundTrader(address(uint160(uint256(accountId))), 5_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000 * 1e18, 2_000 * 1e6, 1e8);
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 20_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 180);
 

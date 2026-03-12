@@ -19,7 +19,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_H1_UserCanAddMarginWithoutChangingSize() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
         vm.prank(alice);
@@ -83,7 +83,8 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

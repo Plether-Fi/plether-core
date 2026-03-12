@@ -42,10 +42,10 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         bytes32 loserId = bytes32(uint256(uint160(loser)));
 
         _fundTrader(winner, 200_000e6);
-        _fundTrader(loser, 2_000e6);
+        _fundTrader(loser, 2000e6);
 
         _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1_000e6, 0.5e8);
+        _open(loserId, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -74,7 +74,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
+        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
@@ -123,7 +123,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_I1_CloseWithMarginDeltaMustRevert() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8);
+        _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
         uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
