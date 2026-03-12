@@ -120,9 +120,9 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 - Spot-vs-EMA deviation guard (0.5%) blocks deposits/deployments during pool manipulation
 - Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
 - `totalAssets()` is a best-effort NAV view for UX/monitoring; use `totalAssetsValidated()` for strict oracle-validated accounting reads
-- `_harvestSafe()` wraps all Curve + oracle calls in try/catch to guarantee withdrawal liveness
+- `_harvestSafe()` gracefully skips when Curve VP reads fail; if yield is pending, strict oracle validation is still enforced
 - `setEmergencyMode()` resets LP tracking without touching Curve, enabling exits even if the pool is fully bricked
-- L2 sequencer uptime validation on all oracle reads including harvest
+- L2 sequencer uptime validation is enforced on state-changing oracle-critical flows (deposit/lpDeposit/harvest/deploy/replenish)
 
 ## Ecosystem Integrations
 

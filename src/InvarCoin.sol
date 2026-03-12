@@ -28,6 +28,7 @@ import {OracleLib} from "./libraries/OracleLib.sol";
 ///
 ///      LP tokens are valued with dual pricing to prevent manipulation:
 ///        - totalAssets() and harvest use pessimistic pricing (min of EMA, oracle) for conservative NAV.
+///        - totalAssetsValidated() provides strict oracle-validated NAV (reverts on stale/invalid oracle).
 ///        - deposit() uses optimistic NAV (max of EMA, oracle) so new depositors cannot dilute existing holders.
 ///        - lpDeposit() values minted LP pessimistically so depositors cannot extract value from stale-high EMA.
 ///        - withdraw() and lpWithdraw() use pro-rata asset distribution (no NAV pricing needed).
@@ -231,6 +232,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Buffer health metrics for keeper bots and frontends.
+    /// @dev Uses permissive totalAssets() (best-effort oracle read). For strict oracle-validated NAV,
+    ///      use totalAssetsValidated().
     /// @return currentBuffer USDC held locally (6 decimals).
     /// @return targetBuffer Target USDC buffer based on total assets (6 decimals).
     /// @return deployable Excess USDC deployable to Curve (0 if below threshold).
@@ -252,7 +255,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Estimated harvestable Curve fee yield (USDC, 6 decimals).
-    /// @dev Read-only version of _harvest logic. Returns 0 if no staking contract or no VP growth.
+    /// @dev Read-only estimator mirroring _harvest math. Uses permissive oracle reads and returns 0 if no staking
+    ///      contract or no VP growth.
     function getHarvestableYield() external view returns (uint256 yieldUsdc) {
         uint256 lpBal = trackedLpBalance;
         if (lpBal == 0 || address(stakedInvarCoin) == address(0)) {
@@ -366,6 +370,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Deposit USDC to mint INVAR shares. USDC stays in the local buffer until deployed to Curve.
     /// @dev Uses optimistic LP pricing for NAV to prevent deposit dilution. Harvests yield before minting.
+    ///      Reverts while emergencyActive is true.
     /// @param usdcAmount Amount of USDC to deposit (6 decimals).
     /// @param receiver Address that receives the minted INVAR shares.
     /// @param minSharesOut Minimum INVAR shares to receive (0 = no minimum).
@@ -558,6 +563,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Inverse of lpWithdraw. Curve slippage is borne by the depositor, not existing holders.
     ///      Shares are priced using pessimistic LP valuation so the depositor cannot extract value
     ///      from a stale-high EMA. Spot deviation is checked against EMA to block sandwich attacks.
+    ///      Reverts while emergencyActive is true.
     /// @param usdcAmount Amount of USDC to deposit (6 decimals, can be 0 if bearAmount > 0).
     /// @param bearAmount Amount of plDXY-BEAR to deposit (18 decimals, can be 0 if usdcAmount > 0).
     /// @param receiver Address that receives the minted INVAR shares.
