@@ -49,12 +49,13 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _fundTrader(alice, 500e6);
+        _fundTrader(alice, 1000e6);
         _open(accountId, CfdTypes.Side.BULL, 20_000e18, 312e6, 1e8);
+        uint256 vaultDepth = pool.totalAssets();
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(accountId, 100_550_000, pool.totalAssets(), uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 99_500_000, vaultDepth, uint64(block.timestamp));
     }
 
     function test_H3_OperatorCannotSeizeToArbitraryRecipient() public {
@@ -78,14 +79,10 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
     function test_M2_WithdrawRejectsUnsupportedAsset() public {
         MockUSDC stray = new MockUSDC();
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        stray.mint(address(clearinghouse), 100e6);
 
         vm.prank(address(router));
-        clearinghouse.settleUsdc(accountId, address(stray), 100e6);
-
-        vm.prank(alice);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__AssetNotSupported.selector);
-        clearinghouse.withdraw(accountId, address(stray), 100e6);
+        clearinghouse.settleUsdc(accountId, address(stray), 100e6);
     }
 
 }
@@ -212,6 +209,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.expectRevert();
         router.executeOrder(1, empty);
     }
+
 }
 
 contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
@@ -253,4 +251,5 @@ contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Funding accrual should not depend on update-vs-trade path");
     }
+
 }

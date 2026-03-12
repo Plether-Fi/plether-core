@@ -9,6 +9,7 @@ import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title CfdEngine
@@ -16,6 +17,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
 /// @custom:security-contact contact@plether.com
 contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
+
+    using SafeERC20 for IERC20;
 
     uint256 public immutable CAP_PRICE;
 
@@ -507,10 +510,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (int256) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
+        _updateFunding(lastMarkPrice, vaultDepthUsdc);
         lastMarkPrice = price;
         lastMarkTime = publishTime;
-
-        _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[order.accountId];
         uint256 marginSnapshot = pos.margin;
@@ -582,13 +584,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                     }
                     unsettledFundingDebt = loss - pos.margin;
                     if (pos.margin > 0) {
-                        clearinghouse.seizeAsset(order.accountId, address(USDC), pos.margin, address(vault));
+                        _seizeUsdcToVault(order.accountId, pos.margin);
                         clearinghouse.unlockMargin(order.accountId, pos.margin);
                     }
                     pos.margin = 0;
                 } else {
                     pos.margin -= loss;
-                    clearinghouse.seizeAsset(order.accountId, address(USDC), loss, address(vault));
+                    _seizeUsdcToVault(order.accountId, loss);
                     clearinghouse.unlockMargin(order.accountId, loss);
                 }
             }
@@ -654,7 +656,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 netMarginChange = int256(order.marginDelta) - tradeCost;
 
         if (tradeCost > 0) {
-            clearinghouse.seizeAsset(order.accountId, address(USDC), uint256(tradeCost), address(vault));
+            _seizeUsdcToVault(order.accountId, uint256(tradeCost));
         } else if (tradeCost < 0) {
             uint256 rebate = uint256(-tradeCost);
             vault.payOut(address(clearinghouse), rebate);
@@ -764,7 +766,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             uint256 available = chBalance > locked ? chBalance - locked : 0;
             uint256 toSeize = available < owed ? available : owed;
             if (toSeize > 0) {
-                clearinghouse.seizeAsset(order.accountId, address(USDC), toSeize, address(vault));
+                _seizeUsdcToVault(order.accountId, toSeize);
             }
             uint256 shortfall = owed - toSeize;
             actualFee = execFeeUsdc > shortfall ? execFeeUsdc - shortfall : 0;
@@ -887,9 +889,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
+        _updateFunding(lastMarkPrice, vaultDepthUsdc);
         lastMarkPrice = price;
         lastMarkTime = publishTime;
-        _updateFunding(price, vaultDepthUsdc);
 
         CfdTypes.Position storage pos = positions[accountId];
         if (pos.size == 0) {
@@ -905,7 +907,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        int256 equityUsdc = int256(pos.margin) + pendingFunding;
+        uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
+        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
+
+        int256 equityUsdc = int256(pos.margin) + int256(freeUsdc) + pendingFunding;
         equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
 
         uint256 mmUsdc = getMaintenanceMarginUsdc(pos.size, price);
@@ -945,7 +951,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             if (uint256(residual) <= posMargin) {
                 uint256 toSeize = posMargin - uint256(residual);
                 if (toSeize > 0) {
-                    clearinghouse.seizeAsset(accountId, address(USDC), toSeize, address(vault));
+                    _seizeUsdcToVault(accountId, toSeize);
                 }
             } else {
                 uint256 toPay = uint256(residual) - posMargin;
@@ -954,16 +960,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         } else {
             if (posMargin > 0) {
-                clearinghouse.seizeAsset(accountId, address(USDC), posMargin, address(vault));
+                _seizeUsdcToVault(accountId, posMargin);
             }
             uint256 deficit = uint256(-residual);
-            uint256 chBalance = clearinghouse.balances(accountId, address(USDC));
-            uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
-            uint256 freeUsdc = chBalance > locked ? chBalance - locked : 0;
             if (freeUsdc > 0) {
                 uint256 toSeize = freeUsdc < deficit ? freeUsdc : deficit;
-                clearinghouse.seizeAsset(accountId, address(USDC), toSeize, address(vault));
-                deficit -= toSeize;
+                if (toSeize > 0) {
+                    _seizeUsdcToVault(accountId, toSeize);
+                    deficit -= toSeize;
+                }
             }
             if (deficit > 0) {
                 accumulatedBadDebtUsdc += deficit;
@@ -1046,6 +1051,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _updateFunding(lastMarkPrice, vault.totalAssets());
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
+    }
+
+    function _seizeUsdcToVault(
+        bytes32 accountId,
+        uint256 amount
+    ) internal {
+        if (amount == 0) {
+            return;
+        }
+        clearinghouse.seizeAsset(accountId, address(USDC), amount, address(this));
+        USDC.safeTransfer(address(vault), amount);
     }
 
     // ==========================================

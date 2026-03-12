@@ -66,6 +66,7 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__InsufficientFreeEquity();
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
+    error MarginClearinghouse__InvalidSeizeRecipient();
     error MarginClearinghouse__TimelockNotReady();
     error MarginClearinghouse__NoProposal();
 
@@ -252,6 +253,9 @@ contract MarginClearinghouse is Ownable2Step {
         if (balances[accountId][asset] < amount) {
             revert MarginClearinghouse__InsufficientBalance();
         }
+        if (!assetConfigs[asset].isSupported) {
+            revert MarginClearinghouse__AssetNotSupported();
+        }
 
         balances[accountId][asset] -= amount;
 
@@ -354,14 +358,19 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
+    /// @dev Restricted to the configured settlement asset so operators cannot mutate
+    ///      arbitrary asset ledgers via the settlement path.
     /// @param accountId Account to settle
-    /// @param usdc Settlement token address (must match settlementAsset in practice)
+    /// @param usdc Settlement token address (must equal settlementAsset)
     /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)
     function settleUsdc(
         bytes32 accountId,
         address usdc,
         int256 amount
     ) external onlyOperator {
+        if (usdc != settlementAsset || !assetConfigs[usdc].isSupported) {
+            revert MarginClearinghouse__AssetNotSupported();
+        }
         if (amount > 0) {
             balances[accountId][usdc] += uint256(amount);
         } else if (amount < 0) {
@@ -373,17 +382,26 @@ contract MarginClearinghouse is Ownable2Step {
         }
     }
 
-    /// @notice Transfers assets from an account to a recipient (losses, fees, VPI charges, or bad debt)
+    /// @notice Transfers settlement asset from an account to the calling operator.
+    /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
+    ///      into their own contract/account and must forward them explicitly afterward.
+    ///      This prevents operators from draining user funds to arbitrary third-party addresses.
     /// @param accountId Account to seize from
-    /// @param asset ERC20 token to seize
+    /// @param asset ERC20 token to seize (must equal settlementAsset)
     /// @param amount Token amount to seize
-    /// @param recipient Address to receive the seized tokens
+    /// @param recipient Recipient of seized tokens (must equal msg.sender)
     function seizeAsset(
         bytes32 accountId,
         address asset,
         uint256 amount,
         address recipient
     ) external onlyOperator {
+        if (asset != settlementAsset || !assetConfigs[asset].isSupported) {
+            revert MarginClearinghouse__AssetNotSupported();
+        }
+        if (recipient != msg.sender) {
+            revert MarginClearinghouse__InvalidSeizeRecipient();
+        }
         if (balances[accountId][asset] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }

@@ -382,7 +382,8 @@ contract CfdEngineTest is BasePerpTest {
     function test_SetRiskParams_MakesPositionLiquidatable() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        address trader = address(uint160(uint256(accountId)));
+        _fundTrader(trader, 5000 * 1e6);
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -397,6 +398,9 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.prank(address(router));
         engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 2500 * 1e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         vm.prank(address(router));
@@ -704,7 +708,8 @@ contract CfdEngineTest is BasePerpTest {
     function test_M11_LiquidationSeizesFreeEquity() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 50_000 * 1e6);
+        address trader = address(uint160(uint256(accountId)));
+        _fundTrader(trader, 50_000 * 1e6);
 
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
@@ -719,6 +724,9 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.prank(address(router));
         engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 46_000 * 1e6);
 
         uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
         assertTrue(freeEquityBefore > 0, "User should have free equity beyond locked margin");
@@ -745,7 +753,8 @@ contract CfdEngineTest is BasePerpTest {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 aliceId = bytes32(uint256(1));
         bytes32 bobId = bytes32(uint256(2));
-        _fundTrader(address(uint160(uint256(aliceId))), 50_000 * 1e6);
+        address aliceTrader = address(uint160(uint256(aliceId)));
+        _fundTrader(aliceTrader, 50_000 * 1e6);
         _fundTrader(address(uint160(uint256(bobId))), 50_000 * 1e6);
 
         CfdTypes.Order memory aliceOpen = CfdTypes.Order({
@@ -761,6 +770,9 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.prank(address(router));
         engine.processOrder(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
+
+        vm.prank(aliceTrader);
+        clearinghouse.withdraw(aliceId, address(usdc), 28_000 * 1e6);
 
         CfdTypes.Order memory bobOpen = CfdTypes.Order({
             accountId: bobId,
@@ -803,7 +815,8 @@ contract CfdEngineTest is BasePerpTest {
     function test_LiquidationBounty_CappedByPositiveEquity() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1234));
-        _fundTrader(address(uint160(uint256(accountId))), 200 * 1e6);
+        address trader = address(uint160(uint256(accountId)));
+        _fundTrader(trader, 200 * 1e6);
 
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
@@ -837,11 +850,14 @@ contract CfdEngineTest is BasePerpTest {
 
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
 
-        vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(accountId, 1.1e8, vaultDepth, uint64(block.timestamp));
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 194 * 1e6);
 
-        assertEq(bounty, posMargin, "Keeper bounty should be capped by available positive equity in this scenario");
-        assertEq(bounty, 5_400_000, "Keeper bounty should follow the equity cap");
+        vm.prank(address(router));
+        uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
+
+        assertLt(bounty, posMargin, "Keeper bounty should be capped by positive equity before touching margin cap");
+        assertEq(bounty, 400_000, "Keeper bounty should follow the positive-equity cap");
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {

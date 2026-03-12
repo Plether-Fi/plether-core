@@ -67,6 +67,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__InvalidBasePrice();
     error OrderRouter__EmptyFeeds();
     error OrderRouter__MevDetected();
+    error OrderRouter__MissingPythUpdateData();
     error OrderRouter__OracleFrozen();
     error OrderRouter__InsufficientGas();
 
@@ -480,13 +481,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 mockFallbackPrice
     ) internal returns (uint256 price, uint64 publishTime, uint256 pythFee) {
         if (address(pyth) != address(0)) {
-            if (pythUpdateData.length > 0) {
-                pythFee = pyth.getUpdateFee(pythUpdateData);
-                if (msg.value < pythFee) {
-                    revert OrderRouter__InsufficientPythFee();
-                }
-                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            if (pythUpdateData.length == 0) {
+                revert OrderRouter__MissingPythUpdateData();
             }
+            pythFee = pyth.getUpdateFee(pythUpdateData);
+            if (msg.value < pythFee) {
+                revert OrderRouter__InsufficientPythFee();
+            }
+            pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
             uint256 minPublishTime;
             (price, minPublishTime) = _computeBasketPrice();
             publishTime = uint64(minPublishTime);

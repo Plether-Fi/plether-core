@@ -324,6 +324,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1);
     }
 
+    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = "";
+    }
+
     function test_MevCheck_RevertsInsteadOfCancelling() public {
         vm.warp(1000);
 
@@ -333,7 +338,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
         vm.warp(1050);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -350,7 +355,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1050);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
@@ -366,7 +371,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
         vm.warp(1050);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -400,7 +405,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -432,7 +437,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -486,7 +491,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -522,7 +527,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
@@ -544,7 +549,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.deal(keeper, 1 ether);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
@@ -562,7 +567,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1000);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
@@ -578,7 +583,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -618,7 +623,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -636,7 +641,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1001);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
@@ -650,7 +655,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -817,13 +822,18 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
 
         vm.warp(FRIDAY_18UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         require(size == 10_000 * 1e18, "setUp: position not opened");
+    }
+
+    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = "";
     }
 
     function _currentTimestamp() internal view returns (uint256 ts) {
@@ -871,7 +881,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -887,7 +897,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         uint64 execBefore = router.nextExecuteId();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
@@ -902,7 +912,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -919,7 +929,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -930,11 +940,14 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        vm.prank(alice);
+        clearinghouse.withdraw(aliceId, address(usdc), 9300e6);
+
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_18UTC + 1);
 
         vm.warp(SATURDAY_NOON);
-        bytes[] memory empty = new bytes[](0);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes[] memory empty = _pythUpdateData();
 
         router.executeLiquidation(aliceId, empty);
 
@@ -946,7 +959,7 @@ contract FadStalenessTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
@@ -960,7 +973,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
@@ -977,7 +990,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
@@ -991,7 +1004,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
         vm.warp(WEDNESDAY_NOON + 67);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1015,7 +1028,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
 
         vm.warp(WEDNESDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1086,7 +1099,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(MONDAY_NOON + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         uint64 execBefore = router.nextExecuteId();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
@@ -1106,7 +1119,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(FRIDAY_20UTC + 30);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1126,7 +1139,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(FRIDAY_20UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1145,7 +1158,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(FRIDAY_20UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1164,7 +1177,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(FRIDAY_20UTC + 63);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1178,7 +1191,7 @@ contract FadStalenessTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
 
         vm.warp(FRIDAY_20UTC + 16);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
@@ -1194,7 +1207,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1213,7 +1226,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 30);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1231,7 +1244,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(SUNDAY_21UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1248,7 +1261,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1292,7 +1305,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(wednesdayMidnight - 3 hours + 50);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
         assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
@@ -1325,7 +1338,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(runwayTime + 30);
-        bytes[] memory empty = new bytes[](0);
+        bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
@@ -1950,6 +1963,11 @@ contract StalenessGriefTest is BasePerpTest {
         vm.warp(SETUP_TIMESTAMP);
     }
 
+    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = "";
+    }
+
     // Regression: H-02
     function test_StaleOracleCancelsOrderInsteadOfReverting() public {
         _fundJunior(bob, 1_000_000e6);
@@ -1962,7 +1980,7 @@ contract StalenessGriefTest is BasePerpTest {
 
         vm.warp(block.timestamp + 120);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.prank(attacker);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
