@@ -44,7 +44,6 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public keeperFees;
     mapping(uint64 => uint256) public committedMargins;
-    mapping(uint64 => uint64) public commitBlocks;
     mapping(address => uint256) public claimableEth;
 
     error OrderRouter__ZeroSize();
@@ -240,7 +239,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         });
 
         keeperFees[orderId] = msg.value;
-        commitBlocks[orderId] = uint64(block.number);
         emit OrderCommitted(orderId, accountId, side);
     }
 
@@ -456,7 +454,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 fee = keeperFees[orderId];
         _unlockCommittedMargin(orderId);
         delete keeperFees[orderId];
-        delete commitBlocks[orderId];
         delete orders[orderId];
         nextExecuteId++;
         if (fee > 0) {
@@ -515,7 +512,6 @@ contract OrderRouter is Ownable2Step, Pausable {
             _unlockCommittedMargin(orderId);
         }
         delete keeperFees[orderId];
-        delete commitBlocks[orderId];
         delete orders[orderId];
         nextExecuteId++;
     }
