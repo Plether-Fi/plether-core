@@ -83,20 +83,20 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
     }
 
     function test_C02_FailedOrderRefunds100Percent() public {
+        _fundTrader(spammer, 10_000 * 1e6);
+
         // Spammer commits with impossible slippage (targetPrice=1 for BULL open = always fails)
         vm.prank(spammer);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1, false);
 
-        uint256 spammerClaimableBefore = router.claimableEth(spammer);
+        uint256 keeperBefore = keeper.balance;
 
         bytes[] memory empty;
         vm.prank(keeper);
         router.executeOrder{value: 0}(1, empty);
 
-        uint256 refund = router.claimableEth(spammer) - spammerClaimableBefore;
-
-        // C-02 BUG: 100% refund. Keeper spent gas but earned nothing.
-        assertLt(refund, 0.01 ether, "C-02: failed order must not refund 100% of keeper fee");
+        assertEq(router.claimableEth(spammer), 0, "Failed order should not refund keeper fee to user");
+        assertEq(keeper.balance - keeperBefore, 0.01 ether, "Keeper should receive failed-order fee");
     }
 
 }
@@ -479,4 +479,3 @@ contract AuditH04_UnpaidYieldNotScaled is BasePerpTest {
     }
 
 }
-

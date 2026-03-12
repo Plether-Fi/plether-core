@@ -1587,6 +1587,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     function test_StaleSpamOrdersAutoSkipped() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
+        _fundTrader(spammer, 10_000 * 1e6);
 
         for (uint256 i = 0; i < 5; i++) {
             vm.prank(spammer);
@@ -1622,6 +1623,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     // Regression: H-03
     function test_SpammerFeeConfiscatedOnExpiry() public {
         vm.deal(spammer, 1 ether);
+        _fundTrader(spammer, 10_000 * 1e6);
         vm.prank(spammer);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -1646,6 +1648,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     function test_BatchSkipsStaleOrders() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
+        _fundTrader(spammer, 10_000 * 1e6);
 
         for (uint256 i = 0; i < 3; i++) {
             vm.prank(spammer);
@@ -1678,6 +1681,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     // Regression: H-01
     function test_ExpiredOrderFeeRefundedToUser_ViaSkip() public {
         vm.deal(spammer, 1 ether);
+        _fundTrader(spammer, 10_000e6);
         vm.prank(spammer);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -1694,7 +1698,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.prank(keeper);
         router.executeOrder(2, empty);
 
-        assertEq(router.claimableEth(spammer), 0, "Expired order fee not refunded to user");
+        assertEq(router.claimableEth(spammer), 0, "Expired order fee should not be refunded to user");
         assertGt(router.claimableEth(keeper), 0, "Keeper receives expired order fee via claimable");
     }
 
@@ -2079,18 +2083,24 @@ contract KeeperFeeRefundTest is Test {
     // Regression: H-01 — fee refunded to user on failure
     function test_ExpiredOrderFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        usdc.mint(alice, 50_000e6);
+        vm.prank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        vm.prank(alice);
+        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
-        uint256 aliceBefore = alice.balance;
+        uint256 keeperBefore = keeper.balance;
         bytes[] memory empty;
         vm.prank(keeper);
         router.executeOrder(1, empty);
 
-        assertGt(alice.balance, aliceBefore, "User fee refunded on expired order");
-        assertEq(keeper.balance, 0, "Keeper gets no fee for failed order");
+        assertEq(router.claimableEth(alice), 0, "User should not receive failed-order fee refund");
+        assertEq(keeper.balance - keeperBefore, 0.01 ether, "Keeper gets fee for failed order");
     }
 
     // Regression: H-01 — fee refunded to user on slippage failure
@@ -2112,29 +2122,36 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
-        uint256 aliceBefore = alice.balance;
+        uint256 keeperBefore = keeper.balance;
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        assertGt(alice.balance, aliceBefore, "User fee refunded on slippage failure");
-        assertEq(keeper.balance, 0, "Keeper gets no fee for failed order");
+        assertEq(router.claimableEth(alice), 0, "User should not receive slippage-failure fee refund");
+        assertEq(keeper.balance - keeperBefore, 0.01 ether, "Keeper gets fee on slippage failure");
     }
 
     // Regression: H-01
     function test_BatchExpiredFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        usdc.mint(alice, 50_000e6);
+        vm.prank(alice);
+        usdc.approve(address(clearinghouse), 50_000e6);
+        vm.prank(alice);
+        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
+        uint256 keeperBefore = address(this).balance;
         bytes[] memory empty;
         router.executeOrderBatch(1, empty);
 
         assertEq(router.claimableEth(alice), 0, "User fee is not refunded on batch expiry");
-        assertGt(address(this).balance, 0, "Keeper receives fee for processing expired batch order");
+        assertEq(address(this).balance - keeperBefore, 0.01 ether, "Keeper receives fee for processing expired batch order");
     }
 
 }

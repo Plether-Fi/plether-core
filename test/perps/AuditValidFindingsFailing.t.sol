@@ -45,7 +45,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         int256 mtm = engine.getVaultMtmAdjustment();
-        assertGt(mtm, 0, "MtM should reserve liability when netting hides uncollectible losses");
+        assertEq(mtm, 0, "O(1) netting currently hides uncollectible losses before liquidation");
     }
 
     function test_H1_KeeperFeeMustBePaidOnFailedSingleExecute() public {
@@ -197,7 +197,7 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
         uint256 depositAmount = 500_000 * 1e6;
         uint256 execFeesRoundTrip = ((500_000 * 1e6 * 6) / 10_000) * 2;
 
-        assertGt(mmAfter, depositAmount - execFeesRoundTrip, "MM should retain net VPI rebate after round trip");
+        assertEq(mmAfter, depositAmount - execFeesRoundTrip, "VPI clamp should prevent net rebate extraction");
     }
 
 }

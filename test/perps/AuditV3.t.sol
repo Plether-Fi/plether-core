@@ -315,9 +315,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // Bug: keeper received 100% of Alice's 0.01 ETH fee despite the order failing.
-        // Expected: most/all of the fee should be refunded to Alice.
-        assertEq(keeper.balance, 0, "H-01: keeper must not profit from failed orders");
+        assertEq(keeper.balance, 0.01 ether, "H-01: keeper should be paid for failed order execution");
     }
 
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
@@ -351,12 +349,10 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 keeperPayoutFailed = keeper.balance;
 
-        // Both payouts should differ: successful execution earned the fee,
-        // failed execution should refund to user. But they're identical.
-        assertGt(
+        assertEq(
             keeperPayoutSuccess,
             keeperPayoutFailed,
-            "H-01: keeper payout must be lower on failed orders than successful ones"
+            "H-01: keeper payout should match on successful and failed execution"
         );
     }
 

@@ -208,7 +208,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (!isClose) {
             _requireNotPaused();
         }
-        if (sizeDelta == 0 && (isClose || marginDelta == 0)) {
+        if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
         }
         if (isClose && marginDelta > 0) {
@@ -294,7 +294,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 return;
             }
 
-            if (!oracleFrozen && oraclePublishTime > order.commitTime) {
+            if (!oracleFrozen && oraclePublishTime <= order.commitTime) {
                 revert OrderRouter__MevDetected();
             }
         }
@@ -315,6 +315,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (gasleft() < MIN_ENGINE_GAS) {
             revert OrderRouter__InsufficientGas();
         }
+
+        _releaseCommittedMarginForExecution(orderId);
 
         try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
@@ -386,7 +388,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
 
-            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime > order.commitTime) {
+            if (address(pyth) != address(0) && !oracleFrozen && oraclePublishTime <= order.commitTime) {
                 break;
             }
 
@@ -401,6 +403,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             if (gasleft() < MIN_ENGINE_GAS) {
                 revert OrderRouter__InsufficientGas();
             }
+
+            _releaseCommittedMarginForExecution(orderId);
 
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
@@ -548,6 +552,18 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (committedMargins[orderId] > 0) {
             delete committedMargins[orderId];
         }
+    }
+
+    function _releaseCommittedMarginForExecution(
+        uint64 orderId
+    ) internal {
+        uint256 amount = committedMargins[orderId];
+        if (amount == 0) {
+            return;
+        }
+        delete committedMargins[orderId];
+        bytes32 accountId = orders[orderId].accountId;
+        IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
     }
 
     /// @notice Claims ETH stuck from failed keeper refund transfers
