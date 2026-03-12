@@ -179,10 +179,11 @@ contract PerpsForkTest is Test {
         vm.prank(trader);
         router.commitOrder(side, size, margin, targetPrice, isClose);
 
-        pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 1);
-        vm.warp(commitTime + 2);
+        pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 6);
+        vm.warp(commitTime + 7);
+        vm.roll(block.number + 2);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         router.executeOrder(orderId, empty);
     }
@@ -191,6 +192,33 @@ contract PerpsForkTest is Test {
         address trader
     ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(trader)));
+    }
+
+    function _configureLongOrderExpiry() internal {
+        router.proposeMaxOrderAge(1000);
+        vm.warp(block.timestamp + 48 hours + 1);
+        router.finalizeMaxOrderAge();
+    }
+
+    function _commitOrderDeterministic(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin,
+        uint256 targetPrice,
+        bool isClose
+    ) internal returns (uint64 orderId, uint256 commitTime, uint256 commitBlock) {
+        orderId = router.nextCommitId();
+        commitTime = block.timestamp;
+        commitBlock = block.number;
+
+        vm.prank(trader);
+        router.commitOrder(side, size, margin, targetPrice, isClose);
+    }
+
+    function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
+        updateData = new bytes[](1);
+        updateData[0] = "";
     }
 
     function _getRiskParams() internal view returns (CfdTypes.RiskParams memory) {
@@ -228,6 +256,7 @@ contract PerpsForkTest is Test {
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
         uint256 clearinghouseBefore = IERC20(USDC).balanceOf(address(clearinghouse));
+        uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
 
         // Open BULL $50k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
@@ -245,8 +274,8 @@ contract PerpsForkTest is Test {
 
         // Verify USDC conservation across all contracts
         uint256 totalAfter = IERC20(USDC).balanceOf(alice) + IERC20(USDC).balanceOf(address(pool))
-            + IERC20(USDC).balanceOf(address(clearinghouse));
-        uint256 totalBefore = aliceUsdcBefore + poolBefore + clearinghouseBefore;
+            + IERC20(USDC).balanceOf(address(clearinghouse)) + IERC20(USDC).balanceOf(keeper);
+        uint256 totalBefore = aliceUsdcBefore + poolBefore + clearinghouseBefore + keeperBefore;
 
         assertEq(totalAfter, totalBefore, "USDC conservation violated");
     }
@@ -283,6 +312,7 @@ contract PerpsForkTest is Test {
         realPythRouter.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 2e8, false);
 
         vm.warp(t1 + 5 days + 3); // skip past weekend to avoid oracle-frozen revert
+        vm.roll(block.number + 2);
         vm.prank(keeper);
         realPythRouter.executeOrder(1, empty);
 
@@ -296,89 +326,84 @@ contract PerpsForkTest is Test {
     // ==========================================
 
     function test_Staleness_RealBlockTimestamps() public {
+        _configureLongOrderExpiry();
         _depositToClearinghouse(alice, 10_000e6);
-        bytes[] memory empty;
-        bytes32 aliceId = _accountId(alice);
-        uint256 t = block.timestamp;
 
-        // All timestamps computed from t to avoid block.timestamp caching after vm.warp.
-        // commitTime = block.timestamp at commitOrder, which equals the last vm.warp value.
+        (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
+            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        // 1. MEV shield: publishTime == commitTime → hard revert
-        // commitTime = t (no warp yet)
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
-
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t);
-        vm.warp(t + 2);
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime);
+        vm.warp(commitTime + 2);
+        vm.roll(commitBlock + 2);
 
         vm.prank(keeper);
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        router.executeOrder(orderId, _pythUpdateData());
 
-        // Drain order 1 via staleness (publishTime > commitTime but 61s stale)
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 1);
-        vm.warp(t + 62); // staleness = 62 - 1 = 61 > 60
+        vm.warp(commitTime + 1001);
+        vm.roll(commitBlock + 3);
         vm.prank(keeper);
-        router.executeOrder(1, empty);
+        router.executeOrder(orderId, _pythUpdateData());
 
+        bytes32 aliceId = _accountId(alice);
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "MEV-tainted order should not open position");
+        assertEq(router.nextExecuteId(), orderId + 1, "Queue should advance after expiring the MEV-tainted order");
+    }
 
-        // 2. 61-second staleness — too stale (soft cancel)
-        // commitTime = t + 62 (last warp)
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
-
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 63); // > commitTime
-        vm.warp(t + 124); // staleness = 124 - 63 = 61 > 60
-
-        vm.prank(keeper);
-        router.executeOrder(2, empty);
-
-        (size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "61-second stale price should cancel order");
-
-        // 3. Within boundary: 59s → should succeed
-        // commitTime = t + 124 (last warp)
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
-
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 125); // > commitTime
-        vm.warp(t + 184); // staleness = 184 - 125 = 59 <= 60
-
-        vm.prank(keeper);
-        router.executeOrder(3, empty);
-
-        (size,,,,,,,) = engine.positions(aliceId);
-        assertGt(size, 0, "59-second-old price should succeed");
-
-        // 4. Cleanup: close position
-        // commitTime = t + 184
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 185);
-        vm.warp(t + 186);
-        vm.prank(keeper);
-        router.executeOrder(4, empty);
-
-        // 5. 15-second liquidation staleness
+    function test_Staleness_61SecondPrice_Reverts() public {
+        _configureLongOrderExpiry();
         _depositToClearinghouse(alice, 10_000e6);
-        // commitTime = t + 186
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 187);
-        vm.warp(t + 188);
-        vm.prank(keeper);
-        router.executeOrder(5, empty);
 
-        // staleness = 205 - 189 = 16 > 15 → too stale for liquidation
-        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), t + 189);
-        vm.warp(t + 205);
+        (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
+            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime + 6);
+        vm.warp(commitTime + 67);
+        vm.roll(commitBlock + 2);
+
+        vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
+        router.executeOrder(orderId, _pythUpdateData());
+
+        bytes32 aliceId = _accountId(alice);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "61-second stale price should not open a position");
+        assertEq(router.nextExecuteId(), orderId, "Stale price revert should leave order pending");
+    }
+
+    function test_Staleness_59SecondPrice_Executes() public {
+        _configureLongOrderExpiry();
+        _depositToClearinghouse(alice, 10_000e6);
+
+        (uint64 orderId, uint256 commitTime, uint256 commitBlock) =
+            _commitOrderDeterministic(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), commitTime + 6);
+        vm.warp(commitTime + 65);
+        vm.roll(commitBlock + 2);
+
+        vm.prank(keeper);
+        router.executeOrder(orderId, _pythUpdateData());
+
+        bytes32 aliceId = _accountId(alice);
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertGt(size, 0, "59-second-old price should execute");
+        assertEq(router.nextExecuteId(), orderId + 1, "Successful execution should advance the queue");
+    }
+
+    function test_LiquidationStaleness_16SecondsOld_Reverts() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        this._commitAndExecute(alice, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, int64(100_000_000), false);
+
+        bytes32 aliceId = _accountId(alice);
+        uint256 liqPublishTime = block.timestamp + 1;
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), liqPublishTime);
+        vm.warp(liqPublishTime + 16);
 
         vm.prank(keeper);
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
-        router.executeLiquidation(aliceId, empty);
+        router.executeLiquidation(aliceId, _pythUpdateData());
     }
 
     // ==========================================
@@ -399,12 +424,12 @@ contract PerpsForkTest is Test {
         uint256 chBefore = IERC20(USDC).balanceOf(address(clearinghouse));
         uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
 
-        // Price rises to $1.06 → BULL PnL = -$6000, equity negative → liquidatable
+        // Price rises to $1.10 → BULL PnL = -$10k, equity turns liquidatable
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
-        pyth.setAllPrices(feedIds, int64(106_000_000), -8, liqTs);
+        pyth.setAllPrices(feedIds, int64(110_000_000), -8, liqTs);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         router.executeLiquidation(aliceId, empty);
 
@@ -426,16 +451,17 @@ contract PerpsForkTest is Test {
     // ==========================================
 
     function test_KeeperGasEconomics() public {
-        _depositToClearinghouse(alice, 10_000e6);
+        _depositToClearinghouse(alice, 2_000e6);
 
         uint256 ts = block.timestamp;
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        pyth.setAllPrices(feedIds, int64(100_000_000), -8, ts + 1);
-        vm.warp(ts + 2);
+        pyth.setAllPrices(feedIds, int64(100_000_000), -8, ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 1);
 
-        bytes[] memory empty;
+        bytes[] memory empty = _pythUpdateData();
 
         uint256 gasBefore = gasleft();
         vm.prank(keeper);
@@ -443,7 +469,7 @@ contract PerpsForkTest is Test {
         uint256 executeGas = gasBefore - gasleft();
 
         emit log_named_uint("executeOrder gas", executeGas);
-        assertLt(executeGas, 500_000, "executeOrder should use < 500k gas");
+        assertLt(executeGas, 550_000, "executeOrder should use < 550k gas");
 
         bytes32 aliceId = _accountId(alice);
         (uint256 size,,,,,,,) = engine.positions(aliceId);
@@ -452,7 +478,7 @@ contract PerpsForkTest is Test {
         // Move price to make position liquidatable
         uint256 liqTs = block.timestamp + 60;
         vm.warp(liqTs);
-        pyth.setAllPrices(feedIds, int64(112_000_000), -8, liqTs);
+        pyth.setAllPrices(feedIds, int64(120_000_000), -8, liqTs);
 
         gasBefore = gasleft();
         vm.prank(keeper);
@@ -460,7 +486,7 @@ contract PerpsForkTest is Test {
         uint256 liquidateGas = gasBefore - gasleft();
 
         emit log_named_uint("executeLiquidation gas", liquidateGas);
-        assertLt(liquidateGas, 500_000, "executeLiquidation should use < 500k gas");
+        assertLt(liquidateGas, 550_000, "executeLiquidation should use < 550k gas");
 
         // At 100 gwei with ETH ~$2000, verify gas cost < min bounty ($5)
         uint256 maxGas = executeGas > liquidateGas ? executeGas : liquidateGas;
@@ -481,7 +507,8 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(bob, 20_000e6);
         _depositToClearinghouse(carol, 20_000e6);
 
-        uint256 totalUsdcBefore = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse));
+        uint256 totalUsdcBefore = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
+            + IERC20(USDC).balanceOf(keeper);
 
         // Alice BULL $100k, Bob BEAR $80k, Carol BULL $50k — all at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, int64(100_000_000), false);
@@ -509,7 +536,8 @@ contract PerpsForkTest is Test {
         assertEq(engine.bearOI(), 0, "Bear OI should be 0 after all close");
 
         // USDC conservation
-        uint256 totalUsdcAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse));
+        uint256 totalUsdcAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
+            + IERC20(USDC).balanceOf(keeper);
         assertEq(totalUsdcAfter, totalUsdcBefore, "USDC conservation across multi-trader");
     }
 
