@@ -63,10 +63,11 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(110);
-        bytes[] memory empty;
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
 
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        router.executeOrder(1, updateData);
     }
 
 }

@@ -247,10 +247,11 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
 
         vm.warp(1001);
-        bytes[] memory empty;
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
 
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        router.executeOrder(1, updateData);
     }
 
 }

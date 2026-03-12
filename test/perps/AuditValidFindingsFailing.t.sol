@@ -78,6 +78,11 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _open(positiveId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
         _open(negativeId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
 
+        vm.prank(traderPositive);
+        clearinghouse.withdraw(positiveId, address(usdc), 8400 * 1e6);
+        vm.prank(traderNegative);
+        clearinghouse.withdraw(negativeId, address(usdc), 8400 * 1e6);
+
         // Liquidate at equity ≈ +$5 (just above zero)
         // Bounty capped at min(~$152, $5) = $5
         uint256 depth = pool.totalAssets();

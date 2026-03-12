@@ -100,6 +100,9 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
 
         _open(ACCOUNT_ID, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
+        vm.prank(trader);
+        clearinghouse.withdraw(ACCOUNT_ID, address(usdc), 94e6);
+
         vm.warp(1_709_971_200); // Saturday during FAD
         uint256 depth = pool.totalAssets();
 
@@ -201,8 +204,9 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
 
         vm.warp(1006);
         vm.roll(block.number + 1);
-        bytes[] memory empty;
-        router.executeOrder(1, empty);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+        router.executeOrder(1, updateData);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(accountId);

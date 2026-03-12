@@ -227,8 +227,9 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         // executeOrder hard-reverts with OracleFrozen for ALL orders including closes.
         // executeLiquidation relaxes staleness and proceeds — asymmetric DoS.
         // Close orders should use fadMaxStaleness like liquidations do.
-        bytes[] memory empty;
-        router.executeOrder{value: 0.01 ether}(1, empty);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+        router.executeOrder{value: 0.01 ether}(1, updateData);
 
         (size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "C-03: close orders must execute during oracle freeze");

@@ -213,9 +213,9 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
     function test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal() public {
         address trader = address(0xB0B);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 1_500e6);
+        _fundTrader(trader, 1500e6);
         vm.deal(trader, 1 ether);
-        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 1_000e6, 100_000_000);
+        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 1000e6, 100_000_000);
 
         uint64 commitTime = uint64(block.timestamp + 1000);
         uint64 stalePublishTime = commitTime + 6;

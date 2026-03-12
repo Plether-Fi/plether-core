@@ -23,6 +23,20 @@ contract LiquidationTest is BasePerpTest {
         vm.stopPrank();
     }
 
+    function _withdrawFreeUsdc(
+        address trader,
+        uint256 reserveUsdc
+    ) internal {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 balance = clearinghouse.balances(accountId, address(usdc));
+        uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 withdrawable = balance > locked + reserveUsdc ? balance - locked - reserveUsdc : 0;
+        if (withdrawable > 0) {
+            vm.prank(trader);
+            clearinghouse.withdraw(accountId, address(usdc), withdrawable);
+        }
+    }
+
     function test_FridayAutoDeleverage() public {
         vm.warp(WEDNESDAY_NOON);
         assertEq(
@@ -35,6 +49,7 @@ contract LiquidationTest is BasePerpTest {
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -67,12 +82,11 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: Alice keeps surplus equity
         // Opening: exec fee = 6 bps of $100k = $60. pos.margin = $2000 - $60 = $1940.
-        // Clearinghouse after open: $10k - $60 (fee seized) = $9940. Locked = $1940.
+        // Clearinghouse after open and withdrawing free USDC: locked margin remains $1940.
         // Liquidation: equity = $1940 + $0 (PnL) = $1940. Bounty = $150.
         // residual = $1940 - $150 = $1790. toSeize = $1940 - $1790 = $150.
-        // Clearinghouse after liq: $9940 - $150 = $9790.
         uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
-        assertEq(chBalance, 9790 * 1e6, "Alice keeps surplus equity after ethical liquidation");
+        assertEq(chBalance, 1790 * 1e6, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -81,6 +95,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -105,9 +120,9 @@ contract LiquidationTest is BasePerpTest {
         // Ethical: user should retain equity - bounty
         // PnL = -$1500, Margin = $2000, Equity = $500
         // Bounty ~ 0.15% * $101.5k = $152.25, but min $5 → $152.25
-        // Residual = $500 - $152.25 = $347.75
+        // Residual = $440 - $152.25 = $287.75 after the 6 bps execution fee
         uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
-        assertTrue(chBalance > 8000 * 1e6, "Alice retains most of her clearinghouse balance");
+        assertApproxEqAbs(chBalance, 287_750_000, 1, "Alice retains equity net of keeper bounty");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {
@@ -118,6 +133,7 @@ contract LiquidationTest is BasePerpTest {
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -134,6 +150,7 @@ contract LiquidationTest is BasePerpTest {
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
@@ -181,6 +198,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -209,6 +227,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
+        _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);

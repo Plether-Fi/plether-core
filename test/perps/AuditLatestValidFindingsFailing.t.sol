@@ -90,10 +90,11 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1005);
 
         vm.warp(1005);
-        bytes[] memory empty;
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
 
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        router.executeOrder(1, updateData);
     }
 
     function test_H1_FutureDatedVaaShouldNotPanic() public {
@@ -105,9 +106,10 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1002);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1002);
 
-        bytes[] memory empty;
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
         vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
-        router.executeOrder(1, empty);
+        router.executeOrder(1, updateData);
     }
 
 }
