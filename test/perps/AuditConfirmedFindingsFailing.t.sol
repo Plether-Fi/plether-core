@@ -57,22 +57,20 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
     }
 
     function test_C1_BatchExecuteShouldRefundUserNotKeeper() public {
-        router.proposeMaxOrderAge(60);
-        vm.warp(block.timestamp + 48 hours + 1);
-        router.finalizeMaxOrderAge();
+        uint256 t0 = 2_000_000_000;
+        vm.warp(t0);
+        vm.roll(100);
 
-        uint256 commitTime = block.timestamp;
-
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), commitTime);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), commitTime);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
         router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
-        vm.warp(commitTime + 61);
-        vm.roll(block.number + 1);
-        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), commitTime + 61);
-        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), commitTime + 61);
+        vm.warp(t0 + 61);
+        vm.roll(200);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
         uint256 keeperBalanceBefore = keeper.balance;
 
@@ -83,6 +81,46 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         router.executeOrderBatch(1, updateData);
 
         assertEq(keeper.balance, keeperBalanceBefore, "Keeper should not profit from expired orders in batch execution");
+        assertEq(alice.balance, 1 ether, "User should be refunded keeper fee on expired batch order");
+    }
+
+    function test_C1_BatchMixedSuccessOnlyPaysKeeperForSuccessful() public {
+        _fundTrader(alice, 50_000e6);
+
+        uint256 t0 = 2_000_000_000;
+
+        vm.warp(t0);
+        vm.roll(100);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        vm.warp(t0 + 10);
+        vm.roll(200);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 10);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 10);
+
+        vm.prank(alice);
+        router.commitOrder{value: 0.02 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        vm.warp(t0 + 61);
+        vm.roll(300);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), t0 + 61);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
+
+        uint256 aliceBefore = alice.balance;
+        uint256 keeperBalanceBefore = keeper.balance;
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.prank(keeper);
+        router.executeOrderBatch(2, updateData);
+
+        assertEq(keeper.balance - keeperBalanceBefore, 0.02 ether, "Keeper only paid for the successful order");
+        assertEq(alice.balance - aliceBefore, 0.01 ether, "User refunded fee from the expired order");
     }
 
     function test_C1_StaleSingleExecuteShouldRefundUserNotKeeper() public {
