@@ -79,11 +79,7 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(
-            pool.unpaidSeniorYield(),
-            0,
-            "New senior rate must not back-accrue senior yield over stale-mark time"
-        );
+        assertEq(pool.unpaidSeniorYield(), 0, "New senior rate must not back-accrue senior yield over stale-mark time");
     }
 
 }

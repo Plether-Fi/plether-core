@@ -22,6 +22,15 @@ interface ICfdEngine {
         uint64 publishTime
     ) external returns (int256 settlementUsdc);
 
+    /// @notice Pays an order execution keeper from accrued protocol fees.
+    /// @param recipient          Keeper address receiving the USDC payout
+    /// @param requestedAmountUsdc Requested keeper payout (6 decimals)
+    /// @return paidAmountUsdc    Actual payout after fee-pool caps (6 decimals)
+    function payOrderKeeper(
+        address recipient,
+        uint256 requestedAmountUsdc
+    ) external returns (uint256 paidAmountUsdc);
+
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param accountId          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)

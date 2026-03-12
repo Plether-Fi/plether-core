@@ -87,7 +87,7 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
 
         // Spammer commits with impossible slippage (targetPrice=1 for BULL open = always fails)
         vm.prank(spammer);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1, false);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1, false);
 
         uint256 keeperBefore = keeper.balance;
 

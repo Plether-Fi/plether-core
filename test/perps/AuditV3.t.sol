@@ -95,7 +95,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         vm.deal(alice, 1 ether);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
@@ -128,11 +128,11 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         _fundTrader(bob, 50_000e6);
         vm.deal(bob, 1 ether);
         vm.prank(bob);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
 
         // Alice commits a CLOSE order → behind Bob (order 2)
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         // Keeper processes both: order 1 soft-fails, order 2 closes Alice's position.
         // Bug: order 1 hard reverts, blocking order 2 entirely (FIFO deadlock).
@@ -304,7 +304,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         // Alice commits order with 0.01 ETH keeper fee
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         // Warp past maxOrderAge — order expires
         _warpForward(61);
@@ -331,26 +331,26 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         // Order 1: will succeed (execute immediately)
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
 
-        vm.deal(keeper, 0);
+        usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
         bytes[] memory empty;
         router.executeOrder(1, empty);
-        uint256 keeperPayoutSuccess = keeper.balance;
+        uint256 keeperPayoutSuccess = usdc.balanceOf(keeper);
 
         // Order 2: will expire
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
 
         _warpForward(61);
 
-        vm.deal(keeper, 0);
+        usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
         router.executeOrder(2, empty);
-        uint256 keeperPayoutFailed = keeper.balance;
+        uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
-        assertEq(keeperPayoutSuccess, 0.01 ether, "H-01: successful execution should pay the keeper");
+        assertEq(keeperPayoutSuccess, 1e6, "H-01: successful execution should pay the keeper in USDC");
         assertEq(keeperPayoutFailed, 0, "H-01: failed execution should not pay the keeper");
     }
 
@@ -454,7 +454,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
         vm.deal(alice, 1 ether);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));

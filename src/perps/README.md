@@ -41,7 +41,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and pays the keeper fee to the keeper (who spent gas), incrementing the queue for 100% protocol liveness.
+**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for 100% protocol liveness. Successful fills pay the keeper in USDC from accrued execution fees, capped at `min(1 bp of notional, 1 USDC)`.
 
 ### IV. CfdEngine — The Mathematical Ledger
 
@@ -197,7 +197,7 @@ Timelocked parameters:
 |----------|-----------|
 | CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds` |
 | HousePool | `seniorRateBps`, `markStalenessLimit` |
-| OrderRouter | `maxOrderAge`, `minKeeperFee` |
+| OrderRouter | `maxOrderAge` |
 | MarginClearinghouse | operator status, withdraw guard, asset configs (LTV, oracle) |
 
 **Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.

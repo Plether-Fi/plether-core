@@ -125,7 +125,7 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
     }
 
     function test_M1_WipedTrancheCanBeRecapitalized() public {
@@ -198,7 +198,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1006);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1006);

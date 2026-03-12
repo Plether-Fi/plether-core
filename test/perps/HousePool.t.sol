@@ -369,9 +369,9 @@ contract HousePoolTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        // 100k BULL at $1.00: execFee = $100k * 6bps = $60
+        // 100k BULL at $1.00: protocol retains $60 less the 1 USDC keeper reward
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 60_000_000, "Exec fee = 6bps of $100k notional");
+        assertEq(fees, 59_000_000, "Protocol fees should net out the 1 USDC keeper reward");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = usdc.balanceOf(address(pool));

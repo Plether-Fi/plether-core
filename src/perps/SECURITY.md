@@ -21,7 +21,6 @@ All perpetuals contracts are **non-upgradeable**. Once deployed, the bytecode ca
 | `seniorRateBps` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
 | `markStalenessLimit` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
 | `maxOrderAge` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
-| `minKeeperFee` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
 | Supported assets / LTV haircuts | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
 | Protocol operators | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
 | Withdraw guard | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
@@ -124,7 +123,7 @@ The protocol owner can (all subject to 48-hour timelock):
 - Add/remove FAD day overrides for FX market holidays
 - Configure `fadMaxStaleness` and `fadRunwaySeconds`
 - Set the senior tranche interest rate and mark staleness limit
-- Configure max order age and minimum keeper fee
+- Configure max order age
 - Add supported collateral assets and configure LTV haircuts
 - Grant/revoke operator status on the MarginClearinghouse
 - Set the withdraw guard on the MarginClearinghouse
@@ -147,10 +146,10 @@ The owner **cannot**:
 #### Keepers
 
 Keepers are permissionless — anyone can execute orders and liquidations:
-- **Order Execution**: Keepers push Pyth price payloads and receive ETH incentive fees attached to orders
+- **Order Execution**: Keepers push Pyth price payloads and receive USDC rewards funded from accrued execution fees, capped at `min(1 bp of notional, 1 USDC)` per successful fill
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Order Fees**: When orders fail (slippage, skew, engine revert), the keeper fee is paid to the keeper who spent gas executing, not refunded to the user. This prevents free queue-clogging spam
+- **Failed Orders**: Failed or expired orders do not pay an order keeper reward; keepers are only paid on successful fills
 
 #### Protocol Operators
 

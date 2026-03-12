@@ -222,7 +222,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
 
         // Alice commits a close order (commitOrder allows closes even when paused)
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         // executeOrder hard-reverts with OracleFrozen for ALL orders including closes.
         // executeLiquidation relaxes staleness and proceeds — asymmetric DoS.
@@ -426,7 +426,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
 
         // Alice commits a valid order
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
 
         uint64 orderId = router.nextCommitId() - 1;
         bytes[] memory priceData = new bytes[](1);

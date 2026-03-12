@@ -65,7 +65,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(t0 + 61);
         vm.roll(200);
@@ -95,7 +95,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(t0 + 10);
         vm.roll(200);
@@ -103,7 +103,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 10);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.02 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(t0 + 61);
         vm.roll(300);
@@ -111,7 +111,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 61);
 
         uint256 aliceBefore = alice.balance;
-        uint256 keeperBalanceBefore = keeper.balance;
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
@@ -119,8 +119,8 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch(2, updateData);
 
-        assertEq(keeper.balance - keeperBalanceBefore, 0.02 ether, "Keeper only paid for the successful order");
-        assertEq(alice.balance - aliceBefore, 0.01 ether, "User refunded fee from the expired order");
+        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 1e6, "Keeper only paid for the successful order");
+        assertEq(alice.balance - aliceBefore, 0, "Expired order should not change the user's ETH balance");
     }
 
     function test_C1_StaleSingleExecuteShouldRefundUserNotKeeper() public {
@@ -130,7 +130,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";

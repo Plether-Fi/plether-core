@@ -1513,9 +1513,9 @@ contract PhantomExecFeeTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         uint256 totalFees = engine.accumulatedFeesUsdc();
-        uint256 closeFee = totalFees - openFee;
+        uint256 keeperRewardUsdc = 1e6;
 
-        assertEq(closeFee, 0, "close exec fee should be 0 when shortfall exceeds fee");
+        assertEq(totalFees + keeperRewardUsdc, openFee, "close exec fee should be 0 when shortfall exceeds fee");
     }
 
 }

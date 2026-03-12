@@ -236,18 +236,6 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(router.maxOrderAgeActivationTime(), 0);
     }
 
-    function test_ProposeMinKeeperFee_TimelockFlow() public {
-        router.proposeMinKeeperFee(0.001 ether);
-
-        vm.expectRevert(OrderRouter.OrderRouter__TimelockNotReady.selector);
-        router.finalizeMinKeeperFee();
-
-        _warpForward(48 hours + 1);
-        router.finalizeMinKeeperFee();
-
-        assertEq(router.minKeeperFee(), 0.001 ether);
-    }
-
     function test_FinalizeMaxOrderAge_NoProposal_Reverts() public {
         vm.expectRevert(OrderRouter.OrderRouter__NoProposal.selector);
         router.finalizeMaxOrderAge();
@@ -327,12 +315,12 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
     }
 
     function test_ExecuteOrder_WorksWhenPaused() public {
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         router.pause();
 
@@ -381,12 +369,12 @@ contract TimelockPauseTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         router.unpause();
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         assertEq(router.nextCommitId(), 2);
     }
 

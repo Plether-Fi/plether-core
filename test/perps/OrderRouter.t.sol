@@ -63,7 +63,7 @@ contract OrderRouterTest is BasePerpTest {
         juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory emptyPayload;
         vm.roll(block.number + 1);
@@ -83,6 +83,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
+        uint256 keeperUsdcBefore = usdc.balanceOf(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -90,7 +91,10 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 30_000_000, "Exec fee = 6bps of $50k notional");
+        assertEq(fees, 29_000_000, "Protocol should retain 6bps minus the 1 USDC keeper reward");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Keeper should receive the 1 USDC capped reward"
+        );
         assertGt(freeUsdc, 949_000 * 1e6, "Free USDC should be ~$950k (pool - maxLiab - fees)");
         assertLt(freeUsdc, 951_000 * 1e6, "Free USDC bounded above");
 
@@ -133,8 +137,8 @@ contract OrderRouterTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
         vm.stopPrank();
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6, "Both committed margins should be locked");
@@ -173,14 +177,14 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(carol);
-        router.commitOrder{value: 0.02 ether}(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty;
-        uint256 keeperBefore = address(this).balance;
+        uint256 keeperBefore = usdc.balanceOf(address(this));
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
@@ -194,19 +198,19 @@ contract OrderRouterTest is BasePerpTest {
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
-        uint256 keeperAfter = address(this).balance;
-        assertEq(keeperAfter - keeperBefore, 0.04 ether, "Keeper should receive all keeper fees");
+        uint256 keeperAfter = usdc.balanceOf(address(this));
+        assertEq(keeperAfter - keeperBefore, 2_500_000, "Keeper should receive min(1 bp, 1 USDC) per successful order");
     }
 
     function test_BatchExecution_MixedResults() public {
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -238,16 +242,23 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_SingleETHTransfer() public {
         vm.prank(alice);
-        router.commitOrder{value: 0.05 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder{value: 0.05 ether}(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty;
-        uint256 keeperBefore = address(this).balance;
+        uint256 keeperEthBefore = address(this).balance;
+        uint256 keeperUsdcBefore = usdc.balanceOf(address(this));
         router.executeOrderBatch{value: 0.1 ether}(2, empty);
-        uint256 keeperAfter = address(this).balance;
+        uint256 keeperEthAfter = address(this).balance;
+        uint256 keeperUsdcAfter = usdc.balanceOf(address(this));
 
-        assertEq(keeperAfter - keeperBefore, 0.1 ether, "Keeper net gain = sum of keeper fees");
+        assertEq(
+            keeperEthAfter - keeperEthBefore, 0, "Batch execution should refund unused ETH when no Pyth fee is due"
+        );
+        assertEq(
+            keeperUsdcAfter - keeperUsdcBefore, 1_500_000, "Keeper should receive capped USDC rewards for both orders"
+        );
     }
 
 }
@@ -543,7 +554,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.1 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address keeper = address(0xBEEF);
         vm.deal(keeper, 1 ether);
@@ -556,7 +567,8 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Order preserved for honest keeper");
-        assertEq(router.keeperFees(1), 0.1 ether, "Keeper fee preserved");
+        (, uint256 sizeDelta,,,,,,,) = router.orders(1);
+        assertEq(sizeDelta, 10_000 * 1e18, "Order should remain pending after MEV revert");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -894,7 +906,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -1096,7 +1108,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(MONDAY_NOON);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(MONDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -1155,7 +1167,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_20UTC);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(FRIDAY_20UTC + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -1241,7 +1253,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -1302,7 +1314,7 @@ contract FadStalenessTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 6);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         vm.warp(wednesdayMidnight - 3 hours + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -1590,16 +1602,14 @@ contract OrderRouterAuditTest is BasePerpTest {
         assertEq(size, 0, "Expired order must not execute via executeOrder");
     }
 
-    // Regression: H-03 — zero fee commit should revert
-    function test_ZeroFeeCommitShouldRevert() public {
-        router.proposeMinKeeperFee(0.001 ether);
-        _warpForward(48 hours + 1);
-        router.finalizeMinKeeperFee();
+    // Regression: order commits should not require ETH
+    function test_ZeroEthCommitAllowed() public {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientKeeperFee.selector);
-        router.commitOrder{value: 0}(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+
+        assertEq(router.nextCommitId(), 2, "Commit should succeed without an ETH keeper fee");
     }
 
     // Regression: H-03 — close order allowed while paused
@@ -1712,7 +1722,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.deal(spammer, 1 ether);
         _fundTrader(spammer, 10_000 * 1e6);
         vm.prank(spammer);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
@@ -1728,8 +1738,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        assertEq(router.claimableEth(spammer), 0, "Expired order fee not refunded to user");
-        assertGt(router.claimableEth(keeper), 0, "Keeper receives expired order fee via claimable");
+        assertEq(router.claimableEth(spammer), 0, "Expired order should not create claimable ETH for the user");
+        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH keeper fee");
     }
 
     // Regression: H-03
@@ -1772,7 +1782,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.deal(spammer, 1 ether);
         _fundTrader(spammer, 10_000e6);
         vm.prank(spammer);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
@@ -1788,8 +1798,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        assertEq(router.claimableEth(spammer), 0, "Expired order fee should not be refunded to user");
-        assertGt(router.claimableEth(keeper), 0, "Keeper receives expired order fee via claimable");
+        assertEq(router.claimableEth(spammer), 0, "Expired order should not create claimable ETH for the user");
+        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH keeper fee");
     }
 
 }
@@ -2188,7 +2198,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         clearinghouse.deposit(accountId, address(usdc), 50_000e6);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -2220,7 +2230,7 @@ contract KeeperFeeRefundTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
         bytes[] memory priceData = new bytes[](1);
@@ -2244,7 +2254,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         clearinghouse.deposit(accountId, address(usdc), 50_000e6);
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 

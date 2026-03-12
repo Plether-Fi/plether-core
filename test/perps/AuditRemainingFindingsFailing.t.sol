@@ -137,7 +137,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);
@@ -197,7 +197,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
@@ -223,7 +223,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.warp(commitTime);
         vm.prank(trader);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, 0, true);
 
         mockPyth.setPrice(FEED_A, int64(150_000_000), int32(-8), freshPublishTime);
         mockPyth.setPrice(FEED_B, int64(150_000_000), int32(-8), freshPublishTime);

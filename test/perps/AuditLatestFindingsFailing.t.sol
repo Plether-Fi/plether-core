@@ -76,11 +76,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
-        (bool ok,) = address(router).call{value: keeperFee}(
-            abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 0, 500e6, 1e8, false)
-        );
+        (bool ok,) = address(router)
+            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 0, 500e6, 1e8, false));
         assertFalse(ok, "Margin-only updates must be rejected at commit time");
     }
 
@@ -128,11 +126,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(aliceId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        uint256 keeperFee = router.minKeeperFee();
         vm.prank(alice);
-        (bool ok,) = address(router).call{value: keeperFee}(
-            abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true)
-        );
+        (bool ok,) = address(router)
+            .call(abi.encodeWithSelector(router.commitOrder.selector, CfdTypes.Side.BULL, 20_000e18, 500e6, 0, true));
         assertFalse(ok, "Close orders with positive marginDelta must be rejected");
     }
 
@@ -246,7 +242,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);

@@ -55,7 +55,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(trader, 10_000 * 1e6);
 
         vm.prank(trader);
-        router.commitOrder{value: 1 ether}(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1, false);
 
         uint256 keeperBefore = keeper.balance;
         bytes[] memory empty;

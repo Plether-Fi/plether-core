@@ -136,6 +136,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event FadRunwayProposed(uint256 newRunway, uint256 activationTime);
     event FadRunwayFinalized();
     event BadDebtCleared(uint256 amount, uint256 remaining);
+    event OrderKeeperPaid(address indexed recipient, uint256 amountUsdc);
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -348,6 +349,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
         accumulatedFeesUsdc = 0;
         vault.payOut(recipient, fees);
+        _assertPostSolvency();
+    }
+
+    /// @notice Pays a successful order keeper out of accrued execution fees.
+    /// @dev Payout is capped by currently accumulated fees so keeper rewards cannot overdraft the fee pool.
+    function payOrderKeeper(
+        address recipient,
+        uint256 requestedAmountUsdc
+    ) external onlyRouter nonReentrant returns (uint256 paidAmountUsdc) {
+        if (requestedAmountUsdc == 0 || accumulatedFeesUsdc == 0) {
+            return 0;
+        }
+
+        paidAmountUsdc = requestedAmountUsdc > accumulatedFeesUsdc ? accumulatedFeesUsdc : requestedAmountUsdc;
+        accumulatedFeesUsdc -= paidAmountUsdc;
+
+        vault.payOut(recipient, paidAmountUsdc);
+        emit OrderKeeperPaid(recipient, paidAmountUsdc);
         _assertPostSolvency();
     }
 

@@ -18,9 +18,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract AuditV3Failing_QueueGriefing is BasePerpTest {
 
-    function test_1_MinKeeperFeeShouldBeNonZeroByDefault() public {
-        // minKeeperFee defaults to 0 — zero-cost spam floods the FIFO queue.
-        assertGt(router.minKeeperFee(), 0, "minKeeperFee should have a non-zero default");
+    function test_1_CommitOrderDoesNotRequireEth() public {
+        _fundTrader(address(0xA11CE), 10_000e6);
+
+        vm.prank(address(0xA11CE));
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+
+        assertEq(router.nextCommitId(), 2, "Commit should succeed without sending ETH");
     }
 
     function test_1_MaxOrderAgeShouldBeNonZeroByDefault() public {
@@ -197,7 +201,7 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(OrderRouter.OrderRouter__CloseSideMismatch.selector);
-        router.commitOrder{value: 0.01 ether}(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
     }
 
 }
