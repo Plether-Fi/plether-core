@@ -703,11 +703,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__MustCloseOpposingPosition();
         }
 
-        uint256 unsettledFundingDebt = _settleFunding(order, pos);
+        int256 closeFundingSettlementUsdc = _settleFunding(order, pos);
 
         if (order.isClose) {
             accumulatedFeesUsdc += _processDecrease(
-                order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt
+                order, pos, price, preSkewUsdc, vaultDepthUsdc, closeFundingSettlementUsdc
             );
             _enterDegradedModeIfInsolvent(order.accountId, 0);
         } else {
@@ -743,14 +743,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function _settleFunding(
         CfdTypes.Order memory order,
         CfdTypes.Position storage pos
-    ) internal returns (uint256 unsettledFundingDebt) {
+    ) internal returns (int256 closeFundingSettlementUsdc) {
         int256 pendingFunding = getPendingFunding(pos);
         if (pos.size > 0 && pendingFunding != 0) {
             if (pendingFunding > 0) {
                 uint256 gain = uint256(pendingFunding);
-                pos.margin += gain;
-                vault.payOut(address(clearinghouse), gain);
-                clearinghouse.creditSettlementAndLockMargin(order.accountId, gain);
+                if (order.isClose && order.sizeDelta == pos.size) {
+                    closeFundingSettlementUsdc = int256(gain);
+                } else {
+                    pos.margin += gain;
+                    vault.payOut(address(clearinghouse), gain);
+                    clearinghouse.creditSettlementAndLockMargin(order.accountId, gain);
+                }
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 (uint256 marginConsumedUsdc,, uint256 uncoveredUsdc) = clearinghouse.consumeFundingLoss(
@@ -765,7 +769,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                     if (order.sizeDelta < pos.size) {
                         revert CfdEngine__PartialCloseUnderwaterFunding();
                     }
-                    unsettledFundingDebt = uncoveredUsdc;
+                    closeFundingSettlementUsdc = -int256(uncoveredUsdc);
                 }
             }
         }
@@ -881,7 +885,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 price,
         uint256 preSkewUsdc,
         uint256 vaultDepthUsdc,
-        uint256 unsettledFundingDebt
+        int256 fundingSettlementUsdc
     ) internal returns (uint256 collectedExecFeeUsdc) {
         if (pos.size < order.sizeDelta) {
             revert CfdEngine__CloseSizeExceedsPosition();
@@ -913,7 +917,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             vaultDepthUsdc,
             riskParams.vpiFactor,
             EXECUTION_FEE_BPS,
-            unsettledFundingDebt
+            fundingSettlementUsdc
         );
 
         pos.margin = closeState.remainingMarginUsdc;
@@ -1217,8 +1221,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         preview.valid = true;
-        (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) =
-            _previewFundingSettlement(pos);
+        (int256 pendingFunding, int256 closeFundingSettlementUsdc, uint256 marginAfterFunding) =
+            _previewFundingSettlement(pos, sizeDelta == pos.size, vaultDepthUsdc);
         pos.margin = marginAfterFunding;
 
         uint256 preBullUsdc = (bullOI * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
@@ -1249,7 +1253,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             vaultDepthUsdc,
             riskParams.vpiFactor,
             EXECUTION_FEE_BPS,
-            unsettledFundingDebt
+            closeFundingSettlementUsdc
         );
 
         preview.realizedPnlUsdc = closeState.realizedPnlUsdc;
@@ -1292,22 +1296,71 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _previewFundingSettlement(
-        CfdTypes.Position memory pos
-    ) internal view returns (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) {
-        pendingFunding = getPendingFunding(pos);
+        CfdTypes.Position memory pos,
+        bool fullClose,
+        uint256 vaultDepthUsdc
+    ) internal view returns (int256 pendingFunding, int256 closeFundingSettlementUsdc, uint256 marginAfterFunding) {
+        pendingFunding = _previewPendingFunding(pos, vaultDepthUsdc);
         marginAfterFunding = pos.margin;
         if (pendingFunding >= 0) {
-            marginAfterFunding += uint256(pendingFunding);
-            return (pendingFunding, 0, marginAfterFunding);
+            if (fullClose) {
+                closeFundingSettlementUsdc = pendingFunding;
+            } else {
+                marginAfterFunding += uint256(pendingFunding);
+            }
+            return (pendingFunding, closeFundingSettlementUsdc, marginAfterFunding);
         }
 
         uint256 loss = uint256(-pendingFunding);
         if (marginAfterFunding < loss) {
-            unsettledFundingDebt = loss - marginAfterFunding;
+            closeFundingSettlementUsdc = -int256(loss - marginAfterFunding);
             marginAfterFunding = 0;
         } else {
             marginAfterFunding -= loss;
         }
+    }
+
+    function _previewPendingFunding(
+        CfdTypes.Position memory pos,
+        uint256 vaultDepthUsdc
+    ) internal view returns (int256 fundingUsdc) {
+        if (pos.size == 0) {
+            return 0;
+        }
+
+        int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+        uint256 timeDelta = block.timestamp - lastFundingTime;
+        if (timeDelta == 0 || vaultDepthUsdc == 0 || lastMarkPrice == 0) {
+            return (int256(pos.size) * (currentIndex - pos.entryFundingIndex)) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        }
+
+        uint256 bullUsdc = (bullOI * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (bearOI * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 absSkew;
+        bool bullMajority;
+
+        if (bullUsdc > bearUsdc) {
+            absSkew = bullUsdc - bearUsdc;
+            bullMajority = true;
+        } else {
+            absSkew = bearUsdc - bullUsdc;
+            bullMajority = false;
+        }
+
+        if (absSkew > 0) {
+            uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
+            uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
+            int256 step = int256((lastMarkPrice * fundingDelta) / 1e8);
+            if (step > 0) {
+                if (bullMajority) {
+                    currentIndex = pos.side == CfdTypes.Side.BULL ? currentIndex - step : currentIndex + step;
+                } else {
+                    currentIndex = pos.side == CfdTypes.Side.BEAR ? currentIndex - step : currentIndex + step;
+                }
+            }
+        }
+
+        return (int256(pos.size) * (currentIndex - pos.entryFundingIndex)) / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
     function previewLiquidation(
