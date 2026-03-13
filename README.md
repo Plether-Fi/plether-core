@@ -110,6 +110,14 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 
 **Yield:** Curve LP trading fees accrue as virtual price growth. Keepers call `harvest()` to mint INVAR proportional to the fee yield and donate it to sINVAR (StakedToken) stakers via a 1-hour streaming window. Only fee yield is captured — price appreciation of the underlying assets is excluded via VP-based cost tracking.
 
+**Operational setup sequence:**
+- Deploy `InvarCoin` and `StakedToken`, then call `proposeStakedInvarCoin(sINVAR)`
+- Wait `STAKED_INVAR_TIMELOCK` (7 days), then call `finalizeStakedInvarCoin()` before relying on harvest/donation flows
+- Propose the reward sink with `proposeGaugeRewardsReceiver(receiver)`
+- Wait `GAUGE_REWARDS_TIMELOCK` (7 days), then call `finalizeGaugeRewardsReceiver()`
+- Mark CRV and any other gauge incentives with `protectRewardToken(token)` so they cannot be swept with `rescueToken()`
+- After claiming rewards, route protected balances only through `sweepGaugeRewards(token)`
+
 **Keeper operations:**
 - `deployToCurve()` — pushes excess USDC buffer (>2% target) into single-sided Curve LP
 - `replenishBuffer()` — burns Curve LP to restore the 2% USDC buffer
@@ -121,7 +129,9 @@ InvarCoin is a passive savings token that maintains exposure to a basket of glob
 - Virtual shares (1e18/1e6) prevent first-depositor inflation attacks
 - `totalAssets()` is a best-effort NAV view for UX/monitoring; use `totalAssetsValidated()` for strict oracle-validated accounting reads
 - `_harvestSafe()` gracefully skips when Curve VP reads fail; if yield is pending, strict oracle validation is still enforced
-- `setEmergencyMode()` resets LP tracking without touching Curve, enabling exits even if the pool is fully bricked
+- `setEmergencyMode()` pauses deposits and single-sided withdrawals without discarding LP accounting; `emergencyWithdrawFromCurve()` only zeroes LP tracking after assets are actually recovered
+- `stakedInvarCoin` and `gaugeRewardsReceiver` both use 7-day timelocked propose/finalize flows
+- Protected reward tokens cannot be rescued arbitrarily and must be swept to the configured reward receiver
 - L2 sequencer uptime validation is enforced on state-changing oracle-critical flows (deposit/lpDeposit/harvest/deploy/replenish)
 
 ## Ecosystem Integrations
