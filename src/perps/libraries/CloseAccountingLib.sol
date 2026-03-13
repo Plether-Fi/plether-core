@@ -19,7 +19,12 @@ library CloseAccountingLib {
     }
 
     function buildCloseState(
-        CfdTypes.Position memory position,
+        uint256 positionSize,
+        uint256 positionMarginUsdc,
+        uint256 entryPrice,
+        uint256 maxProfitUsdc,
+        int256 vpiAccrued,
+        CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 capPrice,
@@ -30,18 +35,26 @@ library CloseAccountingLib {
         uint256 executionFeeBps,
         uint256 unsettledFundingDebt
     ) internal pure returns (CloseState memory state) {
-        CfdTypes.Position memory closedPart = position;
-        closedPart.size = sizeDelta;
+        CfdTypes.Position memory closedPart = CfdTypes.Position({
+            size: sizeDelta,
+            margin: positionMarginUsdc,
+            entryPrice: entryPrice,
+            maxProfitUsdc: maxProfitUsdc,
+            entryFundingIndex: 0,
+            side: side,
+            lastUpdateTime: 0,
+            vpiAccrued: vpiAccrued
+        });
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, oraclePrice, capPrice);
         state.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
 
-        state.marginToFreeUsdc = (position.margin * sizeDelta) / position.size;
-        state.remainingMarginUsdc = position.margin - state.marginToFreeUsdc;
-        state.remainingSize = position.size - sizeDelta;
-        state.maxProfitReductionUsdc = (position.maxProfitUsdc * sizeDelta) / position.size;
+        state.marginToFreeUsdc = (positionMarginUsdc * sizeDelta) / positionSize;
+        state.remainingMarginUsdc = positionMarginUsdc - state.marginToFreeUsdc;
+        state.remainingSize = positionSize - sizeDelta;
+        state.maxProfitReductionUsdc = (maxProfitUsdc * sizeDelta) / positionSize;
 
         state.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, vpiFactor);
-        state.proportionalAccrualUsdc = (position.vpiAccrued * int256(sizeDelta)) / int256(position.size);
+        state.proportionalAccrualUsdc = (vpiAccrued * int256(sizeDelta)) / int256(positionSize);
         if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
             state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;
         }

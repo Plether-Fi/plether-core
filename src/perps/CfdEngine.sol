@@ -887,13 +887,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__CloseSizeExceedsPosition();
         }
 
+        uint256 postBullOi = bullOI;
+        uint256 postBearOi = bearOI;
+        if (pos.side == CfdTypes.Side.BULL) {
+            postBullOi -= order.sizeDelta;
+        } else {
+            postBearOi -= order.sizeDelta;
+        }
+        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+
         CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
-            pos,
+            pos.size,
+            pos.margin,
+            pos.entryPrice,
+            pos.maxProfitUsdc,
+            pos.vpiAccrued,
+            pos.side,
             order.sizeDelta,
             price,
             CAP_PRICE,
             preSkewUsdc,
-            _getAbsSkewUsdc(price),
+            postSkewUsdc,
             vaultDepthUsdc,
             riskParams.vpiFactor,
             EXECUTION_FEE_BPS,
@@ -916,7 +932,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         pos.size -= order.sizeDelta;
-
         if (pos.size > 0 && pos.margin < riskParams.minBountyUsdc) {
             revert CfdEngine__DustPosition();
         }
@@ -1218,7 +1233,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postBearUsdc = (postBearOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
         CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
-            pos,
+            pos.size,
+            pos.margin,
+            pos.entryPrice,
+            pos.maxProfitUsdc,
+            pos.vpiAccrued,
+            pos.side,
             sizeDelta,
             oraclePrice,
             CAP_PRICE,
