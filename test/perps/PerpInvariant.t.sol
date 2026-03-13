@@ -474,6 +474,8 @@ contract AdversarialPerpHandler is Test {
     uint256 public ghost_batchAttempts;
     uint256 public ghost_batchAdvances;
     uint256 public ghost_starvationEvents;
+    uint256 public ghost_expectedDeferredLiquidationBounty;
+    uint256 public ghost_failSoftLiquidations;
 
     constructor(
         MockUSDC _usdc,
@@ -633,6 +635,39 @@ contract AdversarialPerpHandler is Test {
             ghost_batchAdvances++;
         }
     }
+
+    function liquidateWithPayoutFailure(uint256 actorIdx, uint256 priceFuzz) external {
+        address actor = actors[actorIdx % actors.length];
+        bytes32 accountId = _accountId(actor);
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        if (size == 0) {
+            return;
+        }
+
+        uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
+        uint256 vaultDepth = pool.totalAssets();
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepth);
+        if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
+            return;
+        }
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(oraclePrice);
+
+        uint256 beforeDeferred = engine.deferredLiquidationBountyUsdc(address(this));
+        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
+        vm.roll(block.number + 1);
+
+        try router.executeLiquidation(accountId, priceData) {
+            uint256 afterDeferred = engine.deferredLiquidationBountyUsdc(address(this));
+            if (afterDeferred == beforeDeferred + preview.keeperBountyUsdc) {
+                ghost_expectedDeferredLiquidationBounty += preview.keeperBountyUsdc;
+                ghost_failSoftLiquidations++;
+            }
+        } catch {}
+
+        vm.clearMockedCalls();
+    }
 }
 
 contract AdversarialPerpInvariantTest is BasePerpTest {
@@ -715,5 +750,13 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
 
     function invariant_AdversarialRouterNeverCustodiesUsdc() public {
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not retain settlement balances during adversarial flows");
+    }
+
+    function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public {
+        assertEq(
+            engine.deferredLiquidationBountyUsdc(address(handler)),
+            handler.ghost_expectedDeferredLiquidationBounty(),
+            "Liquidation payout failures must only create deferred bounty claims"
+        );
     }
 }
