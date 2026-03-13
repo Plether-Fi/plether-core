@@ -767,28 +767,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
     }
 
-    function _cancelPendingOrdersForAccount(
-        bytes32 accountId,
-        uint64 preserveOrderId
-    ) internal {
-        for (uint64 orderId = nextExecuteId; orderId < nextCommitId; orderId++) {
-            if (orderId == preserveOrderId) {
-                continue;
-            }
-            CfdTypes.Order memory queued = orders[orderId];
-            if (queued.accountId != accountId || queued.sizeDelta == 0) {
-                continue;
-            }
-            _unlockCommittedMargin(orderId);
-            _releaseKeeperFeeReserve(orderId);
-            delete orders[orderId];
-            if (pendingOrderCounts[accountId] > 0) {
-                pendingOrderCounts[accountId]--;
-            }
-            emit OrderFailed(orderId, "Cancelled after terminal settlement");
-        }
-    }
-
     /// @notice Claims ETH stuck from failed refund transfers.
     function claimEth() external {
         uint256 amount = claimableEth[msg.sender];
