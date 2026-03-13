@@ -558,7 +558,10 @@ contract OrderRouter is Ownable2Step, Pausable {
         _deleteOrder(orderId);
 
         if (vaultKeeperRewardUsdc > 0) {
-            vault.payOut(msg.sender, vaultKeeperRewardUsdc);
+            try vault.payOut(msg.sender, vaultKeeperRewardUsdc) {
+            } catch {
+                engine.recordDeferredKeeperReward(msg.sender, vaultKeeperRewardUsdc);
+            }
         }
         _sendEth(msg.sender, msg.value - pythFee);
     }

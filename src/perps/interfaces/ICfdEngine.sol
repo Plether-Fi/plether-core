@@ -29,6 +29,12 @@ interface ICfdEngine {
         uint64 publishTime
     ) external returns (int256 settlementUsdc);
 
+    /// @notice Records a deferred keeper reward when immediate vault payment is unavailable.
+    function recordDeferredKeeperReward(
+        address keeper,
+        uint256 amountUsdc
+    ) external;
+
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param accountId          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)

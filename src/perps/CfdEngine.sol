@@ -64,6 +64,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     mapping(bytes32 => CfdTypes.Position) public positions;
     mapping(bytes32 => uint256) public deferredPayoutUsdc;
     uint256 public totalDeferredPayoutUsdc;
+    mapping(address => uint256) public deferredKeeperRewardUsdc;
+    uint256 public totalDeferredKeeperRewardUsdc;
 
     address public orderRouter;
 
@@ -94,6 +96,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__NoFeesToWithdraw();
     error CfdEngine__NoDeferredPayout();
     error CfdEngine__InsufficientVaultLiquidity();
+    error CfdEngine__NoDeferredKeeperReward();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__FundingExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -151,6 +154,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event DegradedModeCleared();
     event DeferredPayoutRecorded(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
+    event DeferredKeeperRewardRecorded(address indexed keeper, uint256 amountUsdc);
+    event DeferredKeeperRewardClaimed(address indexed keeper, uint256 amountUsdc);
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -421,6 +426,34 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         emit DeferredPayoutClaimed(accountId, amount);
     }
 
+    function claimDeferredKeeperReward() external nonReentrant {
+        uint256 amount = deferredKeeperRewardUsdc[msg.sender];
+        if (amount == 0) {
+            revert CfdEngine__NoDeferredKeeperReward();
+        }
+        if (vault.totalAssets() < amount) {
+            revert CfdEngine__InsufficientVaultLiquidity();
+        }
+
+        deferredKeeperRewardUsdc[msg.sender] = 0;
+        totalDeferredKeeperRewardUsdc -= amount;
+        vault.payOut(msg.sender, amount);
+
+        emit DeferredKeeperRewardClaimed(msg.sender, amount);
+    }
+
+    function recordDeferredKeeperReward(
+        address keeper,
+        uint256 amountUsdc
+    ) external onlyRouter {
+        if (amountUsdc == 0) {
+            return;
+        }
+        deferredKeeperRewardUsdc[keeper] += amountUsdc;
+        totalDeferredKeeperRewardUsdc += amountUsdc;
+        emit DeferredKeeperRewardRecorded(keeper, amountUsdc);
+    }
+
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
     /// @param amount USDC amount of bad debt to clear (6 decimals)
     function clearBadDebt(
@@ -589,7 +622,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         if (order.isClose) {
             keeperRewardUsdc = int256(_processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt));
-            _enterDegradedModeIfInsolvent(order.accountId);
+            _enterDegradedModeIfInsolvent(order.accountId, keeperRewardUsdc > 0 ? uint256(keeperRewardUsdc) : 0);
         } else {
             if (degradedMode) {
                 revert CfdEngine__DegradedMode();
@@ -1099,7 +1132,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
-        _enterDegradedModeIfInsolvent(accountId);
+        _enterDegradedModeIfInsolvent(accountId, 0);
     }
 
     function _assertPostSolvency() internal view {
@@ -1117,7 +1150,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
         return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl())
-            + totalDeferredPayoutUsdc;
+            + totalDeferredPayoutUsdc + totalDeferredKeeperRewardUsdc;
     }
 
     function _buildAdjustedSolvencySnapshot() internal view returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot) {
@@ -1129,15 +1162,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 ? snapshot.effectiveSolvencyAssets - totalDeferredPayoutUsdc
                 : 0;
         }
+        if (totalDeferredKeeperRewardUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredKeeperRewardUsdc
+                ? snapshot.effectiveSolvencyAssets - totalDeferredKeeperRewardUsdc
+                : 0;
+        }
     }
 
     function _enterDegradedModeIfInsolvent(
-        bytes32 accountId
+        bytes32 accountId,
+        uint256 pendingVaultPayoutUsdc
     ) internal {
         if (degradedMode) {
             return;
         }
         CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
+        if (pendingVaultPayoutUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > pendingVaultPayoutUsdc
+                ? snapshot.effectiveSolvencyAssets - pendingVaultPayoutUsdc
+                : 0;
+        }
         if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             degradedMode = true;
             emit DegradedModeEntered(snapshot.effectiveSolvencyAssets, snapshot.maxLiability, accountId);

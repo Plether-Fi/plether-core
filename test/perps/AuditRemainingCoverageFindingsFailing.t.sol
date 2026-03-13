@@ -165,4 +165,29 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(router.nextCommitId(), 2, "Fully utilized traders should be able to queue close intents without upfront free USDC");
     }
 
+    function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(80_000_000));
+
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeOrder(1, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Close should still succeed even when keeper reward cash is unavailable");
+        assertGt(engine.deferredKeeperRewardUsdc(keeper), 0, "Keeper reward should defer instead of reverting the close");
+    }
+
 }
