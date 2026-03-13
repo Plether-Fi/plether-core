@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
+import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -28,15 +29,6 @@ contract MarginClearinghouse is Ownable2Step {
         uint8 decimals;
         uint16 ltvBps;
         address oracle;
-    }
-
-    struct AccountUsdcBuckets {
-        uint256 settlementBalanceUsdc;
-        uint256 reservedSettlementUsdc;
-        uint256 totalLockedMarginUsdc;
-        uint256 activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc;
-        uint256 freeSettlementUsdc;
     }
 
     struct SettlementConsumption {
@@ -344,8 +336,8 @@ contract MarginClearinghouse is Ownable2Step {
     function getAccountUsdcBuckets(
         bytes32 accountId,
         uint256 activePositionMarginUsdc
-    ) public view returns (AccountUsdcBuckets memory buckets) {
-        buckets = _toExternalBuckets(_buildAccountUsdcBuckets(accountId, activePositionMarginUsdc));
+    ) public view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
+        buckets = _buildAccountUsdcBuckets(accountId, activePositionMarginUsdc);
     }
 
     function getFreeSettlementBalanceUsdc(
@@ -504,8 +496,7 @@ contract MarginClearinghouse is Ownable2Step {
         uncoveredUsdc = consumption.uncoveredUsdc;
 
         if (marginConsumedUsdc > 0) {
-            MarginClearinghouseAccountingLib.AccountUsdcBuckets memory buckets =
-                _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
             lockedMarginUsdc[accountId] = buckets.otherLockedMarginUsdc + (buckets.activePositionMarginUsdc - marginConsumedUsdc);
             emit MarginUnlocked(accountId, marginConsumedUsdc);
         }
@@ -528,8 +519,7 @@ contract MarginClearinghouse is Ownable2Step {
         int256 residualUsdc,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
-        MarginClearinghouseAccountingLib.AccountUsdcBuckets memory buckets =
-            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
         uint256 reachableUsdc = MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(buckets);
 
         if (residualUsdc >= 0) {
@@ -560,7 +550,7 @@ contract MarginClearinghouse is Ownable2Step {
     function _buildAccountUsdcBuckets(
         bytes32 accountId,
         uint256 activePositionMarginUsdc
-    ) internal view returns (MarginClearinghouseAccountingLib.AccountUsdcBuckets memory buckets) {
+    ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             balances[accountId][settlementAsset], reservedSettlementUsdc[accountId], lockedMarginUsdc[accountId], activePositionMarginUsdc
         );
@@ -574,17 +564,6 @@ contract MarginClearinghouse is Ownable2Step {
         return MarginClearinghouseAccountingLib.planFundingLossConsumption(
             _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc), lossUsdc
         );
-    }
-
-    function _toExternalBuckets(
-        MarginClearinghouseAccountingLib.AccountUsdcBuckets memory internalBuckets
-    ) internal pure returns (AccountUsdcBuckets memory buckets) {
-        buckets.settlementBalanceUsdc = internalBuckets.settlementBalanceUsdc;
-        buckets.reservedSettlementUsdc = internalBuckets.reservedSettlementUsdc;
-        buckets.totalLockedMarginUsdc = internalBuckets.totalLockedMarginUsdc;
-        buckets.activePositionMarginUsdc = internalBuckets.activePositionMarginUsdc;
-        buckets.otherLockedMarginUsdc = internalBuckets.otherLockedMarginUsdc;
-        buckets.freeSettlementUsdc = internalBuckets.freeSettlementUsdc;
     }
 
     /// @notice Transfers settlement asset from an account to the calling operator.

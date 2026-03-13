@@ -7,6 +7,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -221,7 +222,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
         vm.stopPrank();
 
-        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 600 * 1e6);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 600 * 1e6);
 
         assertEq(buckets.settlementBalanceUsdc, 2000 * 1e6);
         assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
@@ -238,7 +239,7 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockMargin(aliceId, 200 * 1e6);
 
-        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 500 * 1e6);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 500 * 1e6);
 
         assertEq(buckets.activePositionMarginUsdc, 200 * 1e6);
         assertEq(buckets.otherLockedMarginUsdc, 0);
@@ -326,7 +327,7 @@ contract MarginClearinghouseTest is Test {
             clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 1200 * 1e6, engine);
         vm.stopPrank();
 
-        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
         assertEq(freeConsumed, 1050 * 1e6);
         assertEq(marginConsumed, 150 * 1e6);
         assertEq(uncovered, 0);
@@ -348,7 +349,7 @@ contract MarginClearinghouseTest is Test {
             clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
         vm.stopPrank();
 
-        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
         assertEq(seizedUsdc, 1450 * 1e6);
         assertEq(payoutUsdc, 0);
         assertEq(badDebtUsdc, 0);

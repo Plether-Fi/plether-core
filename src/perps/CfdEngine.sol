@@ -8,7 +8,6 @@ import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
-import {CfdEngineReserveAccountingLib} from "./libraries/CfdEngineReserveAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -1462,13 +1461,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return CfdEngineReserveAccountingLib.getWithdrawalReservedUsdc(
-            _maxLiability(),
-            accumulatedFeesUsdc,
-            _getLiabilityOnlyFundingPnl(),
-            totalDeferredPayoutUsdc,
-            totalDeferredLiquidationBountyUsdc
-        );
+        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl())
+            + totalDeferredPayoutUsdc + totalDeferredLiquidationBountyUsdc;
     }
 
     function _buildAdjustedSolvencySnapshot()
@@ -1476,14 +1470,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         view
         returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot)
     {
-        snapshot = CfdEngineReserveAccountingLib.buildAdjustedSolvencySnapshot(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            _maxLiability(),
-            _buildFundingSnapshot(),
-            totalDeferredPayoutUsdc,
-            totalDeferredLiquidationBountyUsdc
+        snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
+            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
         );
+        if (totalDeferredPayoutUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredPayoutUsdc
+                ? snapshot.effectiveSolvencyAssets - totalDeferredPayoutUsdc
+                : 0;
+        }
+        if (totalDeferredLiquidationBountyUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredLiquidationBountyUsdc
+                ? snapshot.effectiveSolvencyAssets - totalDeferredLiquidationBountyUsdc
+                : 0;
+        }
     }
 
     function _enterDegradedModeIfInsolvent(
@@ -1494,7 +1493,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
         CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
-        snapshot = CfdEngineReserveAccountingLib.applyPendingVaultPayout(snapshot, pendingVaultPayoutUsdc);
+        if (pendingVaultPayoutUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > pendingVaultPayoutUsdc
+                ? snapshot.effectiveSolvencyAssets - pendingVaultPayoutUsdc
+                : 0;
+        }
         if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             degradedMode = true;
             emit DegradedModeEntered(snapshot.effectiveSolvencyAssets, snapshot.maxLiability, accountId);

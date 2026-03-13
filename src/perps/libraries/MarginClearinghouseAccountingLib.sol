@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-library MarginClearinghouseAccountingLib {
+import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 
-    struct AccountUsdcBuckets {
-        uint256 settlementBalanceUsdc;
-        uint256 reservedSettlementUsdc;
-        uint256 totalLockedMarginUsdc;
-        uint256 activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc;
-        uint256 freeSettlementUsdc;
-    }
+library MarginClearinghouseAccountingLib {
 
     struct SettlementConsumption {
         uint256 freeSettlementConsumedUsdc;
@@ -24,7 +17,7 @@ library MarginClearinghouseAccountingLib {
         uint256 reservedSettlementUsdc,
         uint256 totalLockedMarginUsdc,
         uint256 activePositionMarginUsdc
-    ) internal pure returns (AccountUsdcBuckets memory buckets) {
+    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets.settlementBalanceUsdc = settlementBalanceUsdc;
         buckets.reservedSettlementUsdc = reservedSettlementUsdc;
         buckets.totalLockedMarginUsdc = totalLockedMarginUsdc;
@@ -39,7 +32,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     function planFundingLossConsumption(
-        AccountUsdcBuckets memory buckets,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
     ) internal pure returns (SettlementConsumption memory consumption) {
         consumption.freeSettlementConsumedUsdc = buckets.freeSettlementUsdc > lossUsdc ? lossUsdc : buckets.freeSettlementUsdc;
@@ -52,7 +45,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     function getLiquidationReachableUsdc(
-        AccountUsdcBuckets memory buckets
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal pure returns (uint256 reachableUsdc) {
         reachableUsdc = buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc;
         if (reachableUsdc > buckets.settlementBalanceUsdc) {
@@ -61,7 +54,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     function getSettlementReachableUsdc(
-        AccountUsdcBuckets memory buckets,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 protectedLockedMarginUsdc
     ) internal pure returns (uint256 reachableUsdc) {
         uint256 protectedBalance = protectedLockedMarginUsdc + buckets.reservedSettlementUsdc;
