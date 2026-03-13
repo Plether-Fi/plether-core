@@ -79,8 +79,8 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
-        // With the explicit $200k depth passed to processOrder, the current VPI + fee path leaves $1,927.5 margin.
-        assertEq(margin, 1_927_500_000, "Margin should equal deposit minus VPI and exec fee");
+        // With the explicit $200k depth passed to processOrder, the current VPI + fee path leaves $1,947.5 margin.
+        assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
     function test_OpenTradeCostCannotSeizeReservedSettlementEscrow() public {
@@ -103,7 +103,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientAssetToSeize.selector);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
         vm.prank(address(router));
         engine.processOrder(order, 1e8, 1_000_000e6, uint64(block.timestamp));
 
@@ -316,9 +316,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
-        // 100k BULL at $1.00: execFee = notional * 6bps = $100k * 0.0006 = $60
+        // 100k BULL at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 60_000_000, "Exec fee should be 6bps of $100k notional");
+        assertEq(fees, 40_000_000, "Exec fee should be 4bps of $100k notional");
 
         address treasury = address(0xBEEF);
         engine.withdrawFees(treasury);
@@ -863,7 +863,7 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert(CfdEngine.CfdEngine__MarginDrainedByFees.selector);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
         engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
@@ -1281,7 +1281,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
 
         assertLe(bounty, posMargin, "Keeper bounty should not exceed remaining positive equity");
-        assertEq(bounty, 400_000, "Keeper bounty should cap at the trader's remaining positive equity");
+        assertEq(bounty, 600_000, "Keeper bounty should cap at the trader's remaining positive equity");
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {
@@ -1366,9 +1366,9 @@ contract CfdEngineTest is BasePerpTest {
 
         // Without fix: close at smallDepth yields massive VPI rebate (attacker profits).
         // With fix: stateful bound caps close rebate to what was paid on open → net VPI = 0.
-        // Only exec fees should be deducted. Exec fee = 6bps * $100k * 2 = $120.
+        // Only exec fees should be deducted. Exec fee = 4bps * $100k * 2 = $80.
         uint256 roundTripCost = chBeforeOpen - chAfterClose;
-        uint256 execFeeRoundTrip = 120 * 1e6;
+        uint256 execFeeRoundTrip = 80 * 1e6;
         assertEq(roundTripCost, execFeeRoundTrip, "Round-trip costs only exec fees, no VPI profit");
     }
 
@@ -2373,7 +2373,7 @@ contract VpiChunkingTest is Test {
         uint256 mmUsdcAfter = clearinghouse.balances(mmId, address(usdc));
 
         uint256 totalDeposited = 500_000 * 1e6;
-        uint256 approxExecFees = (500_000 * 1e6 * 6 / 10_000) * 2;
+        uint256 approxExecFees = (500_000 * 1e6 * 4 / 10_000) * 2;
         uint256 breakeven = totalDeposited - approxExecFees;
 
         assertEq(

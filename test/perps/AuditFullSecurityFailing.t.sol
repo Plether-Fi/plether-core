@@ -22,7 +22,7 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
 
         assertEq(
             clearinghouse.balances(accountId, address(usdc)),
-            776_500_000,
+            796_500_000,
             "Liquidation should leave only residual equity after consuming free USDC"
         );
     }

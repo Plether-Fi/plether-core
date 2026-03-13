@@ -130,8 +130,8 @@ contract AuditC03_MarginCheck is BasePerpTest {
 
         // Open 200k BULL tokens at $1.00
         // Notional = $200k, MMR = 1% = $2000, IMR = 1.5x = $3000
-        // marginDelta = $3100 → pre-fee passes IMR ($3100 >= $3000)
-        // execFee = 6bps * $200k = $120 → pos.margin = $2980 < $3000
+        // marginDelta = $3070 → pre-fee passes IMR ($3070 >= $3000)
+        // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
         // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
         uint256 depth = pool.totalAssets();
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
@@ -140,7 +140,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
             CfdTypes.Order({
                 accountId: aliceId,
                 sizeDelta: 200_000 * 1e18,
-                marginDelta: 3100 * 1e6,
+                marginDelta: 3070 * 1e6,
                 targetPrice: 1e8,
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),

@@ -50,7 +50,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
         assertEq(equityAfter, equityBefore, "Execution fees should not increase LP equity");
         assertEq(
-            engine.accumulatedFeesUsdc(), 120e6, "Open and close execution fees should both accrue as protocol revenue"
+            engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"
         );
     }
 

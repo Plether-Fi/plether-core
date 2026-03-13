@@ -203,7 +203,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
             engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
-        assertEq(bounty, 4_940_000, "Keeper bounty should cap at remaining positive equity");
+        assertEq(bounty, 4_960_000, "Keeper bounty should cap at remaining positive equity");
     }
 
 }
