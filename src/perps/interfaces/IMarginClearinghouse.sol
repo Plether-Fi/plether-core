@@ -64,7 +64,6 @@ interface IMarginClearinghouse {
     /// @notice Consumes close-path losses from settlement buckets while preserving explicitly protected locked margin.
     function consumeCloseLoss(
         bytes32 accountId,
-        uint256 protectedLockedMarginUsdc,
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);

@@ -367,8 +367,7 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockMargin(aliceId, 900 * 1e6);
         clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
-        (uint256 seizedUsdc, uint256 shortfallUsdc) =
-            clearinghouse.consumeCloseLoss(aliceId, 300 * 1e6, 1800 * 1e6, engine);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1800 * 1e6, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
