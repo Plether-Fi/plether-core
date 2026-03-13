@@ -94,6 +94,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
         uint256 immediatePayoutUsdc;
+        uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
     }
@@ -997,16 +998,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         collectedExecFeeUsdc = execFeeUsdc;
 
         if (netSettlement > 0) {
-            uint256 settlementGain = uint256(netSettlement);
-            uint256 availableCash = vault.totalAssets();
-            if (availableCash >= settlementGain) {
-                vault.payOut(address(clearinghouse), settlementGain);
-                clearinghouse.settleUsdc(accountId, address(USDC), netSettlement);
-            } else {
-                deferredPayoutUsdc[accountId] += settlementGain;
-                totalDeferredPayoutUsdc += settlementGain;
-                emit DeferredPayoutRecorded(accountId, settlementGain);
-            }
+            _payOrRecordDeferredTraderPayout(accountId, uint256(netSettlement));
             return collectedExecFeeUsdc;
         }
 
@@ -1038,8 +1030,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             accountId, positionMarginUsdc, residualUsdc, address(vault)
         );
         if (result.payoutUsdc > 0) {
-            vault.payOut(address(clearinghouse), result.payoutUsdc);
-            clearinghouse.settleUsdc(accountId, address(USDC), int256(result.payoutUsdc));
+            _payOrRecordDeferredTraderPayout(accountId, result.payoutUsdc);
+        }
+    }
+
+    function _payOrRecordDeferredTraderPayout(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        uint256 availableCash = vault.totalAssets();
+        if (availableCash >= amountUsdc) {
+            vault.payOut(address(clearinghouse), amountUsdc);
+            clearinghouse.settleUsdc(accountId, address(USDC), int256(amountUsdc));
+        } else {
+            deferredPayoutUsdc[accountId] += amountUsdc;
+            totalDeferredPayoutUsdc += amountUsdc;
+            emit DeferredPayoutRecorded(accountId, amountUsdc);
         }
     }
 
@@ -1317,7 +1327,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdEngineSettlementLib.LiquidationSettlementResult memory result = LiquidationAccountingLib.settlementForState(liqState);
         preview.seizedCollateralUsdc = result.seizedUsdc;
-        preview.immediatePayoutUsdc = result.payoutUsdc;
+        uint256 availableCash = vault.totalAssets();
+        preview.immediatePayoutUsdc = availableCash >= result.payoutUsdc ? result.payoutUsdc : 0;
+        preview.deferredPayoutUsdc = availableCash >= result.payoutUsdc ? 0 : result.payoutUsdc;
         preview.badDebtUsdc = result.badDebtUsdc;
 
         uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc);
