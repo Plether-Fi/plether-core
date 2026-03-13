@@ -80,6 +80,65 @@ contract AuditFollowupFindingsFailing_KeeperReserveSettlementShield is BasePerpT
 
 }
 
+contract AuditFollowupFindingsFailing_CloseKeeperFees is BasePerpTest {
+
+    address trader = address(0xC105E);
+    address keeper = address(0xBEEF);
+    address survivor = address(0x5157);
+
+    function test_H1_CloseKeeperRewardMustBeCappedInsteadOfFullExecFee() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 20_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, true);
+
+        uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(1, empty);
+
+        uint256 keeperBalanceAfter = usdc.balanceOf(keeper);
+        assertEq(
+            keeperBalanceAfter - keeperBalanceBefore,
+            1e6,
+            "Close keepers should only receive the capped keeper fee, not the full 6 bps execution fee"
+        );
+    }
+
+    function test_H1_CloseKeeperPayoutMustBeIncludedInDegradedModeCheck() public {
+        bytes32 survivorId = bytes32(uint256(uint160(survivor)));
+        bytes32 closingId = bytes32(uint256(uint160(trader)));
+        _fundTrader(survivor, 20_000e6);
+        _fundTrader(trader, 20_000e6);
+
+        _open(survivorId, CfdTypes.Side.BULL, 300_000e18, 10_000e6, 1e8);
+        _open(closingId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 remainingLiability = engine.getMaxLiability();
+        uint256 closeExecFeeUsdc = 60e6;
+        uint256 targetAssets = remainingLiability + closeExecFeeUsdc - 1;
+        uint256 currentAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, true);
+
+        bytes[] memory empty;
+        vm.prank(keeper);
+        router.executeOrder(1, empty);
+
+        assertTrue(
+            engine.degradedMode(),
+            "Degraded mode should account for keeper reward cash leaving the vault on close"
+        );
+    }
+
+}
+
 contract AuditFollowupFindingsFailing_StaleWithdrawals is BasePerpTest {
 
     address trader = address(0x57A1);
