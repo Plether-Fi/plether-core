@@ -169,6 +169,58 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ClaimDeferredPayout_CreditsClearinghouseWhenLiquidityReturns() public {
+        address trader = address(0xD302);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        uint256 deferred = engine.deferredPayoutUsdc(accountId);
+        assertGt(deferred, 0, "Setup should create a deferred payout");
+
+        _fundJunior(address(this), deferred);
+        uint256 clearinghouseBefore = clearinghouse.balances(accountId, address(usdc));
+
+        vm.prank(trader);
+        engine.claimDeferredPayout(accountId);
+
+        assertEq(engine.deferredPayoutUsdc(accountId), 0, "Claim should clear deferred payout state");
+        assertEq(
+            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouseBefore + deferred,
+            "Claim should credit the clearinghouse balance"
+        );
+    }
+
+    function test_ClaimDeferredPayout_RevertsWithoutLiquidityOrPayout() public {
+        address trader = address(0xD303);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__NoDeferredPayout.selector);
+        engine.claimDeferredPayout(accountId);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        engine.claimDeferredPayout(accountId);
+    }
+
     function test_FundingSettlement_SyncsClearinghouse() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));

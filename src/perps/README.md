@@ -52,7 +52,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**Un-Brickable FIFO Queue**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Each order prepays a reserved USDC keeper fee at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark). Important nuance: tiny orders can currently round this reserve down to zero, so FIFO remains logically unbrickable but may still become economically unattractive for keepers if invalid dust orders accumulate.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders prepay a reserved USDC keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents no longer require upfront free USDC; their keeper compensation is funded from the close-path execution fee during settlement.
 
 ### IV. CfdEngine — The Mathematical Ledger
 
@@ -61,6 +61,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 Core state machine. **Holds zero physical funds.** Receives validated intents, enforces O(1) solvency bounds, handles position mutations, calculates PnL, and instructs the Clearinghouse/HousePool on exactly who to pay.
 
 **Degraded Mode**: If a profitable close reveals that realized payouts have pushed `effectiveAssets` below the remaining worst-case liability bound, the close still succeeds but the engine latches `degradedMode`. While degraded, new opens and position-backed withdrawals are blocked, while closes, liquidations, mark updates, and recapitalization remain available until the owner clears the mode after solvency is restored.
+
+**Deferred Close Payouts**: A profitable close is never dropped solely because the House Pool is temporarily short on free cash. If the vault cannot immediately fund the realized gain, the position is still destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Once liquidity returns, the trader calls `claimDeferredPayout(accountId)` and the vault settles the deferred amount into the `MarginClearinghouse`, after which it becomes normal withdrawable/reusable account balance.
 
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
@@ -191,7 +193,7 @@ This prevents the Friday 19:00-22:00 gap from being exploitable -- during this p
 | Execution Fee | 6 bps (0.06%) | Charged on notional size at open/close |
 | Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
-Accumulated fees are withdrawn by the protocol owner via `withdrawFees()`.
+Open-path execution fees accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Close-path execution fees are used to pay the executing keeper during settlement instead of accumulating as protocol fees.
 
 ## Governance
 
@@ -244,7 +246,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Normal oracle staleness | 60s | Max Pyth price age for execution |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
-| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; third-party deposits do not reset existing holders' cooldown |
+| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, third-party deposits only initialize cooldown for fresh recipients |
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
 | `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |

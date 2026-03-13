@@ -59,7 +59,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Economic liveness still depends on keepers being paid enough to process the queued order |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders escrow a keeper fee bounded to `[0.05 USDC, 1.00 USDC]`, while close orders pay their keeper from close-path execution fees |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -150,6 +150,7 @@ The owner **cannot**:
 
 Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads and receive a reserved USDC fee collected at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine, with a `$1.00` fallback before the first mark is observed
+- **Keeper fee floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents skip upfront reservation and instead pay the keeper from the close settlement fee when execution succeeds
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
 - **Failed Orders**: Failed or expired orders still pay the reserved keeper fee to the executor, so stale or invalid orders remain costly for the submitter and economically worthwhile for keepers to clear
@@ -214,6 +215,13 @@ When a position goes underwater (equity < 0):
 - **Liquidation**: Vault seizes all position margin + available free USDC from clearinghouse. Remaining deficit is absorbed as bad debt by the House Pool.
 - **Self-Close**: `_processDecrease` seizes `min(available, owed)` from the user. Any shortfall is absorbed by the vault.
 - **Risk**: Sustained bad debt erodes LP capital. The funding curve's "wall of APY" at 40% skew is designed to prevent this by forcing deleveraging before extremes.
+
+#### Deferred Profitable Close Payouts
+
+- **Behavior**: If a profitable close realizes more USDC than the House Pool can immediately transfer, the position is still closed and the unpaid gain is recorded in `deferredPayoutUsdc[accountId]`
+- **Claim path**: Once liquidity returns, the account owner calls `claimDeferredPayout(accountId)`. The vault pays the deferred USDC into the `MarginClearinghouse`, which credits the trader's USDC balance there
+- **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
+- **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity
 
 #### No Partial Liquidation
 

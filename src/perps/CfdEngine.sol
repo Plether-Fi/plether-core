@@ -91,6 +91,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     error CfdEngine__VaultAlreadySet();
     error CfdEngine__RouterAlreadySet();
     error CfdEngine__NoFeesToWithdraw();
+    error CfdEngine__NoDeferredPayout();
+    error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__FundingExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -147,6 +149,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, bytes32 indexed triggeringAccount);
     event DegradedModeCleared();
     event DeferredPayoutRecorded(bytes32 indexed accountId, uint256 amountUsdc);
+    event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -389,6 +392,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _assertPostSolvency();
 
         emit MarginAdded(accountId, amount);
+    }
+
+    /// @notice Claims a previously deferred profitable close payout into the clearinghouse.
+    /// @dev The payout remains subject to current vault cash availability. Funds are credited to the
+    ///      clearinghouse first, so traders access them through the normal account-balance path.
+    function claimDeferredPayout(
+        bytes32 accountId
+    ) external nonReentrant {
+        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+            revert CfdEngine__NotAccountOwner();
+        }
+
+        uint256 amount = deferredPayoutUsdc[accountId];
+        if (amount == 0) {
+            revert CfdEngine__NoDeferredPayout();
+        }
+        if (vault.totalAssets() < amount) {
+            revert CfdEngine__InsufficientVaultLiquidity();
+        }
+
+        deferredPayoutUsdc[accountId] = 0;
+        vault.payOut(address(clearinghouse), amount);
+        clearinghouse.settleUsdc(accountId, address(USDC), int256(amount));
+
+        emit DeferredPayoutClaimed(accountId, amount);
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
