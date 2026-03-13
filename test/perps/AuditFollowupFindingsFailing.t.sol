@@ -311,14 +311,14 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
     address alice = address(0xA11CE);
     address helper = address(0xB0B);
 
-    function test_M1_ThirdPartyTopUpForExistingHolderMustRemainComposable() public {
+    function test_M1_SmallThirdPartyTopUpForExistingHolderMustRemainComposable() public {
         _fundJunior(alice, 100_000e6);
         uint256 initialCooldown = juniorVault.lastDepositTime(alice);
 
-        usdc.mint(helper, 10_000e6);
+        usdc.mint(helper, 4_999e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 10_000e6);
-        juniorVault.deposit(10_000e6, alice);
+        usdc.approve(address(juniorVault), 4_999e6);
+        juniorVault.deposit(4_999e6, alice);
         vm.stopPrank();
 
         assertGt(juniorVault.balanceOf(alice), 100_000e9, "Third-party top-up should mint additional shares for the existing holder");

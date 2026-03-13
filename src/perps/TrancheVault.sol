@@ -137,7 +137,11 @@ contract TrancheVault is ERC4626 {
         }
         _mint(receiver, shares);
         uint256 previousBalance = balanceOf(receiver) - shares;
-        if (caller == receiver || previousBalance == 0) {
+        uint256 meaningfulTopUpThreshold = previousBalance / 20;
+        if (meaningfulTopUpThreshold == 0 && previousBalance > 0) {
+            meaningfulTopUpThreshold = 1;
+        }
+        if (caller == receiver || previousBalance == 0 || shares >= meaningfulTopUpThreshold) {
             lastDepositTime[receiver] = block.timestamp;
         }
         emit Deposit(caller, receiver, assets, shares);

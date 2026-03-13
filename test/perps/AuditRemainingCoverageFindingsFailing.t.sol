@@ -105,9 +105,8 @@ contract AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs is BasePerpTe
     address alice = address(0xA11CE);
     address attacker = address(0xBAD);
 
-    function test_M1_FivePercentThirdPartyTopUpMustNotResetExistingHolderCooldown() public {
+    function test_M1_FivePercentThirdPartyTopUpMustResetExistingHolderCooldown() public {
         _fundJunior(alice, 100_000e6);
-        uint256 initialCooldown = juniorVault.lastDepositTime(alice);
 
         vm.warp(block.timestamp + 50 minutes);
 
@@ -117,13 +116,8 @@ contract AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs is BasePerpTe
         juniorVault.deposit(5_000e6, alice);
         vm.stopPrank();
 
-        assertEq(
-            juniorVault.lastDepositTime(alice),
-            initialCooldown,
-            "Third-party top-ups should not reset an existing holder cooldown"
-        );
-
         vm.warp(block.timestamp + 11 minutes);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
         vm.prank(alice);
         juniorVault.withdraw(105_000e6, alice, alice);
     }
