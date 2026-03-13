@@ -353,6 +353,69 @@ contract CfdEngineTest is BasePerpTest {
         engine.addMargin(accountId, 0);
     }
 
+    function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
+        address trader = address(0xAB10);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900 * 1e6, type(uint256).max, false);
+
+        CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
+
+        assertEq(viewData.settlementBalanceUsdc, clearinghouse.balances(accountId, address(usdc)));
+        assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
+        assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
+        assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
+        assertEq(viewData.closeReachableUsdc, clearinghouse.getSettlementReachableUsdc(accountId, 0));
+        assertEq(viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, 2_000 * 1e6));
+        assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
+        assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
+        assertEq(viewData.deferredPayoutUsdc, 0);
+    }
+
+    function test_GetPositionView_ReturnsLivePositionState() public {
+        address trader = address(0xAB11);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(90_000_000, uint64(block.timestamp));
+
+        CfdEngine.PositionView memory viewData = engine.getPositionView(accountId);
+        assertTrue(viewData.exists);
+        assertEq(uint256(viewData.side), uint256(CfdTypes.Side.BULL));
+        assertEq(viewData.size, 100_000 * 1e18);
+        assertEq(viewData.entryPrice, 1e8);
+        assertEq(viewData.entryNotionalUsdc, 100_000 * 1e6);
+        assertLt(viewData.unrealizedPnlUsdc, 0);
+        assertEq(viewData.maxProfitUsdc, 100_000 * 1e6);
+    }
+
+    function test_GetProtocolAccountingView_ReflectsDeferredLiabilities() public {
+        address trader = address(0xAB12);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        CfdEngine.ProtocolAccountingView memory viewData = engine.getProtocolAccountingView();
+        assertEq(viewData.vaultAssetsUsdc, pool.totalAssets());
+        assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
+        assertEq(viewData.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
+        assertEq(viewData.totalDeferredKeeperRewardUsdc, engine.totalDeferredKeeperRewardUsdc());
+        assertEq(viewData.degradedMode, engine.degradedMode());
+        assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
+    }
+
     function test_CloseLoss_DoesNotConsumeQueuedCommittedMargin() public {
         address trader = address(0xABD0);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

@@ -22,6 +22,46 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 
+    struct AccountCollateralView {
+        uint256 settlementBalanceUsdc;
+        uint256 lockedMarginUsdc;
+        uint256 reservedSettlementUsdc;
+        uint256 freeSettlementUsdc;
+        uint256 closeReachableUsdc;
+        uint256 liquidationReachableUsdc;
+        uint256 accountEquityUsdc;
+        uint256 freeBuyingPowerUsdc;
+        uint256 deferredPayoutUsdc;
+    }
+
+    struct PositionView {
+        bool exists;
+        CfdTypes.Side side;
+        uint256 size;
+        uint256 margin;
+        uint256 entryPrice;
+        uint256 entryNotionalUsdc;
+        int256 unrealizedPnlUsdc;
+        int256 pendingFundingUsdc;
+        int256 netEquityUsdc;
+        uint256 maxProfitUsdc;
+        bool liquidatable;
+    }
+
+    struct ProtocolAccountingView {
+        uint256 vaultAssetsUsdc;
+        uint256 maxLiabilityUsdc;
+        uint256 withdrawalReservedUsdc;
+        uint256 freeUsdc;
+        uint256 accumulatedFeesUsdc;
+        int256 cappedFundingPnlUsdc;
+        int256 liabilityOnlyFundingPnlUsdc;
+        uint256 totalDeferredPayoutUsdc;
+        uint256 totalDeferredKeeperRewardUsdc;
+        bool degradedMode;
+        bool hasLiveLiability;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -1031,6 +1071,66 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bytes32 accountId
     ) external view returns (uint256) {
         return positions[accountId].size;
+    }
+
+    function getAccountCollateralView(
+        bytes32 accountId
+    ) external view returns (AccountCollateralView memory viewData) {
+        uint256 positionMargin = positions[accountId].margin;
+        viewData.settlementBalanceUsdc = clearinghouse.balances(accountId, address(USDC));
+        viewData.lockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
+        viewData.reservedSettlementUsdc = clearinghouse.reservedSettlementUsdc(accountId);
+        viewData.freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        viewData.closeReachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        viewData.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin);
+        viewData.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
+        viewData.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        viewData.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
+    }
+
+    function getPositionView(
+        bytes32 accountId
+    ) external view returns (PositionView memory viewData) {
+        CfdTypes.Position memory pos = positions[accountId];
+        if (pos.size == 0) {
+            return viewData;
+        }
+
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, lastMarkPrice, CAP_PRICE);
+        int256 pendingFunding = getPendingFunding(pos);
+        uint256 reachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+
+        int256 equityUsdc = int256(reachableUsdc) + pendingFunding;
+        equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
+
+        viewData.exists = true;
+        viewData.side = pos.side;
+        viewData.size = pos.size;
+        viewData.margin = pos.margin;
+        viewData.entryPrice = pos.entryPrice;
+        viewData.entryNotionalUsdc = (pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        viewData.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        viewData.pendingFundingUsdc = pendingFunding;
+        viewData.netEquityUsdc = equityUsdc;
+        viewData.maxProfitUsdc = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
+        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        viewData.liquidatable = equityUsdc <= int256((viewData.entryNotionalUsdc * requiredBps) / 10_000);
+    }
+
+    function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
+        viewData.vaultAssetsUsdc = vault.totalAssets();
+        viewData.maxLiabilityUsdc = _maxLiability();
+        viewData.withdrawalReservedUsdc = _getWithdrawalReservedUsdc();
+        viewData.freeUsdc = viewData.vaultAssetsUsdc > viewData.withdrawalReservedUsdc
+            ? viewData.vaultAssetsUsdc - viewData.withdrawalReservedUsdc
+            : 0;
+        viewData.accumulatedFeesUsdc = accumulatedFeesUsdc;
+        viewData.cappedFundingPnlUsdc = _getSolvencyCappedFundingPnl();
+        viewData.liabilityOnlyFundingPnlUsdc = _getLiabilityOnlyFundingPnl();
+        viewData.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        viewData.totalDeferredKeeperRewardUsdc = totalDeferredKeeperRewardUsdc;
+        viewData.degradedMode = degradedMode;
+        viewData.hasLiveLiability = globalBullMaxProfit + globalBearMaxProfit > 0;
     }
 
     function getPositionSide(
