@@ -42,7 +42,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
-        assertEq(escrow.keeperReserveUsdc, 0, "Dust orders should not fabricate paid escrow where keeper fee rounds to zero");
+        assertEq(escrow.keeperReserveUsdc, 50_000, "Dust orders should escrow the minimum keeper fee so FIFO remains serviceable");
     }
 
 }
@@ -88,7 +88,7 @@ contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
         });
     }
 
-    function test_H1_PositiveEquityLiquidationPaysStandardNotionalBounty() public {
+    function test_H1_PositiveEquityLiquidationCapsAtRemainingEquity() public {
         address trader = address(0xA201);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
@@ -103,7 +103,7 @@ contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
         uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
-        assertEq(bounty, 10_100_000, "Keeper bounty remains notional-based while equity stays positive");
+        assertEq(bounty, 4_940_000, "Keeper bounty should cap at remaining positive equity");
     }
 
 }

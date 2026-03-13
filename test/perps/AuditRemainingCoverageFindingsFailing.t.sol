@@ -29,7 +29,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         );
     }
 
-    function test_H1_LiquidationMustUseSameReachableCollateralModelAsSettlement() public {
+    function test_H1_QueuedCollateralPreventsPrematureLiquidation() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -38,16 +38,11 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900e6, type(uint256).max, false);
 
-        bytes[] memory empty;
+        uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        engine.liquidatePosition(accountId, 105_000_000, pool.totalAssets(), uint64(block.timestamp));
+        vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
+        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
-
-        assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            0,
-            "Liquidation should not record bad debt when queued settlement collateral is still fully seizable"
-        );
     }
 
 }
@@ -83,7 +78,7 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
         uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
-        assertEq(bounty, 7_000_000, "Keeper bounty should not exceed the trader's remaining positive equity");
+        assertEq(bounty, 4_940_000, "Keeper bounty should not exceed the trader's remaining positive equity");
     }
 
 }
@@ -92,12 +87,15 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
 
     address trader = address(0xD057);
 
-    function test_H3_DustOrdersMustNotQueueWithoutKeeperReserve() public {
+    function test_H3_DustOrdersMustEscrowMinimumKeeperReserve() public {
         _fundTrader(trader, 1e6);
 
         vm.prank(trader);
-        vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
+
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(escrow.keeperReserveUsdc, 50_000, "Dust orders should escrow a nonzero minimum keeper fee");
     }
 
 }
@@ -128,6 +126,49 @@ contract AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs is BasePerpTe
         vm.warp(block.timestamp + 11 minutes);
         vm.prank(alice);
         juniorVault.withdraw(105_000e6, alice, alice);
+    }
+
+}
+
+contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerpTest {
+
+    address trader = address(0xC105);
+    address keeper = address(0xBEEF);
+
+    function test_H4_ProfitableCloseMustNotBeDroppedWhenVaultLacksImmediateCash() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 10_000e6);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(80_000_000));
+
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeOrder(1, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
+    }
+
+    function test_M2_FullyUtilizedAccountShouldStillBeAbleToQueueClose() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        assertEq(router.nextCommitId(), 2, "Fully utilized traders should be able to queue close intents without upfront free USDC");
     }
 
 }

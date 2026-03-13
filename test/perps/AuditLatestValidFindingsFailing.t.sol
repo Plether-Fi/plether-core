@@ -23,7 +23,12 @@ contract AuditLatestValidFindingsFailing is BasePerpTest {
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
 
         vm.prank(address(juniorVault));
         pool.reconcile();

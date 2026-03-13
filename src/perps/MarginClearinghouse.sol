@@ -339,6 +339,18 @@ contract MarginClearinghouse is Ownable2Step {
         return reachable > balance ? balance : reachable;
     }
 
+    /// @notice Returns settlement balance reachable after protecting only an explicitly remaining margin bucket.
+    /// @dev This is the canonical helper for terminal settlement paths: full closes and liquidations
+    ///      should pass zero protected margin, while partial closes should protect only the residual
+    ///      position margin that remains open after settlement.
+    function getSettlementReachableUsdc(
+        bytes32 accountId,
+        uint256 protectedLockedMarginUsdc
+    ) public view returns (uint256) {
+        uint256 balance = balances[accountId][settlementAsset];
+        return balance > protectedLockedMarginUsdc ? balance - protectedLockedMarginUsdc : 0;
+    }
+
     // ==========================================
     // PROTOCOL INTEGRATION (OrderRouter / Engine)
     // ==========================================

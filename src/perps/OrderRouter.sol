@@ -46,6 +46,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
     uint256 internal constant ORDER_KEEPER_BPS = 1;
+    uint256 internal constant MIN_ORDER_KEEPER_FEE_USDC = 50_000;
     uint256 internal constant MAX_ORDER_KEEPER_FEE_USDC = DecimalConstants.ONE_USDC;
 
     uint256 public pendingMaxOrderAge;
@@ -208,7 +209,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
             revert OrderRouter__NoOpenPosition();
         }
-        uint256 keeperFeeReserveUsdc = _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
+        uint256 keeperFeeReserveUsdc = isClose ? 0 : _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -232,7 +233,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     }
 
     /// @notice Quotes the reserved USDC keeper fee for a new order using the latest engine mark price.
-    /// @dev Falls back to 1.00 USD if the engine has not observed a mark yet. Result is capped at 1 USDC.
+    /// @dev Falls back to 1.00 USD if the engine has not observed a mark yet. Result is floored at
+    ///      0.05 USDC and capped at 1 USDC for non-close intents.
     /// @param sizeDelta Order size in 18-decimal notional units
     /// @return keeperFeeUsdc Reserved keeper fee in 6-decimal USDC units
     function quoteKeeperFeeUsdc(
@@ -272,7 +274,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId,
         bytes[] calldata pythUpdateData
     ) external payable {
-        uint256 keeperRewardUsdc = _skipStaleOrders(orderId);
+        uint256 reservedKeeperRewardUsdc = _skipStaleOrders(orderId);
+        uint256 vaultKeeperRewardUsdc;
         if (orderId != nextExecuteId) {
             revert OrderRouter__FIFOViolation();
         }
@@ -282,7 +285,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, "Order expired");
-            _finalizeExecution(orderId, 0, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+            _finalizeExecution(orderId, 0, false, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), 0);
             return;
         }
 
@@ -298,7 +301,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             );
             if (policy.closeOnly && !order.isClose) {
                 emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
-                _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+                _finalizeExecution(orderId, pythFee, false, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), 0);
                 return;
             }
 
@@ -322,7 +325,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+            _finalizeExecution(orderId, pythFee, false, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), 0);
             return;
         }
 
@@ -335,19 +338,22 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         _releaseCommittedMarginForExecution(orderId);
 
-        try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
+        try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) returns (int256 closeKeeperRewardUsdc) {
+            if (closeKeeperRewardUsdc > 0) {
+                vaultKeeperRewardUsdc += uint256(closeKeeperRewardUsdc);
+            }
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+            _finalizeExecution(orderId, pythFee, false, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), 0);
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(orderId, pythFee, false, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+            _finalizeExecution(orderId, pythFee, false, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), 0);
             return;
         }
 
-        _finalizeExecution(orderId, pythFee, true, keeperRewardUsdc + _collectKeeperFeeReserve(orderId));
+        _finalizeExecution(orderId, pythFee, true, reservedKeeperRewardUsdc + _collectKeeperFeeReserve(orderId), vaultKeeperRewardUsdc);
     }
 
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
@@ -384,26 +390,27 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 capPrice = engine.CAP_PRICE();
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
 
-        uint256 totalKeeperRewardUsdc;
+        uint256 totalReservedKeeperRewardUsdc;
+        uint256 totalVaultKeeperRewardUsdc;
 
         while (nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
             CfdTypes.Order memory order = orders[orderId];
 
             if (order.sizeDelta == 0) {
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
                 continue;
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, "Order expired");
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
                 continue;
             }
 
             if (policy.closeOnly && !order.isClose) {
                 emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
                 continue;
             }
 
@@ -418,7 +425,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
                 continue;
             }
 
@@ -431,20 +438,26 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             _releaseCommittedMarginForExecution(orderId);
 
-            try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
+            try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) returns (int256 closeKeeperRewardUsdc) {
+                if (closeKeeperRewardUsdc > 0) {
+                    totalVaultKeeperRewardUsdc += uint256(closeKeeperRewardUsdc);
+                }
                 emit OrderExecuted(orderId, clampedPrice);
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, true);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, true);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
-                totalKeeperRewardUsdc += _cleanupOrder(orderId, false);
+                totalReservedKeeperRewardUsdc += _cleanupOrder(orderId, false);
             }
         }
 
-        if (totalKeeperRewardUsdc > 0) {
-            USDC.safeTransfer(msg.sender, totalKeeperRewardUsdc);
+        if (totalReservedKeeperRewardUsdc > 0) {
+            USDC.safeTransfer(msg.sender, totalReservedKeeperRewardUsdc);
+        }
+        if (totalVaultKeeperRewardUsdc > 0) {
+            vault.payOut(msg.sender, totalVaultKeeperRewardUsdc);
         }
 
         _sendEth(msg.sender, msg.value - pythFee);
@@ -529,13 +542,17 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId,
         uint256 pythFee,
         bool success,
-        uint256 keeperRewardUsdc
+        uint256 reservedKeeperRewardUsdc,
+        uint256 vaultKeeperRewardUsdc
     ) internal {
         _consumeOrderEscrow(orderId, success);
         _deleteOrder(orderId);
 
-        if (keeperRewardUsdc > 0) {
-            USDC.safeTransfer(msg.sender, keeperRewardUsdc);
+        if (reservedKeeperRewardUsdc > 0) {
+            USDC.safeTransfer(msg.sender, reservedKeeperRewardUsdc);
+        }
+        if (vaultKeeperRewardUsdc > 0) {
+            vault.payOut(msg.sender, vaultKeeperRewardUsdc);
         }
         _sendEth(msg.sender, msg.value - pythFee);
     }
@@ -546,6 +563,9 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal pure returns (uint256) {
         uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
         uint256 keeperRewardUsdc = (notionalUsdc * ORDER_KEEPER_BPS) / 10_000;
+        if (keeperRewardUsdc < MIN_ORDER_KEEPER_FEE_USDC) {
+            keeperRewardUsdc = MIN_ORDER_KEEPER_FEE_USDC;
+        }
         return keeperRewardUsdc > MAX_ORDER_KEEPER_FEE_USDC ? MAX_ORDER_KEEPER_FEE_USDC : keeperRewardUsdc;
     }
 

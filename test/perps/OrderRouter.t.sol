@@ -179,7 +179,7 @@ contract OrderRouterTest is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
-        assertEq(escrow.keeperReserveUsdc, 1_500_000, "Escrow view should sum keeper reserves");
+        assertEq(escrow.keeperReserveUsdc, 1_000_000, "Only the open order should escrow an upfront keeper reserve");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 

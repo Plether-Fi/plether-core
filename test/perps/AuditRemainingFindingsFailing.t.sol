@@ -37,14 +37,19 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 1e8);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
         assertEq(equityAfter, equityBefore, "Execution fees should not increase LP equity");
-        assertEq(engine.accumulatedFeesUsdc(), 120e6, "Execution fees should accrue to protocol fees");
+        assertEq(engine.accumulatedFeesUsdc(), 60e6, "Only open-path fees remain protocol revenue; close fees pay execution keepers");
     }
 
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {

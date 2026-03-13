@@ -109,7 +109,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
 
-        assertEq(bounty, 10_100_000, "Keeper bounty should stay notional-based even when equity is slightly positive");
+        assertEq(bounty, 4_940_000, "Keeper bounty should cap at the trader's remaining positive equity");
     }
 
 }

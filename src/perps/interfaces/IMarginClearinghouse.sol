@@ -59,4 +59,12 @@ interface IMarginClearinghouse {
         uint256 positionMarginUsdc
     ) external view returns (uint256);
 
+    /// @notice Returns settlement-asset balance reachable for a terminal or partial settlement path.
+    /// @dev Protects only the explicitly supplied remaining locked margin bucket and treats all
+    ///      other settlement-asset balance as reachable for loss collection.
+    function getSettlementReachableUsdc(
+        bytes32 accountId,
+        uint256 protectedLockedMarginUsdc
+    ) external view returns (uint256);
+
 }

@@ -299,8 +299,10 @@ contract CfdEngineTest is BasePerpTest {
             lockedBeforeClose - liveMarginBeforeClose,
             "Close settlement should release only the live position margin, not the later committed margin"
         );
-        assertGt(
-            engine.accumulatedBadDebtUsdc(), badDebtBefore, "Any uncovered close loss should become bad debt instead of consuming queued margin"
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            badDebtBefore,
+            "Queued committed margin should now be counted before socializing a full-close shortfall"
         );
     }
 
@@ -936,8 +938,8 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
 
-        assertGt(bounty, posMargin, "Keeper bounty can exceed remaining positive equity once uncapped");
-        assertEq(bounty, 10_050_000, "Keeper bounty should follow notional size once positive-equity capping is removed");
+        assertLe(bounty, posMargin, "Keeper bounty should not exceed remaining positive equity");
+        assertEq(bounty, 400_000, "Keeper bounty should cap at the trader's remaining positive equity");
     }
 
     function test_ClearBadDebt_ReducesOutstandingDebt() public {
@@ -1580,10 +1582,10 @@ contract PhantomExecFeeTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1);
         vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
-        assertEq(engine.accumulatedFeesUsdc(), openFee, "No additional close fee should accrue when the close intent cannot reserve keeper fees");
+        assertEq(router.nextCommitId(), 3, "Fully utilized traders should still be able to queue close intents");
+        assertEq(engine.accumulatedFeesUsdc(), openFee, "Committing the close should not accrue additional protocol fees");
     }
 
 }

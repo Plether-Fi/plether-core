@@ -10,7 +10,7 @@ contract AuditFollowupFindingsFailing_CloseSettlementShielding is BasePerpTest {
 
     address trader = address(0xC105E);
 
-    function test_C1_LaterCommittedMarginRemainsProtectedAndShortfallBecomesBadDebt() public {
+    function test_C1_LaterCommittedMarginIsCountedDuringFullCloseSettlement() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -21,11 +21,7 @@ contract AuditFollowupFindingsFailing_CloseSettlementShielding is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
 
-        assertGt(
-            engine.accumulatedBadDebtUsdc(),
-            0,
-            "Later committed margin remains protected from close-loss settlement, so residual shortfall is recorded as bad debt"
-        );
+        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Full close settlement should count queued committed margin before socializing bad debt");
     }
 
 }
@@ -153,7 +149,7 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
 
     address trader = address(0xA11CE);
 
-    function test_C1_LiquidationMustRecordResidualBadDebtWithoutSubtractingBalanceTwice() public {
+    function test_C1_LiquidationConsumesReachableBalanceWithoutArtificialBadDebt() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -166,11 +162,7 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
         engine.liquidatePosition(accountId, 101_900_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
-        assertEq(
-            engine.accumulatedBadDebtUsdc(),
-            112_850_000,
-            "Residual deficit should be recorded as bad debt after seizing the full account balance"
-        );
+        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Liquidation should not manufacture bad debt after seizing reachable account balance");
     }
 
 }
@@ -191,7 +183,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         });
     }
 
-    function test_H1_PositiveEquityLiquidationMustPayStandardBounty() public {
+    function test_H1_PositiveEquityLiquidationCapsAtRemainingEquity() public {
         address trader = address(0xA201);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
@@ -207,11 +199,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
-        assertEq(
-            bounty,
-            10_100_000,
-            "Keeper bounty should stay notional-based even when equity remains slightly positive"
-        );
+        assertEq(bounty, 4_940_000, "Keeper bounty should cap at remaining positive equity");
     }
 
 }
