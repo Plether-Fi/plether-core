@@ -511,6 +511,32 @@ contract MarginClearinghouse is Ownable2Step {
         emit AssetSeized(accountId, settlementAsset, totalConsumedUsdc, recipient);
     }
 
+    /// @notice Consumes close-path losses from settlement buckets while preserving reserved settlement and protected locked margin.
+    function consumeCloseLoss(
+        bytes32 accountId,
+        uint256 protectedLockedMarginUsdc,
+        uint256 lossUsdc,
+        address recipient
+    ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc) {
+        if (lossUsdc == 0) {
+            return (0, 0);
+        }
+
+        uint256 reachableUsdc = getFreeSettlementBalanceUsdc(accountId);
+        seizedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
+        shortfallUsdc = lossUsdc - seizedUsdc;
+
+        if (seizedUsdc == 0) {
+            return (0, shortfallUsdc);
+        }
+
+        balances[accountId][settlementAsset] -= seizedUsdc;
+        IERC20(settlementAsset).safeTransfer(recipient, seizedUsdc);
+        emit AssetSeized(accountId, settlementAsset, seizedUsdc, recipient);
+
+        protectedLockedMarginUsdc;
+    }
+
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
     /// @dev Releases the specified active position margin bucket but leaves unrelated committed margin untouched.
     function consumeLiquidationResidual(

@@ -360,6 +360,26 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 200 * 1e6);
     }
 
+    function test_ConsumeCloseLoss_PreservesProtectedBuckets() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) =
+            clearinghouse.consumeCloseLoss(aliceId, 300 * 1e6, 1800 * 1e6, engine);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        assertEq(seizedUsdc, 1050 * 1e6);
+        assertEq(shortfallUsdc, 750 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 950 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6, "Close loss helper should not unlock protected margin buckets");
+        assertEq(buckets.freeSettlementUsdc, 0);
+    }
+
     function test_SupportAsset_InvalidLTV_Reverts() public {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
         clearinghouse.proposeAssetConfig(address(0xBEEF), 18, 10_001, address(0));

@@ -11,7 +11,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
     address trader = address(0xC10A);
 
-    function test_C1_FullCloseMustNotTreatQueuedCommittedMarginAsLossShield() public {
+    function test_C1_FullCloseMustPreserveQueuedCommittedMarginBuckets() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -22,11 +22,17 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
 
-        assertGt(
-            engine.accumulatedBadDebtUsdc(),
-            0,
-            "Queued committed margin should remain protected, so the uncovered shortfall must be socialized as bad debt"
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            7_900e6,
+            "Queued committed margin should remain locked after the live position fully closes"
         );
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            50_000,
+            "Queued execution bounty reserve should remain protected after the live position fully closes"
+        );
+        assertEq(router.pendingOrderCounts(accountId), 1, "Queued successor order should remain pending after the live position closes");
     }
 
     function test_H1_LiquidationMustPreserveQueuedCollateralBuckets() public {

@@ -1002,13 +1002,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return collectedExecFeeUsdc;
         }
 
-        remainingPosMarginUsdc;
         CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-            clearinghouse.getFreeSettlementBalanceUsdc(accountId), uint256(-netSettlement), execFeeUsdc
+            clearinghouse.getSettlementReachableUsdc(accountId, remainingPosMarginUsdc), uint256(-netSettlement), execFeeUsdc
         );
-        if (result.seizedUsdc > 0) {
-            _seizeUsdcToVault(accountId, result.seizedUsdc);
-        }
+        (result.seizedUsdc, result.shortfallUsdc) =
+            clearinghouse.consumeCloseLoss(accountId, remainingPosMarginUsdc, uint256(-netSettlement), address(vault));
         if (result.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
