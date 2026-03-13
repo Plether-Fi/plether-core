@@ -46,6 +46,36 @@ contract AuditFollowupFindingsFailing_CloseSettlementShielding is BasePerpTest {
 
 }
 
+contract AuditFollowupFindingsFailing_KeeperReserveSettlementShield is BasePerpTest {
+
+    address trader = address(0xC106E);
+
+    function test_C4_KeeperReserveEscrowMustRemainReachableDuringFullCloseSettlement() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 9_001e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 8_000e6, 1e8);
+
+        vm.startPrank(trader);
+        for (uint256 i = 0; i < 1001; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 2_000_000e18, 0, type(uint256).max, false);
+        }
+        vm.stopPrank();
+
+        assertEq(router.keeperFeeReserves(1), 1e6, "Setup should escrow the max keeper reserve in the router");
+        assertEq(usdc.balanceOf(address(router)), 1_001e6, "Setup should move queued keeper reserves into router escrow");
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 108_500_000);
+
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            0,
+            "Router-held keeper reserves should remain collectible during full close settlement"
+        );
+    }
+
+}
+
 contract AuditFollowupFindingsFailing_StaleWithdrawals is BasePerpTest {
 
     address trader = address(0x57A1);
@@ -161,6 +191,22 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");
         _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8);
+    }
+
+    function test_C3_DeferredPayoutMustLatchDegradedModeWhileLiabilityRemainsOutstanding() public {
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+
+        _fundTrader(bullTrader, 11_000e6);
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        _close(bullId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        assertGt(engine.deferredPayoutUsdc(bullId), 0, "Setup should create a deferred payout liability");
+        assertTrue(engine.degradedMode(), "Outstanding deferred payouts should keep the protocol in degraded mode");
     }
 
 }
