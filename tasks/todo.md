@@ -134,6 +134,47 @@ Review:
 - Updated `test_M12_GetFreeUSDC_ReservesFees` in `test/perps/HousePool.t.sol` to expect the live 4 bps fee accrual (`40_000_000`) and to use current execution-bounty terminology.
 - Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "M12_GetFreeUSDC_ReservesFees"` and `forge test --match-path "test/perps/*.t.sol"`.
 
+- [x] Refactor clearinghouse reachability and consume paths around one internal bucket snapshot
+- [x] Update related tests to assert bucket preservation across writes
+- [x] Run targeted Forge tests for clearinghouse settlement paths
+
+Review:
+- Added the first explicit bucket-model implementation slice in `src/perps/MarginClearinghouse.sol` and `src/perps/interfaces/IMarginClearinghouse.sol`: `getAccountUsdcBuckets()` now exposes settlement balance, reserved settlement, total locked margin, active position margin, other locked margin, and free settlement as first-class fields instead of leaving those partitions implicit.
+- Extended `src/perps/CfdEngine.sol` collateral views to surface `activePositionMarginUsdc` and `otherLockedMarginUsdc`, so perps-facing diagnostics now reflect the clearinghouse bucket model directly.
+- Added regression coverage in `test/perps/MarginClearinghouse.t.sol` and `test/perps/CfdEngine.t.sol` proving both read-side and write-side bucket preservation.
+- Extracted the bucket math into `src/perps/libraries/MarginClearinghouseAccountingLib.sol` so the clearinghouse now uses one shared kernel for bucket construction, funding-loss consumption planning, and reachable-balance planning.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "GetAccountUsdcBuckets|ConsumeFundingLoss_PreservesOtherLockedAndReservedBuckets|ConsumeLiquidationResidual_PreservesOtherLockedAndReservedBuckets|FreeSettlementBalance_TracksLockedUsdcOnly"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "GetAccountCollateralView_ReturnsCurrentBuckets"`.
+
+- [x] Identify liquidation-specific math/snapshot logic in `CfdEngine` for extraction
+- [x] Add `LiquidationAccounting` library for preview/live shared calculations
+- [x] Wire `CfdEngine` liquidation preview/live paths to the new library without behavior changes
+- [x] Run targeted liquidation tests and record results
+
+Review:
+- Added `src/perps/libraries/LiquidationAccountingLib.sol` to hold the shared liquidation kernel: equity composition, maintenance margin, bounty capping, and residual settlement planning are now computed in one place.
+- Updated `src/perps/CfdEngine.sol` so both `previewLiquidation()` and live liquidation call the same liquidation accounting builder, reducing preview/live drift and making the domain boundary explicit.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewLiquidation_ReturnsBountyAndLiquidatableFlag|LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|Liquidation_PreservesReservedSettlementEscrow|LiquidationBounty_CappedByPositiveEquity"` and `forge test --match-path test/perps/AuditCurrentFindingsVerification.t.sol --match-test "M2_KeeperBountyShouldUsePositiveEquityNotPositionMargin"`.
+
+- [x] Identify withdrawal/solvency snapshot logic shared between `CfdEngine` and `HousePool`
+- [x] Extract a dedicated accounting library for perps reserve/solvency views
+- [x] Wire engine/pool callsites to the new library without behavior changes
+- [x] Run targeted reserve/solvency tests and record results
+
+Review:
+- Added `src/perps/libraries/CfdEngineReserveAccountingLib.sol` so deferred trader payouts, deferred liquidation bounties, withdrawal reserve construction, and pending vault-payout solvency adjustments now run through one shared reserve/solvency kernel instead of inline arithmetic in `src/perps/CfdEngine.sol`.
+- Updated `src/perps/CfdEngine.sol` to use the new reserve-accounting library for `getWithdrawalReservedUsdc()`, adjusted solvency snapshots, and degraded-mode pending payout handling.
+- Verified green: `forge test --match-path test/perps/ArchitectureRegression.t.sol --match-test "WithdrawFees_MustHonorDeferredKeeperLiabilities|Reconcile_MustSubtractDeferredLiquidationBounties"`, `forge test --match-path test/perps/HousePool.t.sol --match-test "M12_GetFreeUSDC_ReservesFees|GetVaultLiquidityView_ReturnsCurrentPoolState"`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "GetProtocolAccountingView|GetDeferredPayoutStatus_ReflectsClaimability"`.
+
+- [x] Identify repeated order-escrow aggregation logic in `OrderRouter` for extraction
+- [x] Add `OrderEscrowAccounting` library for queued order summaries/views
+- [x] Wire `OrderRouter` escrow view/summary paths to the new library without behavior changes
+- [x] Run targeted order-router escrow tests and record results
+
+Review:
+- Added `src/perps/libraries/OrderEscrowAccountingLib.sol` so queued-order escrow aggregation now has an explicit domain helper for account matching, escrow totals, summary totals, and pending-order view construction.
+- Updated `src/perps/OrderRouter.sol` to route `getAccountEscrow()`, `getAccountOrderSummary()`, and `getPendingOrdersForAccount()` through the shared order-escrow accounting helper instead of repeating hand-rolled queue aggregation logic in three separate paths.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "AccountEscrowView_TracksPendingOrders|GetAccountOrderSummary_ReturnsAggregateOrderState|GetPendingOrdersForAccount_ReturnsQueuedOrderDetails|CloseCommit_RequiresFlatKeeperBountyReserve"` and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "BatchExecution_AllSucceed|BatchExecution_MixedResults"`.
+
 - [x] Verify the latest audit findings against current code and spec
 - [x] Trace queue cancellation, seizure reachability, fee routing, liquidation bounty, and commit-time validation paths
 - [x] Cross-check each claim against `ACCOUNTING_SPEC.md` and existing regression coverage

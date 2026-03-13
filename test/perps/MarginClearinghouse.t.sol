@@ -212,6 +212,39 @@ contract MarginClearinghouseTest is Test {
         );
     }
 
+    function test_GetAccountUsdcBuckets_SplitsActiveAndReservedBuckets() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        vm.stopPrank();
+
+        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 600 * 1e6);
+
+        assertEq(buckets.settlementBalanceUsdc, 2000 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 1050 * 1e6);
+    }
+
+    function test_GetAccountUsdcBuckets_ClampsActiveMarginToTotalLocked() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockMargin(aliceId, 200 * 1e6);
+
+        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 500 * 1e6);
+
+        assertEq(buckets.activePositionMarginUsdc, 200 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 0);
+        assertEq(buckets.freeSettlementUsdc, 800 * 1e6);
+    }
+
     function test_Deposit_UnsupportedAsset_Reverts() public {
         MockToken randomToken = new MockToken("Random", "RND", 18);
         randomToken.mint(alice, 1000e18);
@@ -280,6 +313,50 @@ contract MarginClearinghouseTest is Test {
         vm.prank(alice);
         vm.expectRevert();
         clearinghouse.withdraw(aliceId, address(usdc), 1000 * 1e6);
+    }
+
+    function test_ConsumeFundingLoss_PreservesOtherLockedAndReservedBuckets() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
+            clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 1200 * 1e6, engine);
+        vm.stopPrank();
+
+        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        assertEq(freeConsumed, 1050 * 1e6);
+        assertEq(marginConsumed, 150 * 1e6);
+        assertEq(uncovered, 0);
+        assertEq(buckets.settlementBalanceUsdc, 800 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 750 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 750 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 0);
+    }
+
+    function test_ConsumeLiquidationResidual_PreservesOtherLockedAndReservedBuckets() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
+            clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
+        vm.stopPrank();
+
+        MarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        assertEq(seizedUsdc, 1450 * 1e6);
+        assertEq(payoutUsdc, 0);
+        assertEq(badDebtUsdc, 0);
+        assertEq(buckets.settlementBalanceUsdc, 550 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 200 * 1e6);
     }
 
     function test_SupportAsset_InvalidLTV_Reverts() public {

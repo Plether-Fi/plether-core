@@ -398,6 +398,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.settlementBalanceUsdc, clearinghouse.balances(accountId, address(usdc)));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
+        assertEq(viewData.activePositionMarginUsdc, positionMargin);
+        assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(

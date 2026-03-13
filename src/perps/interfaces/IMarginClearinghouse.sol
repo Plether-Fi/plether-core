@@ -4,6 +4,15 @@ pragma solidity 0.8.33;
 /// @notice Cross-margin account system that holds collateral and settles PnL for CFD positions.
 interface IMarginClearinghouse {
 
+    struct AccountUsdcBuckets {
+        uint256 settlementBalanceUsdc;
+        uint256 reservedSettlementUsdc;
+        uint256 totalLockedMarginUsdc;
+        uint256 activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc;
+        uint256 freeSettlementUsdc;
+    }
+
     /// @notice Returns the balance of an asset for an account
     function balances(
         bytes32 accountId,
@@ -68,10 +77,16 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Returns reserved settlement USDC for pending keeper-fee escrow
+    /// @notice Returns reserved settlement USDC for pending execution-bounty escrow
     function reservedSettlementUsdc(
         bytes32 accountId
     ) external view returns (uint256);
+    /// @notice Returns the explicit USDC bucket split for an account.
+    /// @dev `activePositionMarginUsdc` is the margin bucket currently backing the live position being reasoned about.
+    function getAccountUsdcBuckets(
+        bytes32 accountId,
+        uint256 activePositionMarginUsdc
+    ) external view returns (AccountUsdcBuckets memory buckets);
     /// @notice Returns total USD buying power of an account with LTV haircuts (6 decimals)
     function getAccountEquityUsdc(
         bytes32 accountId

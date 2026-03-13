@@ -8,6 +8,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
+import {OrderEscrowAccountingLib} from "./libraries/OrderEscrowAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -284,34 +285,38 @@ contract OrderRouter is Ownable2Step, Pausable {
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (AccountEscrow memory escrow) {
+        OrderEscrowAccountingLib.AccountEscrowTotals memory totals;
         uint64 maxOrderId = nextCommitId;
         for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
             CfdTypes.Order memory order = orders[orderId];
-            if (order.accountId != accountId || order.sizeDelta == 0) {
+            if (!OrderEscrowAccountingLib.matchesAccount(order, accountId)) {
                 continue;
             }
-            escrow.committedMarginUsdc += committedMargins[orderId];
-            escrow.executionBountyUsdc += executionBountyReserves[orderId];
-            escrow.pendingOrderCount++;
+            totals = OrderEscrowAccountingLib.includeOrder(totals, committedMargins[orderId], executionBountyReserves[orderId]);
         }
+        escrow.committedMarginUsdc = totals.committedMarginUsdc;
+        escrow.executionBountyUsdc = totals.executionBountyUsdc;
+        escrow.pendingOrderCount = totals.pendingOrderCount;
     }
 
     function getAccountOrderSummary(
         bytes32 accountId
     ) external view returns (AccountOrderSummary memory summary) {
+        OrderEscrowAccountingLib.AccountOrderSummaryTotals memory totals;
         uint64 maxOrderId = nextCommitId;
         for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
             CfdTypes.Order memory order = orders[orderId];
-            if (order.accountId != accountId || order.sizeDelta == 0) {
+            if (!OrderEscrowAccountingLib.matchesAccount(order, accountId)) {
                 continue;
             }
-            summary.pendingOrderCount++;
-            summary.committedMarginUsdc += committedMargins[orderId];
-            summary.executionBountyUsdc += executionBountyReserves[orderId];
-            if (order.isClose) {
-                summary.hasTerminalCloseQueued = true;
-            }
+            totals = OrderEscrowAccountingLib.includeOrder(
+                totals, order, committedMargins[orderId], executionBountyReserves[orderId]
+            );
         }
+        summary.pendingOrderCount = totals.pendingOrderCount;
+        summary.committedMarginUsdc = totals.committedMarginUsdc;
+        summary.executionBountyUsdc = totals.executionBountyUsdc;
+        summary.hasTerminalCloseQueued = totals.hasTerminalCloseQueued;
     }
 
     function getPendingOrdersForAccount(
@@ -321,7 +326,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 count;
         for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
             CfdTypes.Order memory order = orders[orderId];
-            if (order.accountId == accountId && order.sizeDelta > 0) {
+            if (OrderEscrowAccountingLib.matchesAccount(order, accountId)) {
                 count++;
             }
         }
@@ -330,20 +335,23 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 index;
         for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
             CfdTypes.Order memory order = orders[orderId];
-            if (order.accountId != accountId || order.sizeDelta == 0) {
+            if (!OrderEscrowAccountingLib.matchesAccount(order, accountId)) {
                 continue;
             }
+            OrderEscrowAccountingLib.PendingOrderData memory orderData = OrderEscrowAccountingLib.buildPendingOrderData(
+                orderId, order, committedMargins[orderId], executionBountyReserves[orderId]
+            );
             pending[index] = PendingOrderView({
-                orderId: orderId,
-                isClose: order.isClose,
-                side: order.side,
-                sizeDelta: order.sizeDelta,
-                marginDelta: order.marginDelta,
-                targetPrice: order.targetPrice,
-                commitTime: order.commitTime,
-                commitBlock: order.commitBlock,
-                committedMarginUsdc: committedMargins[orderId],
-                executionBountyUsdc: executionBountyReserves[orderId]
+                orderId: orderData.orderId,
+                isClose: orderData.isClose,
+                side: orderData.side,
+                sizeDelta: orderData.sizeDelta,
+                marginDelta: orderData.marginDelta,
+                targetPrice: orderData.targetPrice,
+                commitTime: orderData.commitTime,
+                commitBlock: orderData.commitBlock,
+                committedMarginUsdc: orderData.committedMarginUsdc,
+                executionBountyUsdc: orderData.executionBountyUsdc
             });
             index++;
         }
