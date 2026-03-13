@@ -238,6 +238,59 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[1].executionBountyUsdc, router.quoteCloseOrderExecutionBountyUsdc());
     }
 
+    function test_CancelOrder_ReleasesEscrowForNonHeadOrder() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6);
+        assertEq(router.executionBountyReserves(2), 500_000);
+
+        vm.prank(alice);
+        router.cancelOrder(2);
+
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1000 * 1e6, "Cancelled tail order should unlock only its margin");
+        assertEq(router.executionBountyReserves(2), 0, "Cancelled tail order should release its execution bounty reserve");
+        assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
+        assertEq(router.nextExecuteId(), 1, "Cancelling a non-head order should not advance FIFO head");
+
+        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        assertEq(pending.length, 1);
+        assertEq(pending[0].orderId, 1);
+    }
+
+    function test_CancelOrder_HeadAdvancesNextExecuteId() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        router.cancelOrder(1);
+
+        assertEq(router.nextExecuteId(), 2, "Cancelling the FIFO head should advance nextExecuteId");
+        assertEq(router.pendingOrderCounts(accountId), 0);
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), 0, "Cancelling the head should unlock committed margin");
+    }
+
+    function test_CancelOrder_OnlyOwnerCanCancel() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(bob);
+        vm.expectRevert(OrderRouter.OrderRouter__NotOrderOwner.selector);
+        router.cancelOrder(1);
+    }
+
+    function test_CancelOrder_NonPendingReverts() public {
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
+        router.cancelOrder(99);
+    }
+
     function test_BatchExecution_AllSucceed() public {
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);

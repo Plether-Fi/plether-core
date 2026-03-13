@@ -175,6 +175,17 @@ Review:
 - Updated `src/perps/OrderRouter.sol` to route `getAccountEscrow()`, `getAccountOrderSummary()`, and `getPendingOrdersForAccount()` through the shared order-escrow accounting helper instead of repeating hand-rolled queue aggregation logic in three separate paths.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "AccountEscrowView_TracksPendingOrders|GetAccountOrderSummary_ReturnsAggregateOrderState|GetPendingOrdersForAccount_ReturnsQueuedOrderDetails|CloseCommit_RequiresFlatKeeperBountyReserve"` and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "BatchExecution_AllSucceed|BatchExecution_MixedResults"`.
 
+- [x] Design explicit queued-order cancel semantics that preserve FIFO safety and escrow correctness
+- [x] Implement cancel path in `OrderRouter` for eligible pending orders
+- [x] Add tests for cancel authorization, escrow refunds, and head-order restrictions
+- [x] Run targeted OrderRouter tests and broader verification if needed
+
+Review:
+- Added explicit queued-order cancellation to `src/perps/OrderRouter.sol` via `cancelOrder(uint64 orderId)`. Order owners can now cancel any still-pending order, including the FIFO head, with committed margin and reserved execution bounty escrow released immediately.
+- Cancellation preserves FIFO safety by only advancing `nextExecuteId` when the cancelled order is the current head; cancelling a later order leaves a hole that existing queue scans already skip safely.
+- Added focused coverage in `test/perps/OrderRouter.t.sol` for owner-only cancellation, non-pending revert, head cancellation advancing the queue, and non-head cancellation releasing escrow without disturbing the head.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "CancelOrder_|AccountEscrowView_TracksPendingOrders|GetAccountOrderSummary_ReturnsAggregateOrderState|GetPendingOrdersForAccount_ReturnsQueuedOrderDetails|BatchExecution_AllSucceed|BatchExecution_MixedResults|UnbrickableQueue_OnEngineRevert|MultiPendingOrders_DoNotCorruptLockedMarginOnFail|DeferredPayout_CloseDoesNotBlockLaterQueuedOrders"`.
+
 - [x] Verify the latest audit findings against current code and spec
 - [x] Trace queue cancellation, seizure reachability, fee routing, liquidation bounty, and commit-time validation paths
 - [x] Cross-check each claim against `ACCOUNTING_SPEC.md` and existing regression coverage

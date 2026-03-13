@@ -106,10 +106,12 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__CloseSideMismatch();
     error OrderRouter__CloseSizeExceedsPosition();
     error OrderRouter__InsufficientFreeEquity();
+    error OrderRouter__NotOrderOwner();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, string reason);
+    event OrderCancelled(uint64 indexed orderId, bytes32 indexed accountId);
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _vault CfdVault used for vault depth queries and liquidation bounty payouts
@@ -262,6 +264,29 @@ contract OrderRouter is Ownable2Step, Pausable {
         });
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
+    }
+
+    /// @notice Cancels a still-pending order and refunds its reserved execution bounty and committed margin.
+    /// @dev The order owner may cancel any pending order, including the FIFO head. Cancelling a non-head
+    ///      order leaves a hole that later queue scans skip naturally.
+    function cancelOrder(
+        uint64 orderId
+    ) external {
+        CfdTypes.Order memory order = orders[orderId];
+        if (order.sizeDelta == 0) {
+            revert OrderRouter__OrderNotPending();
+        }
+
+        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (order.accountId != accountId) {
+            revert OrderRouter__NotOrderOwner();
+        }
+
+        _unlockCommittedMargin(orderId);
+        _releaseExecutionBounty(orderId);
+        _deleteOrder(orderId, orderId == nextExecuteId);
+
+        emit OrderCancelled(orderId, accountId);
     }
 
     /// @notice Quotes the reserved USDC execution bounty for a new open order using the latest engine mark price.
@@ -612,7 +637,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = _consumeOrderEscrow(orderId, success);
-        _deleteOrder(orderId);
+        _deleteOrder(orderId, true);
     }
 
     function _finalizeExecution(
@@ -621,7 +646,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool success
     ) internal {
         _consumeOrderEscrow(orderId, success);
-        _deleteOrder(orderId);
+        _deleteOrder(orderId, true);
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
@@ -745,14 +770,17 @@ contract OrderRouter is Ownable2Step, Pausable {
     }
 
     function _deleteOrder(
-        uint64 orderId
+        uint64 orderId,
+        bool advanceHead
     ) internal {
         bytes32 accountId = orders[orderId].accountId;
         delete orders[orderId];
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;
         }
-        nextExecuteId++;
+        if (advanceHead) {
+            nextExecuteId++;
+        }
     }
 
     function _clearCommittedMargin(
