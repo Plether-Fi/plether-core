@@ -443,7 +443,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
     ///         Updates Pyth once, then loops through the FIFO queue. Aggregates reserved USDC
-    ///         keeper fees across processed orders and refunds excess ETH in a single transfer.
+    ///         execution bounties across processed orders and refunds excess ETH in a single transfer.
     /// @param maxOrderId Inclusive upper bound of order IDs to process (must be committed)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrderBatch(

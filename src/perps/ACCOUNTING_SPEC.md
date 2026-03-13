@@ -154,7 +154,7 @@ Required liabilities in this view:
 
 - accumulated protocol fees,
 - deferred trader payouts,
-- deferred keeper rewards.
+- deferred liquidation bounties.
 
 These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived.
 
@@ -240,7 +240,7 @@ Liquidation must:
 If the liquidation bounty cannot be paid immediately from the vault:
 
 6. the liquidation must still succeed,
-7. the unpaid keeper bounty must become a deferred keeper liability,
+7. the unpaid liquidation bounty must become a deferred liquidation-bounty liability,
 8. solvency and LP reconciliation accounting must include that deferred liability immediately.
 
 ## Degraded Mode Spec
@@ -313,7 +313,7 @@ Required transition rules:
 
 - execution consumes escrow exactly once,
 - cancellation releases escrow exactly once,
-- expiry releases user margin and applies the configured keeper-fee policy,
+- expiry releases user margin and applies the configured execution-bounty policy,
 - non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order.
 
 ## Required Invariants for the Refactor

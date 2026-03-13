@@ -52,9 +52,9 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve a keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve a separate flat `1.00 USDC` keeper bounty at commit time, so keeper compensation stays explicit and does not depend on vault liquidity on failed order resolution.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve a separate flat `1.00 USDC` execution bounty at commit time, so executor compensation stays explicit and does not depend on vault liquidity on failed order resolution.
 
-**Keeper Reserve Custody**: Reserved keeper fees remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain.
+**Execution Bounty Custody**: Reserved execution bounties remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain.
 
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
@@ -68,9 +68,9 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Deferred Close Payouts**: A profitable close is never dropped solely because the House Pool is temporarily short on free cash. If the vault cannot immediately fund the realized gain, the position is still destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are treated as outstanding protocol liabilities in reserve and solvency accounting. Once liquidity returns, the trader calls `claimDeferredPayout(accountId)` and the vault settles the deferred amount into the `MarginClearinghouse`, after which it becomes normal withdrawable/reusable account balance.
 
-**Fail-Soft Keeper Payouts**: Keeper compensation for closes, batched execution, and liquidations is also fail-soft. If the House Pool cannot immediately fund the keeper reward or liquidation bounty, the state transition still completes and the unpaid amount is recorded as a deferred keeper reward claim.
+**Fail-Soft Liquidation Bounties**: Liquidations are still fail-soft if the House Pool cannot immediately fund the liquidation bounty. The state transition still completes and the unpaid amount is recorded as a deferred liquidation bounty claim.
 
-**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred keeper rewards are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
+**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred liquidation bounties are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
 
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
@@ -250,7 +250,9 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
 | IMR | 1.5× MMR (1.5%) | Initial margin requirement |
-| Execution fee | 6 bps (0.06%) | Charged on notional at open/close |
+| Execution fee | 6 bps (0.06%) | Protocol fee charged on notional at open/close |
+| Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
+| Close execution bounty | 1.00 USDC | Reserved at commit as a flat amount |
 | Normal oracle staleness | 60s | Max Pyth price age for execution |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |

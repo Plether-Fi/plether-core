@@ -59,7 +59,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve a keeper fee bounded to `[0.05 USDC, 1.00 USDC]` inside the clearinghouse, while close orders reserve a flat `1.00 USDC` keeper bounty from free settlement |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` inside the clearinghouse, while close orders reserve a flat `1.00 USDC` execution bounty from free settlement |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -149,11 +149,11 @@ The owner **cannot**:
 #### Keepers
 
 Keepers are permissionless — anyone can execute orders and liquidations:
-- **Order Execution**: Keepers push Pyth price payloads. For risk-increasing orders, the keeper fee is reserved inside the `MarginClearinghouse` at commit time, quoted from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
-- **Keeper fee floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents skip upfront reservation and instead pay the keeper from the close settlement fee when execution succeeds
+- **Order Execution**: Keepers push Pyth price payloads. For risk-increasing orders, the execution bounty is reserved inside the `MarginClearinghouse` at commit time, quoted from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
+- **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` execution bounty up front
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired risk-increasing orders still pay the reserved keeper fee to the executor, so stale or invalid orders remain costly for the submitter and economically worthwhile for keepers to clear. Close orders do not reserve upfront keeper fees.
+- **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor, so stale or invalid heads remain costly for the submitter and economically worthwhile for keepers to clear.
 
 #### Protocol Operators
 
@@ -223,12 +223,12 @@ When a position goes underwater (equity < 0):
 - **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
 - **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity and are counted in reserve/solvency accounting
 
-#### Deferred Keeper Rewards
+#### Deferred Liquidation Bounties
 
-- **Behavior**: If a close, batched execution, or liquidation cannot immediately fund keeper compensation from the House Pool, the state transition still completes and the unpaid reward is recorded as a deferred keeper claim
-- **Claim path**: Once liquidity returns, the keeper calls `claimDeferredKeeperReward()` and the vault pays the owed USDC directly
-- **Impact**: Liquidations and queue advancement remain live during temporary vault illiquidity; keeper payment finality becomes deferred rather than blocking the state transition
-- **Operational note**: Deferred keeper rewards are counted in reserve, solvency, and LP reconciliation accounting until paid
+- **Behavior**: If a liquidation cannot immediately fund the liquidation bounty from the House Pool, the state transition still completes and the unpaid amount is recorded as a deferred liquidation bounty claim
+- **Claim path**: Once liquidity returns, the keeper calls `claimDeferredLiquidationBounty()` and the vault pays the owed USDC directly
+- **Impact**: Liquidations remain live during temporary vault illiquidity; liquidation bounty payment finality becomes deferred rather than blocking the state transition
+- **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 
 #### Terminal Queue Continuity
 

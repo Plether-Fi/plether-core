@@ -83,6 +83,37 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(margin, 1_927_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
+    function test_OpenTradeCostCannotSeizeReservedSettlementEscrow() public {
+        address trader = address(0xB011);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2_000e6);
+
+        vm.prank(address(router));
+        clearinghouse.reserveSettlementUsdc(accountId, 1_950e6);
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000e18,
+            marginDelta: 2_000e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 77,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientAssetToSeize.selector);
+        vm.prank(address(router));
+        engine.processOrder(order, 1e8, 1_000_000e6, uint64(block.timestamp));
+
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            1_950e6,
+            "trade-cost seizure must not consume reserved settlement escrow"
+        );
+    }
+
     function test_FundingAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
