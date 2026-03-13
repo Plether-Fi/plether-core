@@ -8,6 +8,7 @@ import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
+import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -896,15 +897,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__CloseSizeExceedsPosition();
         }
 
-        CfdTypes.Position memory closedPart = pos;
-        closedPart.size = order.sizeDelta;
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, price, CAP_PRICE);
-        int256 realizedPnl = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
+            pos,
+            order.sizeDelta,
+            price,
+            CAP_PRICE,
+            preSkewUsdc,
+            _getAbsSkewUsdc(price),
+            vaultDepthUsdc,
+            riskParams.vpiFactor,
+            EXECUTION_FEE_BPS,
+            unsettledFundingDebt
+        );
 
-        uint256 marginToFree = (pos.margin * order.sizeDelta) / pos.size;
-        pos.margin -= marginToFree;
+        pos.margin = closeState.remainingMarginUsdc;
 
-        uint256 maxProfitReduction = (pos.maxProfitUsdc * order.sizeDelta) / pos.size;
+        uint256 maxProfitReduction = closeState.maxProfitReductionUsdc;
         pos.maxProfitUsdc -= maxProfitReduction;
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
 
@@ -923,26 +931,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__DustPosition();
         }
 
-        clearinghouse.unlockMargin(order.accountId, marginToFree);
+        clearinghouse.unlockMargin(order.accountId, closeState.marginToFreeUsdc);
+        pos.vpiAccrued -= closeState.proportionalAccrualUsdc;
 
-        uint256 postSkewUsdc = _getAbsSkewUsdc(price);
-        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
+        collectedExecFeeUsdc = _settleCloseNetSettlement(
+            order.accountId, closeState.netSettlementUsdc, closeState.executionFeeUsdc, pos.margin
+        );
 
-        uint256 originalSize = pos.size + order.sizeDelta;
-        int256 proportionalAccrual = (pos.vpiAccrued * int256(order.sizeDelta)) / int256(originalSize);
-        if (proportionalAccrual + vpiUsdc < 0) {
-            vpiUsdc = -proportionalAccrual;
-        }
-        pos.vpiAccrued -= proportionalAccrual;
-
-        uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 execFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
-
-        int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
-
-        collectedExecFeeUsdc = _settleCloseNetSettlement(order.accountId, netSettlement, execFeeUsdc, pos.margin);
-
-        emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
+        emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, closeState.realizedPnlUsdc);
 
         if (pos.size == 0) {
             delete positions[order.accountId];
@@ -1221,18 +1217,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _previewFundingSettlement(pos);
         pos.margin = marginAfterFunding;
 
-        CfdTypes.Position memory closedPart = pos;
-        closedPart.size = sizeDelta;
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, oraclePrice, CAP_PRICE);
-        preview.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-
-        uint256 marginToFree = (pos.margin * sizeDelta) / pos.size;
-        preview.remainingMargin = pos.margin - marginToFree;
-        preview.remainingSize = pos.size - sizeDelta;
-        preview.fundingUsdc = pendingFunding;
-
         uint256 preSkewUsdc = _getAbsSkewUsdc(lastMarkPrice);
-        uint256 maxProfitReduction = (pos.maxProfitUsdc * sizeDelta) / pos.size;
         uint256 postBullOi = bullOI;
         uint256 postBearOi = bearOI;
         if (pos.side == CfdTypes.Side.BULL) {
@@ -1243,23 +1228,40 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postBullUsdc = (postBullOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-        preview.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
-        if (preview.vpiDeltaUsdc > 0) {
-            preview.vpiUsdc = uint256(preview.vpiDeltaUsdc);
-        }
-        uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        preview.executionFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
+        CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
+            pos,
+            sizeDelta,
+            oraclePrice,
+            CAP_PRICE,
+            preSkewUsdc,
+            postSkewUsdc,
+            vaultDepthUsdc,
+            riskParams.vpiFactor,
+            EXECUTION_FEE_BPS,
+            unsettledFundingDebt
+        );
 
-        int256 netSettlement = preview.realizedPnlUsdc - preview.vpiDeltaUsdc - int256(preview.executionFeeUsdc)
-            - int256(unsettledFundingDebt);
-        if (netSettlement > 0) {
-            uint256 settlementGain = uint256(netSettlement);
+        preview.realizedPnlUsdc = closeState.realizedPnlUsdc;
+        preview.remainingMargin = closeState.remainingMarginUsdc;
+        preview.remainingSize = closeState.remainingSize;
+        preview.fundingUsdc = pendingFunding;
+
+        preview.vpiDeltaUsdc = closeState.vpiDeltaUsdc;
+        if (closeState.vpiDeltaUsdc > 0) {
+            preview.vpiUsdc = uint256(closeState.vpiDeltaUsdc);
+        }
+        preview.executionFeeUsdc = closeState.executionFeeUsdc;
+
+        if (closeState.netSettlementUsdc > 0) {
+            uint256 settlementGain = uint256(closeState.netSettlementUsdc);
             uint256 availableCash = vault.totalAssets();
             preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
             preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
-        } else if (netSettlement < 0) {
+        } else if (closeState.netSettlementUsdc < 0) {
             CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-                clearinghouse.getFreeSettlementBalanceUsdc(accountId), uint256(-netSettlement), preview.executionFeeUsdc
+                clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+                uint256(-closeState.netSettlementUsdc),
+                preview.executionFeeUsdc
             );
             preview.seizedCollateralUsdc = result.seizedUsdc;
             preview.badDebtUsdc = result.badDebtUsdc;
@@ -1269,7 +1271,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
-        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, maxProfitReduction);
+        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc);
         uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
         preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
     }

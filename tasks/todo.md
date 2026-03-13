@@ -186,6 +186,16 @@ Review:
 - Added focused coverage in `test/perps/OrderRouter.t.sol` for owner-only cancellation, non-pending revert, head cancellation advancing the queue, and non-head cancellation releasing escrow without disturbing the head.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "CancelOrder_|AccountEscrowView_TracksPendingOrders|GetAccountOrderSummary_ReturnsAggregateOrderState|GetPendingOrdersForAccount_ReturnsQueuedOrderDetails|BatchExecution_AllSucceed|BatchExecution_MixedResults|UnbrickableQueue_OnEngineRevert|MultiPendingOrders_DoNotCorruptLockedMarginOnFail|DeferredPayout_CloseDoesNotBlockLaterQueuedOrders"`.
 
+- [x] Identify close-preview and close-execution math to extract into one shared kernel
+- [x] Add a close accounting library/shared settlement builder
+- [x] Wire `previewClose()` and live close execution to the shared kernel without changing behavior
+- [x] Run targeted close/deferred payout regressions and record results
+
+Review:
+- Added `src/perps/libraries/CloseAccountingLib.sol` so close-path realized PnL, released margin, max-profit reduction, proportional VPI accrual, clamped VPI delta, execution fee, and net settlement are now computed in one canonical kernel.
+- Updated `src/perps/CfdEngine.sol` so both `_processDecrease()` and `previewClose()` use the same close accounting builder. This removes the remaining preview/live drift on proportional `vpiAccrued` rebate capping and centralizes the core close math.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown|PreviewClose_NegativeVpiDoesNotPanic|ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid|C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable|OpenTradeCostCannotSeizeReservedSettlementEscrow"` and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test "C1_FullCloseMustNotTreatQueuedCommittedMarginAsLossShield|H1_LiquidationMustPreserveQueuedCollateralBuckets"`.
+
 - [x] Verify the latest audit findings against current code and spec
 - [x] Trace queue cancellation, seizure reachability, fee routing, liquidation bounty, and commit-time validation paths
 - [x] Cross-check each claim against `ACCOUNTING_SPEC.md` and existing regression coverage
