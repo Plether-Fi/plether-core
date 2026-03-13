@@ -1221,7 +1221,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _previewFundingSettlement(pos);
         pos.margin = marginAfterFunding;
 
-        uint256 preSkewUsdc = _getAbsSkewUsdc(lastMarkPrice);
+        uint256 preBullUsdc = (bullOI * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 preBearUsdc = (bearOI * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
         uint256 postBullOi = bullOI;
         uint256 postBearOi = bearOI;
         if (pos.side == CfdTypes.Side.BULL) {
@@ -1267,10 +1269,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
             preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
         } else if (closeState.netSettlementUsdc < 0) {
+            uint256 balanceUsdc = clearinghouse.balances(accountId, address(USDC));
+            uint256 lockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
+            uint256 reservedSettlement = clearinghouse.reservedSettlementUsdc(accountId);
+            uint256 freeSettlementAfterUnlock = balanceUsdc > (lockedMarginUsdc - closeState.marginToFreeUsdc) + reservedSettlement
+                ? balanceUsdc - ((lockedMarginUsdc - closeState.marginToFreeUsdc) + reservedSettlement)
+                : 0;
             CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-                clearinghouse.getFreeSettlementBalanceUsdc(accountId),
-                uint256(-closeState.netSettlementUsdc),
-                preview.executionFeeUsdc
+                freeSettlementAfterUnlock, uint256(-closeState.netSettlementUsdc), preview.executionFeeUsdc
             );
             preview.seizedCollateralUsdc = result.seizedUsdc;
             preview.badDebtUsdc = result.badDebtUsdc;

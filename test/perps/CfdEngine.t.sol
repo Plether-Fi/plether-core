@@ -489,6 +489,26 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(preview.vpiUsdc, 0, "Positive-only VPI charge field should clamp rebates to zero");
     }
 
+    function test_PreviewClose_UsesPostUnlockFreeSettlementForLosses() public {
+        address trader = address(0xAB1302);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 5_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
+
+        uint256 freeSettlementBeforePreview = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
+
+        assertGt(
+            preview.seizedCollateralUsdc,
+            freeSettlementBeforePreview,
+            "Preview loss collection should include settlement freed by the partial close before applying close losses"
+        );
+    }
+
     function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
