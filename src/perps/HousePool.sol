@@ -402,7 +402,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     function _getReconcileSnapshot() internal view returns (HousePoolAccountingLib.ReconcileSnapshot memory snapshot) {
         return HousePoolAccountingLib.buildReconcileSnapshot(
-            USDC.balanceOf(address(this)), ENGINE.accumulatedFeesUsdc(), ENGINE.getVaultMtmAdjustment()
+            USDC.balanceOf(address(this)),
+            ENGINE.accumulatedFeesUsdc(),
+            ENGINE.totalDeferredPayoutUsdc() + ENGINE.totalDeferredKeeperRewardUsdc(),
+            ENGINE.getVaultMtmAdjustment()
         );
     }
 

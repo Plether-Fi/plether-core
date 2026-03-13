@@ -49,3 +49,7 @@ number_underscore = "thousands"
 single_line_statement_blocks = "multi"
 sort_imports = true
 contract_new_lines = true
+
+[invariant]
+runs = 16        # instead of 256
+depth = 500

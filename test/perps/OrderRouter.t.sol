@@ -311,6 +311,113 @@ contract OrderRouterTest is BasePerpTest {
         );
     }
 
+    function test_LargeQueue_BatchClearsHundredsOfFailedOrdersAndExecutesTail() public {
+        address spammer = address(0x444);
+        address carol = address(0x555);
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+
+        usdc.mint(spammer, 100_000 * 1e6);
+        vm.startPrank(spammer);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), address(usdc), 100_000 * 1e6);
+        vm.stopPrank();
+
+        usdc.mint(carol, 20_000 * 1e6);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(carolId, address(usdc), 20_000 * 1e6);
+        vm.stopPrank();
+
+        uint256 spamCount = 200;
+        for (uint256 i = 0; i < spamCount; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BULL, 1_000 * 1e18, 100 * 1e6, 2e8, false);
+        }
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(uint64(spamCount + 1), empty);
+
+        assertEq(router.nextExecuteId(), spamCount + 2, "batch should clear the adversarial queue and reach the tail order");
+        (uint256 size,,,,,,,) = engine.positions(carolId);
+        assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
+    }
+
+    function test_PoisonedHead_CloseFailureDoesNotPinLaterOrders() public {
+        address carol = address(0x556);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+
+        usdc.mint(carol, 20_000 * 1e6);
+        vm.startPrank(carol);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(carolId, address(usdc), 20_000 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
+
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.BEAR, 5_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(3, empty);
+
+        assertEq(router.nextExecuteId(), 4, "failed close at queue head must not pin later orders");
+        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
+        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
+        assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
+        assertEq(carolSize, 5_000 * 1e18, "later valid order must still execute");
+    }
+
+    function test_LargeForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
+        address spammer = address(0x557);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        usdc.mint(spammer, 100_000 * 1e6);
+        vm.startPrank(spammer);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), address(usdc), 100_000 * 1e6);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        uint256 spamCount = 200;
+        for (uint256 i = 0; i < spamCount; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BEAR, 1_000 * 1e18, 100 * 1e6, 2e8, false);
+        }
+
+        vm.roll(block.number + 1);
+        router.executeOrder(2, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "terminal close should still succeed with a large foreign queue behind it");
+        assertEq(router.nextExecuteId(), 3, "queue head should advance after the full close");
+
+        vm.roll(block.number + 1);
+        router.executeOrder(3, empty);
+        assertEq(router.nextExecuteId(), 4, "tail queue should remain live after terminal close cleanup");
+    }
+
 }
 
 contract OrderRouterPythTest is BasePerpTest {

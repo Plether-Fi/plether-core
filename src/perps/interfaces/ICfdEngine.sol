@@ -59,6 +59,12 @@ interface ICfdEngine {
     /// @notice Total withdrawal reserve required by current protocol liabilities.
     function getWithdrawalReservedUsdc() external view returns (uint256);
 
+    /// @notice Deferred profitable-close payouts still owed to traders.
+    function totalDeferredPayoutUsdc() external view returns (uint256);
+
+    /// @notice Deferred keeper rewards still owed after failed immediate payout.
+    function totalDeferredKeeperRewardUsdc() external view returns (uint256);
+
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
     function getUnrealizedTraderPnl() external view returns (int256);

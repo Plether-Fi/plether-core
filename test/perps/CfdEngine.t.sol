@@ -369,7 +369,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(viewData.closeReachableUsdc, clearinghouse.getSettlementReachableUsdc(accountId, 0));
+        assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
@@ -498,10 +498,10 @@ contract CfdEngineTest is BasePerpTest {
             lockedBeforeClose - liveMarginBeforeClose,
             "Close settlement should release only the live position margin, not the later committed margin"
         );
-        assertEq(
+        assertGt(
             engine.accumulatedBadDebtUsdc(),
             badDebtBefore,
-            "Queued committed margin should now be counted before socializing a full-close shortfall"
+            "Close settlement must not consume queued committed margin before socializing the residual shortfall"
         );
     }
 

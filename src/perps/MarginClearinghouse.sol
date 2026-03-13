@@ -353,7 +353,8 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 protectedLockedMarginUsdc
     ) public view returns (uint256) {
         uint256 balance = balances[accountId][settlementAsset];
-        return balance > protectedLockedMarginUsdc ? balance - protectedLockedMarginUsdc : 0;
+        uint256 protectedBalance = protectedLockedMarginUsdc + reservedSettlementUsdc[accountId];
+        return balance > protectedBalance ? balance - protectedBalance : 0;
     }
 
     // ==========================================
@@ -485,6 +486,9 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__InvalidSeizeRecipient();
         }
         if (balances[accountId][asset] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+        if (amount > getFreeSettlementBalanceUsdc(accountId)) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 

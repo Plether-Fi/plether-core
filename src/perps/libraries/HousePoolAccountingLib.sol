@@ -14,6 +14,7 @@ library HousePoolAccountingLib {
     struct ReconcileSnapshot {
         uint256 physicalAssets;
         uint256 protocolFees;
+        uint256 deferredLiabilities;
         uint256 cashMinusFees;
         int256 mtm;
         uint256 distributable;
@@ -40,11 +41,14 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         uint256 physicalAssets,
         uint256 protocolFees,
+        uint256 deferredLiabilities,
         int256 mtm
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = physicalAssets;
         snapshot.protocolFees = protocolFees;
-        snapshot.cashMinusFees = physicalAssets > protocolFees ? physicalAssets - protocolFees : 0;
+        snapshot.deferredLiabilities = deferredLiabilities;
+        uint256 protectedLiabilities = protocolFees + deferredLiabilities;
+        snapshot.cashMinusFees = physicalAssets > protectedLiabilities ? physicalAssets - protectedLiabilities : 0;
         snapshot.mtm = mtm;
         if (mtm >= 0) {
             snapshot.distributable = snapshot.cashMinusFees > uint256(mtm) ? snapshot.cashMinusFees - uint256(mtm) : 0;

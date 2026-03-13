@@ -595,7 +595,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 pendingFunding = getPendingFunding(pos);
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        uint256 reachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
 
         int256 equity = int256(reachableUsdc) + pendingFunding;
         equity = isProfit ? equity + int256(pnlAbs) : equity - int256(pnlAbs);
@@ -1015,8 +1015,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return actualFeeUsdc;
         }
 
+        remainingPosMarginUsdc;
         CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-            clearinghouse.getSettlementReachableUsdc(accountId, remainingPosMarginUsdc), uint256(-netSettlement), execFeeUsdc
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId), uint256(-netSettlement), execFeeUsdc
         );
         if (result.seizedUsdc > 0) {
             _seizeUsdcToVault(accountId, result.seizedUsdc);
@@ -1116,12 +1117,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function getAccountCollateralView(
         bytes32 accountId
     ) external view returns (AccountCollateralView memory viewData) {
-        uint256 positionMargin = positions[accountId].margin;
+        CfdTypes.Position memory pos = positions[accountId];
+        uint256 positionMargin = pos.margin;
         viewData.settlementBalanceUsdc = clearinghouse.balances(accountId, address(USDC));
         viewData.lockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
         viewData.reservedSettlementUsdc = clearinghouse.reservedSettlementUsdc(accountId);
         viewData.freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        viewData.closeReachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        viewData.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
         viewData.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin);
         viewData.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         viewData.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
@@ -1138,7 +1140,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, lastMarkPrice, CAP_PRICE);
         int256 pendingFunding = getPendingFunding(pos);
-        uint256 reachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
 
         int256 equityUsdc = int256(reachableUsdc) + pendingFunding;
         equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
@@ -1241,7 +1243,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
         } else if (netSettlement < 0) {
             CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-                clearinghouse.getSettlementReachableUsdc(accountId, preview.remainingMargin), uint256(-netSettlement), preview.executionFeeUsdc
+                clearinghouse.getFreeSettlementBalanceUsdc(accountId), uint256(-netSettlement), preview.executionFeeUsdc
             );
             preview.seizedCollateralUsdc = result.seizedUsdc;
             preview.badDebtUsdc = result.badDebtUsdc;
@@ -1293,7 +1295,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, oraclePrice, CAP_PRICE);
         preview.pnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
         preview.fundingUsdc = getPendingFunding(pos);
-        preview.reachableCollateralUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        preview.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
         preview.equityUsdc = int256(preview.reachableCollateralUsdc) + preview.fundingUsdc + preview.pnlUsdc;
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         uint256 maintenanceMarginUsdc = (((pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
@@ -1390,7 +1392,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
 
-        uint256 reachableUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
 
         int256 equityUsdc = int256(reachableUsdc) + pendingFunding;
         equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
@@ -1442,9 +1444,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _assertPostSolvency() internal view {
-        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
-            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
-        );
+        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
         if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             revert CfdEngine__PostOpSolvencyBreach();
         }

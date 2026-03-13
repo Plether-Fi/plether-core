@@ -385,4 +385,75 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
+    function invariant_ProtocolAccountingViewMatchesAccessors() public {
+        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+
+        assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
+        assertEq(protocolView.maxLiabilityUsdc, engine.getMaxLiability(), "Protocol view liability must match accessor");
+        assertEq(
+            protocolView.withdrawalReservedUsdc,
+            engine.getWithdrawalReservedUsdc(),
+            "Protocol view withdrawal reserve must match accessor"
+        );
+        assertEq(protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor");
+        assertEq(
+            protocolView.totalDeferredPayoutUsdc,
+            engine.totalDeferredPayoutUsdc(),
+            "Protocol view trader deferred payouts must match storage"
+        );
+        assertEq(
+            protocolView.totalDeferredKeeperRewardUsdc,
+            engine.totalDeferredKeeperRewardUsdc(),
+            "Protocol view keeper deferred payouts must match storage"
+        );
+    }
+
+    function invariant_WithdrawalReserveIncludesDeferredLiabilities() public {
+        uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
+            + engine.totalDeferredKeeperRewardUsdc();
+
+        int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
+        if (fundingLiability > 0) {
+            expectedReserved += uint256(fundingLiability);
+        }
+
+        assertEq(
+            engine.getWithdrawalReservedUsdc(),
+            expectedReserved,
+            "Withdrawal reserve must include liabilities, fees, and deferred obligations"
+        );
+    }
+
+    function invariant_PoolLiquidityViewMatchesProtocolAccounting() public {
+        HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
+        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+
+        assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on vault assets");
+        assertEq(
+            vaultView.withdrawalReservedUsdc,
+            protocolView.withdrawalReservedUsdc,
+            "Pool and engine must agree on withdrawal reserves"
+        );
+        assertEq(vaultView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
+    }
+
+    function invariant_LiquidationPreviewMatchesPositionView() public {
+        uint256 oraclePrice = engine.lastMarkPrice();
+        if (oraclePrice == 0) {
+            return;
+        }
+
+        uint256 vaultDepth = pool.totalAssets();
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            if (!positionView.exists) {
+                continue;
+            }
+
+            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepth);
+            assertEq(preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view");
+        }
+    }
+
 }

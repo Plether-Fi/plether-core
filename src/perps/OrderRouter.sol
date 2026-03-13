@@ -103,6 +103,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__InsufficientGas();
     error OrderRouter__NoOpenPosition();
     error OrderRouter__CloseSideMismatch();
+    error OrderRouter__CloseSizeExceedsPosition();
     error OrderRouter__InsufficientFreeEquity();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
@@ -228,6 +229,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
             revert OrderRouter__NoOpenPosition();
+        }
+        if (isClose && engine.hasOpenPosition(accountId)) {
+            if (engine.getPositionSide(accountId) != side) {
+                revert OrderRouter__CloseSideMismatch();
+            }
+            if (sizeDelta > engine.getPositionSize(accountId)) {
+                revert OrderRouter__CloseSizeExceedsPosition();
+            }
         }
         uint256 keeperFeeReserveUsdc = isClose ? 0 : _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
 
