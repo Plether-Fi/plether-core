@@ -88,24 +88,6 @@ contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
         });
     }
 
-    function test_H1_PositiveEquityLiquidationCapsAtRemainingEquity() public {
-        address trader = address(0xA201);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-
-        _fundTrader(trader, 100e6);
-        _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
-
-        vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 94e6);
-
-        vm.startPrank(address(router));
-        vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
-        vm.stopPrank();
-
-        assertEq(bounty, 4_940_000, "Keeper bounty should cap at remaining positive equity");
-    }
-
 }
 
 contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {

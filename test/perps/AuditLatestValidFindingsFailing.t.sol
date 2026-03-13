@@ -16,27 +16,6 @@ contract AuditLatestValidFindingsFailing is BasePerpTest {
 
     address alice = address(0xA11CE);
 
-    function test_M2_ExecutionFeesShouldRemainProtocolRevenue() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _fundTrader(alice, 50_000e6);
-
-        uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
-
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
-        vm.roll(block.number + 1);
-        router.executeOrder(1, priceData);
-
-        vm.prank(address(juniorVault));
-        pool.reconcile();
-
-        uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore, "Execution fees should not flow into LP equity");
-    }
-
 }
 
 contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {

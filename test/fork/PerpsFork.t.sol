@@ -626,4 +626,76 @@ contract PerpsForkTest is Test {
         assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
     }
 
+    function test_DeferredPayoutClaimFlow_RealUsdc() public {
+        _depositToClearinghouse(alice, 11_000e6);
+
+        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8, int64(100_000_000), false);
+
+        bytes32 aliceId = _accountId(alice);
+        uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
+        vm.prank(address(pool));
+        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        uint256 chBefore = clearinghouse.balances(aliceId, USDC);
+
+        uint256 commitTime = block.timestamp;
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), commitTime + 6);
+        vm.warp(commitTime + 7);
+        vm.roll(block.number + 2);
+        vm.prank(keeper);
+        router.executeOrder(2, _pythUpdateData());
+
+        uint256 deferred = engine.deferredPayoutUsdc(aliceId);
+        assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Position should be closed even when payout is deferred");
+        assertEq(clearinghouse.balances(aliceId, USDC), chBefore, "Clearinghouse balance should stay unchanged until claim");
+
+        deal(USDC, lp, IERC20(USDC).balanceOf(lp) + deferred);
+        vm.startPrank(lp);
+        juniorVault.deposit(deferred, lp);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        engine.claimDeferredPayout(aliceId);
+
+        assertEq(engine.deferredPayoutUsdc(aliceId), 0, "Claim should clear deferred payout state");
+        assertEq(clearinghouse.balances(aliceId, USDC), chBefore + deferred, "Claim should credit clearinghouse USDC");
+    }
+
+    function test_DeferredPayoutBatchDoesNotBlockTailOrder_RealUsdc() public {
+        _depositToClearinghouse(alice, 20_000e6);
+
+        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8_000e6, 1e8, int64(100_000_000), false);
+
+        bytes32 aliceId = _accountId(alice);
+        uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
+        vm.prank(address(pool));
+        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 8_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        vm.warp(block.timestamp + 10);
+        vm.roll(block.number + 1);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 500e6, 0, false);
+
+        pyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
+        vm.warp(block.timestamp + 7);
+        vm.roll(block.number + 2);
+        vm.prank(keeper);
+        router.executeOrderBatch(3, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 4, "Batch execution should continue past a deferred-payout close");
+        assertGt(engine.deferredPayoutUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
+
+        (uint256 size,,,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(aliceId);
+        assertEq(size, 10_000e18, "Tail order should still execute after the deferred-payout close");
+        assertEq(uint256(side), uint256(CfdTypes.Side.BEAR), "Tail BEAR order should become the new live position");
+        assertEq(entryFunding, 0, "Position read should remain well-formed after batch progression");
+    }
+
 }
