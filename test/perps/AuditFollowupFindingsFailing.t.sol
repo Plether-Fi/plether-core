@@ -63,7 +63,11 @@ contract AuditFollowupFindingsFailing_KeeperReserveSettlementShield is BasePerpT
         vm.stopPrank();
 
         assertEq(router.keeperFeeReserves(1), 1e6, "Setup should escrow the max keeper reserve in the router");
-        assertEq(usdc.balanceOf(address(router)), 1_001e6, "Setup should move queued keeper reserves into router escrow");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            1_001e6,
+            "Setup should reserve queued keeper fees inside the clearinghouse until execution"
+        );
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 108_500_000);
 
@@ -193,7 +197,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8);
     }
 
-    function test_C3_DeferredPayoutMustLatchDegradedModeWhileLiabilityRemainsOutstanding() public {
+    function test_C3_DeferredPayoutDoesNotRequireDegradedModeWithoutOpenLiability() public {
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
 
         _fundTrader(bullTrader, 11_000e6);
@@ -206,7 +210,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _close(bullId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(engine.deferredPayoutUsdc(bullId), 0, "Setup should create a deferred payout liability");
-        assertTrue(engine.degradedMode(), "Outstanding deferred payouts should keep the protocol in degraded mode");
+        assertFalse(engine.degradedMode(), "A standalone deferred payout should not force degraded mode once bounded open liability is gone");
     }
 
 }

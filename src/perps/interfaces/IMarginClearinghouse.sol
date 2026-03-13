@@ -29,6 +29,22 @@ interface IMarginClearinghouse {
         address usdc,
         int256 amount
     ) external;
+    /// @notice Reserves settlement USDC in place without transferring custody
+    function reserveSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Releases previously reserved settlement USDC
+    function releaseReservedSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Pays reserved settlement USDC to the calling operator
+    function payReservedSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc,
+        address recipient
+    ) external;
     /// @notice Transfers assets from an account to a recipient (losses, fees, or bad debt)
     function seizeAsset(
         bytes32 accountId,
@@ -36,6 +52,10 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
+    /// @notice Returns reserved settlement USDC for pending keeper-fee escrow
+    function reservedSettlementUsdc(
+        bytes32 accountId
+    ) external view returns (uint256);
     /// @notice Returns total USD buying power of an account with LTV haircuts (6 decimals)
     function getAccountEquityUsdc(
         bytes32 accountId

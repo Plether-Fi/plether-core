@@ -106,6 +106,11 @@ interface ICfdEngine {
         bytes32 accountId
     ) external view returns (bool);
 
+    /// @notice Returns the current position size for an account (18 decimals).
+    function getPositionSize(
+        bytes32 accountId
+    ) external view returns (uint256);
+
     /// @notice Returns the stored side for an open position.
     function getPositionSide(
         bytes32 accountId

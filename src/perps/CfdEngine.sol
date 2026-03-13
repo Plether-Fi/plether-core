@@ -63,6 +63,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => CfdTypes.Position) public positions;
     mapping(bytes32 => uint256) public deferredPayoutUsdc;
+    uint256 public totalDeferredPayoutUsdc;
 
     address public orderRouter;
 
@@ -413,6 +414,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         deferredPayoutUsdc[accountId] = 0;
+        totalDeferredPayoutUsdc -= amount;
         vault.payOut(address(clearinghouse), amount);
         clearinghouse.settleUsdc(accountId, address(USDC), int256(amount));
 
@@ -439,9 +441,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (!degradedMode) {
             revert CfdEngine__NotDegraded();
         }
-        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
-            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
-        );
+        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
         if (
             snapshot.effectiveSolvencyAssets < snapshot.maxLiability
         ) {
@@ -857,11 +857,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             bearOI += sizeDelta;
         }
         uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
-        if (
-            CfdEngineSnapshotsLib.buildSolvencySnapshot(
-                vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
-            ).effectiveSolvencyAssets < maxLiability
-        ) {
+        if (_buildAdjustedSolvencySnapshot().effectiveSolvencyAssets < maxLiability) {
             revert CfdEngine__VaultSolvencyExceeded();
         }
     }
@@ -896,6 +892,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 clearinghouse.settleUsdc(accountId, address(USDC), netSettlement);
             } else {
                 deferredPayoutUsdc[accountId] += settlementGain;
+                totalDeferredPayoutUsdc += settlementGain;
                 emit DeferredPayoutRecorded(accountId, settlementGain);
             }
             return actualFeeUsdc;
@@ -995,6 +992,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bytes32 accountId
     ) external view returns (bool) {
         return positions[accountId].size > 0;
+    }
+
+    function getPositionSize(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return positions[accountId].size;
     }
 
     function getPositionSide(
@@ -1113,7 +1116,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl());
+        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl())
+            + totalDeferredPayoutUsdc;
+    }
+
+    function _buildAdjustedSolvencySnapshot() internal view returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot) {
+        snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
+            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
+        );
+        if (totalDeferredPayoutUsdc > 0) {
+            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredPayoutUsdc
+                ? snapshot.effectiveSolvencyAssets - totalDeferredPayoutUsdc
+                : 0;
+        }
     }
 
     function _enterDegradedModeIfInsolvent(
@@ -1122,9 +1137,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (degradedMode) {
             return;
         }
-        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
-            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
-        );
+        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
         if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             degradedMode = true;
             emit DegradedModeEntered(snapshot.effectiveSolvencyAssets, snapshot.maxLiability, accountId);

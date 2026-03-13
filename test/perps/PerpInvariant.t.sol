@@ -283,7 +283,13 @@ contract PerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += router.keeperFeeReserves(orderId);
         }
 
-        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Router USDC must back queued keeper reserves exactly");
+        uint256 trackedReservedSettlement;
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            trackedReservedSettlement += clearinghouse.reservedSettlementUsdc(accountId);
+        }
+
+        assertEq(trackedReservedSettlement, pendingKeeperReserves, "Queued keeper reserves must stay reserved inside the clearinghouse");
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {

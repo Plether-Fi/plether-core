@@ -35,6 +35,7 @@ contract MarginClearinghouse is Ownable2Step {
     mapping(bytes32 => mapping(address => uint256)) public balances;
 
     mapping(bytes32 => uint256) public lockedMarginUsdc;
+    mapping(bytes32 => uint256) public reservedSettlementUsdc;
 
     IWithdrawGuard public withdrawGuard;
 
@@ -74,6 +75,9 @@ contract MarginClearinghouse is Ownable2Step {
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event MarginLocked(bytes32 indexed accountId, uint256 amountUsdc);
     event MarginUnlocked(bytes32 indexed accountId, uint256 amountUsdc);
+    event SettlementReserved(bytes32 indexed accountId, uint256 amountUsdc);
+    event SettlementReserveReleased(bytes32 indexed accountId, uint256 amountUsdc);
+    event SettlementReservePaid(bytes32 indexed accountId, uint256 amountUsdc, address recipient);
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
     modifier onlyOperator() {
@@ -261,10 +265,11 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
-        if (remainingEquity < lockedMarginUsdc[accountId]) {
+        uint256 reserved = reservedSettlementUsdc[accountId];
+        if (remainingEquity < lockedMarginUsdc[accountId] + reserved) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId]) {
+        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + reserved) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
 
@@ -312,8 +317,8 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) public view returns (uint256) {
         uint256 equity = getAccountEquityUsdc(accountId);
-        uint256 locked = lockedMarginUsdc[accountId];
-        return equity > locked ? equity - locked : 0;
+        uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
+        return equity > encumbered ? equity - encumbered : 0;
     }
 
     /// @notice Returns free settlement balance after subtracting locked margin.
@@ -323,8 +328,8 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) public view returns (uint256) {
         uint256 balance = balances[accountId][settlementAsset];
-        uint256 locked = lockedMarginUsdc[accountId];
-        return balance > locked ? balance - locked : 0;
+        uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
+        return balance > encumbered ? balance - encumbered : 0;
     }
 
     /// @notice Returns settlement balance reachable by a position-reducing settlement path.
@@ -412,6 +417,51 @@ contract MarginClearinghouse is Ownable2Step {
             }
             balances[accountId][usdc] -= loss;
         }
+    }
+
+    function reserveSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        if (amountUsdc == 0) {
+            return;
+        }
+        uint256 balance = balances[accountId][settlementAsset];
+        uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
+        if (balance < encumbered + amountUsdc) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        }
+        reservedSettlementUsdc[accountId] += amountUsdc;
+        emit SettlementReserved(accountId, amountUsdc);
+    }
+
+    function releaseReservedSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        if (amountUsdc == 0) {
+            return;
+        }
+        uint256 reserved = reservedSettlementUsdc[accountId];
+        reservedSettlementUsdc[accountId] = reserved > amountUsdc ? reserved - amountUsdc : 0;
+        emit SettlementReserveReleased(accountId, amountUsdc);
+    }
+
+    function payReservedSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc,
+        address recipient
+    ) external onlyOperator {
+        if (amountUsdc == 0) {
+            return;
+        }
+        if (reservedSettlementUsdc[accountId] < amountUsdc || balances[accountId][settlementAsset] < amountUsdc) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        }
+        reservedSettlementUsdc[accountId] -= amountUsdc;
+        balances[accountId][settlementAsset] -= amountUsdc;
+        IERC20(settlementAsset).safeTransfer(recipient, amountUsdc);
+        emit SettlementReservePaid(accountId, amountUsdc, recipient);
     }
 
     /// @notice Transfers settlement asset from an account to the calling operator.

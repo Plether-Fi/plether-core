@@ -514,7 +514,7 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
-        assertEq(usdc.balanceOf(address(router)), 1e6, "Router should continue escrowing the keeper reserve");
+        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 1e6, "Clearinghouse should continue escrowing the keeper reserve");
     }
 
     function testFuzz_SlippageFailureClearsEscrowAndAdvancesQueue(
@@ -536,7 +536,7 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
-        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out and no longer escrowed");
+        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 0, "Keeper reserve should be paid out and no longer remain reserved");
     }
 
     function test_InsufficientPythFee_Reverts() public {
