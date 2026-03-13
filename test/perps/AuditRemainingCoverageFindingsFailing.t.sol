@@ -29,7 +29,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         );
     }
 
-    function test_H1_QueuedCollateralPreventsPrematureLiquidation() public {
+    function test_H1_LiquidationMustPreserveQueuedCollateralBuckets() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -40,9 +40,26 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        vm.expectRevert();
         engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Liquidation should still clear the live insolvent position");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            50_000,
+            "Queued execution bounty escrow must remain protected during liquidation"
+        );
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            7900e6,
+            "Queued committed margin must remain locked for the surviving queued order"
+        );
+        assertEq(
+            clearinghouse.balances(accountId, address(usdc)),
+            7_900_050_000,
+            "Only protected queued collateral buckets should remain after liquidation"
+        );
     }
 
 }

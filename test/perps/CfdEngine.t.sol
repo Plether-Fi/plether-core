@@ -473,6 +473,20 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(illiquidPreview.remainingSize, 0);
     }
 
+    function test_PreviewClose_NegativeVpiDoesNotPanic() public {
+        address trader = address(0xAB1301);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 1e8, pool.totalAssets());
+
+        assertTrue(preview.valid, "Preview should remain valid when close earns a negative VPI rebate");
+        assertLt(preview.vpiDeltaUsdc, 0, "Preview should expose negative VPI as a rebate instead of panicking");
+        assertEq(preview.vpiUsdc, 0, "Positive-only VPI charge field should clamp rebates to zero");
+    }
+
     function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

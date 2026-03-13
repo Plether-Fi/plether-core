@@ -54,7 +54,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve a separate flat `1.00 USDC` execution bounty at commit time, so executor compensation stays explicit and does not depend on vault liquidity on failed order resolution.
 
-**Execution Bounty Custody**: Reserved execution bounties remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain.
+**Execution Bounty Custody**: Reserved execution bounties remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain. When an order resolves, `payReservedSettlementUsdc()` routes that reserved escrow directly to the executing recipient chosen by the router/operator; this path is intentionally more permissive than `seizeAsset()`, which only allows self-recipient seizure.
 
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
@@ -256,7 +256,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Normal oracle staleness | 60s | Max Pyth price age for execution |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
-| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, third-party deposits only initialize cooldown for fresh recipients |
+| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, and meaningful third-party top-ups also reset the recipient cooldown |
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
 | `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |

@@ -161,9 +161,10 @@ The CfdEngine and OrderRouter are granted operator status on the MarginClearingh
 - Lock/unlock margin on user accounts
 - Settle USDC (credit or debit balances)
 - Seize assets from accounts (for losses, fees, and bad debt)
+- Pay reserved execution bounty escrow to an arbitrary recipient via `payReservedSettlementUsdc()`
 
 Operators **cannot**:
-- Withdraw user funds to arbitrary addresses (seizure requires a `recipient` parameter, always `address(vault)` in practice)
+- Use `seizeAsset()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
 - Create negative balances (seizure reverts if balance insufficient)
 
 ## Known Limitations
@@ -319,7 +320,7 @@ When a position goes underwater (equity < 0):
 
 #### Deposit Cooldown
 
-- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal. Only self-deposits reset the receiver cooldown; third-party deposits leave the receiver's existing cooldown unchanged.
+- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal. Self-deposits reset the receiver cooldown, and meaningful third-party top-ups also reset the receiver cooldown.
 - **Impact**: Users cannot deposit and immediately withdraw, even if the vault's share price has not changed.
 - **Rationale**: Prevents share price manipulation via flash loans or MEV sandwich attacks on LP deposits.
 

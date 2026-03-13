@@ -69,6 +69,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 sizeDelta;
         int256 realizedPnlUsdc;
         int256 fundingUsdc;
+        int256 vpiDeltaUsdc;
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
         uint256 immediatePayoutUsdc;
@@ -1227,11 +1228,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postBullUsdc = (postBullOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-        preview.vpiUsdc = uint256(CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor));
+        preview.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor);
+        if (preview.vpiDeltaUsdc > 0) {
+            preview.vpiUsdc = uint256(preview.vpiDeltaUsdc);
+        }
         uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         preview.executionFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
-        int256 netSettlement = preview.realizedPnlUsdc - int256(preview.vpiUsdc) - int256(preview.executionFeeUsdc)
+        int256 netSettlement = preview.realizedPnlUsdc - preview.vpiDeltaUsdc - int256(preview.executionFeeUsdc)
             - int256(unsettledFundingDebt);
         if (netSettlement > 0) {
             uint256 settlementGain = uint256(netSettlement);

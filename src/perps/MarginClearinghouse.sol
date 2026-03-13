@@ -543,7 +543,8 @@ contract MarginClearinghouse is Ownable2Step {
     /// @notice Transfers settlement asset from an account to the calling operator.
     /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
     ///      into their own contract/account and must forward them explicitly afterward.
-    ///      This prevents operators from draining user funds to arbitrary third-party addresses.
+    ///      This is stricter than `payReservedSettlementUsdc()`, which can route reserved
+    ///      execution bounty escrow to an arbitrary recipient chosen by the operator.
     /// @param accountId Account to seize from
     /// @param asset ERC20 token to seize (must equal settlementAsset)
     /// @param amount Token amount to seize
