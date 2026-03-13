@@ -41,7 +41,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
         vm.expectRevert();
-        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp), 0);
+        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
     }
 
@@ -76,7 +76,7 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
         uint256 bounty =
-            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp), 0);
+            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(bounty, 4_940_000, "Keeper bounty should not exceed the trader's remaining positive equity");

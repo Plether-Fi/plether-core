@@ -45,6 +45,22 @@ interface IMarginClearinghouse {
         uint256 amountUsdc,
         address recipient
     ) external;
+    /// @notice Consumes funding loss from free settlement plus the active position margin bucket.
+    function consumeFundingLoss(
+        bytes32 accountId,
+        uint256 lockedPositionMarginUsdc,
+        uint256 lossUsdc,
+        address recipient
+    ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
+    /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
+    function consumeLiquidationResidual(
+        bytes32 accountId,
+        uint256 lockedPositionMarginUsdc,
+        int256 residualUsdc,
+        address recipient
+    )
+        external
+        returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc);
     /// @notice Transfers assets from an account to a recipient (losses, fees, or bad debt)
     function seizeAsset(
         bytes32 accountId,

@@ -17,7 +17,7 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.startPrank(address(router));
-        engine.liquidatePosition(accountId, 1.09e8, pool.totalAssets(), uint64(block.timestamp), 0);
+        engine.liquidatePosition(accountId, 1.09e8, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(
@@ -105,7 +105,7 @@ contract AuditFullSecurityFailing_BadDebtClearing is BasePerpTest {
 
         vm.startPrank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        engine.liquidatePosition(loserId, 1e8, pool.totalAssets(), uint64(block.timestamp), 0);
+        engine.liquidatePosition(loserId, 1e8, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         uint256 badDebt = engine.accumulatedBadDebtUsdc();

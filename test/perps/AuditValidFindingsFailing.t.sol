@@ -89,14 +89,14 @@ contract AuditValidFindingsFailing is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtPositiveEquity =
-            engine.liquidatePosition(positiveId, 101_595_000, depth, uint64(block.timestamp), 0);
+            engine.liquidatePosition(positiveId, 101_595_000, depth, uint64(block.timestamp));
 
         // Liquidate at equity ≈ -$5 (just below zero)
         // Bounty capped at min(~$152, $1600 margin) = $152
         depth = pool.totalAssets();
         vm.prank(address(router));
         uint256 bountyAtNegativeEquity =
-            engine.liquidatePosition(negativeId, 101_605_000, depth, uint64(block.timestamp), 0);
+            engine.liquidatePosition(negativeId, 101_605_000, depth, uint64(block.timestamp));
 
         uint256 jump = bountyAtNegativeEquity > bountyAtPositiveEquity
             ? bountyAtNegativeEquity - bountyAtPositiveEquity

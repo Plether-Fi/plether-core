@@ -465,6 +465,81 @@ contract MarginClearinghouse is Ownable2Step {
         emit SettlementReservePaid(accountId, amountUsdc, recipient);
     }
 
+    /// @notice Consumes a funding loss from free settlement first, then from the active position margin bucket.
+    /// @dev Reserved settlement and unrelated locked margin remain protected.
+    function consumeFundingLoss(
+        bytes32 accountId,
+        uint256 lockedPositionMarginUsdc,
+        uint256 lossUsdc,
+        address recipient
+    ) external onlyOperator returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) {
+        if (lossUsdc == 0) {
+            return (0, 0, 0);
+        }
+
+        freeSettlementConsumedUsdc = getFreeSettlementBalanceUsdc(accountId);
+        if (freeSettlementConsumedUsdc > lossUsdc) {
+            freeSettlementConsumedUsdc = lossUsdc;
+        }
+
+        uint256 remainingLossUsdc = lossUsdc - freeSettlementConsumedUsdc;
+        marginConsumedUsdc = lockedPositionMarginUsdc > remainingLossUsdc ? remainingLossUsdc : lockedPositionMarginUsdc;
+        uncoveredUsdc = remainingLossUsdc - marginConsumedUsdc;
+
+        if (marginConsumedUsdc > 0) {
+            uint256 totalLocked = lockedMarginUsdc[accountId];
+            lockedMarginUsdc[accountId] = totalLocked > marginConsumedUsdc ? totalLocked - marginConsumedUsdc : 0;
+            emit MarginUnlocked(accountId, marginConsumedUsdc);
+        }
+
+        uint256 totalConsumedUsdc = freeSettlementConsumedUsdc + marginConsumedUsdc;
+        if (totalConsumedUsdc == 0) {
+            return (marginConsumedUsdc, freeSettlementConsumedUsdc, uncoveredUsdc);
+        }
+
+        balances[accountId][settlementAsset] -= totalConsumedUsdc;
+        IERC20(settlementAsset).safeTransfer(recipient, totalConsumedUsdc);
+        emit AssetSeized(accountId, settlementAsset, totalConsumedUsdc, recipient);
+    }
+
+    /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
+    /// @dev Releases the specified active position margin bucket but leaves unrelated committed margin untouched.
+    function consumeLiquidationResidual(
+        bytes32 accountId,
+        uint256 lockedPositionMarginUsdc,
+        int256 residualUsdc,
+        address recipient
+    ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
+        uint256 totalLocked = lockedMarginUsdc[accountId];
+        uint256 protectedLockedMarginUsdc = totalLocked > lockedPositionMarginUsdc ? totalLocked - lockedPositionMarginUsdc : 0;
+        uint256 balance = balances[accountId][settlementAsset];
+        uint256 protectedUsdc = protectedLockedMarginUsdc + reservedSettlementUsdc[accountId];
+        uint256 reachableUsdc = balance > protectedUsdc ? balance - protectedUsdc : 0;
+
+        if (residualUsdc >= 0) {
+            uint256 targetBalanceUsdc = uint256(residualUsdc);
+            if (reachableUsdc > targetBalanceUsdc) {
+                seizedUsdc = reachableUsdc - targetBalanceUsdc;
+            } else if (targetBalanceUsdc > reachableUsdc) {
+                payoutUsdc = targetBalanceUsdc - reachableUsdc;
+            }
+        } else {
+            seizedUsdc = reachableUsdc;
+            badDebtUsdc = uint256(-residualUsdc);
+        }
+
+        if (lockedPositionMarginUsdc > 0) {
+            lockedMarginUsdc[accountId] = protectedLockedMarginUsdc;
+            emit MarginUnlocked(accountId, lockedPositionMarginUsdc);
+        }
+
+        if (seizedUsdc > 0) {
+            balances[accountId][settlementAsset] -= seizedUsdc;
+            IERC20(settlementAsset).safeTransfer(recipient, seizedUsdc);
+            emit AssetSeized(accountId, settlementAsset, seizedUsdc, recipient);
+        }
+    }
+
     /// @notice Transfers settlement asset from an account to the calling operator.
     /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
     ///      into their own contract/account and must forward them explicitly afterward.

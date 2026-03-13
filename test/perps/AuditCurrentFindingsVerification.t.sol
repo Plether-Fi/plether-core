@@ -34,7 +34,7 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 1e8, depth, uint64(block.timestamp), 0);
+        engine.liquidatePosition(loserId, 1e8, depth, uint64(block.timestamp));
 
         uint256 price = engine.lastMarkPrice();
         int256 bullPnl = (int256(engine.globalBullEntryNotional()) - int256(engine.bullOI() * price)) / int256(1e20);
@@ -107,7 +107,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         uint256 depth = pool.totalAssets();
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp), 0);
+        uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
 
         assertEq(bounty, 4_940_000, "Keeper bounty should cap at the trader's remaining positive equity");
     }

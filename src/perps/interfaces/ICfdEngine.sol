@@ -58,8 +58,7 @@ interface ICfdEngine {
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime,
-        uint256 pendingVaultPayoutUsdc
+        uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 
     function previewLiquidation(

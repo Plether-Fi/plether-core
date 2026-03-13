@@ -939,9 +939,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
 
         uint256 vaultDepth = vault.totalAssets();
-        uint256 keeperBountyUsdc = engine.previewLiquidation(accountId, executionPrice, vaultDepth).keeperBountyUsdc;
-        keeperBountyUsdc =
-            engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime, keeperBountyUsdc);
+        uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
 
         _payOrDeferLiquidationBounty(keeperBountyUsdc);
 

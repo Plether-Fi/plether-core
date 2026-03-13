@@ -748,23 +748,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 clearinghouse.lockMargin(order.accountId, gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
-                if (pos.margin < loss) {
+                (uint256 marginConsumedUsdc,, uint256 uncoveredUsdc) = clearinghouse.consumeFundingLoss(
+                    order.accountId, pos.margin, loss, address(vault)
+                );
+                pos.margin -= marginConsumedUsdc;
+
+                if (uncoveredUsdc > 0) {
                     if (!order.isClose) {
                         revert CfdEngine__FundingExceedsMargin();
                     }
                     if (order.sizeDelta < pos.size) {
                         revert CfdEngine__PartialCloseUnderwaterFunding();
                     }
-                    unsettledFundingDebt = loss - pos.margin;
-                    if (pos.margin > 0) {
-                        _seizeUsdcToVault(order.accountId, pos.margin);
-                        clearinghouse.unlockMargin(order.accountId, pos.margin);
-                    }
-                    pos.margin = 0;
-                } else {
-                    pos.margin -= loss;
-                    _seizeUsdcToVault(order.accountId, loss);
-                    clearinghouse.unlockMargin(order.accountId, loss);
+                    unsettledFundingDebt = uncoveredUsdc;
                 }
             }
         }
@@ -1031,13 +1027,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     function _settleLiquidationResidual(
         bytes32 accountId,
+        uint256 positionMarginUsdc,
         int256 residualUsdc
     ) internal returns (CfdEngineSettlementLib.LiquidationSettlementResult memory result) {
-        uint256 accountBalance = clearinghouse.balances(accountId, address(USDC));
-        result = CfdEngineSettlementLib.liquidationSettlementResult(accountBalance, residualUsdc);
-        if (result.seizedUsdc > 0) {
-            _seizeUsdcToVault(accountId, result.seizedUsdc);
-        }
+        (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
+            accountId, positionMarginUsdc, residualUsdc, address(vault)
+        );
         if (result.payoutUsdc > 0) {
             vault.payOut(address(clearinghouse), result.payoutUsdc);
             clearinghouse.settleUsdc(accountId, address(USDC), int256(result.payoutUsdc));
@@ -1154,8 +1149,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.pendingFundingUsdc = pendingFunding;
         viewData.netEquityUsdc = equityUsdc;
         viewData.maxProfitUsdc = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
+        uint256 currentNotionalUsdc = (pos.size * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        viewData.liquidatable = equityUsdc <= int256((viewData.entryNotionalUsdc * requiredBps) / 10_000);
+        viewData.liquidatable = equityUsdc <= int256((currentNotionalUsdc * requiredBps) / 10_000);
     }
 
     function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
@@ -1295,8 +1291,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
         preview.equityUsdc = int256(preview.reachableCollateralUsdc) + preview.fundingUsdc + preview.pnlUsdc;
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        uint256 maintenanceMarginUsdc =
-            (((pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
+        uint256 maintenanceMarginUsdc = (((pos.size * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
         preview.liquidatable = preview.equityUsdc <= int256(maintenanceMarginUsdc);
 
         uint256 posMargin = pos.margin;
@@ -1314,7 +1309,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdEngineSettlementLib.LiquidationSettlementResult memory result =
             CfdEngineSettlementLib.liquidationSettlementResult(
-                clearinghouse.balances(accountId, address(USDC)), preview.equityUsdc - int256(bounty)
+                preview.reachableCollateralUsdc, preview.equityUsdc - int256(bounty)
             );
         preview.seizedCollateralUsdc = result.seizedUsdc;
         preview.immediatePayoutUsdc = result.payoutUsdc;
@@ -1371,18 +1366,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime,
-        uint256 pendingVaultPayoutUsdc
+        uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
-        return _liquidatePosition(accountId, currentOraclePrice, vaultDepthUsdc, publishTime, pendingVaultPayoutUsdc);
+        return _liquidatePosition(accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
     }
 
     function _liquidatePosition(
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime,
-        uint256 pendingVaultPayoutUsdc
+        uint64 publishTime
     ) internal returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(lastMarkPrice, vaultDepthUsdc);
@@ -1436,11 +1429,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 keeperBountyUsdc = posMargin;
             }
         }
-        clearinghouse.unlockMargin(accountId, posMargin);
-
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
         CfdEngineSettlementLib.LiquidationSettlementResult memory settlement =
-            _settleLiquidationResidual(accountId, residual);
+            _settleLiquidationResidual(accountId, posMargin, residual);
         accumulatedBadDebtUsdc += settlement.badDebtUsdc;
 
         if (pos.side == CfdTypes.Side.BULL) {
@@ -1451,7 +1442,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
-        _enterDegradedModeIfInsolvent(accountId, pendingVaultPayoutUsdc);
+        _enterDegradedModeIfInsolvent(accountId, keeperBountyUsdc);
     }
 
     function _assertPostSolvency() internal view {
