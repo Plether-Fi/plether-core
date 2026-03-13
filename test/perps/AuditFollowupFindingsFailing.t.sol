@@ -5,6 +5,26 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract TrancheCooldownBypassReceiver {
+
+    function approveAsset(
+        TrancheVault vault,
+        uint256 amount
+    ) external {
+        IERC20(vault.asset()).approve(address(vault), amount);
+    }
+
+    function withdrawMax(
+        TrancheVault vault,
+        address receiver
+    ) external {
+        uint256 assets = vault.maxWithdraw(address(this));
+        vault.withdraw(assets, receiver, address(this));
+    }
+
+}
 
 contract AuditFollowupFindingsFailing_CloseSettlementShielding is BasePerpTest {
 
@@ -303,6 +323,35 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
 
         assertGt(juniorVault.balanceOf(alice), 100_000e9, "Third-party top-up should mint additional shares for the existing holder");
         assertEq(juniorVault.lastDepositTime(alice), initialCooldown, "Third-party top-up should not reset the holder cooldown");
+    }
+
+}
+
+contract AuditFollowupFindingsFailing_TrancheCooldownBypass is BasePerpTest {
+
+    address attacker = address(0xBAD);
+
+    function test_H1_TwoContractThirdPartyDepositMustRefreshReceiverCooldown() public {
+        TrancheCooldownBypassReceiver receiver = new TrancheCooldownBypassReceiver();
+        address receiverAddr = address(receiver);
+
+        usdc.mint(receiverAddr, 1);
+        vm.prank(receiverAddr);
+        receiver.approveAsset(juniorVault, 1);
+        vm.prank(receiverAddr);
+        juniorVault.deposit(1, receiverAddr);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        usdc.mint(attacker, 10_000e6);
+        vm.startPrank(attacker);
+        usdc.approve(address(juniorVault), 10_000e6);
+        juniorVault.deposit(10_000e6, receiverAddr);
+        vm.stopPrank();
+
+        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.prank(receiverAddr);
+        receiver.withdrawMax(juniorVault, attacker);
     }
 
 }
