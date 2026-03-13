@@ -21,7 +21,7 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
         clearinghouse.reserveSettlementUsdc(accountId, 300e6);
 
         uint256 reachable = clearinghouse.getSettlementReachableUsdc(accountId, 2_000e6);
-        assertEq(reachable, 7_700e6, "reachable settlement must exclude reserved keeper escrow");
+        assertEq(reachable, 7_700e6, "reachable settlement must exclude reserved execution bounty escrow");
     }
 
     function test_SeizeAsset_CannotConsumeReservedSettlement() public {
@@ -75,7 +75,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.juniorPrincipal(), 900_000e6, "deferred keeper rewards must reduce LP distributable equity");
+        assertEq(pool.juniorPrincipal(), 900_000e6, "deferred liquidation bounties must reduce LP distributable equity");
     }
 }
 

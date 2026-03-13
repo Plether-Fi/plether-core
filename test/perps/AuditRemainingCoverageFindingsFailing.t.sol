@@ -193,7 +193,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         router.executeOrder(1, priceData);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "Close should still succeed even when keeper reward cash is unavailable");
+        assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(engine.deferredLiquidationBountyUsdc(keeper), 0, "Close execution should not create deferred liquidation bounties");
         assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, router.quoteCloseOrderExecutionBountyUsdc(), "Keeper should be paid from the reserved close bounty");
     }

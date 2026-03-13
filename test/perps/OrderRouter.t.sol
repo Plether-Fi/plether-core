@@ -76,7 +76,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Only the reserved keeper fee should leave Alice's balance"
+            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Only the reserved execution bounty should leave Alice's balance"
         );
     }
 
@@ -565,9 +565,9 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Reserved keeper fee should be charged on failure"
+            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Reserved execution bounty should be charged on failure"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive the reserved keeper fee");
+        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive the reserved execution bounty");
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -1905,7 +1905,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
 
-        assertEq(router.nextCommitId(), 2, "Commit should succeed without an ETH keeper fee");
+        assertEq(router.nextCommitId(), 2, "Commit should succeed without an ETH execution fee");
     }
 
     // Regression: H-03 — close order allowed while paused
@@ -2035,7 +2035,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         assertEq(router.claimableEth(spammer), 0, "Expired order should not create claimable ETH for the user");
-        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH keeper fee");
+        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH execution fee");
     }
 
     // Regression: H-03
@@ -2095,7 +2095,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         assertEq(router.claimableEth(spammer), 0, "Expired order should not create claimable ETH for the user");
-        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH keeper fee");
+        assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH execution fee");
     }
 
 }
@@ -2408,7 +2408,7 @@ contract VpiImrBypassTest is Test {
         clearinghouse.deposit(aliceAccount, address(usdc), 1e6);
         vm.stopPrank();
 
-        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved keeper fee");
+        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved execution bounty");
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
