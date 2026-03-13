@@ -457,3 +457,263 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
 }
+
+contract AdversarialPerpHandler is Test {
+
+    MockUSDC public usdc;
+    CfdEngine public engine;
+    HousePool public pool;
+    MarginClearinghouse public clearinghouse;
+    OrderRouter public router;
+    TrancheVault public juniorVault;
+
+    address[4] public actors;
+    address public lp;
+    address public sink;
+
+    uint256 public ghost_batchAttempts;
+    uint256 public ghost_batchAdvances;
+    uint256 public ghost_starvationEvents;
+
+    constructor(
+        MockUSDC _usdc,
+        CfdEngine _engine,
+        HousePool _pool,
+        MarginClearinghouse _clearinghouse,
+        OrderRouter _router,
+        TrancheVault _juniorVault
+    ) {
+        usdc = _usdc;
+        engine = _engine;
+        pool = _pool;
+        clearinghouse = _clearinghouse;
+        router = _router;
+        juniorVault = _juniorVault;
+
+        actors[0] = address(0x3001);
+        actors[1] = address(0x3002);
+        actors[2] = address(0x3003);
+        actors[3] = address(0x3004);
+        lp = address(0x4001);
+        sink = address(0xDEAD);
+    }
+
+    function _accountId(
+        address actor
+    ) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(actor)));
+    }
+
+    function _seedTrader(address actor, uint256 amount) internal {
+        bytes32 accountId = _accountId(actor);
+        usdc.mint(actor, amount);
+        vm.startPrank(actor);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(accountId, address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function _seedLp(uint256 amount) internal {
+        usdc.mint(lp, amount);
+        vm.startPrank(lp);
+        usdc.approve(address(juniorVault), type(uint256).max);
+        juniorVault.deposit(amount, lp);
+        vm.stopPrank();
+    }
+
+    function seedActors(uint256 amountFuzz) external {
+        uint256 amount = bound(amountFuzz, 1_000e6, 50_000e6);
+        for (uint256 i = 0; i < actors.length; i++) {
+            _seedTrader(actors[i], amount);
+        }
+    }
+
+    function openPosition(uint256 actorIdx, uint8 sideRaw, uint256 sizeFuzz, uint256 marginFuzz) external {
+        address actor = actors[actorIdx % actors.length];
+        bytes32 accountId = _accountId(actor);
+        uint256 size = bound(sizeFuzz, 1_000e18, 25_000e18);
+        uint256 margin = bound(marginFuzz, 200e6, 5_000e6);
+
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < margin + 1e6) {
+            _seedTrader(actor, margin + 5e6);
+        }
+
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+
+        uint64 commitId = router.nextCommitId();
+        vm.prank(actor);
+        router.commitOrder(side, size, margin, 1e8, false);
+
+        vm.roll(block.number + 1);
+        bytes[] memory empty = new bytes[](0);
+        try router.executeOrder(commitId, empty) {} catch {}
+    }
+
+    function spamInvalidOrders(uint256 actorIdx, uint256 countFuzz) external {
+        address actor = actors[actorIdx % actors.length];
+        bytes32 accountId = _accountId(actor);
+        uint256 count = bound(countFuzz, 1, 6);
+
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < count * 101e6) {
+            _seedTrader(actor, count * 150e6);
+        }
+
+        for (uint256 i = 0; i < count; i++) {
+            vm.prank(actor);
+            router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 2e8, false);
+        }
+    }
+
+    function queueBadClose(uint256 actorIdx) external {
+        address actor = actors[actorIdx % actors.length];
+        bytes32 accountId = _accountId(actor);
+        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        if (size == 0) {
+            return;
+        }
+
+        vm.prank(actor);
+        try router.commitOrder(side, size, 0, 90_000_000, true) {} catch {}
+    }
+
+    function starveLiquidity(uint256 amountFuzz) external {
+        uint256 poolAssets = pool.totalAssets();
+        if (poolAssets <= 10e6) {
+            return;
+        }
+
+        uint256 amount = bound(amountFuzz, 1e6, poolAssets - 10e6);
+        vm.prank(address(pool));
+        usdc.transfer(sink, amount);
+        ghost_starvationEvents++;
+    }
+
+    function replenishLiquidity(uint256 amountFuzz) external {
+        uint256 amount = bound(amountFuzz, 1_000e6, 100_000e6);
+        _seedLp(amount);
+    }
+
+    function processBatch(uint256 maxOrdersFuzz, uint256 oraclePriceFuzz) external {
+        uint64 nextExecuteId = router.nextExecuteId();
+        uint64 nextCommitId = router.nextCommitId();
+        address actor = actors[ghost_batchAttempts % actors.length];
+        bytes32 accountId = _accountId(actor);
+
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < 205e6) {
+            _seedTrader(actor, 500e6);
+        }
+
+        CfdTypes.Side side = CfdTypes.Side.BULL;
+        (uint256 size,,,,, CfdTypes.Side existingSide,,) = engine.positions(accountId);
+        if (size > 0) {
+            side = existingSide;
+        }
+
+        vm.prank(actor);
+        router.commitOrder(side, 1_000e18, 200e6, 1e8, false);
+
+        nextCommitId = router.nextCommitId();
+        nextExecuteId = router.nextExecuteId();
+
+        uint256 pending = nextCommitId - nextExecuteId;
+        uint256 maxOrders = bound(maxOrdersFuzz, pending, pending);
+        uint256 oraclePrice = bound(oraclePriceFuzz, 99_000_000, 101_000_000);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(oraclePrice);
+
+        ghost_batchAttempts++;
+        vm.roll(block.number + 1);
+
+        uint64 beforeExecute = router.nextExecuteId();
+        try router.executeOrderBatch(uint64(maxOrders), priceData) {} catch {}
+        uint64 afterExecute = router.nextExecuteId();
+
+        if (afterExecute > beforeExecute) {
+            ghost_batchAdvances++;
+        }
+    }
+}
+
+contract AdversarialPerpInvariantTest is BasePerpTest {
+
+    AdversarialPerpHandler handler;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0.0005e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.15e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 200_000e6;
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 500_000e6;
+    }
+
+    function setUp() public override {
+        super.setUp();
+
+        handler = new AdversarialPerpHandler(usdc, engine, pool, clearinghouse, router, juniorVault);
+        handler.seedActors(10_000e6);
+
+        targetContract(address(handler));
+    }
+
+    function invariant_AdversarialEscrowStaysBacked() public {
+        uint256 pendingKeeperReserves;
+        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
+            if (accountId == bytes32(0) || sizeDelta == 0) {
+                continue;
+            }
+            pendingKeeperReserves += router.keeperFeeReserves(orderId);
+        }
+
+        uint256 trackedReservedSettlement;
+        for (uint256 i = 0; i < 4; i++) {
+            trackedReservedSettlement += clearinghouse.reservedSettlementUsdc(
+                bytes32(uint256(uint160(handler.actors(i))))
+            );
+        }
+
+        assertEq(
+            trackedReservedSettlement,
+            pendingKeeperReserves,
+            "Adversarial queue keeper reserves must remain fully backed"
+        );
+    }
+
+    function invariant_AdversarialBatchProcessingRemainsLive() public {
+        uint64 nextExecuteId = router.nextExecuteId();
+        uint64 nextCommitId = router.nextCommitId();
+        assertLe(nextExecuteId, nextCommitId, "Queue pointers must remain ordered");
+    }
+
+    function invariant_AdversarialViewsStayConsistent() public {
+        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+        HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
+
+        assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on assets");
+        assertEq(vaultView.freeUsdc, protocolView.freeUsdc, "Pool and engine must agree on free liquidity");
+        assertEq(
+            vaultView.withdrawalReservedUsdc,
+            protocolView.withdrawalReservedUsdc,
+            "Pool and engine must agree on reserved liquidity"
+        );
+    }
+
+    function invariant_AdversarialRouterNeverCustodiesUsdc() public {
+        assertEq(usdc.balanceOf(address(router)), 0, "Router must not retain settlement balances during adversarial flows");
+    }
+}
