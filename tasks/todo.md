@@ -18,6 +18,31 @@
 
 ## Test Results: 125/125 pass (was 102)
 
+## InvarCoin P0/P1 Remediation (Mar 13 2026)
+
+- [x] Preserve pro-rata LP claims in emergency mode by keeping LP accounting intact until assets are actually recovered
+- [x] Require balanced LP redemption in `lpWithdraw()` even during emergency mode
+- [x] Harden gauge onboarding with explicit approval + LP token validation
+- [x] Replace persistent gauge approvals with exact-per-call approvals
+- [x] Update unit and fork tests for new emergency/gauge behavior
+
+### Verification
+- `forge test --match-path test/InvarCoin.t.sol`
+- `forge test --match-path test/fork/InvarCoinGaugeFork.t.sol`
+
+## InvarCoin P1/P2 Hardening (Mar 13 2026)
+
+- [x] Replace direct `stakedInvarCoin` setter with validated propose/finalize timelock flow
+- [x] Validate staking vault code exists and `asset() == INVAR`
+- [x] Add timelocked `gaugeRewardsReceiver` configuration
+- [x] Add protected reward token sweep path and block arbitrary rescue of protected rewards
+- [x] Update scripts and tests for the new integration flow
+
+### Verification
+- `forge test --match-path test/InvarCoin.t.sol`
+- `forge test --match-path test/fork/InvarCoinGaugeFork.t.sol`
+- `forge build`
+
 ---
 
 ## PletherDOV Completion (pre-audit)

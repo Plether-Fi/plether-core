@@ -38,7 +38,9 @@ contract InvarCoinManipulationForkTest is BaseForkTest {
         ic = new InvarCoin(USDC, bearToken, curvePool, curvePool, address(basketOracle), address(0), address(0));
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        _warpAndRefreshOracle(ic.STAKED_INVAR_TIMELOCK());
+        ic.finalizeStakedInvarCoin();
 
         deal(USDC, alice, 2_000_000e6);
         deal(USDC, bob, 500_000e6);

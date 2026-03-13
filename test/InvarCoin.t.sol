@@ -264,6 +264,10 @@ contract MockCurveGauge {
         lpToken = IERC20(_lpToken);
     }
 
+    function lp_token() external view returns (address) {
+        return address(lpToken);
+    }
+
     function deposit(
         uint256 amount
     ) external {
@@ -306,6 +310,10 @@ contract MockBrickedGauge {
         address _lpToken
     ) {
         lpToken = IERC20(_lpToken);
+    }
+
+    function lp_token() external view returns (address) {
+        return address(lpToken);
     }
 
     function deposit(
@@ -371,7 +379,10 @@ contract InvarCoinTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        vm.warp(block.timestamp + ic.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeStakedInvarCoin();
 
         usdc.mint(alice, 1_000_000e6);
         usdc.mint(bob, 1_000_000e6);
@@ -1237,16 +1248,41 @@ contract InvarCoinTest is Test {
     // ==========================================
 
     function test_SetStakedInvarCoin_RevertsOnSecondCall() public {
+        StakedToken newSInvar = new StakedToken(IERC20(address(ic)), "New Staked InvarCoin", "nsINVAR");
+
         vm.expectRevert(InvarCoin.InvarCoin__AlreadySet.selector);
-        ic.setStakedInvarCoin(makeAddr("newSInvar"));
+        ic.proposeStakedInvarCoin(address(newSInvar));
     }
 
-    function test_SetStakedInvarCoin_RevertsOnZeroAddress() public {
+    function test_ProposeStakedInvarCoin_RevertsOnZeroAddress() public {
         InvarCoin fresh = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
         );
-        vm.expectRevert(InvarCoin.InvarCoin__ZeroAddress.selector);
-        fresh.setStakedInvarCoin(address(0));
+
+        vm.expectRevert(InvarCoin.InvarCoin__InvalidStakingVault.selector);
+        fresh.proposeStakedInvarCoin(address(0));
+    }
+
+    function test_ProposeStakedInvarCoin_RevertsForWrongAsset() public {
+        InvarCoin fresh = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+        StakedToken wrongVault = new StakedToken(IERC20(address(usdc)), "Wrong Vault", "wINVAR");
+
+        vm.expectRevert(InvarCoin.InvarCoin__InvalidStakingVault.selector);
+        fresh.proposeStakedInvarCoin(address(wrongVault));
+    }
+
+    function test_FinalizeStakedInvarCoin_RevertsBeforeTimelock() public {
+        InvarCoin fresh = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+        StakedToken freshVault = new StakedToken(IERC20(address(fresh)), "Fresh Vault", "fINVAR");
+
+        fresh.proposeStakedInvarCoin(address(freshVault));
+
+        vm.expectRevert(InvarCoin.InvarCoin__StakingTimelockActive.selector);
+        fresh.finalizeStakedInvarCoin();
     }
 
     // ==========================================
@@ -2046,12 +2082,12 @@ contract InvarCoinTest is Test {
 
         assertTrue(ic.paused(), "should be paused");
         assertTrue(ic.emergencyActive(), "should be emergency");
-        assertEq(ic.trackedLpBalance(), 0, "trackedLpBalance reset");
-        assertEq(ic.curveLpCostVp(), 0, "curveLpCostVp reset");
+        assertGt(ic.trackedLpBalance(), 0, "trackedLpBalance preserved");
+        assertGt(ic.curveLpCostVp(), 0, "curveLpCostVp preserved");
 
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
-        assertGt(usdcOut, 0, "user gets USDC from buffer even with bricked Curve");
+        vm.expectRevert("Curve bricked");
+        ic.lpWithdraw(shares, 0, 0);
     }
 
     function test_EmergencyWithdrawFromCurve_RevertsWhenCurveBricked() public {
@@ -2081,11 +2117,12 @@ contract InvarCoinTest is Test {
         ic.setEmergencyMode();
 
         assertTrue(ic.emergencyActive());
-        assertEq(ic.trackedLpBalance(), 0);
+        assertGt(ic.trackedLpBalance(), 0);
 
         ic.emergencyWithdrawFromCurve();
 
         assertEq(curveLp.balanceOf(address(ic)), 0, "LP tokens recovered from Curve");
+        assertEq(ic.trackedLpBalance(), 0, "tracked LP cleared after recovery");
     }
 
     function test_SetEmergencyMode_OnlyOwner() public {
@@ -2762,6 +2799,7 @@ contract InvarCoinGaugeTest is Test {
     MockCurveGauge public gauge;
 
     address public alice = makeAddr("alice");
+    address public rewardReceiver = makeAddr("rewardReceiver");
 
     uint256 constant ORACLE_PRICE = 120_000_000;
 
@@ -2780,9 +2818,17 @@ contract InvarCoinGaugeTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        vm.warp(block.timestamp + ic.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeStakedInvarCoin();
+        ic.proposeGaugeRewardsReceiver(rewardReceiver);
+        vm.warp(block.timestamp + ic.GAUGE_REWARDS_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGaugeRewardsReceiver();
 
         gauge = new MockCurveGauge(address(curveLp));
+        ic.setGaugeApproval(address(gauge), true);
 
         usdc.mint(alice, 1_000_000e6);
         vm.prank(alice);
@@ -2855,6 +2901,7 @@ contract InvarCoinGaugeTest is Test {
         assertGt(stakedInGauge, 0);
 
         MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.setGaugeApproval(address(newGauge), true);
         ic.proposeGauge(address(newGauge));
         vm.warp(block.timestamp + 7 days);
         oracle.setUpdatedAt(block.timestamp);
@@ -2883,6 +2930,7 @@ contract InvarCoinGaugeTest is Test {
 
     function test_FinalizeGauge_RevertsIfOldGaugeBricked() public {
         MockBrickedGauge brickedGauge = new MockBrickedGauge(address(curveLp));
+        ic.setGaugeApproval(address(brickedGauge), true);
 
         ic.proposeGauge(address(brickedGauge));
         vm.warp(block.timestamp + 7 days);
@@ -2898,6 +2946,7 @@ contract InvarCoinGaugeTest is Test {
         brickedGauge.setBricked(true);
 
         MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.setGaugeApproval(address(newGauge), true);
         ic.proposeGauge(address(newGauge));
         vm.warp(block.timestamp + 14 days);
         oracle.setUpdatedAt(block.timestamp);
@@ -3162,8 +3211,16 @@ contract InvarCoinGaugeTest is Test {
             address(minter)
         );
         StakedToken sL1 = new StakedToken(IERC20(address(icL1)), "sINVAR-L1", "sINVAR-L1");
-        icL1.setStakedInvarCoin(address(sL1));
+        icL1.proposeStakedInvarCoin(address(sL1));
+        vm.warp(block.timestamp + icL1.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        icL1.finalizeStakedInvarCoin();
+        icL1.proposeGaugeRewardsReceiver(rewardReceiver);
+        vm.warp(block.timestamp + icL1.GAUGE_REWARDS_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        icL1.finalizeGaugeRewardsReceiver();
 
+        icL1.setGaugeApproval(address(gauge), true);
         icL1.proposeGauge(address(gauge));
         vm.warp(block.timestamp + 7 days);
         oracle.setUpdatedAt(block.timestamp);
@@ -3197,6 +3254,33 @@ contract InvarCoinGaugeTest is Test {
         ic.rescueToken(address(gauge), alice);
     }
 
+    function test_ProtectRewardToken_BlocksRescueAndSweepsToReceiver() public {
+        MockUSDC6 rewardToken = new MockUSDC6();
+        rewardToken.mint(address(ic), 123e6);
+
+        ic.protectRewardToken(address(rewardToken));
+
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.rescueToken(address(rewardToken), alice);
+
+        ic.sweepGaugeRewards(address(rewardToken));
+
+        assertEq(rewardToken.balanceOf(rewardReceiver), 123e6);
+    }
+
+    function test_SweepGaugeRewards_RevertsWithoutConfiguredReceiver() public {
+        InvarCoin fresh = new InvarCoin(
+            address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
+        );
+        MockUSDC6 rewardToken = new MockUSDC6();
+        rewardToken.mint(address(fresh), 50e6);
+
+        fresh.protectRewardToken(address(rewardToken));
+
+        vm.expectRevert(InvarCoin.InvarCoin__GaugeRewardsReceiverNotSet.selector);
+        fresh.sweepGaugeRewards(address(rewardToken));
+    }
+
     // ==========================================
     // PROPOSE GAUGE: OVERWRITE PENDING
     // ==========================================
@@ -3205,6 +3289,7 @@ contract InvarCoinGaugeTest is Test {
         ic.proposeGauge(address(gauge));
 
         MockCurveGauge gauge2 = new MockCurveGauge(address(curveLp));
+        ic.setGaugeApproval(address(gauge2), true);
         ic.proposeGauge(address(gauge2));
 
         assertEq(ic.pendingGauge(), address(gauge2));
@@ -3241,6 +3326,7 @@ contract InvarCoinGaugeTest is Test {
         _setupGauge();
 
         MockCurveGauge newGauge = new MockCurveGauge(address(curveLp));
+        ic.setGaugeApproval(address(newGauge), true);
         ic.proposeGauge(address(newGauge));
         vm.warp(block.timestamp + 7 days);
         oracle.setUpdatedAt(block.timestamp);
@@ -3261,9 +3347,9 @@ contract InvarCoinGaugeTest is Test {
         assertEq(curveLp.allowance(address(ic), oldGaugeAddr), 0);
     }
 
-    function test_FinalizeGauge_SetsMaxApprovalOnNew() public {
+    function test_FinalizeGauge_LeavesNoResidualApprovalOnNew() public {
         _setupGauge();
-        assertEq(curveLp.allowance(address(ic), address(gauge)), type(uint256).max);
+        assertEq(curveLp.allowance(address(ic), address(gauge)), 0);
     }
 
     // ==========================================
@@ -3438,6 +3524,7 @@ contract InvarCoinGaugeTest is Test {
 
     function test_DeployToCurve_RevertsIfGaugeBricked() public {
         MockBrickedGauge brickedGauge = new MockBrickedGauge(address(curveLp));
+        ic.setGaugeApproval(address(brickedGauge), true);
         ic.proposeGauge(address(brickedGauge));
         vm.warp(block.timestamp + 7 days);
         oracle.setUpdatedAt(block.timestamp);
@@ -3560,7 +3647,10 @@ contract InvarCoinPermitTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        vm.warp(block.timestamp + ic.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeStakedInvarCoin();
 
         signer = vm.addr(SIGNER_KEY);
         usdc.mint(signer, 1_000_000e6);
@@ -3665,7 +3755,10 @@ contract HarvestBypassTest is Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        vm.warp(block.timestamp + ic.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeStakedInvarCoin();
 
         usdc.mint(alice, 1_000_000e6);
         vm.prank(alice);

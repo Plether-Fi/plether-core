@@ -39,7 +39,7 @@ contract DeployInvarCoin is Script {
         );
 
         StakedToken sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
 
         vm.stopBroadcast();
 
@@ -57,8 +57,10 @@ contract DeployInvarCoin is Script {
         console.log("");
         console.log("Next steps:");
         console.log("  1. Verify both contracts on Etherscan");
-        console.log("  2. Transfer ownership if needed");
-        console.log("  3. Test deposit/deploy/harvest cycle");
+        console.log("  2. Wait 7 days, then call finalizeStakedInvarCoin()");
+        console.log("  3. Propose/finalize a gaugeRewardsReceiver before sweeping rewards");
+        console.log("  4. Transfer ownership if needed");
+        console.log("  5. Test deposit/deploy/harvest cycle");
         console.log("========================================");
     }
 

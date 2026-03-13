@@ -329,7 +329,10 @@ contract InvarCoinInvariantTest is StdInvariant, Test {
         );
 
         sInvar = new StakedToken(IERC20(address(ic)), "Staked InvarCoin", "sINVAR");
-        ic.setStakedInvarCoin(address(sInvar));
+        ic.proposeStakedInvarCoin(address(sInvar));
+        vm.warp(block.timestamp + ic.STAKED_INVAR_TIMELOCK());
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeStakedInvarCoin();
 
         curve.setSwapFeeBps(30);
 

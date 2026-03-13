@@ -82,19 +82,28 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice sINVAR staking contract that receives harvested yield.
     StakedToken public stakedInvarCoin;
+    address public pendingStakedInvarCoin;
+    uint256 public stakedInvarCoinActivationTime;
+    uint256 public constant STAKED_INVAR_TIMELOCK = 7 days;
     /// @notice Cumulative virtual-price cost basis of tracked LP tokens (18 decimals).
     /// @dev Used to isolate fee yield (VP growth) from price appreciation. Only LP tokens
     ///      deployed by the vault are tracked — donated LP is excluded to prevent yield manipulation.
     uint256 public curveLpCostVp;
     /// @notice LP token balance deployed by the vault (excludes donated LP).
     uint256 public trackedLpBalance;
-    /// @notice True when emergency mode is active — forces users to lpWithdraw (balanced exit).
+    /// @notice True when emergency mode is active — blocks deposits and single-sided withdrawals.
     bool public emergencyActive;
 
     ICurveGauge public curveGauge;
     address public pendingGauge;
     uint256 public gaugeActivationTime;
     uint256 public constant GAUGE_TIMELOCK = 7 days;
+    mapping(address => bool) public approvedGauges;
+    address public gaugeRewardsReceiver;
+    address public pendingGaugeRewardsReceiver;
+    uint256 public gaugeRewardsReceiverActivationTime;
+    uint256 public constant GAUGE_REWARDS_TIMELOCK = 7 days;
+    mapping(address => bool) public protectedRewardTokens;
 
     // ==========================================
     // EVENTS & ERRORS
@@ -109,12 +118,17 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event YieldHarvested(uint256 glUsdMinted, uint256 callerReward, uint256 donated);
     event TokenRescued(address indexed token, address indexed to, uint256 amount);
     event EmergencyWithdrawCurve(uint256 lpBurned, uint256 usdcReceived, uint256 bearReceived);
+    event StakedInvarCoinProposed(address indexed stakedInvarCoin, uint256 activationTime);
     event StakedInvarCoinSet(address indexed stakedInvarCoin);
     event GaugeProposed(address indexed gauge, uint256 activationTime);
     event GaugeUpdated(address indexed oldGauge, address indexed newGauge);
+    event GaugeRewardsReceiverProposed(address indexed receiver, uint256 activationTime);
+    event GaugeRewardsReceiverSet(address indexed receiver);
+    event RewardTokenProtected(address indexed token);
     event GaugeStaked(uint256 amount);
     event GaugeUnstaked(uint256 amount);
     event GaugeRewardsClaimed();
+    event GaugeRewardsSwept(address indexed token, address indexed receiver, uint256 amount);
     event UsdcDonated(address indexed donor, uint256 usdcAmount, uint256 invarMinted);
     error InvarCoin__ZeroAmount();
     error InvarCoin__StakingNotSet();
@@ -129,9 +143,14 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__UseLpWithdraw();
     error InvarCoin__Unauthorized();
     error InvarCoin__GaugeTimelockActive();
+    error InvarCoin__StakingTimelockActive();
+    error InvarCoin__GaugeRewardsTimelockActive();
     error InvarCoin__InvalidProposal();
     error InvarCoin__NoGauge();
     error InvarCoin__EmergencyActive();
+    error InvarCoin__InvalidGauge();
+    error InvarCoin__InvalidStakingVault();
+    error InvarCoin__GaugeRewardsReceiverNotSet();
 
     /// @param _usdc USDC token address.
     /// @param _bear plDXY-BEAR token address.
@@ -168,19 +187,112 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         BEAR.safeIncreaseAllowance(_curvePool, type(uint256).max);
     }
 
-    /// @notice One-time setter for the sINVAR staking contract. Cannot be changed once set.
+    function _validateStakingVault(
+        address stakingVault
+    ) private view {
+        if (stakingVault == address(0) || stakingVault.code.length == 0) {
+            revert InvarCoin__InvalidStakingVault();
+        }
+
+        try StakedToken(stakingVault).asset() returns (address assetToken) {
+            if (assetToken != address(this)) {
+                revert InvarCoin__InvalidStakingVault();
+            }
+        } catch {
+            revert InvarCoin__InvalidStakingVault();
+        }
+    }
+
+    /// @notice Propose the sINVAR staking contract. Finalized after STAKED_INVAR_TIMELOCK.
     /// @param _stakedInvarCoin Address of the StakedToken (sINVAR) contract.
-    function setStakedInvarCoin(
+    function proposeStakedInvarCoin(
         address _stakedInvarCoin
     ) external onlyOwner {
-        if (_stakedInvarCoin == address(0)) {
-            revert InvarCoin__ZeroAddress();
-        }
         if (address(stakedInvarCoin) != address(0)) {
             revert InvarCoin__AlreadySet();
         }
-        stakedInvarCoin = StakedToken(_stakedInvarCoin);
-        emit StakedInvarCoinSet(_stakedInvarCoin);
+
+        _validateStakingVault(_stakedInvarCoin);
+
+        pendingStakedInvarCoin = _stakedInvarCoin;
+        stakedInvarCoinActivationTime = block.timestamp + STAKED_INVAR_TIMELOCK;
+
+        emit StakedInvarCoinProposed(_stakedInvarCoin, stakedInvarCoinActivationTime);
+    }
+
+    /// @notice Finalize the proposed sINVAR staking contract after the timelock.
+    function finalizeStakedInvarCoin() external onlyOwner {
+        if (address(stakedInvarCoin) != address(0)) {
+            revert InvarCoin__AlreadySet();
+        }
+        if (pendingStakedInvarCoin == address(0) || block.timestamp < stakedInvarCoinActivationTime) {
+            revert InvarCoin__StakingTimelockActive();
+        }
+
+        address nextStakedInvarCoin = pendingStakedInvarCoin;
+        _validateStakingVault(nextStakedInvarCoin);
+
+        stakedInvarCoin = StakedToken(nextStakedInvarCoin);
+        pendingStakedInvarCoin = address(0);
+        stakedInvarCoinActivationTime = 0;
+
+        emit StakedInvarCoinSet(nextStakedInvarCoin);
+    }
+
+    /// @notice Propose the receiver for protected gauge reward tokens.
+    function proposeGaugeRewardsReceiver(
+        address receiver
+    ) external onlyOwner {
+        if (receiver == address(0)) {
+            revert InvarCoin__ZeroAddress();
+        }
+
+        pendingGaugeRewardsReceiver = receiver;
+        gaugeRewardsReceiverActivationTime = block.timestamp + GAUGE_REWARDS_TIMELOCK;
+
+        emit GaugeRewardsReceiverProposed(receiver, gaugeRewardsReceiverActivationTime);
+    }
+
+    /// @notice Finalize the protected reward receiver after the timelock.
+    function finalizeGaugeRewardsReceiver() external onlyOwner {
+        if (pendingGaugeRewardsReceiver == address(0) || block.timestamp < gaugeRewardsReceiverActivationTime) {
+            revert InvarCoin__GaugeRewardsTimelockActive();
+        }
+
+        gaugeRewardsReceiver = pendingGaugeRewardsReceiver;
+        pendingGaugeRewardsReceiver = address(0);
+        gaugeRewardsReceiverActivationTime = 0;
+
+        emit GaugeRewardsReceiverSet(gaugeRewardsReceiver);
+    }
+
+    /// @notice Irreversibly marks a token as a protected gauge reward token.
+    function protectRewardToken(
+        address token
+    ) external onlyOwner {
+        if (token == address(0)) {
+            revert InvarCoin__ZeroAddress();
+        }
+
+        protectedRewardTokens[token] = true;
+        emit RewardTokenProtected(token);
+    }
+
+    /// @notice Sweeps a protected gauge reward token to the configured receiver.
+    function sweepGaugeRewards(
+        address token
+    ) external onlyOwner {
+        if (!protectedRewardTokens[token]) {
+            revert InvarCoin__CannotRescueCoreAsset();
+        }
+        if (gaugeRewardsReceiver == address(0)) {
+            revert InvarCoin__GaugeRewardsReceiverNotSet();
+        }
+
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(gaugeRewardsReceiver, balance);
+
+        emit GaugeRewardsSwept(token, gaugeRewardsReceiver, balance);
     }
 
     // ==========================================
@@ -341,7 +453,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp > lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev Total LP held: local + gauge-staked. Reverts if gauge is bricked — use setEmergencyMode().
+    /// @dev Total LP held: local + gauge-staked. Reverts if gauge is bricked — use emergencyWithdrawFromCurve().
     function _lpBalance() private view returns (uint256) {
         uint256 bal = CURVE_LP_TOKEN.balanceOf(address(this));
         ICurveGauge gauge = curveGauge;
@@ -361,6 +473,47 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             if (address(gauge) != address(0)) {
                 gauge.withdraw(amount - local);
             }
+        }
+    }
+
+    function _stakeLpToGauge(
+        uint256 amount
+    ) private {
+        if (amount == 0) {
+            return;
+        }
+
+        ICurveGauge gauge = curveGauge;
+        if (address(gauge) == address(0)) {
+            return;
+        }
+
+        CURVE_LP_TOKEN.approve(address(gauge), 0);
+        CURVE_LP_TOKEN.approve(address(gauge), amount);
+        gauge.deposit(amount);
+        CURVE_LP_TOKEN.approve(address(gauge), 0);
+    }
+
+    function _validateGaugeAddress(
+        address gauge
+    ) private view {
+        if (gauge == address(0)) {
+            return;
+        }
+        if (gauge.code.length == 0) {
+            revert InvarCoin__InvalidGauge();
+        }
+        if (ICurveGauge(gauge).lp_token() != address(CURVE_LP_TOKEN)) {
+            revert InvarCoin__InvalidGauge();
+        }
+    }
+
+    function _validateGauge(
+        address gauge
+    ) private view {
+        _validateGaugeAddress(gauge);
+        if (gauge != address(0) && !approvedGauges[gauge]) {
+            revert InvarCoin__InvalidGauge();
         }
     }
 
@@ -496,7 +649,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Balanced withdrawal: returns pro-rata USDC + BEAR from Curve LP (remove_liquidity).
     /// @dev Intentionally lacks whenNotPaused — serves as the emergency exit when the contract is paused.
-    ///      During emergencyActive, skips Curve LP burn (LP was already removed or is inaccessible).
+    ///      Emergency mode still honors pro-rata LP claims by redeeming any remaining LP before paying out.
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param minBearOut Minimum plDXY-BEAR to receive (slippage protection).
@@ -531,18 +684,16 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             bearReturned += Math.mulDiv(bearBal, glUsdAmount, supply);
         }
 
-        if (!emergencyActive) {
-            uint256 lpBal = _lpBalance();
-            if (lpBal > 0) {
-                uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
-                trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
-                curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
-                _ensureUnstakedLp(lpToBurn);
-                uint256[2] memory min_amounts = [uint256(0), uint256(0)];
-                uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
-                usdcReturned += withdrawn[0];
-                bearReturned += withdrawn[1];
-            }
+        uint256 lpBal = _lpBalance();
+        if (lpBal > 0) {
+            uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
+            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
+            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
+            _ensureUnstakedLp(lpToBurn);
+            uint256[2] memory min_amounts = [uint256(0), uint256(0)];
+            uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
+            usdcReturned += withdrawn[0];
+            bearReturned += withdrawn[1];
         }
 
         if (usdcReturned < minUsdcOut || bearReturned < minBearOut) {
@@ -611,10 +762,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
-        ICurveGauge gauge = curveGauge;
-        if (address(gauge) != address(0)) {
-            gauge.deposit(lpMinted);
-        }
+        _stakeLpToGauge(lpMinted);
 
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
 
@@ -785,10 +933,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
 
-        ICurveGauge gauge = curveGauge;
-        if (address(gauge) != address(0)) {
-            gauge.deposit(lpMinted);
-        }
+        _stakeLpToGauge(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
@@ -871,23 +1016,15 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
         emergencyActive = false;
 
-        ICurveGauge gauge = curveGauge;
-        if (address(gauge) != address(0)) {
-            gauge.deposit(lpMinted);
-        }
+        _stakeLpToGauge(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
     }
 
-    /// @notice Activates emergency mode without touching Curve. Guarantees withdrawal liveness
-    ///         even if the Curve pool is completely non-functional (bricked remove_liquidity).
-    /// @dev Sets emergencyActive so lpWithdraw skips LP burn. Zeroes trackedLpBalance and curveLpCostVp
-    ///      to prevent harvest from operating on phantom LP. Pauses the contract to force users through
-    ///      lpWithdraw (the only withdrawal path that works without Curve).
-    ///      Can later call emergencyWithdrawFromCurve() if/when Curve recovers.
+    /// @notice Activates emergency mode without touching Curve.
+    /// @dev Pauses the contract and blocks deposits plus single-sided withdrawals.
+    ///      LP accounting is left intact so users retain their pro-rata claim once balanced exits recover.
     function setEmergencyMode() external onlyOwner {
-        trackedLpBalance = 0;
-        curveLpCostVp = 0;
         emergencyActive = true;
         if (!paused()) {
             _pause();
@@ -895,13 +1032,12 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Attempts to recover LP tokens from Curve via balanced remove_liquidity.
-    /// @dev Also callable as a standalone emergency — sets emergencyActive, zeroes cost basis, and pauses.
+    /// @dev Also callable as a standalone emergency — sets emergencyActive, pauses, and only zeroes
+    ///      tracked LP accounting after the LP has actually been recovered.
     ///      If Curve is bricked, the remove_liquidity call reverts and the entire tx rolls back,
     ///      leaving state unchanged. Use setEmergencyMode() first in that case.
     function emergencyWithdrawFromCurve() external onlyOwner nonReentrant {
         uint256 lpBal = _lpBalance();
-        trackedLpBalance = 0;
-        curveLpCostVp = 0;
         emergencyActive = true;
         if (!paused()) {
             _pause();
@@ -912,7 +1048,19 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             _ensureUnstakedLp(lpBal);
             received = CURVE_POOL.remove_liquidity(lpBal, [uint256(0), uint256(0)]);
         }
+        trackedLpBalance = 0;
+        curveLpCostVp = 0;
         emit EmergencyWithdrawCurve(lpBal, received[0], received[1]);
+    }
+
+    function setGaugeApproval(
+        address gauge,
+        bool approved
+    ) external onlyOwner {
+        if (approved) {
+            _validateGaugeAddress(gauge);
+        }
+        approvedGauges[gauge] = approved;
     }
 
     function pause() external onlyOwner {
@@ -932,7 +1080,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     ) external onlyOwner {
         if (
             token == address(USDC) || token == address(BEAR) || token == address(CURVE_LP_TOKEN)
-                || token == address(curveGauge)
+                || token == address(curveGauge) || protectedRewardTokens[token]
         ) {
             revert InvarCoin__CannotRescueCoreAsset();
         }
@@ -953,6 +1101,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (_gauge == address(curveGauge)) {
             revert InvarCoin__InvalidProposal();
         }
+        _validateGauge(_gauge);
         pendingGauge = _gauge;
         gaugeActivationTime = block.timestamp + GAUGE_TIMELOCK;
         emit GaugeProposed(_gauge, gaugeActivationTime);
@@ -971,6 +1120,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         ICurveGauge oldGauge = curveGauge;
         address newGauge = pendingGauge;
 
+        _validateGauge(newGauge);
+
         if (address(oldGauge) != address(0)) {
             uint256 stakedBal = oldGauge.balanceOf(address(this));
             if (stakedBal > 0) {
@@ -984,11 +1135,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         gaugeActivationTime = 0;
 
         if (newGauge != address(0)) {
-            CURVE_LP_TOKEN.approve(newGauge, type(uint256).max);
             uint256 lpBal = CURVE_LP_TOKEN.balanceOf(address(this));
-            if (lpBal > 0) {
-                ICurveGauge(newGauge).deposit(lpBal);
-            }
+            _stakeLpToGauge(lpBal);
         }
 
         emit GaugeUpdated(address(oldGauge), newGauge);
@@ -1009,7 +1157,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (amount == 0) {
             revert InvarCoin__ZeroAmount();
         }
-        gauge.deposit(amount);
+        _stakeLpToGauge(amount);
         emit GaugeStaked(amount);
     }
 

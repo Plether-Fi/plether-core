@@ -3,6 +3,8 @@ pragma solidity 0.8.33;
 
 interface ICurveGauge {
 
+    function lp_token() external view returns (address);
+
     function deposit(
         uint256 amount
     ) external;

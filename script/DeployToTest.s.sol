@@ -323,9 +323,10 @@ contract DeployToTest is Script {
             address(0)
         );
         deployed.stakedInvarCoin = new StakedToken(IERC20(address(deployed.invarCoin)), "Staked InvarCoin", "sINVAR");
-        deployed.invarCoin.setStakedInvarCoin(address(deployed.stakedInvarCoin));
+        deployed.invarCoin.proposeStakedInvarCoin(address(deployed.stakedInvarCoin));
         console.log("InvarCoin:", address(deployed.invarCoin));
         console.log("sINVAR:", address(deployed.stakedInvarCoin));
+        console.log("Pending sINVAR activation after timelock");
 
         // Step 13: Deploy Routers and create Morpho markets
         _deployRoutersAndMarkets(deployed, deployer);
