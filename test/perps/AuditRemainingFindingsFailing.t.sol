@@ -49,7 +49,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
         assertEq(equityAfter, equityBefore, "Execution fees should not increase LP equity");
-        assertEq(engine.accumulatedFeesUsdc(), 60e6, "Only open-path fees remain protocol revenue; close fees pay execution keepers");
+        assertEq(engine.accumulatedFeesUsdc(), 120e6, "Open and close execution fees should both accrue as protocol revenue");
     }
 
     function test_H2_LiquidationMustRespectFreeUsdcCollateral() public {

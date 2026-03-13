@@ -71,7 +71,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 fundingUsdc;
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
-        uint256 keeperRewardUsdc;
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 seizedCollateralUsdc;
@@ -677,13 +676,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
     /// @param vaultDepthUsdc HousePool total assets — used to scale funding rate
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    /// @return keeperRewardUsdc Close-path keeper reward paid from settled execution fees (6 decimals); opens return 0
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
         uint64 publishTime
-    ) external onlyRouter nonReentrant returns (int256 keeperRewardUsdc) {
+    ) external onlyRouter nonReentrant {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(lastMarkPrice, vaultDepthUsdc);
         _cacheMarkPriceIfNewer(price, publishTime);
@@ -701,8 +699,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 unsettledFundingDebt = _settleFunding(order, pos);
 
         if (order.isClose) {
-            keeperRewardUsdc = int256(_processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt));
-            _enterDegradedModeIfInsolvent(order.accountId, keeperRewardUsdc > 0 ? uint256(keeperRewardUsdc) : 0);
+            accumulatedFeesUsdc += _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
+            _enterDegradedModeIfInsolvent(order.accountId, 0);
         } else {
             if (degradedMode) {
                 revert CfdEngine__DegradedMode();
@@ -727,7 +725,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         pos.lastUpdateTime = uint64(block.timestamp);
-        return keeperRewardUsdc;
     }
 
     // ==========================================
@@ -890,7 +887,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 preSkewUsdc,
         uint256 vaultDepthUsdc,
         uint256 unsettledFundingDebt
-    ) internal returns (uint256 keeperRewardUsdc) {
+    ) internal returns (uint256 collectedExecFeeUsdc) {
         if (pos.size < order.sizeDelta) {
             revert CfdEngine__CloseSizeExceedsPosition();
         }
@@ -939,8 +936,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
-        uint256 actualFee = _settleCloseNetSettlement(order.accountId, netSettlement, execFeeUsdc, pos.margin);
-        keeperRewardUsdc = actualFee;
+        collectedExecFeeUsdc = _settleCloseNetSettlement(order.accountId, netSettlement, execFeeUsdc, pos.margin);
 
         emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, realizedPnl);
 
@@ -994,8 +990,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 netSettlement,
         uint256 execFeeUsdc,
         uint256 remainingPosMarginUsdc
-    ) internal returns (uint256 actualFeeUsdc) {
-        actualFeeUsdc = execFeeUsdc;
+    ) internal returns (uint256 collectedExecFeeUsdc) {
+        collectedExecFeeUsdc = execFeeUsdc;
 
         if (netSettlement > 0) {
             uint256 settlementGain = uint256(netSettlement);
@@ -1008,11 +1004,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 totalDeferredPayoutUsdc += settlementGain;
                 emit DeferredPayoutRecorded(accountId, settlementGain);
             }
-            return actualFeeUsdc;
+            return collectedExecFeeUsdc;
         }
 
         if (netSettlement == 0) {
-            return actualFeeUsdc;
+            return collectedExecFeeUsdc;
         }
 
         remainingPosMarginUsdc;
@@ -1026,7 +1022,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
 
-        actualFeeUsdc = result.actualFeeUsdc;
+        collectedExecFeeUsdc = result.collectedExecFeeUsdc;
         accumulatedBadDebtUsdc += result.badDebtUsdc;
     }
 
@@ -1232,7 +1228,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.vpiUsdc = uint256(CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor));
         uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         preview.executionFeeUsdc = (notionalUsdc * 6) / 10_000;
-        preview.keeperRewardUsdc = preview.executionFeeUsdc;
 
         int256 netSettlement = preview.realizedPnlUsdc - int256(preview.vpiUsdc) - int256(preview.executionFeeUsdc)
             - int256(unsettledFundingDebt);
@@ -1253,12 +1248,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
-        uint256 pendingKeeperPayout = preview.keeperRewardUsdc;
         uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, maxProfitReduction);
         uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
-        if (pendingKeeperPayout > 0) {
-            effectiveAssetsAfter = effectiveAssetsAfter > pendingKeeperPayout ? effectiveAssetsAfter - pendingKeeperPayout : 0;
-        }
         preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
     }
 

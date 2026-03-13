@@ -101,7 +101,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
         assertEq(equityAfter, equityBefore, "Execution fees should not increase LP distributable equity");
-        assertEq(engine.accumulatedFeesUsdc(), 60e6, "Only open-path fees remain as protocol revenue; close fees are paid to execution keepers");
+        assertEq(engine.accumulatedFeesUsdc(), 120e6, "Open and close execution fees should both accrue as protocol revenue");
     }
 
     function test_M2_WipedTrancheCanAcceptNewDeposits() public {

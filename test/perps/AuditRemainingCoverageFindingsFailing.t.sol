@@ -153,16 +153,22 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
     }
 
-    function test_M2_FullyUtilizedAccountShouldStillBeAbleToQueueClose() public {
+    function test_M2_CloseCommitMustReserveFlatKeeperBounty() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2_000e6);
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
 
         vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        assertEq(router.nextCommitId(), 2, "Fully utilized traders should be able to queue close intents without upfront free USDC");
+        _fundTrader(trader, router.quoteCloseKeeperFeeUsdc());
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        assertEq(router.nextCommitId(), 2, "Close commits should succeed once the flat keeper bounty is funded");
     }
 
     function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
@@ -181,13 +187,72 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(80_000_000));
 
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Close should still succeed even when keeper reward cash is unavailable");
-        assertGt(engine.deferredKeeperRewardUsdc(keeper), 0, "Keeper reward should defer instead of reverting the close");
+        assertEq(engine.deferredKeeperRewardUsdc(keeper), 0, "Close execution should not create deferred keeper rewards");
+        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, router.quoteCloseKeeperFeeUsdc(), "Keeper should be paid from the reserved close bounty");
     }
 
+}
+
+contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest {
+
+    address trader = address(0x7100);
+    address spammer = address(0x7101);
+    address keeper = address(0x7102);
+
+    function test_H6_LiquidationKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(125_000_000));
+
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
+        assertGt(engine.deferredKeeperRewardUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
+    }
+
+    function test_M3_TerminalCloseMustRemainExecutableUnderLargeForeignQueue() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 20_000e6);
+        _fundTrader(spammer, 250_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        uint256 spamCount = 1000;
+        for (uint256 i = 0; i < spamCount; i++) {
+            vm.prank(spammer);
+            router.commitOrder(CfdTypes.Side.BEAR, 1_000e18, 100e6, 2e8, false);
+        }
+
+        bytes[] memory empty = new bytes[](0);
+        vm.roll(block.number + 1);
+
+        (bool ok,) = address(router).call{gas: 8_000_000}(
+            abi.encodeCall(router.executeOrder, (uint64(2), empty))
+        );
+
+        assertTrue(ok, "Terminal close should not depend on scanning the full global queue");
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Terminal close should succeed even with many foreign queued orders");
+    }
 }

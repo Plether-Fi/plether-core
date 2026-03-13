@@ -11,7 +11,7 @@ library CfdEngineSettlementLib {
     struct CloseSettlementResult {
         uint256 seizedUsdc;
         uint256 shortfallUsdc;
-        uint256 actualFeeUsdc;
+        uint256 collectedExecFeeUsdc;
         uint256 badDebtUsdc;
     }
 
@@ -38,7 +38,7 @@ library CfdEngineSettlementLib {
         DebtCollectionResult memory collection = collectSettlementDeficit(availableUsdc, owedUsdc);
         result.seizedUsdc = collection.seizedUsdc;
         result.shortfallUsdc = collection.shortfallUsdc;
-        result.actualFeeUsdc = execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
+        result.collectedExecFeeUsdc = execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
         result.badDebtUsdc = collection.shortfallUsdc > execFeeUsdc ? collection.shortfallUsdc - execFeeUsdc : 0;
     }
 

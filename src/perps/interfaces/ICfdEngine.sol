@@ -21,13 +21,12 @@ interface ICfdEngine {
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
     /// @param vaultDepthUsdc     Available vault liquidity, used for open-interest caps (6 decimals)
     /// @param publishTime        Oracle publish timestamp, used for funding rate accrual
-    /// @return settlementUsdc    Net USDC to transfer: positive = vault pays trader, negative = trader pays vault
     function processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
         uint64 publishTime
-    ) external returns (int256 settlementUsdc);
+    ) external;
 
     /// @notice Records a deferred keeper reward when immediate vault payment is unavailable.
     function recordDeferredKeeperReward(

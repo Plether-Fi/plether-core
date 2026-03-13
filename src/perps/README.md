@@ -52,7 +52,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve a keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents no longer require upfront free USDC; their keeper compensation is funded from the close-path execution fee during settlement.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve a keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve a separate flat `1.00 USDC` keeper bounty at commit time, so keeper compensation stays explicit and does not depend on vault liquidity.
 
 **Keeper Reserve Custody**: Reserved keeper fees remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain.
 
@@ -197,7 +197,7 @@ This prevents the Friday 19:00-22:00 gap from being exploitable -- during this p
 | Execution Fee | 6 bps (0.06%) | Charged on notional size at open/close |
 | Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
-Open-path execution fees accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Close-path execution fees are used to pay the executing keeper during settlement instead of accumulating as protocol fees.
+Open-path and close-path execution fees both accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Keeper execution is compensated separately from the router's reserved order bounties.
 
 ## Governance
 

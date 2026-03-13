@@ -179,7 +179,7 @@ contract OrderRouterTest is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
-        assertEq(escrow.keeperReserveUsdc, 1_000_000, "Only the open order should escrow an upfront keeper reserve");
+        assertEq(escrow.keeperReserveUsdc, 2_000_000, "Open and close orders should both escrow keeper execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
@@ -194,8 +194,27 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
         assertEq(summary.pendingOrderCount, 2);
         assertEq(summary.committedMarginUsdc, 1000 * 1e6);
-        assertEq(summary.keeperReserveUsdc, 1_000_000);
+        assertEq(summary.keeperReserveUsdc, 2_000_000);
         assertTrue(summary.hasTerminalCloseQueued);
+    }
+
+    function test_CloseCommit_RequiresFlatKeeperBountyReserve() public {
+        address trader = address(0x333);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 1_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1_000e6, 1e8);
+
+        vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+
+        _fundTrader(trader, router.quoteCloseKeeperFeeUsdc());
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+
+        assertEq(router.keeperFeeReserves(1), router.quoteCloseKeeperFeeUsdc());
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -214,7 +233,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[0].keeperReserveUsdc, 1_000_000);
         assertEq(pending[1].orderId, 2);
         assertTrue(pending[1].isClose);
-        assertEq(pending[1].keeperReserveUsdc, 0);
+        assertEq(pending[1].keeperReserveUsdc, router.quoteCloseKeeperFeeUsdc());
     }
 
     function test_BatchExecution_AllSucceed() public {
@@ -626,11 +645,14 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 8_000e6);
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
+        uint256 keeperUsdcBefore = usdc.balanceOf(address(this));
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, priceData);
 
         assertEq(router.nextExecuteId(), 4, "Deferred-payout close should not stall the FIFO queue");
         assertGt(engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution");
+        assertEq(engine.deferredKeeperRewardUsdc(address(this)), 0, "Close execution should not rely on deferred keeper rewards");
+        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Batch keeper should be paid from the reserved close bounty");
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout");

@@ -75,8 +75,7 @@ contract CfdEngineTest is BasePerpTest {
         juniorVault.deposit(950_000 * 1e6, address(this));
 
         vm.prank(address(router));
-        int256 settlement = engine.processOrder(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
-        assertEq(settlement, 0, "processOrder always returns 0");
+        engine.processOrder(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
@@ -1761,7 +1760,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         juniorVault.deposit(lpDeposit, bob);
         vm.stopPrank();
 
-        uint256 margin = 1001e6;
+        uint256 margin = 1002e6;
         usdc.mint(alice, margin);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), margin);
@@ -1783,7 +1782,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
-        assertEq(router.nextCommitId(), 3, "Fully utilized traders should still be able to queue close intents");
+        assertEq(router.nextCommitId(), 3, "Close intents should reserve a flat keeper bounty from free settlement");
         assertEq(engine.accumulatedFeesUsdc(), openFee, "Committing the close should not accrue additional protocol fees");
     }
 
