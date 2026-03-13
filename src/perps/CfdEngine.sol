@@ -1363,8 +1363,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        uint256 pendingVaultPayoutUsdc
+    ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
+        return _liquidatePosition(accountId, currentOraclePrice, vaultDepthUsdc, publishTime, pendingVaultPayoutUsdc);
+    }
+
+    function liquidatePosition(
+        bytes32 accountId,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
+        return _liquidatePosition(accountId, currentOraclePrice, vaultDepthUsdc, publishTime, 0);
+    }
+
+    function _liquidatePosition(
+        bytes32 accountId,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        uint256 pendingVaultPayoutUsdc
+    ) internal returns (uint256 keeperBountyUsdc) {
         uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
         _updateFunding(lastMarkPrice, vaultDepthUsdc);
         _cacheMarkPriceIfNewer(price, publishTime);
@@ -1431,7 +1451,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
-        _enterDegradedModeIfInsolvent(accountId, 0);
+        _enterDegradedModeIfInsolvent(accountId, pendingVaultPayoutUsdc);
     }
 
     function _assertPostSolvency() internal view {

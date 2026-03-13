@@ -7,6 +7,20 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    struct LiquidationPreview {
+        bool liquidatable;
+        uint256 oraclePrice;
+        int256 equityUsdc;
+        int256 pnlUsdc;
+        int256 fundingUsdc;
+        uint256 reachableCollateralUsdc;
+        uint256 keeperBountyUsdc;
+        uint256 seizedCollateralUsdc;
+        uint256 immediatePayoutUsdc;
+        uint256 badDebtUsdc;
+        bool triggersDegradedMode;
+    }
+
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
 
@@ -44,8 +58,15 @@ interface ICfdEngine {
         bytes32 accountId,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime
+        uint64 publishTime,
+        uint256 pendingVaultPayoutUsdc
     ) external returns (uint256 keeperBountyUsdc);
+
+    function previewLiquidation(
+        bytes32 accountId,
+        uint256 oraclePrice,
+        uint256 vaultDepthUsdc
+    ) external view returns (LiquidationPreview memory preview);
 
     /// @notice Worst-case payout for all BULL positions (6 decimals)
     function globalBullMaxProfit() external view returns (uint256);

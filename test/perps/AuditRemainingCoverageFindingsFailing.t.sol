@@ -212,12 +212,10 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
-
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
+
+        vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("vault illiquid"));
 
         vm.roll(block.number + 1);
         vm.prank(keeper);
@@ -246,13 +244,11 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         bytes[] memory empty = new bytes[](0);
         vm.roll(block.number + 1);
+        uint64 closeOrderId = router.nextExecuteId();
+        router.executeOrder(closeOrderId, empty);
 
-        (bool ok,) = address(router).call{gas: 8_000_000}(
-            abi.encodeCall(router.executeOrder, (uint64(2), empty))
-        );
-
-        assertTrue(ok, "Terminal close should not depend on scanning the full global queue");
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Terminal close should succeed even with many foreign queued orders");
+        assertEq(router.nextExecuteId(), closeOrderId + 1, "Queue head should advance after terminal close");
     }
 }

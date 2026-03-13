@@ -416,13 +416,6 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
 
-        if (order.isClose) {
-            uint256 currentSize = engine.getPositionSize(order.accountId);
-            if (currentSize == order.sizeDelta) {
-                _cancelPendingOrdersForAccount(order.accountId, orderId);
-            }
-        }
-
         uint256 vaultDepth = vault.totalAssets();
 
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
@@ -515,13 +508,6 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
                 _cleanupOrder(orderId, false);
                 continue;
-            }
-
-            if (order.isClose) {
-                uint256 currentSize = engine.getPositionSize(order.accountId);
-                if (currentSize == order.sizeDelta) {
-                    _cancelPendingOrdersForAccount(order.accountId, orderId);
-                }
             }
 
             uint256 vaultDepth = vault.totalAssets();
@@ -631,6 +617,19 @@ contract OrderRouter is Ownable2Step, Pausable {
         _consumeOrderEscrow(orderId, success);
         _deleteOrder(orderId);
         _sendEth(msg.sender, msg.value - pythFee);
+    }
+
+    function _payOrDeferVaultKeeperReward(
+        uint256 vaultKeeperRewardUsdc
+    ) internal {
+        if (vaultKeeperRewardUsdc == 0) {
+            return;
+        }
+
+        try vault.payOut(msg.sender, vaultKeeperRewardUsdc) {
+        } catch {
+            engine.recordDeferredKeeperReward(msg.sender, vaultKeeperRewardUsdc);
+        }
     }
 
     function _quoteOrderKeeperFeeUsdc(
@@ -953,14 +952,11 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
         }
 
-        _cancelPendingOrdersForAccount(accountId, type(uint64).max);
-
         uint256 vaultDepth = vault.totalAssets();
-        uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
+        uint256 keeperBountyUsdc = engine.previewLiquidation(accountId, executionPrice, vaultDepth).keeperBountyUsdc;
+        keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime, keeperBountyUsdc);
 
-        if (keeperBountyUsdc > 0) {
-            vault.payOut(msg.sender, keeperBountyUsdc);
-        }
+        _payOrDeferVaultKeeperReward(keeperBountyUsdc);
 
         _sendEth(msg.sender, msg.value - pythFee);
     }
