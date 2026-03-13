@@ -466,6 +466,35 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.keeperFeeReserves(2), 1e6, "Trailing order keeper reserve should remain escrowed");
     }
 
+    function test_DeferredPayout_CloseDoesNotBlockLaterQueuedOrders() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 8_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        bytes[] memory priceData = _pythUpdateData();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 6);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 8_000e6);
+
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(3, priceData);
+
+        assertEq(router.nextExecuteId(), 4, "Deferred-payout close should not stall the FIFO queue");
+        assertGt(engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution");
+
+        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        assertEq(escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout");
+    }
+
     function testFuzz_StaleOracleRevertPreservesEscrowAndQueue(
         uint64 age
     ) public {

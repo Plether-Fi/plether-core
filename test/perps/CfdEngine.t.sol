@@ -145,6 +145,30 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(bullFunding < 0, "Retail BULL should owe massive funding");
     }
 
+    function test_ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid() public {
+        bytes32 accountId = bytes32(uint256(uint160(address(0xD301))));
+        _fundTrader(address(0xD301), 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        uint256 clearinghouseBefore = clearinghouse.balances(accountId, address(usdc));
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Profitable close should still destroy the position");
+        assertGt(engine.deferredPayoutUsdc(accountId), 0, "Unpaid profit should be recorded as deferred payout");
+        assertEq(
+            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouseBefore,
+            "Illiquid profitable close should not immediately credit clearinghouse cash"
+        );
+    }
+
     function test_FundingSettlement_SyncsClearinghouse() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
