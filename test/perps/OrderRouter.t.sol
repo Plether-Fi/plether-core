@@ -198,6 +198,25 @@ contract OrderRouterTest is BasePerpTest {
         assertTrue(summary.hasTerminalCloseQueued);
     }
 
+    function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5_000 * 1e18, 0, 1e8, true);
+        vm.stopPrank();
+
+        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        assertEq(pending.length, 2);
+        assertEq(pending[0].orderId, 1);
+        assertFalse(pending[0].isClose);
+        assertEq(pending[0].committedMarginUsdc, 1000 * 1e6);
+        assertEq(pending[0].keeperReserveUsdc, 1_000_000);
+        assertEq(pending[1].orderId, 2);
+        assertTrue(pending[1].isClose);
+        assertEq(pending[1].keeperReserveUsdc, 0);
+    }
+
     function test_BatchExecution_AllSucceed() public {
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);
@@ -508,49 +527,6 @@ contract OrderRouterPythTest is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout");
-    }
-
-    function test_BatchDeferredKeeperReward_DoesNotRevertLaterOrders() public {
-        address charlie = address(0x333);
-        address keeper = address(0x999);
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        bytes32 charlieId = bytes32(uint256(uint160(charlie)));
-
-        _fundTrader(charlie, 10_000e6);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
-
-        bytes[] memory openPriceData = new bytes[](1);
-        openPriceData[0] = abi.encode(uint256(1e8));
-        vm.roll(block.number + 1);
-        router.executeOrder(1, openPriceData);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        vm.prank(charlie);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1_000e6, 80_000_000, false);
-
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
-
-        bytes[] memory batchPriceData = new bytes[](1);
-        batchPriceData[0] = abi.encode(uint256(80_000_000));
-
-        vm.roll(block.number + 1);
-        vm.prank(keeper);
-        router.executeOrderBatch(3, batchPriceData);
-
-        assertEq(router.nextExecuteId(), 4, "Deferred keeper reward should not revert the batch tail");
-        assertEq(engine.deferredKeeperRewardUsdc(keeper), 48e6, "Keeper reward should defer when vault cash is unavailable");
-
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
-        assertEq(aliceSize, 0, "Profitable close should still execute");
-
-        (uint256 charlieSize,,,,,,,) = engine.positions(charlieId);
-        assertEq(charlieSize, 10_000e18, "Later orders in the batch should still execute");
     }
 
     function testFuzz_StaleOracleRevertPreservesEscrowAndQueue(

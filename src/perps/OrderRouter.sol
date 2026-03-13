@@ -35,6 +35,19 @@ contract OrderRouter is Ownable2Step, Pausable {
         bool hasTerminalCloseQueued;
     }
 
+    struct PendingOrderView {
+        uint64 orderId;
+        bool isClose;
+        CfdTypes.Side side;
+        uint256 sizeDelta;
+        uint256 marginDelta;
+        uint256 targetPrice;
+        uint64 commitTime;
+        uint64 commitBlock;
+        uint256 committedMarginUsdc;
+        uint256 keeperReserveUsdc;
+    }
+
     ICfdEngine public engine;
     ICfdVault public vault;
     IPyth public pyth;
@@ -281,6 +294,41 @@ contract OrderRouter is Ownable2Step, Pausable {
             if (order.isClose) {
                 summary.hasTerminalCloseQueued = true;
             }
+        }
+    }
+
+    function getPendingOrdersForAccount(
+        bytes32 accountId
+    ) external view returns (PendingOrderView[] memory pending) {
+        uint64 maxOrderId = nextCommitId;
+        uint256 count;
+        for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
+            CfdTypes.Order memory order = orders[orderId];
+            if (order.accountId == accountId && order.sizeDelta > 0) {
+                count++;
+            }
+        }
+
+        pending = new PendingOrderView[](count);
+        uint256 index;
+        for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
+            CfdTypes.Order memory order = orders[orderId];
+            if (order.accountId != accountId || order.sizeDelta == 0) {
+                continue;
+            }
+            pending[index] = PendingOrderView({
+                orderId: orderId,
+                isClose: order.isClose,
+                side: order.side,
+                sizeDelta: order.sizeDelta,
+                marginDelta: order.marginDelta,
+                targetPrice: order.targetPrice,
+                commitTime: order.commitTime,
+                commitBlock: order.commitBlock,
+                committedMarginUsdc: committedMargins[orderId],
+                keeperReserveUsdc: keeperFeeReserves[orderId]
+            });
+            index++;
         }
     }
 

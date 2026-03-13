@@ -62,6 +62,46 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         bool hasLiveLiability;
     }
 
+    struct ClosePreview {
+        bool valid;
+        uint8 invalidCode;
+        uint256 executionPrice;
+        uint256 sizeDelta;
+        int256 realizedPnlUsdc;
+        int256 fundingUsdc;
+        uint256 vpiUsdc;
+        uint256 executionFeeUsdc;
+        uint256 keeperRewardUsdc;
+        uint256 immediatePayoutUsdc;
+        uint256 deferredPayoutUsdc;
+        uint256 seizedCollateralUsdc;
+        uint256 badDebtUsdc;
+        uint256 remainingSize;
+        uint256 remainingMargin;
+        bool triggersDegradedMode;
+    }
+
+    struct LiquidationPreview {
+        bool liquidatable;
+        uint256 oraclePrice;
+        int256 equityUsdc;
+        int256 pnlUsdc;
+        int256 fundingUsdc;
+        uint256 reachableCollateralUsdc;
+        uint256 keeperBountyUsdc;
+        uint256 seizedCollateralUsdc;
+        uint256 immediatePayoutUsdc;
+        uint256 badDebtUsdc;
+        bool triggersDegradedMode;
+    }
+
+    struct DeferredPayoutStatus {
+        uint256 deferredTraderPayoutUsdc;
+        bool traderPayoutClaimableNow;
+        uint256 deferredKeeperRewardUsdc;
+        bool keeperRewardClaimableNow;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -1131,6 +1171,172 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.totalDeferredKeeperRewardUsdc = totalDeferredKeeperRewardUsdc;
         viewData.degradedMode = degradedMode;
         viewData.hasLiveLiability = globalBullMaxProfit + globalBearMaxProfit > 0;
+    }
+
+    function getDeferredPayoutStatus(
+        bytes32 accountId,
+        address keeper
+    ) external view returns (DeferredPayoutStatus memory status) {
+        status.deferredTraderPayoutUsdc = deferredPayoutUsdc[accountId];
+        status.traderPayoutClaimableNow = vault.totalAssets() >= status.deferredTraderPayoutUsdc && status.deferredTraderPayoutUsdc > 0;
+        status.deferredKeeperRewardUsdc = deferredKeeperRewardUsdc[keeper];
+        status.keeperRewardClaimableNow = vault.totalAssets() >= status.deferredKeeperRewardUsdc && status.deferredKeeperRewardUsdc > 0;
+    }
+
+    function previewClose(
+        bytes32 accountId,
+        uint256 sizeDelta,
+        uint256 oraclePrice,
+        uint256 vaultDepthUsdc
+    ) external view returns (ClosePreview memory preview) {
+        CfdTypes.Position memory pos = positions[accountId];
+        preview.executionPrice = oraclePrice;
+        preview.sizeDelta = sizeDelta;
+        if (pos.size == 0) {
+            preview.invalidCode = 1;
+            return preview;
+        }
+        if (sizeDelta == 0 || sizeDelta > pos.size) {
+            preview.invalidCode = 2;
+            return preview;
+        }
+
+        preview.valid = true;
+        (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) = _previewFundingSettlement(pos);
+        pos.margin = marginAfterFunding;
+
+        CfdTypes.Position memory closedPart = pos;
+        closedPart.size = sizeDelta;
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, oraclePrice, CAP_PRICE);
+        preview.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+
+        uint256 marginToFree = (pos.margin * sizeDelta) / pos.size;
+        preview.remainingMargin = pos.margin - marginToFree;
+        preview.remainingSize = pos.size - sizeDelta;
+        preview.fundingUsdc = pendingFunding;
+
+        uint256 preSkewUsdc = _getAbsSkewUsdc(lastMarkPrice);
+        uint256 maxProfitReduction = (pos.maxProfitUsdc * sizeDelta) / pos.size;
+        uint256 postBullOi = bullOI;
+        uint256 postBearOi = bearOI;
+        if (pos.side == CfdTypes.Side.BULL) {
+            postBullOi -= sizeDelta;
+        } else {
+            postBearOi -= sizeDelta;
+        }
+        uint256 postBullUsdc = (postBullOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (postBearOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+        preview.vpiUsdc = uint256(CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor));
+        uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        preview.executionFeeUsdc = (notionalUsdc * 6) / 10_000;
+        preview.keeperRewardUsdc = preview.executionFeeUsdc;
+
+        int256 netSettlement = preview.realizedPnlUsdc - int256(preview.vpiUsdc) - int256(preview.executionFeeUsdc)
+            - int256(unsettledFundingDebt);
+        if (netSettlement > 0) {
+            uint256 settlementGain = uint256(netSettlement);
+            uint256 availableCash = vault.totalAssets();
+            preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
+            preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
+        } else if (netSettlement < 0) {
+            CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
+                clearinghouse.getSettlementReachableUsdc(accountId, preview.remainingMargin), uint256(-netSettlement), preview.executionFeeUsdc
+            );
+            preview.seizedCollateralUsdc = result.seizedUsdc;
+            preview.badDebtUsdc = result.badDebtUsdc;
+            if (result.shortfallUsdc > 0 && preview.remainingMargin > 0) {
+                preview.valid = false;
+                preview.invalidCode = 3;
+            }
+        }
+
+        uint256 pendingKeeperPayout = preview.keeperRewardUsdc;
+        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, maxProfitReduction);
+        uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
+        if (pendingKeeperPayout > 0) {
+            effectiveAssetsAfter = effectiveAssetsAfter > pendingKeeperPayout ? effectiveAssetsAfter - pendingKeeperPayout : 0;
+        }
+        preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
+    }
+
+    function _previewFundingSettlement(
+        CfdTypes.Position memory pos
+    ) internal view returns (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) {
+        pendingFunding = getPendingFunding(pos);
+        marginAfterFunding = pos.margin;
+        if (pendingFunding >= 0) {
+            marginAfterFunding += uint256(pendingFunding);
+            return (pendingFunding, 0, marginAfterFunding);
+        }
+
+        uint256 loss = uint256(-pendingFunding);
+        if (marginAfterFunding < loss) {
+            unsettledFundingDebt = loss - marginAfterFunding;
+            marginAfterFunding = 0;
+        } else {
+            marginAfterFunding -= loss;
+        }
+    }
+
+    function previewLiquidation(
+        bytes32 accountId,
+        uint256 oraclePrice,
+        uint256 vaultDepthUsdc
+    ) external view returns (LiquidationPreview memory preview) {
+        CfdTypes.Position memory pos = positions[accountId];
+        preview.oraclePrice = oraclePrice;
+        if (pos.size == 0) {
+            return preview;
+        }
+
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, oraclePrice, CAP_PRICE);
+        preview.pnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        preview.fundingUsdc = getPendingFunding(pos);
+        preview.reachableCollateralUsdc = clearinghouse.getSettlementReachableUsdc(accountId, 0);
+        preview.equityUsdc = int256(preview.reachableCollateralUsdc) + preview.fundingUsdc + preview.pnlUsdc;
+        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        uint256 maintenanceMarginUsdc = (((pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
+        preview.liquidatable = preview.equityUsdc <= int256(maintenanceMarginUsdc);
+
+        uint256 posMargin = pos.margin;
+        uint256 notionalUsdc = (pos.size * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bounty = (notionalUsdc * riskParams.bountyBps) / 10_000;
+        if (bounty < riskParams.minBountyUsdc) {
+            bounty = riskParams.minBountyUsdc;
+        }
+        if (preview.equityUsdc > 0 && bounty > uint256(preview.equityUsdc)) {
+            bounty = uint256(preview.equityUsdc);
+        } else if (preview.equityUsdc <= 0 && bounty > posMargin) {
+            bounty = posMargin;
+        }
+        preview.keeperBountyUsdc = bounty;
+
+        CfdEngineSettlementLib.LiquidationSettlementResult memory result = CfdEngineSettlementLib.liquidationSettlementResult(
+            clearinghouse.balances(accountId, address(USDC)), preview.equityUsdc - int256(bounty)
+        );
+        preview.seizedCollateralUsdc = result.seizedUsdc;
+        preview.immediatePayoutUsdc = result.payoutUsdc;
+        preview.badDebtUsdc = result.badDebtUsdc;
+
+        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc);
+        uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
+        preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
+        vaultDepthUsdc;
+    }
+
+    function viewDataMaxLiabilityAfterClose(
+        CfdTypes.Side side,
+        uint256 maxProfitReduction
+    ) internal view returns (uint256) {
+        uint256 bullMax = globalBullMaxProfit;
+        uint256 bearMax = globalBearMaxProfit;
+        if (side == CfdTypes.Side.BULL) {
+            bullMax -= maxProfitReduction;
+        } else {
+            bearMax -= maxProfitReduction;
+        }
+        return bullMax > bearMax ? bullMax : bearMax;
     }
 
     function getPositionSide(

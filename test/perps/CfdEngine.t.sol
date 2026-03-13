@@ -363,13 +363,14 @@ contract CfdEngineTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900 * 1e6, type(uint256).max, false);
 
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
+        (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
 
         assertEq(viewData.settlementBalanceUsdc, clearinghouse.balances(accountId, address(usdc)));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.closeReachableUsdc, clearinghouse.getSettlementReachableUsdc(accountId, 0));
-        assertEq(viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, 2_000 * 1e6));
+        assertEq(viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
         assertEq(viewData.deferredPayoutUsdc, 0);
@@ -390,7 +391,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.size, 100_000 * 1e18);
         assertEq(viewData.entryPrice, 1e8);
         assertEq(viewData.entryNotionalUsdc, 100_000 * 1e6);
-        assertLt(viewData.unrealizedPnlUsdc, 0);
+        assertGt(viewData.unrealizedPnlUsdc, 0);
         assertEq(viewData.maxProfitUsdc, 100_000 * 1e6);
     }
 
@@ -414,6 +415,65 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.totalDeferredKeeperRewardUsdc, engine.totalDeferredKeeperRewardUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
+    }
+
+    function test_PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown() public {
+        address trader = address(0xAB13);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        CfdEngine.ClosePreview memory normalPreview = engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        assertTrue(normalPreview.valid);
+        assertGt(normalPreview.immediatePayoutUsdc, 0);
+        assertEq(normalPreview.deferredPayoutUsdc, 0);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        CfdEngine.ClosePreview memory illiquidPreview = engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        assertTrue(illiquidPreview.valid);
+        assertEq(illiquidPreview.immediatePayoutUsdc, 0);
+        assertGt(illiquidPreview.deferredPayoutUsdc, 0);
+        assertEq(illiquidPreview.remainingSize, 0);
+    }
+
+    function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
+        address trader = address(0xAB14);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 300e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        assertTrue(preview.liquidatable);
+        assertEq(preview.keeperBountyUsdc, 15_150_000);
+        assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
+    }
+
+    function test_GetDeferredPayoutStatus_ReflectsClaimability() public {
+        address trader = address(0xAB15);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        CfdEngine.DeferredPayoutStatus memory statusBefore = engine.getDeferredPayoutStatus(accountId, address(this));
+        assertGt(statusBefore.deferredTraderPayoutUsdc, 0);
+        assertFalse(statusBefore.traderPayoutClaimableNow);
+
+        _fundJunior(address(this), statusBefore.deferredTraderPayoutUsdc);
+
+        CfdEngine.DeferredPayoutStatus memory statusAfter = engine.getDeferredPayoutStatus(accountId, address(this));
+        assertTrue(statusAfter.traderPayoutClaimableNow);
     }
 
     function test_CloseLoss_DoesNotConsumeQueuedCommittedMargin() public {

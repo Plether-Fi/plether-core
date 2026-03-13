@@ -387,6 +387,22 @@ contract HousePoolTest is BasePerpTest {
         assertEq(freeUSDC, vaultBal - expectedReserved, "Free USDC should reserve both directional liability and fees exactly");
     }
 
+    function test_GetVaultLiquidityView_ReturnsCurrentPoolState() public {
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 300_000e6);
+
+        HousePool.VaultLiquidityView memory viewData = pool.getVaultLiquidityView();
+        assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
+        assertEq(viewData.freeUsdc, pool.getFreeUSDC());
+        assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(viewData.seniorPrincipalUsdc, pool.seniorPrincipal());
+        assertEq(viewData.juniorPrincipalUsdc, pool.juniorPrincipal());
+        assertEq(viewData.unpaidSeniorYieldUsdc, pool.unpaidSeniorYield());
+        assertEq(viewData.seniorHighWaterMarkUsdc, pool.seniorHighWaterMark());
+        assertEq(viewData.oracleFrozen, engine.isOracleFrozen());
+        assertEq(viewData.degradedMode, engine.degradedMode());
+    }
+
     function test_M10_JitLP_BlockedByCooldown() public {
         _fundJunior(bob, 500_000 * 1e6);
 

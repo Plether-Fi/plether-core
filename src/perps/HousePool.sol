@@ -19,6 +19,19 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
+    struct VaultLiquidityView {
+        uint256 totalAssetsUsdc;
+        uint256 freeUsdc;
+        uint256 withdrawalReservedUsdc;
+        uint256 seniorPrincipalUsdc;
+        uint256 juniorPrincipalUsdc;
+        uint256 unpaidSeniorYieldUsdc;
+        uint256 seniorHighWaterMarkUsdc;
+        bool markFresh;
+        bool oracleFrozen;
+        bool degradedMode;
+    }
+
     IERC20 public immutable USDC;
     ICfdEngine public immutable ENGINE;
 
@@ -317,6 +330,19 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 free = getFreeUSDC();
         uint256 subordinated = free > seniorPrincipal ? free - seniorPrincipal : 0;
         return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
+    }
+
+    function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
+        viewData.totalAssetsUsdc = USDC.balanceOf(address(this));
+        viewData.freeUsdc = getFreeUSDC();
+        viewData.withdrawalReservedUsdc = ENGINE.getWithdrawalReservedUsdc();
+        viewData.seniorPrincipalUsdc = seniorPrincipal;
+        viewData.juniorPrincipalUsdc = juniorPrincipal;
+        viewData.unpaidSeniorYieldUsdc = unpaidSeniorYield;
+        viewData.seniorHighWaterMarkUsdc = seniorHighWaterMark;
+        viewData.markFresh = _markIsFreshForReconcile();
+        viewData.oracleFrozen = ENGINE.isOracleFrozen();
+        viewData.degradedMode = ENGINE.degradedMode();
     }
 
     // ==========================================
