@@ -26,7 +26,6 @@ contract TrancheCooldownBypassReceiver {
 
 }
 
-
 contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
     address bullTrader = address(0xB011);
@@ -77,25 +76,26 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
         assertTrue(engine.degradedMode(), "Setup must enter degraded mode");
         vm.prank(address(router));
-        (bool ok,) = address(engine).call(
-            abi.encodeWithSelector(
-                engine.processOrder.selector,
-                CfdTypes.Order({
-                    accountId: newTraderId,
-                    sizeDelta: 10_000e18,
-                    marginDelta: 1_000e6,
-                    targetPrice: 1e8,
-                    commitTime: uint64(block.timestamp),
-                    commitBlock: uint64(block.number),
-                    orderId: 0,
-                    side: CfdTypes.Side.BULL,
-                    isClose: false
-                }),
-                1e8,
-                pool.totalAssets(),
-                uint64(block.timestamp)
-            )
-        );
+        (bool ok,) = address(engine)
+            .call(
+                abi.encodeWithSelector(
+                    engine.processOrder.selector,
+                    CfdTypes.Order({
+                        accountId: newTraderId,
+                        sizeDelta: 10_000e18,
+                        marginDelta: 1000e6,
+                        targetPrice: 1e8,
+                        commitTime: uint64(block.timestamp),
+                        commitBlock: uint64(block.number),
+                        orderId: 0,
+                        side: CfdTypes.Side.BULL,
+                        isClose: false
+                    }),
+                    1e8,
+                    pool.totalAssets(),
+                    uint64(block.timestamp)
+                )
+            );
         assertFalse(ok, "Degraded mode must block new opens until recapitalized");
     }
 
@@ -120,23 +120,26 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");
-        _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8);
+        _open(newTraderId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
     }
 
     function test_C3_DeferredPayoutDoesNotRequireDegradedModeWithoutOpenLiability() public {
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
 
         _fundTrader(bullTrader, 11_000e6);
-        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(bullId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
         assertGt(engine.deferredPayoutUsdc(bullId), 0, "Setup should create a deferred payout liability");
-        assertFalse(engine.degradedMode(), "A standalone deferred payout should not force degraded mode once bounded open liability is gone");
+        assertFalse(
+            engine.degradedMode(),
+            "A standalone deferred payout should not force degraded mode once bounded open liability is gone"
+        );
     }
 
 }
@@ -149,16 +152,20 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 8_000e6);
+        clearinghouse.withdraw(accountId, address(usdc), 8000e6);
 
         vm.startPrank(address(router));
         engine.liquidatePosition(accountId, 101_900_000, pool.totalAssets(), uint64(block.timestamp), 0);
         vm.stopPrank();
 
-        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Liquidation should not manufacture bad debt after seizing reachable account balance");
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            0,
+            "Liquidation should not manufacture bad debt after seizing reachable account balance"
+        );
     }
 
 }
@@ -192,7 +199,8 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp), 0);
+        uint256 bounty =
+            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp), 0);
         vm.stopPrank();
 
         assertEq(bounty, 4_940_000, "Keeper bounty should cap at remaining positive equity");
@@ -235,7 +243,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
 
-        _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6_500e6, 1e8);
+        _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
         _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
         _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
@@ -247,23 +255,34 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         CfdTypes.Position memory bullPosB;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(bullIdA);
+            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
+                engine.positions(bullIdA);
             bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(bullIdB);
+            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
+                engine.positions(bullIdB);
             bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
+                engine.positions(bearId);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
         }
 
         int256 bullFundingA = engine.getPendingFunding(bullPosA);
         int256 bullFundingB = engine.getPendingFunding(bullPosB);
         int256 bearFunding = engine.getPendingFunding(bearPos);
-        assertLt(bullFundingA, -int256(bullPosA.margin), "Large undercollateralized bull should owe more funding than its own margin");
-        assertGt(bullFundingA + bullFundingB, -int256(bullPosA.margin + bullPosB.margin), "Global bull margin should mask the single-account deficit");
+        assertLt(
+            bullFundingA,
+            -int256(bullPosA.margin),
+            "Large undercollateralized bull should owe more funding than its own margin"
+        );
+        assertGt(
+            bullFundingA + bullFundingB,
+            -int256(bullPosA.margin + bullPosB.margin),
+            "Global bull margin should mask the single-account deficit"
+        );
         assertGt(bearFunding, 0, "Setup must make the bear side owed funding");
 
         uint256 bal = usdc.balanceOf(address(pool));
@@ -291,14 +310,22 @@ contract AuditFollowupFindingsFailing_TrancheComposability is BasePerpTest {
         _fundJunior(alice, 100_000e6);
         uint256 initialCooldown = juniorVault.lastDepositTime(alice);
 
-        usdc.mint(helper, 4_999e6);
+        usdc.mint(helper, 4999e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 4_999e6);
-        juniorVault.deposit(4_999e6, alice);
+        usdc.approve(address(juniorVault), 4999e6);
+        juniorVault.deposit(4999e6, alice);
         vm.stopPrank();
 
-        assertGt(juniorVault.balanceOf(alice), 100_000e9, "Third-party top-up should mint additional shares for the existing holder");
-        assertEq(juniorVault.lastDepositTime(alice), initialCooldown, "Third-party top-up should not reset the holder cooldown");
+        assertGt(
+            juniorVault.balanceOf(alice),
+            100_000e9,
+            "Third-party top-up should mint additional shares for the existing holder"
+        );
+        assertEq(
+            juniorVault.lastDepositTime(alice),
+            initialCooldown,
+            "Third-party top-up should not reset the holder cooldown"
+        );
     }
 
 }
@@ -340,7 +367,7 @@ contract AuditFollowupFindingsFailing_AsyncCloseIntent is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 5_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 0, 0, true);
         vm.stopPrank();
 

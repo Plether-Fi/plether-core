@@ -100,7 +100,7 @@ C(S) = 0.5 · k · S² / D
 
 `S` = Skew, `D` = Vault Depth, `k` = severity factor. Trade cost = `C(S_post) - C(S_pre)`.
 
-**Wash-Trade Immunity**: Opening and immediately closing yields exactly $0 net VPI. Combined with the flat 6 bps execution fee, wash-trading to farm rebates is guaranteed to be a net loss.
+**Wash-Trade Immunity**: Opening and immediately closing yields exactly $0 net VPI. Combined with the flat 4 bps execution fee, wash-trading to farm rebates is guaranteed to be a net loss.
 
 **Depth Manipulation Resistance**: Each position tracks `vpiAccrued` — the cumulative VPI charges and rebates across its lifetime. On close, the engine bounds the VPI so the user can never extract a net rebate greater than what they paid. This stateful approach is immune to depth manipulation: inflating or deflating depth between open and close cannot produce VPI profit because the bound enforces `accruedVpi + closeVpi >= 0`.
 
@@ -198,7 +198,7 @@ This prevents the Friday 19:00-22:00 gap from being exploitable -- during this p
 
 | Fee | Rate | Source |
 |-----|------|--------|
-| Execution Fee | 6 bps (0.06%) | Charged on notional size at open/close |
+| Execution Fee | 4 bps (0.04%) | Charged on notional size at open/close |
 | Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
 Open-path and close-path execution fees both accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Keeper execution is compensated separately from the router's reserved order bounties.
@@ -250,7 +250,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
 | IMR | 1.5× MMR (1.5%) | Initial margin requirement |
-| Execution fee | 6 bps (0.06%) | Protocol fee charged on notional at open/close |
+| Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
 | Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
 | Close execution bounty | 1.00 USDC | Reserved at commit as a flat amount |
 | Normal oracle staleness | 60s | Max Pyth price age for execution |

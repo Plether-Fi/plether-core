@@ -15,13 +15,13 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(address(engine));
-        clearinghouse.lockMargin(accountId, 2_000e6);
+        clearinghouse.lockMargin(accountId, 2000e6);
 
         vm.prank(address(router));
         clearinghouse.reserveSettlementUsdc(accountId, 300e6);
 
-        uint256 reachable = clearinghouse.getSettlementReachableUsdc(accountId, 2_000e6);
-        assertEq(reachable, 7_700e6, "reachable settlement must exclude reserved execution bounty escrow");
+        uint256 reachable = clearinghouse.getSettlementReachableUsdc(accountId, 2000e6);
+        assertEq(reachable, 7700e6, "reachable settlement must exclude reserved execution bounty escrow");
     }
 
     function test_SeizeAsset_CannotConsumeReservedSettlement() public {
@@ -33,7 +33,7 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
 
         vm.prank(address(engine));
         vm.expectRevert();
-        clearinghouse.seizeAsset(accountId, address(usdc), 9_800e6, address(engine));
+        clearinghouse.seizeAsset(accountId, address(usdc), 9800e6, address(engine));
     }
 
     function test_LiquidationSolvency_MustIgnoreLockedMarginInReachableEquity() public {
@@ -49,6 +49,7 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "locked position margin must not be counted as free liquidation equity");
     }
+
 }
 
 contract ArchitectureRegression_SolvencyViews is BasePerpTest {
@@ -77,6 +78,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         assertEq(pool.juniorPrincipal(), 900_000e6, "deferred liquidation bounties must reduce LP distributable equity");
     }
+
 }
 
 contract ArchitectureRegression_QueueEconomics is BasePerpTest {
@@ -92,4 +94,5 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.BEAR, 100_001e18, 0, 0, true);
     }
+
 }

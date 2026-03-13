@@ -11,6 +11,7 @@ contract HousePoolTest is BasePerpTest {
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
+
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
     }
@@ -384,7 +385,11 @@ contract HousePoolTest is BasePerpTest {
         uint256 vaultBal = usdc.balanceOf(address(pool));
         uint256 expectedReserved = 100_000 * 1e6 + fees;
 
-        assertEq(freeUSDC, vaultBal - expectedReserved, "Free USDC should reserve both directional liability and fees exactly");
+        assertEq(
+            freeUSDC,
+            vaultBal - expectedReserved,
+            "Free USDC should reserve both directional liability and fees exactly"
+        );
     }
 
     function test_GetVaultLiquidityView_ReturnsCurrentPoolState() public {
@@ -820,7 +825,9 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertGt(pool.juniorPrincipal(), juniorBefore, "Without live liability, reconcile should not require a fresh mark");
+        assertGt(
+            pool.juniorPrincipal(), juniorBefore, "Without live liability, reconcile should not require a fresh mark"
+        );
     }
 
     function test_FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals() public {
@@ -843,7 +850,9 @@ contract HousePoolAuditTest is BasePerpTest {
         vm.prank(bob);
         juniorVault.withdraw(1e6, bob, bob);
 
-        assertEq(usdc.balanceOf(bob), bobUsdcBefore + 1e6, "Frozen-oracle withdrawals should use the relaxed freshness limit");
+        assertEq(
+            usdc.balanceOf(bob), bobUsdcBefore + 1e6, "Frozen-oracle withdrawals should use the relaxed freshness limit"
+        );
     }
 
     // Regression: C-02 — funding spread not permanently locked after positions close

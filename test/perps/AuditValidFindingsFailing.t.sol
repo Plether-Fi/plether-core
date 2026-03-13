@@ -22,7 +22,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
-        clearinghouse.withdraw(accountId, address(usdc), 9_999 * 1e6);
+        clearinghouse.withdraw(accountId, address(usdc), 9999 * 1e6);
     }
 
     function test_C2_MtmMustAccountForUncollectibleLosses() public {
@@ -200,7 +200,7 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
 
         uint256 mmAfter = clearinghouse.balances(mmId, address(usdc));
         uint256 depositAmount = 500_000 * 1e6;
-        uint256 execFeesRoundTrip = ((500_000 * 1e6 * 6) / 10_000) * 2;
+        uint256 execFeesRoundTrip = ((500_000 * 1e6 * 4) / 10_000) * 2;
 
         assertEq(mmAfter, depositAmount - execFeesRoundTrip, "VPI clamp should prevent net rebate extraction");
     }

@@ -347,11 +347,11 @@ When a position goes underwater (equity < 0):
 
 | Fee | Rate | Notes |
 |-----|------|-------|
-| Execution Fee | 6 bps (0.06%) | Charged on notional at open and close |
+| Execution Fee | 4 bps (0.04%) | Charged on notional at open and close |
 | Funding | Variable | Kinked curve: 0→15% APY (linear), 15%→300% APY (quadratic) |
 | Keeper Bounty | 15 bps (0.15%) | Floor: $5 USDC. Paid from vault on liquidation |
 
-Fees are hardcoded (execution = 6 bps, bounty = 15 bps). Funding curve parameters are admin-configurable via `proposeRiskParams()`/`finalizeRiskParams()`.
+Fees are hardcoded (execution = 4 bps, bounty = 15 bps). Funding curve parameters are admin-configurable via `proposeRiskParams()`/`finalizeRiskParams()`.
 
 ## Emergency Procedures
 

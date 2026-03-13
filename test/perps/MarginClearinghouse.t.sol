@@ -200,8 +200,16 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockMargin(aliceId, 600 * 1e6);
 
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(aliceId), 9900 * 1e6, "Buying power should include discounted non-USDC collateral");
-        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 400 * 1e6, "Free settlement balance should only count unencumbered USDC");
+        assertEq(
+            clearinghouse.getFreeBuyingPowerUsdc(aliceId),
+            9900 * 1e6,
+            "Buying power should include discounted non-USDC collateral"
+        );
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(aliceId),
+            400 * 1e6,
+            "Free settlement balance should only count unencumbered USDC"
+        );
     }
 
     function test_Deposit_UnsupportedAsset_Reverts() public {

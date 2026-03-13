@@ -32,7 +32,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
     function test_H1_TinyInvalidCloseBehindQueuedIntentTracksEscrowAndPendingCount() public {
         bytes32 accountId = bytes32(uint256(uint160(attacker)));
-        _fundTrader(attacker, 1e6);
+        _fundTrader(attacker, 2e6);
 
         vm.prank(attacker);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
@@ -42,7 +42,11 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
-        assertEq(escrow.executionBountyUsdc, 50_000, "Dust orders should escrow the minimum execution bounty so FIFO remains serviceable");
+        assertEq(
+            escrow.executionBountyUsdc,
+            1_050_000,
+            "Dust open plus close intents should escrow both minimum and flat execution bounties"
+        );
     }
 
 }
@@ -60,10 +64,10 @@ contract AuditLatestStateFindingsFailing_TrancheCooldownBypass is BasePerpTest {
         _fundJunior(alice, 100_000e6);
         vm.warp(block.timestamp + 1 hours + 1);
 
-        usdc.mint(helper, 1_000e6);
+        usdc.mint(helper, 1000e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 1_000e6);
-        juniorVault.deposit(1_000e6, alice);
+        usdc.approve(address(juniorVault), 1000e6);
+        juniorVault.deposit(1000e6, alice);
         vm.stopPrank();
 
         vm.prank(alice);

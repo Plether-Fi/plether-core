@@ -394,10 +394,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
-    function _getWithdrawalSnapshot() internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
+    function _getWithdrawalSnapshot()
+        internal
+        view
+        returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot)
+    {
         return HousePoolAccountingLib.buildWithdrawalSnapshot(
-            USDC.balanceOf(address(this)), ENGINE.getMaxLiability(), ENGINE.accumulatedFeesUsdc(), ENGINE.getWithdrawalReservedUsdc()
-        );
+                USDC.balanceOf(address(this)),
+                ENGINE.getMaxLiability(),
+                ENGINE.accumulatedFeesUsdc(),
+                ENGINE.getWithdrawalReservedUsdc()
+            );
     }
 
     function _getReconcileSnapshot() internal view returns (HousePoolAccountingLib.ReconcileSnapshot memory snapshot) {
@@ -418,15 +425,20 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return HousePoolAccountingLib.isMarkFresh(ENGINE.lastMarkTime(), policy.maxStaleness, block.timestamp);
     }
 
-    function _getMarkFreshnessPolicy() internal view returns (HousePoolAccountingLib.MarkFreshnessPolicy memory policy) {
+    function _getMarkFreshnessPolicy()
+        internal
+        view
+        returns (HousePoolAccountingLib.MarkFreshnessPolicy memory policy)
+    {
         return HousePoolAccountingLib.getMarkFreshnessPolicy(
-            _hasLiveLiability(), ENGINE.isOracleFrozen(), ENGINE.fadMaxStaleness(), markStalenessLimit
-        );
+                _hasLiveLiability(), ENGINE.isOracleFrozen(), ENGINE.fadMaxStaleness(), markStalenessLimit
+            );
     }
 
     function _hasLiveLiability() internal view returns (bool) {
         return ENGINE.hasLiveLiability();
     }
+
     function _accrueSeniorYieldOnly() internal {
         uint256 elapsed = block.timestamp - lastReconcileTime;
         lastReconcileTime = block.timestamp;

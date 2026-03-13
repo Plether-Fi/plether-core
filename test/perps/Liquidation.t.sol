@@ -81,12 +81,12 @@ contract LiquidationTest is BasePerpTest {
         assertEq(bounty, 150 * 1e6, "Keeper should receive $150 USDC bounty (0.15% of $100k)");
 
         // Ethical: Alice keeps surplus equity
-        // Opening: exec fee = 6 bps of $100k = $60. pos.margin = $2000 - $60 = $1940.
-        // Clearinghouse after open and withdrawing free USDC: locked margin remains $1940.
-        // Liquidation: equity = $1940 + $0 (PnL) = $1940. Bounty = $150.
-        // residual = $1940 - $150 = $1790. toSeize = $1940 - $1790 = $150.
+        // Opening: exec fee = 4 bps of $100k = $40. pos.margin = $2000 - $40 = $1960.
+        // Clearinghouse after open and withdrawing free USDC: locked margin remains $1960.
+        // Liquidation: equity = $1960 + $0 (PnL) = $1960. Bounty = $150.
+        // residual = $1960 - $150 = $1810. toSeize = $1960 - $1810 = $150.
         uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
-        assertEq(chBalance, 1790 * 1e6, "Alice keeps surplus equity after ethical liquidation");
+        assertEq(chBalance, 1810 * 1e6, "Alice keeps surplus equity after ethical liquidation");
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -118,11 +118,11 @@ contract LiquidationTest is BasePerpTest {
         assertEq(size, 0, "Position should be wiped");
 
         // Ethical: user should retain equity - bounty
-        // PnL = -$1500, Margin = $2000, Equity = $500
+        // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
         // Bounty ~ 0.15% * $101.5k = $152.25, but min $5 → $152.25
-        // Residual = $440 - $152.25 = $287.75 after the 6 bps execution fee
+        // Residual = $460 - $152.25 = $307.75
         uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
-        assertApproxEqAbs(chBalance, 287_750_000, 1, "Alice retains equity net of keeper bounty");
+        assertApproxEqAbs(chBalance, 307_750_000, 1, "Alice retains equity net of keeper bounty");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {

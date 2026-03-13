@@ -451,7 +451,7 @@ contract PerpsForkTest is Test {
     // ==========================================
 
     function test_KeeperGasEconomics() public {
-        _depositToClearinghouse(alice, 2_000e6);
+        _depositToClearinghouse(alice, 2000e6);
 
         uint256 ts = block.timestamp;
         vm.prank(alice);
@@ -629,12 +629,12 @@ contract PerpsForkTest is Test {
     function test_DeferredPayoutClaimFlow_RealUsdc() public {
         _depositToClearinghouse(alice, 11_000e6);
 
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9_000e6);
+        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9000e6);
 
         uint256 chBefore = clearinghouse.balances(aliceId, USDC);
 
@@ -651,7 +651,9 @@ contract PerpsForkTest is Test {
         assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
-        assertEq(clearinghouse.balances(aliceId, USDC), chBefore, "Clearinghouse balance should stay unchanged until claim");
+        assertEq(
+            clearinghouse.balances(aliceId, USDC), chBefore, "Clearinghouse balance should stay unchanged until claim"
+        );
 
         deal(USDC, lp, IERC20(USDC).balanceOf(lp) + deferred);
         vm.startPrank(lp);
@@ -668,12 +670,12 @@ contract PerpsForkTest is Test {
     function test_DeferredPayoutBatchDoesNotBlockTailOrder_RealUsdc() public {
         _depositToClearinghouse(alice, 20_000e6);
 
-        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8_000e6, 1e8, int64(100_000_000), false);
+        this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
         uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 8_000e6);
+        IERC20(USDC).transfer(address(0xDEAD), poolAssets - 8000e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);

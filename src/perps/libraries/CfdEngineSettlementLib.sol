@@ -38,7 +38,8 @@ library CfdEngineSettlementLib {
         DebtCollectionResult memory collection = collectSettlementDeficit(availableUsdc, owedUsdc);
         result.seizedUsdc = collection.seizedUsdc;
         result.shortfallUsdc = collection.shortfallUsdc;
-        result.collectedExecFeeUsdc = execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
+        result.collectedExecFeeUsdc =
+            execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
         result.badDebtUsdc = collection.shortfallUsdc > execFeeUsdc ? collection.shortfallUsdc - execFeeUsdc : 0;
     }
 

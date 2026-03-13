@@ -76,7 +76,9 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Only the reserved execution bounty should leave Alice's balance"
+            clearinghouse.balances(accountId, address(usdc)),
+            9999 * 1e6,
+            "Only the reserved execution bounty should leave Alice's balance"
         );
     }
 
@@ -93,7 +95,7 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = engine.accumulatedFeesUsdc();
-        assertEq(fees, 30_000_000, "Protocol should still retain the full 6 bps execution fee");
+        assertEq(fees, 20_000_000, "Protocol should still retain the full 4 bps execution fee");
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Keeper should receive the 1 USDC capped reward"
         );
@@ -174,7 +176,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5_000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
@@ -188,7 +190,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5_000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
         OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
@@ -202,8 +204,8 @@ contract OrderRouterTest is BasePerpTest {
         address trader = address(0x333);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        _fundTrader(trader, 1_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1_000e6, 1e8);
+        _fundTrader(trader, 1000e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
 
         vm.prank(trader);
         vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
@@ -222,7 +224,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5_000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
@@ -350,11 +352,11 @@ contract OrderRouterTest is BasePerpTest {
         uint256 spamCount = 200;
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BULL, 1_000 * 1e18, 100 * 1e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 2e8, false);
         }
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -362,7 +364,9 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(uint64(spamCount + 1), empty);
         uint256 gasUsed = gasBefore - gasleft();
 
-        assertEq(router.nextExecuteId(), spamCount + 2, "batch should clear the adversarial queue and reach the tail order");
+        assertEq(
+            router.nextExecuteId(), spamCount + 2, "batch should clear the adversarial queue and reach the tail order"
+        );
         (uint256 size,,,,,,,) = engine.positions(carolId);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
@@ -380,7 +384,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -393,7 +397,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 5_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
@@ -402,7 +406,7 @@ contract OrderRouterTest is BasePerpTest {
         (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
-        assertEq(carolSize, 5_000 * 1e18, "later valid order must still execute");
+        assertEq(carolSize, 5000 * 1e18, "later valid order must still execute");
     }
 
     function test_LargeForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
@@ -416,7 +420,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -428,7 +432,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 spamCount = 200;
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 1_000 * 1e18, 100 * 1e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BEAR, 1000 * 1e18, 100 * 1e6, 2e8, false);
         }
 
         vm.roll(block.number + 1);
@@ -457,7 +461,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -470,10 +474,10 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BULL, 1_000 * 1e18, 100 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 2e8, false);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         uint256 executorBefore = usdc.balanceOf(address(this));
 
@@ -616,9 +620,15 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)), 9_999 * 1e6, "Reserved execution bounty should be charged on failure"
+            clearinghouse.balances(accountId, address(usdc)),
+            9999 * 1e6,
+            "Reserved execution bounty should be charged on failure"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive the reserved execution bounty");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperUsdcBefore,
+            1e6,
+            "Executor should receive the reserved execution bounty"
+        );
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -626,7 +636,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BEAR, 8_000 * 1e18, 400 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 8000 * 1e18, 400 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
@@ -681,7 +691,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 8_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 8000 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
@@ -693,7 +703,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 8_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 8000e6);
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), block.timestamp + 6);
         uint256 keeperUsdcBefore = usdc.balanceOf(address(this));
@@ -701,8 +711,14 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrderBatch(3, priceData);
 
         assertEq(router.nextExecuteId(), 4, "Deferred-payout close should not stall the FIFO queue");
-        assertGt(engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution");
-        assertEq(engine.deferredLiquidationBountyUsdc(address(this)), 0, "Close execution should not rely on deferred liquidation bounties");
+        assertGt(
+            engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
+        );
+        assertEq(
+            engine.deferredLiquidationBountyUsdc(address(this)),
+            0,
+            "Close execution should not rely on deferred liquidation bounties"
+        );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
             2e6,
@@ -710,7 +726,9 @@ contract OrderRouterPythTest is BasePerpTest {
         );
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
-        assertEq(escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout");
+        assertEq(
+            escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
+        );
     }
 
     function testFuzz_StaleOracleRevertPreservesEscrowAndQueue(
@@ -732,7 +750,11 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
-        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 1e6, "Clearinghouse should continue escrowing the keeper reserve");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            1e6,
+            "Clearinghouse should continue escrowing the keeper reserve"
+        );
     }
 
     function testFuzz_SlippageFailureClearsEscrowAndAdvancesQueue(
@@ -754,7 +776,11 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
-        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 0, "Keeper reserve should be paid out and no longer remain reserved");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            0,
+            "Keeper reserve should be paid out and no longer remain reserved"
+        );
     }
 
     function test_InsufficientPythFee_Reverts() public {
@@ -2463,7 +2489,9 @@ contract VpiImrBypassTest is Test {
         clearinghouse.deposit(aliceAccount, address(usdc), 1e6);
         vm.stopPrank();
 
-        assertEq(clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved execution bounty");
+        assertEq(
+            clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved execution bounty"
+        );
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);

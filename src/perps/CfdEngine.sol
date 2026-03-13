@@ -3,11 +3,11 @@ pragma solidity 0.8.33;
 
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
-import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
+import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
+import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -152,6 +152,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
 
+    uint256 public constant EXECUTION_FEE_BPS = 4;
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 
     CfdTypes.RiskParams public pendingRiskParams;
@@ -556,9 +557,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__NotDegraded();
         }
         CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
-        if (
-            snapshot.effectiveSolvencyAssets < snapshot.maxLiability
-        ) {
+        if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
             revert CfdEngine__StillInsolvent();
         }
         degradedMode = false;
@@ -701,7 +700,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 unsettledFundingDebt = _settleFunding(order, pos);
 
         if (order.isClose) {
-            accumulatedFeesUsdc += _processDecrease(order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt);
+            accumulatedFeesUsdc += _processDecrease(
+                order, pos, price, preSkewUsdc, vaultDepthUsdc, unsettledFundingDebt
+            );
             _enterDegradedModeIfInsolvent(order.accountId, 0);
         } else {
             if (degradedMode) {
@@ -833,7 +834,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (notionalUsdc * rp.bountyBps < rp.minBountyUsdc * 10_000) {
             revert CfdEngine__PositionTooSmall();
         }
-        uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
+        uint256 execFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
         int256 tradeCost = vpiUsdc + int256(execFeeUsdc);
         int256 netMarginChange = int256(order.marginDelta) - tradeCost;
@@ -934,7 +935,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         pos.vpiAccrued -= proportionalAccrual;
 
         uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 execFeeUsdc = (notionalUsdc * 6) / 10_000;
+        uint256 execFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
         int256 netSettlement = realizedPnl - vpiUsdc - int256(execFeeUsdc) - int256(unsettledFundingDebt);
 
@@ -1178,7 +1179,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         address keeper
     ) external view returns (DeferredPayoutStatus memory status) {
         status.deferredTraderPayoutUsdc = deferredPayoutUsdc[accountId];
-        status.traderPayoutClaimableNow = vault.totalAssets() >= status.deferredTraderPayoutUsdc && status.deferredTraderPayoutUsdc > 0;
+        status.traderPayoutClaimableNow =
+            vault.totalAssets() >= status.deferredTraderPayoutUsdc && status.deferredTraderPayoutUsdc > 0;
         status.deferredLiquidationBountyUsdc = deferredLiquidationBountyUsdc[keeper];
         status.liquidationBountyClaimableNow =
             vault.totalAssets() >= status.deferredLiquidationBountyUsdc && status.deferredLiquidationBountyUsdc > 0;
@@ -1203,7 +1205,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         preview.valid = true;
-        (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) = _previewFundingSettlement(pos);
+        (int256 pendingFunding, uint256 unsettledFundingDebt, uint256 marginAfterFunding) =
+            _previewFundingSettlement(pos);
         pos.margin = marginAfterFunding;
 
         CfdTypes.Position memory closedPart = pos;
@@ -1230,7 +1233,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
         preview.vpiUsdc = uint256(CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, riskParams.vpiFactor));
         uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        preview.executionFeeUsdc = (notionalUsdc * 6) / 10_000;
+        preview.executionFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
         int256 netSettlement = preview.realizedPnlUsdc - int256(preview.vpiUsdc) - int256(preview.executionFeeUsdc)
             - int256(unsettledFundingDebt);
@@ -1292,7 +1295,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
         preview.equityUsdc = int256(preview.reachableCollateralUsdc) + preview.fundingUsdc + preview.pnlUsdc;
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        uint256 maintenanceMarginUsdc = (((pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
+        uint256 maintenanceMarginUsdc =
+            (((pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE) * requiredBps) / 10_000;
         preview.liquidatable = preview.equityUsdc <= int256(maintenanceMarginUsdc);
 
         uint256 posMargin = pos.margin;
@@ -1308,9 +1312,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
         preview.keeperBountyUsdc = bounty;
 
-        CfdEngineSettlementLib.LiquidationSettlementResult memory result = CfdEngineSettlementLib.liquidationSettlementResult(
-            clearinghouse.balances(accountId, address(USDC)), preview.equityUsdc - int256(bounty)
-        );
+        CfdEngineSettlementLib.LiquidationSettlementResult memory result =
+            CfdEngineSettlementLib.liquidationSettlementResult(
+                clearinghouse.balances(accountId, address(USDC)), preview.equityUsdc - int256(bounty)
+            );
         preview.seizedCollateralUsdc = result.seizedUsdc;
         preview.immediatePayoutUsdc = result.payoutUsdc;
         preview.badDebtUsdc = result.badDebtUsdc;
@@ -1434,7 +1439,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         clearinghouse.unlockMargin(accountId, posMargin);
 
         int256 residual = equityUsdc - int256(keeperBountyUsdc);
-        CfdEngineSettlementLib.LiquidationSettlementResult memory settlement = _settleLiquidationResidual(accountId, residual);
+        CfdEngineSettlementLib.LiquidationSettlementResult memory settlement =
+            _settleLiquidationResidual(accountId, residual);
         accumulatedBadDebtUsdc += settlement.badDebtUsdc;
 
         if (pos.side == CfdTypes.Side.BULL) {
@@ -1460,11 +1466,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl())
-            + totalDeferredPayoutUsdc + totalDeferredLiquidationBountyUsdc;
+        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(
+            _maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl()
+        ) + totalDeferredPayoutUsdc + totalDeferredLiquidationBountyUsdc;
     }
 
-    function _buildAdjustedSolvencySnapshot() internal view returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot) {
+    function _buildAdjustedSolvencySnapshot()
+        internal
+        view
+        returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot)
+    {
         snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
             vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
         );

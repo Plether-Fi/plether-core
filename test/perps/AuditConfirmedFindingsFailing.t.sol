@@ -119,7 +119,11 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         vm.prank(keeper);
         router.executeOrderBatch(2, updateData);
 
-        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 2e6, "Keeper should be paid for both the successful and expired orders");
+        assertEq(
+            usdc.balanceOf(keeper) - keeperUsdcBefore,
+            2e6,
+            "Keeper should be paid for both the successful and expired orders"
+        );
         assertEq(alice.balance - aliceBefore, 0, "Expired order should not change the user's ETH balance");
     }
 
@@ -367,7 +371,7 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.15e18,
-            kinkSkewRatio: 0.10e18,
+            kinkSkewRatio: 0.1e18,
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,

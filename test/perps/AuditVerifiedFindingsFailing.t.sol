@@ -7,9 +7,9 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {BasePerpTest} from "./BasePerpTest.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -60,11 +60,13 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         CfdTypes.Position memory bullPos;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(bullId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
+                engine.positions(bullId);
             bullPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
+                engine.positions(bearId);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
         }
 
@@ -72,8 +74,16 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         int256 bearFunding = engine.getPendingFunding(bearPos);
         assertLt(bullFunding, 0, "Bull side should owe funding in the skewed market");
         assertGt(bearFunding, 0, "Bear side should be owed funding in the skewed market");
-        assertLt(engine.getCappedFundingPnl(), 0, "Solvency funding should include collectible receivables instead of liability-only clipping");
-        assertGt(engine.getLiabilityOnlyFundingPnl(), 0, "Withdrawal funding should remain conservative and reserve only liabilities");
+        assertLt(
+            engine.getCappedFundingPnl(),
+            0,
+            "Solvency funding should include collectible receivables instead of liability-only clipping"
+        );
+        assertGt(
+            engine.getLiabilityOnlyFundingPnl(),
+            0,
+            "Withdrawal funding should remain conservative and reserve only liabilities"
+        );
     }
 
 }
@@ -113,7 +123,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.15e18,
-            kinkSkewRatio: 0.10e18,
+            kinkSkewRatio: 0.1e18,
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
@@ -227,7 +237,9 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, updateData);
 
-        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 0, "Keeper should not collect the reserve on stale oracle input");
+        assertEq(
+            usdc.balanceOf(keeper) - keeperUsdcBefore, 0, "Keeper should not collect the reserve on stale oracle input"
+        );
     }
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
@@ -260,7 +272,10 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         clearinghouse.finalizeOperator();
     }
 
-    function _fundJunior(address lp, uint256 amount) internal {
+    function _fundJunior(
+        address lp,
+        uint256 amount
+    ) internal {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), amount);
@@ -268,7 +283,10 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         vm.stopPrank();
     }
 
-    function _fundTrader(address trader, uint256 amount) internal {
+    function _fundTrader(
+        address trader,
+        uint256 amount
+    ) internal {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         usdc.mint(trader, amount);
         vm.startPrank(trader);
@@ -323,7 +341,7 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
         uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
@@ -332,12 +350,13 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         clearinghouse.withdraw(accountId, address(usdc), freeBefore);
 
         vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         assertGe(
             clearinghouse.balances(accountId, address(usdc)),
             lockedBefore,
-            "Close commits should no longer strip locked margin to fund keeper reserves"
+            "Rejected close commits must not strip locked margin to fund keeper reserves"
         );
     }
 
@@ -371,10 +390,10 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
         bytes32 loserId = bytes32(uint256(uint160(loser)));
 
         _fundTrader(winner, 100_000e6);
-        _fundTrader(loser, 2_000e6);
+        _fundTrader(loser, 2000e6);
 
         _open(winnerId, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserId, CfdTypes.Side.BEAR, 100_000e18, 2_000e6, 0.5e8);
+        _open(loserId, CfdTypes.Side.BEAR, 100_000e18, 2000e6, 0.5e8);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 20_000e6);
@@ -383,7 +402,10 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
         vm.prank(address(router));
         engine.liquidatePosition(loserId, 0.1e8, depth, uint64(block.timestamp), 0);
 
-        assertTrue(engine.degradedMode(), "Liquidations that push effective assets below max liability must latch degraded mode");
+        assertTrue(
+            engine.degradedMode(),
+            "Liquidations that push effective assets below max liability must latch degraded mode"
+        );
     }
 
 }

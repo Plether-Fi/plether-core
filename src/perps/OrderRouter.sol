@@ -3,11 +3,11 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
-import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -239,8 +239,9 @@ contract OrderRouter is Ownable2Step, Pausable {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
-        uint256 executionBountyUsdc =
-            isClose ? _quoteCloseOrderExecutionBountyUsdc() : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
+        uint256 executionBountyUsdc = isClose
+            ? _quoteCloseOrderExecutionBountyUsdc()
+            : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -388,7 +389,9 @@ contract OrderRouter is Ownable2Step, Pausable {
                 engine.fadMaxStaleness()
             );
             if (policy.closeOnly && !order.isClose) {
-                emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
+                emit OrderFailed(
+                    orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
+                );
                 _finalizeExecution(orderId, pythFee, false);
                 return;
             }
@@ -491,7 +494,9 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
 
             if (policy.closeOnly && !order.isClose) {
-                emit OrderFailed(orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode");
+                emit OrderFailed(
+                    orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
+                );
                 _cleanupOrder(orderId, false);
                 continue;
             }
@@ -627,8 +632,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
 
-        try vault.payOut(msg.sender, liquidationBountyUsdc) {
-        } catch {
+        try vault.payOut(msg.sender, liquidationBountyUsdc) {}
+        catch {
             engine.recordDeferredLiquidationBounty(msg.sender, liquidationBountyUsdc);
         }
     }
@@ -656,9 +661,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = executionBountyReserves[orderId];
         if (executionBountyUsdc > 0) {
-            IMarginClearinghouse(engine.clearinghouse()).payReservedSettlementUsdc(
-                orders[orderId].accountId, executionBountyUsdc, msg.sender
-            );
+            IMarginClearinghouse(engine.clearinghouse())
+                .payReservedSettlementUsdc(orders[orderId].accountId, executionBountyUsdc, msg.sender);
             delete executionBountyReserves[orderId];
         }
     }
@@ -671,9 +675,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         delete executionBountyReserves[orderId];
-        IMarginClearinghouse(engine.clearinghouse()).releaseReservedSettlementUsdc(
-            orders[orderId].accountId, executionBountyUsdc
-        );
+        IMarginClearinghouse(engine.clearinghouse())
+            .releaseReservedSettlementUsdc(orders[orderId].accountId, executionBountyUsdc);
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {
@@ -937,7 +940,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         uint256 vaultDepth = vault.totalAssets();
         uint256 keeperBountyUsdc = engine.previewLiquidation(accountId, executionPrice, vaultDepth).keeperBountyUsdc;
-        keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime, keeperBountyUsdc);
+        keeperBountyUsdc =
+            engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime, keeperBountyUsdc);
 
         _payOrDeferLiquidationBounty(keeperBountyUsdc);
 

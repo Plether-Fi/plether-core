@@ -289,7 +289,11 @@ contract PerpInvariantTest is BasePerpTest {
             trackedReservedSettlement += clearinghouse.reservedSettlementUsdc(accountId);
         }
 
-        assertEq(trackedReservedSettlement, pendingKeeperReserves, "Queued keeper reserves must stay reserved inside the clearinghouse");
+        assertEq(
+            trackedReservedSettlement,
+            pendingKeeperReserves,
+            "Queued keeper reserves must stay reserved inside the clearinghouse"
+        );
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {
@@ -307,13 +311,14 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_KnownActorUsdcConservation() public {
-        uint256 actorBalances = usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
+        uint256 actorBalances =
+            usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
         for (uint256 i = 0; i < 3; i++) {
             actorBalances += usdc.balanceOf(handler.traders(i));
         }
 
-        uint256 contractBalances = usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router))
-            + usdc.balanceOf(address(clearinghouse));
+        uint256 contractBalances =
+            usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router)) + usdc.balanceOf(address(clearinghouse));
 
         uint256 expectedSupply = 730_000e6 + handler.ghost_totalDeposited() + handler.ghost_totalLpDeposited();
         assertEq(
@@ -395,7 +400,9 @@ contract PerpInvariantTest is BasePerpTest {
             engine.getWithdrawalReservedUsdc(),
             "Protocol view withdrawal reserve must match accessor"
         );
-        assertEq(protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor");
+        assertEq(
+            protocolView.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol view fees must match accessor"
+        );
         assertEq(
             protocolView.totalDeferredPayoutUsdc,
             engine.totalDeferredPayoutUsdc(),
@@ -409,8 +416,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public {
-        uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
-            + engine.totalDeferredLiquidationBountyUsdc();
+        uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
+            + engine.totalDeferredPayoutUsdc() + engine.totalDeferredLiquidationBountyUsdc();
 
         int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
         if (fundingLiability > 0) {
@@ -452,7 +459,9 @@ contract PerpInvariantTest is BasePerpTest {
             }
 
             CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepth);
-            assertEq(preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view");
+            assertEq(
+                preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view"
+            );
         }
     }
 
@@ -506,7 +515,10 @@ contract AdversarialPerpHandler is Test {
         return bytes32(uint256(uint160(actor)));
     }
 
-    function _seedTrader(address actor, uint256 amount) internal {
+    function _seedTrader(
+        address actor,
+        uint256 amount
+    ) internal {
         bytes32 accountId = _accountId(actor);
         usdc.mint(actor, amount);
         vm.startPrank(actor);
@@ -515,7 +527,9 @@ contract AdversarialPerpHandler is Test {
         vm.stopPrank();
     }
 
-    function _seedLp(uint256 amount) internal {
+    function _seedLp(
+        uint256 amount
+    ) internal {
         usdc.mint(lp, amount);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), type(uint256).max);
@@ -523,18 +537,25 @@ contract AdversarialPerpHandler is Test {
         vm.stopPrank();
     }
 
-    function seedActors(uint256 amountFuzz) external {
-        uint256 amount = bound(amountFuzz, 1_000e6, 50_000e6);
+    function seedActors(
+        uint256 amountFuzz
+    ) external {
+        uint256 amount = bound(amountFuzz, 1000e6, 50_000e6);
         for (uint256 i = 0; i < actors.length; i++) {
             _seedTrader(actors[i], amount);
         }
     }
 
-    function openPosition(uint256 actorIdx, uint8 sideRaw, uint256 sizeFuzz, uint256 marginFuzz) external {
+    function openPosition(
+        uint256 actorIdx,
+        uint8 sideRaw,
+        uint256 sizeFuzz,
+        uint256 marginFuzz
+    ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
-        uint256 size = bound(sizeFuzz, 1_000e18, 25_000e18);
-        uint256 margin = bound(marginFuzz, 200e6, 5_000e6);
+        uint256 size = bound(sizeFuzz, 1000e18, 25_000e18);
+        uint256 margin = bound(marginFuzz, 200e6, 5000e6);
 
         if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < margin + 1e6) {
             _seedTrader(actor, margin + 5e6);
@@ -551,7 +572,10 @@ contract AdversarialPerpHandler is Test {
         try router.executeOrder(commitId, empty) {} catch {}
     }
 
-    function spamInvalidOrders(uint256 actorIdx, uint256 countFuzz) external {
+    function spamInvalidOrders(
+        uint256 actorIdx,
+        uint256 countFuzz
+    ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
         uint256 count = bound(countFuzz, 1, 6);
@@ -562,11 +586,13 @@ contract AdversarialPerpHandler is Test {
 
         for (uint256 i = 0; i < count; i++) {
             vm.prank(actor);
-            router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 2e8, false);
         }
     }
 
-    function queueBadClose(uint256 actorIdx) external {
+    function queueBadClose(
+        uint256 actorIdx
+    ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
         (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
@@ -578,7 +604,9 @@ contract AdversarialPerpHandler is Test {
         try router.commitOrder(side, size, 0, 90_000_000, true) {} catch {}
     }
 
-    function starveLiquidity(uint256 amountFuzz) external {
+    function starveLiquidity(
+        uint256 amountFuzz
+    ) external {
         uint256 poolAssets = pool.totalAssets();
         if (poolAssets <= 10e6) {
             return;
@@ -590,12 +618,17 @@ contract AdversarialPerpHandler is Test {
         ghost_starvationEvents++;
     }
 
-    function replenishLiquidity(uint256 amountFuzz) external {
-        uint256 amount = bound(amountFuzz, 1_000e6, 100_000e6);
+    function replenishLiquidity(
+        uint256 amountFuzz
+    ) external {
+        uint256 amount = bound(amountFuzz, 1000e6, 100_000e6);
         _seedLp(amount);
     }
 
-    function processBatch(uint256 maxOrdersFuzz, uint256 oraclePriceFuzz) external {
+    function processBatch(
+        uint256 maxOrdersFuzz,
+        uint256 oraclePriceFuzz
+    ) external {
         uint64 nextExecuteId = router.nextExecuteId();
         uint64 nextCommitId = router.nextCommitId();
         address actor = actors[ghost_batchAttempts % actors.length];
@@ -612,7 +645,7 @@ contract AdversarialPerpHandler is Test {
         }
 
         vm.prank(actor);
-        router.commitOrder(side, 1_000e18, 200e6, 1e8, false);
+        router.commitOrder(side, 1000e18, 200e6, 1e8, false);
 
         nextCommitId = router.nextCommitId();
         nextExecuteId = router.nextExecuteId();
@@ -636,7 +669,10 @@ contract AdversarialPerpHandler is Test {
         }
     }
 
-    function liquidateWithPayoutFailure(uint256 actorIdx, uint256 priceFuzz) external {
+    function liquidateWithPayoutFailure(
+        uint256 actorIdx,
+        uint256 priceFuzz
+    ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -668,6 +704,7 @@ contract AdversarialPerpHandler is Test {
 
         vm.clearMockedCalls();
     }
+
 }
 
 contract AdversarialPerpInvariantTest is BasePerpTest {
@@ -749,7 +786,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialRouterNeverCustodiesUsdc() public {
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not retain settlement balances during adversarial flows");
+        assertEq(
+            usdc.balanceOf(address(router)), 0, "Router must not retain settlement balances during adversarial flows"
+        );
     }
 
     function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public {
@@ -759,4 +798,5 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             "Liquidation payout failures must only create deferred bounty claims"
         );
     }
+
 }

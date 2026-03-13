@@ -3,7 +3,11 @@ pragma solidity 0.8.33;
 
 library OrderOraclePolicyLib {
 
-    enum OracleAction { OrderExecution, MarkRefresh, Liquidation }
+    enum OracleAction {
+        OrderExecution,
+        MarkRefresh,
+        Liquidation
+    }
 
     struct OracleExecutionPolicy {
         bool oracleFrozen;

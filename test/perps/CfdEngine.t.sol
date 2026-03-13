@@ -86,15 +86,15 @@ contract CfdEngineTest is BasePerpTest {
     function test_OpenTradeCostCannotSeizeReservedSettlementEscrow() public {
         address trader = address(0xB011);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 2_000e6);
+        _fundTrader(trader, 2000e6);
 
         vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, 1_950e6);
+        clearinghouse.reserveSettlementUsdc(accountId, 1950e6);
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000e18,
-            marginDelta: 2_000e6,
+            marginDelta: 2000e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -109,7 +109,7 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             clearinghouse.reservedSettlementUsdc(accountId),
-            1_950e6,
+            1950e6,
             "trade-cost seizure must not consume reserved settlement escrow"
         );
     }
@@ -179,11 +179,11 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(address(0xD301))));
         _fundTrader(address(0xD301), 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         uint256 clearinghouseBefore = clearinghouse.balances(accountId, address(usdc));
 
@@ -204,11 +204,11 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -238,11 +238,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(CfdEngine.CfdEngine__NoDeferredPayout.selector);
         engine.claimDeferredPayout(accountId);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -387,10 +387,10 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB10);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900 * 1e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900 * 1e6, type(uint256).max, false);
 
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
@@ -400,7 +400,9 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin));
+        assertEq(
+            viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin)
+        );
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
         assertEq(viewData.deferredPayoutUsdc, 0);
@@ -410,7 +412,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB11);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000 * 1e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(block.timestamp));
@@ -429,11 +431,11 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB12);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -451,18 +453,20 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB13);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory normalPreview = engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory normalPreview =
+            engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
         assertTrue(normalPreview.valid);
         assertGt(normalPreview.immediatePayoutUsdc, 0);
         assertEq(normalPreview.deferredPayoutUsdc, 0);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        CfdEngine.ClosePreview memory illiquidPreview = engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory illiquidPreview =
+            engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
         assertTrue(illiquidPreview.valid);
         assertEq(illiquidPreview.immediatePayoutUsdc, 0);
         assertGt(illiquidPreview.deferredPayoutUsdc, 0);
@@ -478,7 +482,8 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, address(usdc), 100e6);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview =
+            engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
         assertTrue(preview.liquidatable);
         assertEq(preview.keeperBountyUsdc, 15_150_000);
         assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
@@ -488,11 +493,11 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB15);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 11_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -511,10 +516,10 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000 * 1e6);
 
-        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2_000 * 1e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7_900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900e6, type(uint256).max, false);
 
         uint256 lockedBeforeClose = clearinghouse.lockedMarginUsdc(accountId);
         (, uint256 liveMarginBeforeClose,,,,,,) = engine.positions(accountId);
@@ -522,7 +527,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
 
-        assertEq(router.committedMargins(1), 7_900e6, "Queued committed margin should remain reserved after the earlier close");
+        assertEq(
+            router.committedMargins(1), 7900e6, "Queued committed margin should remain reserved after the earlier close"
+        );
         assertEq(
             clearinghouse.lockedMarginUsdc(accountId),
             lockedBeforeClose - liveMarginBeforeClose,
@@ -1338,7 +1345,11 @@ contract CfdEngineFundingTest is BasePerpTest {
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
         int256 mtm = engine.getVaultMtmAdjustment();
-        assertEq(mtm, 5_000e6, "Only the profitable bull side should count toward vault MtM; losing bear exposure must clamp to zero");
+        assertEq(
+            mtm,
+            5000e6,
+            "Only the profitable bull side should count toward vault MtM; losing bear exposure must clamp to zero"
+        );
     }
 
     // Regression: C-03 — unrealized MtM profits distributed as withdrawable cash
@@ -1452,7 +1463,11 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);
 
         assertGt(sizeAfter, sizeBefore, "Collectible funding receivables should no longer block legitimate increases");
-        assertLe(engine.getCappedFundingPnl(), 0, "Solvency funding should not overstate trader liabilities once receivables are netted");
+        assertLe(
+            engine.getCappedFundingPnl(),
+            0,
+            "Solvency funding should not overstate trader liabilities once receivables are netted"
+        );
     }
 
     // Regression: C-01
@@ -1814,7 +1829,9 @@ contract PhantomExecFeeTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
 
         assertEq(router.nextCommitId(), 3, "Close intents should reserve a flat keeper bounty from free settlement");
-        assertEq(engine.accumulatedFeesUsdc(), openFee, "Committing the close should not accrue additional protocol fees");
+        assertEq(
+            engine.accumulatedFeesUsdc(), openFee, "Committing the close should not accrue additional protocol fees"
+        );
     }
 
 }
@@ -1944,25 +1961,26 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
 
         vm.prank(address(router));
-        (bool ok,) = address(engine).call(
-            abi.encodeWithSelector(
-                engine.processOrder.selector,
-                CfdTypes.Order({
-                    accountId: newTraderId,
-                    sizeDelta: 10_000e18,
-                    marginDelta: 1_000e6,
-                    targetPrice: 1e8,
-                    commitTime: uint64(block.timestamp),
-                    commitBlock: uint64(block.number),
-                    orderId: 0,
-                    side: CfdTypes.Side.BULL,
-                    isClose: false
-                }),
-                1e8,
-                pool.totalAssets(),
-                uint64(block.timestamp)
-            )
-        );
+        (bool ok,) = address(engine)
+            .call(
+                abi.encodeWithSelector(
+                    engine.processOrder.selector,
+                    CfdTypes.Order({
+                        accountId: newTraderId,
+                        sizeDelta: 10_000e18,
+                        marginDelta: 1000e6,
+                        targetPrice: 1e8,
+                        commitTime: uint64(block.timestamp),
+                        commitBlock: uint64(block.number),
+                        orderId: 0,
+                        side: CfdTypes.Side.BULL,
+                        isClose: false
+                    }),
+                    1e8,
+                    pool.totalAssets(),
+                    uint64(block.timestamp)
+                )
+            );
         assertFalse(ok, "Degraded mode must block new opens");
     }
 
