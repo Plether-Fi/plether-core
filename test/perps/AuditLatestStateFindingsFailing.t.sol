@@ -42,7 +42,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
-        assertEq(escrow.keeperReserveUsdc, 50_000, "Dust orders should escrow the minimum keeper fee so FIFO remains serviceable");
+        assertEq(escrow.executionBountyUsdc, 50_000, "Dust orders should escrow the minimum execution bounty so FIFO remains serviceable");
     }
 
 }

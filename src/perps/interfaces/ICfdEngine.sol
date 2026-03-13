@@ -42,8 +42,8 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
-    /// @notice Records a deferred keeper reward when immediate vault payment is unavailable.
-    function recordDeferredKeeperReward(
+    /// @notice Records a deferred liquidation bounty when immediate vault payment is unavailable.
+    function recordDeferredLiquidationBounty(
         address keeper,
         uint256 amountUsdc
     ) external;
@@ -82,8 +82,8 @@ interface ICfdEngine {
     /// @notice Deferred profitable-close payouts still owed to traders.
     function totalDeferredPayoutUsdc() external view returns (uint256);
 
-    /// @notice Deferred keeper rewards still owed after failed immediate payout.
-    function totalDeferredKeeperRewardUsdc() external view returns (uint256);
+    /// @notice Deferred liquidation bounties still owed after failed immediate payout.
+    function totalDeferredLiquidationBountyUsdc() external view returns (uint256);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).

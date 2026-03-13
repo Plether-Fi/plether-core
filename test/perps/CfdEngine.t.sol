@@ -411,7 +411,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(viewData.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
-        assertEq(viewData.totalDeferredKeeperRewardUsdc, engine.totalDeferredKeeperRewardUsdc());
+        assertEq(viewData.totalDeferredLiquidationBountyUsdc, engine.totalDeferredLiquidationBountyUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
     }
@@ -684,7 +684,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         vm.prank(address(router));
-        engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp), 0);
 
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
@@ -703,7 +703,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.finalizeRiskParams();
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 1e8, vaultDepth, uint64(block.timestamp), 0);
         assertTrue(bounty > 0, "Position should be liquidatable after raising maintMarginBps");
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -730,7 +730,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(0xDEAD));
         vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
-        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), 0);
     }
 
     function test_CloseSize_ExceedsPosition_Reverts() public {
@@ -1015,7 +1015,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // Price rises to $1.10 — BULL loses $10k, equity = margin (~$1537) - $10k = negative
         vm.prank(address(router));
-        engine.liquidatePosition(accountId, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 1.1e8, vaultDepth, uint64(block.timestamp), 0);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be liquidated");
@@ -1079,7 +1079,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
         vm.prank(address(router));
-        engine.liquidatePosition(aliceId, 1.1e8, vaultDepth, uint64(block.timestamp));
+        engine.liquidatePosition(aliceId, 1.1e8, vaultDepth, uint64(block.timestamp), 0);
 
         (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 0, "Liquidation must succeed during insolvency");
@@ -1089,7 +1089,7 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(1));
         vm.expectRevert(CfdEngine.CfdEngine__NoPositionToLiquidate.selector);
         vm.prank(address(router));
-        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp), 0);
     }
 
     function test_LiquidationBounty_CappedByPositiveEquity() public {
@@ -1134,7 +1134,7 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(accountId, address(usdc), 194 * 1e6);
 
         vm.prank(address(router));
-        uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp), 0);
 
         assertLe(bounty, posMargin, "Keeper bounty should not exceed remaining positive equity");
         assertEq(bounty, 400_000, "Keeper bounty should cap at the trader's remaining positive equity");
@@ -1148,7 +1148,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(accountId, 1.2e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 1.2e8, depth, uint64(block.timestamp), 0);
 
         uint256 badDebt = engine.accumulatedBadDebtUsdc();
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");

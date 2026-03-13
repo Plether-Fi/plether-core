@@ -381,7 +381,7 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
-        engine.liquidatePosition(loserId, 0.1e8, depth, uint64(block.timestamp));
+        engine.liquidatePosition(loserId, 0.1e8, depth, uint64(block.timestamp), 0);
 
         assertTrue(engine.degradedMode(), "Liquidations that push effective assets below max liability must latch degraded mode");
     }

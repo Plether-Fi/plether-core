@@ -404,7 +404,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return HousePoolAccountingLib.buildReconcileSnapshot(
             USDC.balanceOf(address(this)),
             ENGINE.accumulatedFeesUsdc(),
-            ENGINE.totalDeferredPayoutUsdc() + ENGINE.totalDeferredKeeperRewardUsdc(),
+            ENGINE.totalDeferredPayoutUsdc() + ENGINE.totalDeferredLiquidationBountyUsdc(),
             ENGINE.getVaultMtmAdjustment()
         );
     }

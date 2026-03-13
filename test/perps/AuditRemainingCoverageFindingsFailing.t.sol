@@ -41,7 +41,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
-        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp), 0);
         vm.stopPrank();
     }
 
@@ -75,7 +75,7 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp), 0);
         vm.stopPrank();
 
         assertEq(bounty, 4_940_000, "Keeper bounty should not exceed the trader's remaining positive equity");
@@ -95,7 +95,7 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
 
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
-        assertEq(escrow.keeperReserveUsdc, 50_000, "Dust orders should escrow a nonzero minimum keeper fee");
+        assertEq(escrow.executionBountyUsdc, 50_000, "Dust orders should escrow a nonzero minimum execution bounty");
     }
 
 }
@@ -163,7 +163,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        _fundTrader(trader, router.quoteCloseKeeperFeeUsdc());
+        _fundTrader(trader, router.quoteCloseOrderExecutionBountyUsdc());
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
@@ -194,8 +194,8 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Close should still succeed even when keeper reward cash is unavailable");
-        assertEq(engine.deferredKeeperRewardUsdc(keeper), 0, "Close execution should not create deferred keeper rewards");
-        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, router.quoteCloseKeeperFeeUsdc(), "Keeper should be paid from the reserved close bounty");
+        assertEq(engine.deferredLiquidationBountyUsdc(keeper), 0, "Close execution should not create deferred liquidation bounties");
+        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, router.quoteCloseOrderExecutionBountyUsdc(), "Keeper should be paid from the reserved close bounty");
     }
 
 }
@@ -223,7 +223,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
-        assertGt(engine.deferredKeeperRewardUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
+        assertGt(engine.deferredLiquidationBountyUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderLargeForeignQueue() public {

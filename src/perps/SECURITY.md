@@ -223,11 +223,18 @@ When a position goes underwater (equity < 0):
 - **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
 - **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity and are counted in reserve/solvency accounting
 
-#### Terminal Queue Unwind
+#### Deferred Keeper Rewards
 
-- **Behavior**: When a full close or liquidation becomes the account's terminal settlement event, later queued orders for the same account are cancelled before settlement completes
-- **Effect**: Committed margin is unlocked and reserved keeper fees are released from clearinghouse reserve state, preventing stale tail orders from shielding collateral after the live position is gone
-- **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position; terminal settlement can invalidate later intents
+- **Behavior**: If a close, batched execution, or liquidation cannot immediately fund keeper compensation from the House Pool, the state transition still completes and the unpaid reward is recorded as a deferred keeper claim
+- **Claim path**: Once liquidity returns, the keeper calls `claimDeferredKeeperReward()` and the vault pays the owed USDC directly
+- **Impact**: Liquidations and queue advancement remain live during temporary vault illiquidity; keeper payment finality becomes deferred rather than blocking the state transition
+- **Operational note**: Deferred keeper rewards are counted in reserve, solvency, and LP reconciliation accounting until paid
+
+#### Terminal Queue Continuity
+
+- **Behavior**: When a full close or liquidation becomes the account's terminal settlement event, the protocol does not scan the global queue to cancel later intents for that account
+- **Effect**: Later stale orders simply fail when they eventually reach the queue head; terminal settlement stays bounded and does not inherit O(n) queue-cost risk
+- **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position, but invalidation now happens lazily at execution time instead of eagerly at terminal settlement
 
 #### No Partial Liquidation
 

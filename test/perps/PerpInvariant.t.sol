@@ -280,7 +280,7 @@ contract PerpInvariantTest is BasePerpTest {
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;
             }
-            pendingKeeperReserves += router.keeperFeeReserves(orderId);
+            pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
         uint256 trackedReservedSettlement;
@@ -402,15 +402,15 @@ contract PerpInvariantTest is BasePerpTest {
             "Protocol view trader deferred payouts must match storage"
         );
         assertEq(
-            protocolView.totalDeferredKeeperRewardUsdc,
-            engine.totalDeferredKeeperRewardUsdc(),
-            "Protocol view keeper deferred payouts must match storage"
+            protocolView.totalDeferredLiquidationBountyUsdc,
+            engine.totalDeferredLiquidationBountyUsdc(),
+            "Protocol view deferred liquidation bounties must match storage"
         );
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
-            + engine.totalDeferredKeeperRewardUsdc();
+            + engine.totalDeferredLiquidationBountyUsdc();
 
         int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
         if (fundingLiability > 0) {
@@ -677,7 +677,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;
             }
-            pendingKeeperReserves += router.keeperFeeReserves(orderId);
+            pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
         uint256 trackedReservedSettlement;

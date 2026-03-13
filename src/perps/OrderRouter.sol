@@ -24,14 +24,14 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     struct AccountEscrow {
         uint256 committedMarginUsdc;
-        uint256 keeperReserveUsdc;
+        uint256 executionBountyUsdc;
         uint256 pendingOrderCount;
     }
 
     struct AccountOrderSummary {
         uint256 pendingOrderCount;
         uint256 committedMarginUsdc;
-        uint256 keeperReserveUsdc;
+        uint256 executionBountyUsdc;
         bool hasTerminalCloseQueued;
     }
 
@@ -45,7 +45,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 commitTime;
         uint64 commitBlock;
         uint256 committedMarginUsdc;
-        uint256 keeperReserveUsdc;
+        uint256 executionBountyUsdc;
     }
 
     ICfdEngine public engine;
@@ -65,17 +65,17 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
-    uint256 internal constant ORDER_KEEPER_BPS = 1;
-    uint256 internal constant MIN_ORDER_KEEPER_FEE_USDC = 50_000;
-    uint256 internal constant MAX_ORDER_KEEPER_FEE_USDC = DecimalConstants.ONE_USDC;
-    uint256 internal constant CLOSE_ORDER_KEEPER_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
+    uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
+    uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
 
     mapping(uint64 => CfdTypes.Order) public orders;
     mapping(uint64 => uint256) public committedMargins;
-    mapping(uint64 => uint256) public keeperFeeReserves;
+    mapping(uint64 => uint256) public executionBountyReserves;
     mapping(address => uint256) public claimableEth;
     mapping(bytes32 => uint256) public pendingOrderCounts;
 
@@ -112,7 +112,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     event OrderFailed(uint64 indexed orderId, string reason);
 
     /// @param _engine CfdEngine that processes trades and liquidations
-    /// @param _vault CfdVault used for vault depth queries and keeper payouts
+    /// @param _vault CfdVault used for vault depth queries and liquidation bounty payouts
     /// @param _pyth Pyth oracle contract (address(0) enables mock mode on Anvil)
     /// @param _feedIds Pyth price feed IDs for each basket component
     /// @param _quantities Weight of each component (must sum to 1e18)
@@ -205,7 +205,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     // ==========================================
 
     /// @notice Submits a trade intent to the FIFO queue.
-    ///         Margin and the order's keeper execution bounty are reserved immediately.
+    ///         Margin and the order's execution bounty are reserved immediately.
     /// @param side BULL or BEAR
     /// @param sizeDelta Position size change (18 decimals)
     /// @param marginDelta Margin to add or remove (6 decimals, USDC)
@@ -239,12 +239,13 @@ contract OrderRouter is Ownable2Step, Pausable {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
-        uint256 keeperFeeReserveUsdc = isClose ? _quoteCloseKeeperFeeUsdc() : _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
+        uint256 executionBountyUsdc =
+            isClose ? _quoteCloseOrderExecutionBountyUsdc() : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
 
-        _reserveKeeperFee(clearinghouse, accountId, orderId, keeperFeeReserveUsdc);
+        _reserveExecutionBounty(clearinghouse, accountId, orderId, executionBountyUsdc);
         _reserveCommittedMargin(clearinghouse, accountId, orderId, isClose, marginDelta);
 
         orders[orderId] = CfdTypes.Order({
@@ -262,23 +263,23 @@ contract OrderRouter is Ownable2Step, Pausable {
         emit OrderCommitted(orderId, accountId, side);
     }
 
-    /// @notice Quotes the reserved USDC keeper fee for a new open order using the latest engine mark price.
+    /// @notice Quotes the reserved USDC execution bounty for a new open order using the latest engine mark price.
     /// @dev Falls back to 1.00 USD if the engine has not observed a mark yet. Result is floored at
     ///      0.05 USDC and capped at 1 USDC for non-close intents.
     /// @param sizeDelta Order size in 18-decimal notional units
-    /// @return keeperFeeUsdc Reserved keeper fee in 6-decimal USDC units
-    function quoteKeeperFeeUsdc(
+    /// @return executionBountyUsdc Reserved execution bounty in 6-decimal USDC units
+    function quoteOpenOrderExecutionBountyUsdc(
         uint256 sizeDelta
-    ) external view returns (uint256 keeperFeeUsdc) {
-        return _quoteOrderKeeperFeeUsdc(sizeDelta, _commitReferencePrice());
+    ) external view returns (uint256 executionBountyUsdc) {
+        return _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
     }
 
-    /// @notice Quotes the flat reserved USDC keeper bounty for a close order.
-    function quoteCloseKeeperFeeUsdc() external pure returns (uint256 keeperFeeUsdc) {
-        return _quoteCloseKeeperFeeUsdc();
+    /// @notice Quotes the flat reserved USDC execution bounty for a close order.
+    function quoteCloseOrderExecutionBountyUsdc() external pure returns (uint256 executionBountyUsdc) {
+        return _quoteCloseOrderExecutionBountyUsdc();
     }
 
-    /// @notice Returns the total escrowed state for an account across all queued orders.
+    /// @notice Returns the total queued escrow state for an account across all pending orders.
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (AccountEscrow memory escrow) {
@@ -289,7 +290,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 continue;
             }
             escrow.committedMarginUsdc += committedMargins[orderId];
-            escrow.keeperReserveUsdc += keeperFeeReserves[orderId];
+            escrow.executionBountyUsdc += executionBountyReserves[orderId];
             escrow.pendingOrderCount++;
         }
     }
@@ -305,7 +306,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
             summary.pendingOrderCount++;
             summary.committedMarginUsdc += committedMargins[orderId];
-            summary.keeperReserveUsdc += keeperFeeReserves[orderId];
+            summary.executionBountyUsdc += executionBountyReserves[orderId];
             if (order.isClose) {
                 summary.hasTerminalCloseQueued = true;
             }
@@ -341,7 +342,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 commitTime: order.commitTime,
                 commitBlock: order.commitBlock,
                 committedMarginUsdc: committedMargins[orderId],
-                keeperReserveUsdc: keeperFeeReserves[orderId]
+                executionBountyUsdc: executionBountyReserves[orderId]
             });
             index++;
         }
@@ -353,8 +354,8 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     /// @notice Keeper executes the next order in strict FIFO sequence.
     ///         Validates oracle freshness (publishTime > commitTime, age ≤ 60s),
-    ///         checks slippage, then delegates to CfdEngine. The keeper is paid from the
-    ///         order's reserved USDC fee whether the order fills or is invalid/expired,
+    ///         checks slippage, then delegates to CfdEngine. The executor is paid from the
+    ///         order's reserved USDC execution bounty whether the order fills or is invalid/expired,
     ///         so the queue remains economically serviceable as well as un-brickable.
     /// @param orderId Must equal nextExecuteId (stale orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
@@ -604,8 +605,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _cleanupOrder(
         uint64 orderId,
         bool success
-    ) internal returns (uint256 keeperRewardUsdc) {
-        keeperRewardUsdc = _consumeOrderEscrow(orderId, success);
+    ) internal returns (uint256 executionBountyUsdc) {
+        executionBountyUsdc = _consumeOrderEscrow(orderId, success);
         _deleteOrder(orderId);
     }
 
@@ -619,56 +620,60 @@ contract OrderRouter is Ownable2Step, Pausable {
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
-    function _payOrDeferVaultKeeperReward(
-        uint256 vaultKeeperRewardUsdc
+    function _payOrDeferLiquidationBounty(
+        uint256 liquidationBountyUsdc
     ) internal {
-        if (vaultKeeperRewardUsdc == 0) {
+        if (liquidationBountyUsdc == 0) {
             return;
         }
 
-        try vault.payOut(msg.sender, vaultKeeperRewardUsdc) {
+        try vault.payOut(msg.sender, liquidationBountyUsdc) {
         } catch {
-            engine.recordDeferredKeeperReward(msg.sender, vaultKeeperRewardUsdc);
+            engine.recordDeferredLiquidationBounty(msg.sender, liquidationBountyUsdc);
         }
     }
 
-    function _quoteOrderKeeperFeeUsdc(
+    function _quoteOpenOrderExecutionBountyUsdc(
         uint256 sizeDelta,
         uint256 price
     ) internal pure returns (uint256) {
         uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        uint256 keeperRewardUsdc = (notionalUsdc * ORDER_KEEPER_BPS) / 10_000;
-        if (keeperRewardUsdc < MIN_ORDER_KEEPER_FEE_USDC) {
-            keeperRewardUsdc = MIN_ORDER_KEEPER_FEE_USDC;
+        uint256 executionBountyUsdc = (notionalUsdc * OPEN_ORDER_EXECUTION_BOUNTY_BPS) / 10_000;
+        if (executionBountyUsdc < MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC) {
+            executionBountyUsdc = MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC;
         }
-        return keeperRewardUsdc > MAX_ORDER_KEEPER_FEE_USDC ? MAX_ORDER_KEEPER_FEE_USDC : keeperRewardUsdc;
+        return executionBountyUsdc > MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
+            ? MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC
+            : executionBountyUsdc;
     }
 
-    function _quoteCloseKeeperFeeUsdc() internal pure returns (uint256) {
-        return CLOSE_ORDER_KEEPER_BOUNTY_USDC;
+    function _quoteCloseOrderExecutionBountyUsdc() internal pure returns (uint256) {
+        return CLOSE_ORDER_EXECUTION_BOUNTY_USDC;
     }
 
-    function _collectKeeperFeeReserve(
+    function _collectExecutionBounty(
         uint64 orderId
-    ) internal returns (uint256 keeperRewardUsdc) {
-        keeperRewardUsdc = keeperFeeReserves[orderId];
-        if (keeperRewardUsdc > 0) {
+    ) internal returns (uint256 executionBountyUsdc) {
+        executionBountyUsdc = executionBountyReserves[orderId];
+        if (executionBountyUsdc > 0) {
             IMarginClearinghouse(engine.clearinghouse()).payReservedSettlementUsdc(
-                orders[orderId].accountId, keeperRewardUsdc, msg.sender
+                orders[orderId].accountId, executionBountyUsdc, msg.sender
             );
-            delete keeperFeeReserves[orderId];
+            delete executionBountyReserves[orderId];
         }
     }
 
-    function _releaseKeeperFeeReserve(
+    function _releaseExecutionBounty(
         uint64 orderId
     ) internal {
-        uint256 keeperRewardUsdc = keeperFeeReserves[orderId];
-        if (keeperRewardUsdc == 0) {
+        uint256 executionBountyUsdc = executionBountyReserves[orderId];
+        if (executionBountyUsdc == 0) {
             return;
         }
-        delete keeperFeeReserves[orderId];
-        IMarginClearinghouse(engine.clearinghouse()).releaseReservedSettlementUsdc(orders[orderId].accountId, keeperRewardUsdc);
+        delete executionBountyReserves[orderId];
+        IMarginClearinghouse(engine.clearinghouse()).releaseReservedSettlementUsdc(
+            orders[orderId].accountId, executionBountyUsdc
+        );
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {
@@ -693,20 +698,20 @@ contract OrderRouter is Ownable2Step, Pausable {
         IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
     }
 
-    function _reserveKeeperFee(
+    function _reserveExecutionBounty(
         IMarginClearinghouse clearinghouse,
         bytes32 accountId,
         uint64 orderId,
-        uint256 keeperFeeReserveUsdc
+        uint256 executionBountyUsdc
     ) internal {
-        if (keeperFeeReserveUsdc == 0) {
+        if (executionBountyUsdc == 0) {
             return;
         }
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < keeperFeeReserveUsdc) {
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
             revert OrderRouter__InsufficientFreeEquity();
         }
-        clearinghouse.reserveSettlementUsdc(accountId, keeperFeeReserveUsdc);
-        keeperFeeReserves[orderId] = keeperFeeReserveUsdc;
+        clearinghouse.reserveSettlementUsdc(accountId, executionBountyUsdc);
+        executionBountyReserves[orderId] = executionBountyUsdc;
     }
 
     function _reserveCommittedMargin(
@@ -726,13 +731,13 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _consumeOrderEscrow(
         uint64 orderId,
         bool success
-    ) internal returns (uint256 keeperRewardUsdc) {
+    ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
         } else {
             _unlockCommittedMargin(orderId);
         }
-        _collectKeeperFeeReserve(orderId);
+        _collectExecutionBounty(orderId);
         return 0;
     }
 
@@ -934,7 +939,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 keeperBountyUsdc = engine.previewLiquidation(accountId, executionPrice, vaultDepth).keeperBountyUsdc;
         keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime, keeperBountyUsdc);
 
-        _payOrDeferVaultKeeperReward(keeperBountyUsdc);
+        _payOrDeferLiquidationBounty(keeperBountyUsdc);
 
         _sendEth(msg.sender, msg.value - pythFee);
     }

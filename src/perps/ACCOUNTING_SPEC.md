@@ -150,6 +150,14 @@ Notes:
 - This view is for principal and yield accounting, not open-path solvency.
 - Temporary under-recognition is acceptable; over-recognition is not.
 
+Required liabilities in this view:
+
+- accumulated protocol fees,
+- deferred trader payouts,
+- deferred keeper rewards.
+
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived.
+
 ### D. Liquidation Equity View
 
 Question answered:
@@ -228,6 +236,12 @@ Liquidation must:
 3. delete the position,
 4. re-evaluate protocol solvency,
 5. latch `degradedMode` if the remaining system becomes insolvent.
+
+If the liquidation bounty cannot be paid immediately from the vault:
+
+6. the liquidation must still succeed,
+7. the unpaid keeper bounty must become a deferred keeper liability,
+8. solvency and LP reconciliation accounting must include that deferred liability immediately.
 
 ## Degraded Mode Spec
 
@@ -313,6 +327,8 @@ The refactor should preserve or enforce the following:
 5. no liquidation assumes access to nonexistent or already-reserved funds
 6. solvency accounting and withdrawal accounting never share a helper unless both intentionally use the same assumptions
 7. a successful close may reduce solvency, but it must never be reverted solely to preserve it
+8. terminal full closes and liquidations must not perform work proportional to total queue length
+9. terminal settlement must not eagerly cancel unrelated queued orders; stale tails may fail lazily at execution time instead
 8. every path that deletes a position re-checks degraded-mode containment
 
 ## Refactor Target Modules
