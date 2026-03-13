@@ -379,6 +379,37 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 0);
     }
 
+    function test_CreditSettlementAndLockMargin_CreditsAndLocksSameBucket() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.creditSettlementAndLockMargin(aliceId, 200 * 1e6);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 200 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 1200 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 200 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 200 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 1000 * 1e6);
+    }
+
+    function test_ApplyOpenCost_PreservesReservedSettlementOnDebit() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, 300 * 1e6, int256(200 * 1e6), engine);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 100 * 1e6);
+        assertEq(netMarginChangeUsdc, 100 * 1e6);
+        assertEq(buckets.settlementBalanceUsdc, 1800 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 100 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 1650 * 1e6);
+    }
+
     function test_SupportAsset_InvalidLTV_Reverts() public {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
         clearinghouse.proposeAssetConfig(address(0xBEEF), 18, 10_001, address(0));

@@ -381,14 +381,7 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
-        if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
-            revert MarginClearinghouse__InsufficientFreeEquity();
-        }
-        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
-        }
-        lockedMarginUsdc[accountId] += amountUsdc;
-        emit MarginLocked(accountId, amountUsdc);
+        _lockMargin(accountId, amountUsdc);
     }
 
     /// @notice Unlocks margin when a CFD trade closes
@@ -398,12 +391,7 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
-        if (lockedMarginUsdc[accountId] >= amountUsdc) {
-            lockedMarginUsdc[accountId] -= amountUsdc;
-        } else {
-            lockedMarginUsdc[accountId] = 0;
-        }
-        emit MarginUnlocked(accountId, amountUsdc);
+        _unlockMargin(accountId, amountUsdc);
     }
 
     /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
@@ -422,13 +410,9 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__AssetNotSupported();
         }
         if (amount > 0) {
-            balances[accountId][usdc] += uint256(amount);
+            _creditSettlementUsdc(accountId, uint256(amount));
         } else if (amount < 0) {
-            uint256 loss = uint256(-amount);
-            if (balances[accountId][usdc] < loss) {
-                revert MarginClearinghouse__InsufficientUsdcForSettlement();
-            }
-            balances[accountId][usdc] -= loss;
+            _debitSettlementUsdc(accountId, uint256(-amount));
         }
     }
 
@@ -475,6 +459,46 @@ contract MarginClearinghouse is Ownable2Step {
         balances[accountId][settlementAsset] -= amountUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, amountUsdc);
         emit SettlementReservePaid(accountId, amountUsdc, recipient);
+    }
+
+    /// @notice Credits settlement USDC and locks the same amount as active margin.
+    function creditSettlementAndLockMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        _creditSettlementUsdc(accountId, amountUsdc);
+        _lockMargin(accountId, amountUsdc);
+    }
+
+    /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
+    function applyOpenCost(
+        bytes32 accountId,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc,
+        address recipient
+    ) external onlyOperator returns (int256 netMarginChangeUsdc) {
+        if (tradeCostUsdc > 0) {
+            uint256 costUsdc = uint256(tradeCostUsdc);
+            if (costUsdc > getFreeSettlementBalanceUsdc(accountId)) {
+                revert MarginClearinghouse__InsufficientFreeEquity();
+            }
+            balances[accountId][settlementAsset] -= costUsdc;
+            IERC20(settlementAsset).safeTransfer(recipient, costUsdc);
+            emit AssetSeized(accountId, settlementAsset, costUsdc, recipient);
+        } else if (tradeCostUsdc < 0) {
+            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
+        }
+
+        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
+        if (netMarginChangeUsdc > 0) {
+            _lockMargin(accountId, uint256(netMarginChangeUsdc));
+        } else if (netMarginChangeUsdc < 0) {
+            _unlockMargin(accountId, uint256(-netMarginChangeUsdc));
+        }
     }
 
     /// @notice Consumes a funding loss from free settlement first, then from the active position margin bucket.
@@ -587,6 +611,49 @@ contract MarginClearinghouse is Ownable2Step {
         return MarginClearinghouseAccountingLib.planFundingLossConsumption(
             _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc), lossUsdc
         );
+    }
+
+    function _creditSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        balances[accountId][settlementAsset] += amountUsdc;
+    }
+
+    function _debitSettlementUsdc(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (balances[accountId][settlementAsset] < amountUsdc) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        }
+        balances[accountId][settlementAsset] -= amountUsdc;
+    }
+
+    function _lockMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
+            revert MarginClearinghouse__InsufficientFreeEquity();
+        }
+        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + amountUsdc) {
+            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        }
+        lockedMarginUsdc[accountId] += amountUsdc;
+        emit MarginLocked(accountId, amountUsdc);
+    }
+
+    function _unlockMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (lockedMarginUsdc[accountId] >= amountUsdc) {
+            lockedMarginUsdc[accountId] -= amountUsdc;
+        } else {
+            lockedMarginUsdc[accountId] = 0;
+        }
+        emit MarginUnlocked(accountId, amountUsdc);
     }
 
     /// @notice Transfers settlement asset from an account to the calling operator.

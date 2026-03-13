@@ -750,8 +750,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 uint256 gain = uint256(pendingFunding);
                 pos.margin += gain;
                 vault.payOut(address(clearinghouse), gain);
-                clearinghouse.settleUsdc(order.accountId, address(USDC), pendingFunding);
-                clearinghouse.lockMargin(order.accountId, gain);
+                clearinghouse.creditSettlementAndLockMargin(order.accountId, gain);
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 (uint256 marginConsumedUsdc,, uint256 uncoveredUsdc) = clearinghouse.consumeFundingLoss(
@@ -839,15 +838,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 execFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
         int256 tradeCost = vpiUsdc + int256(execFeeUsdc);
-        int256 netMarginChange = int256(order.marginDelta) - tradeCost;
 
-        if (tradeCost > 0) {
-            _seizeUsdcToVault(order.accountId, uint256(tradeCost));
-        } else if (tradeCost < 0) {
+        if (tradeCost < 0) {
             uint256 rebate = uint256(-tradeCost);
             vault.payOut(address(clearinghouse), rebate);
-            clearinghouse.settleUsdc(order.accountId, address(USDC), int256(rebate));
         }
+
+        int256 netMarginChange = clearinghouse.applyOpenCost(order.accountId, order.marginDelta, tradeCost, address(vault));
 
         if (netMarginChange > 0) {
             pos.margin += uint256(netMarginChange);
@@ -857,13 +854,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 revert CfdEngine__MarginDrainedByFees();
             }
             pos.margin -= deficit;
-        }
-
-        int256 lockDelta = netMarginChange;
-        if (lockDelta > 0) {
-            clearinghouse.lockMargin(order.accountId, uint256(lockDelta));
-        } else if (lockDelta < 0) {
-            clearinghouse.unlockMargin(order.accountId, uint256(-lockDelta));
         }
 
         accumulatedFeesUsdc += execFeeUsdc;

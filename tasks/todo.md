@@ -196,6 +196,18 @@ Review:
 - Updated `src/perps/CfdEngine.sol` so both `_processDecrease()` and `previewClose()` use the same close accounting builder. This removes the remaining preview/live drift on proportional `vpiAccrued` rebate capping and centralizes the core close math.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown|PreviewClose_NegativeVpiDoesNotPanic|ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid|C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable|OpenTradeCostCannotSeizeReservedSettlementEscrow"` and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test "C1_FullCloseMustNotTreatQueuedCommittedMarginAsLossShield|H1_LiquidationMustPreserveQueuedCollateralBuckets"`.
 
+- [x] Design bucket-aware margin-credit and open-cost primitives in `MarginClearinghouse`
+- [x] Implement clearinghouse primitives and route `_settleFunding()` positive path through them
+- [x] Route `_processIncrease()` through the new bucket-aware primitive set
+- [x] Add/update regressions for positive funding credits and open-cost application
+- [x] Run targeted tests and record results
+
+Review:
+- Added bucket-aware clearinghouse primitives in `src/perps/MarginClearinghouse.sol` and `src/perps/interfaces/IMarginClearinghouse.sol`: `creditSettlementAndLockMargin(...)` for positive funding credits and `applyOpenCost(...)` for open/increase trade-cost settlement plus lock/unlock updates.
+- Updated `src/perps/CfdEngine.sol` so `_settleFunding()` positive funding credits and `_processIncrease()` now route through those clearinghouse primitives instead of hand-rolled settlement + lock/unlock sequences.
+- Added direct primitive regressions in `test/perps/MarginClearinghouse.t.sol` and revalidated the existing engine-level funding/open-cost behavior in `test/perps/CfdEngine.t.sol`.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "CreditSettlementAndLockMargin_CreditsAndLocksSameBucket|ApplyOpenCost_PreservesReservedSettlementOnDebit|ConsumeCloseLoss_PreservesProtectedBuckets|ConsumeFundingLoss_PreservesOtherLockedAndReservedBuckets"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "FundingSettlement_SyncsClearinghouse|OpenTradeCostCannotSeizeReservedSettlementEscrow|MarginDrained_ByFees_Reverts|WithdrawFees"`.
+
 - [x] Verify the latest audit findings against current code and spec
 - [x] Trace queue cancellation, seizure reachability, fee routing, liquidation bounty, and commit-time validation paths
 - [x] Cross-check each claim against `ACCOUNTING_SPEC.md` and existing regression coverage

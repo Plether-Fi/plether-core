@@ -54,6 +54,18 @@ interface IMarginClearinghouse {
         uint256 amountUsdc,
         address recipient
     ) external;
+    /// @notice Credits settlement USDC and locks the same amount as active margin.
+    function creditSettlementAndLockMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
+    function applyOpenCost(
+        bytes32 accountId,
+        uint256 marginDeltaUsdc,
+        int256 tradeCostUsdc,
+        address recipient
+    ) external returns (int256 netMarginChangeUsdc);
     /// @notice Consumes funding loss from free settlement plus the active position margin bucket.
     function consumeFundingLoss(
         bytes32 accountId,
