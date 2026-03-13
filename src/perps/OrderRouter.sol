@@ -28,6 +28,13 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 pendingOrderCount;
     }
 
+    struct AccountOrderSummary {
+        uint256 pendingOrderCount;
+        uint256 committedMarginUsdc;
+        uint256 keeperReserveUsdc;
+        bool hasTerminalCloseQueued;
+    }
+
     ICfdEngine public engine;
     ICfdVault public vault;
     IPyth public pyth;
@@ -259,6 +266,24 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
+    function getAccountOrderSummary(
+        bytes32 accountId
+    ) external view returns (AccountOrderSummary memory summary) {
+        uint64 maxOrderId = nextCommitId;
+        for (uint64 orderId = nextExecuteId; orderId < maxOrderId; orderId++) {
+            CfdTypes.Order memory order = orders[orderId];
+            if (order.accountId != accountId || order.sizeDelta == 0) {
+                continue;
+            }
+            summary.pendingOrderCount++;
+            summary.committedMarginUsdc += committedMargins[orderId];
+            summary.keeperReserveUsdc += keeperFeeReserves[orderId];
+            if (order.isClose) {
+                summary.hasTerminalCloseQueued = true;
+            }
+        }
+    }
+
     // ==========================================
     // STEP 2: THE REVEAL (Keeper Execution)
     // ==========================================
@@ -466,9 +491,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
         }
 
-        if (totalVaultKeeperRewardUsdc > 0) {
-            vault.payOut(msg.sender, totalVaultKeeperRewardUsdc);
-        }
+        _payOrDeferVaultKeeperReward(totalVaultKeeperRewardUsdc);
 
         _sendEth(msg.sender, msg.value - pythFee);
     }
@@ -557,13 +580,21 @@ contract OrderRouter is Ownable2Step, Pausable {
         _consumeOrderEscrow(orderId, success);
         _deleteOrder(orderId);
 
-        if (vaultKeeperRewardUsdc > 0) {
-            try vault.payOut(msg.sender, vaultKeeperRewardUsdc) {
-            } catch {
-                engine.recordDeferredKeeperReward(msg.sender, vaultKeeperRewardUsdc);
-            }
-        }
+        _payOrDeferVaultKeeperReward(vaultKeeperRewardUsdc);
         _sendEth(msg.sender, msg.value - pythFee);
+    }
+
+    function _payOrDeferVaultKeeperReward(
+        uint256 vaultKeeperRewardUsdc
+    ) internal {
+        if (vaultKeeperRewardUsdc == 0) {
+            return;
+        }
+
+        try vault.payOut(msg.sender, vaultKeeperRewardUsdc) {
+        } catch {
+            engine.recordDeferredKeeperReward(msg.sender, vaultKeeperRewardUsdc);
+        }
     }
 
     function _quoteOrderKeeperFeeUsdc(
