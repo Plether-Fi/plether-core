@@ -96,13 +96,20 @@ Expected payoff:
 
 ## 4. Finish The Fail-Soft Liability Model
 
-The clean architectural end state is that every vault-paid receivable follows the same rule:
+The clean architectural end state is that every terminal vault-paid receivable follows the same rule:
 
 - pay immediately if cash exists
 - otherwise record a deferred liability
 - include that deferred liability in solvency, withdrawal, and NAV accounting immediately
 
-This is already in place for deferred trader payouts and deferred liquidation bounties. The remaining work is to make the model uniform everywhere the vault can owe money.
+This is already in place for deferred trader payouts and deferred liquidation bounties. The remaining work is to make the model uniform everywhere the vault owes terminal value.
+
+Important boundary:
+
+- terminal receivables should be fail-soft
+- live margin credits should remain immediate-only unless the protocol intentionally adopts a new deferred-margin-credit model
+
+That means profitable closes, positive liquidation residuals, and liquidation bounties fit the fail-soft pattern. By contrast, positive funding credits and open-path rebates are not simple receivables; they immediately change live collateralization and margin health. Converting those paths to the existing deferred-payout mechanism would silently change position semantics, so they should not be folded into the fail-soft model without a separate design.
 
 Primary targets:
 
@@ -112,7 +119,7 @@ Primary targets:
 
 Expected payoff:
 
-- one consistent receivable/liability model
+- one consistent terminal receivable/liability model
 - cleaner behavior under temporary liquidity stress
 - easier audit reasoning about what happens when vault cash is low
 
