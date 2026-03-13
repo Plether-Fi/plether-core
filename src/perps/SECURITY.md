@@ -48,7 +48,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
 | **Degraded Containment** | If a close realizes cash outflow that pushes `effectiveAssets` below the remaining liability bound, `degradedMode` latches: new opens and risky withdrawals are blocked until recapitalization restores solvency and the owner clears the mode |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
-| **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees` — LPs cannot withdraw encumbered capital |
+| **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees - fundingWithdrawalReserve - deferredPayoutLiabilities` — LPs cannot withdraw encumbered capital |
 | **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets on the first post-wipeout recapitalization. Deposits stay blocked while partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`) |
 
 ### Position Invariants
@@ -59,7 +59,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders escrow a keeper fee bounded to `[0.05 USDC, 1.00 USDC]`, while close orders pay their keeper from close-path execution fees |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve a keeper fee bounded to `[0.05 USDC, 1.00 USDC]` inside the clearinghouse, while close orders pay their keeper from close-path execution fees |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -149,11 +149,11 @@ The owner **cannot**:
 #### Keepers
 
 Keepers are permissionless — anyone can execute orders and liquidations:
-- **Order Execution**: Keepers push Pyth price payloads and receive a reserved USDC fee collected at commit time, quoted as `min(1 bp of notional, 1 USDC)` from `lastMarkPrice()` in the engine, with a `$1.00` fallback before the first mark is observed
+- **Order Execution**: Keepers push Pyth price payloads. For risk-increasing orders, the keeper fee is reserved inside the `MarginClearinghouse` at commit time, quoted from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
 - **Keeper fee floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents skip upfront reservation and instead pay the keeper from the close settlement fee when execution succeeds
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired orders still pay the reserved keeper fee to the executor, so stale or invalid orders remain costly for the submitter and economically worthwhile for keepers to clear
+- **Failed Orders**: Failed or expired risk-increasing orders still pay the reserved keeper fee to the executor, so stale or invalid orders remain costly for the submitter and economically worthwhile for keepers to clear. Close orders do not reserve upfront keeper fees.
 
 #### Protocol Operators
 
@@ -221,7 +221,13 @@ When a position goes underwater (equity < 0):
 - **Behavior**: If a profitable close realizes more USDC than the House Pool can immediately transfer, the position is still closed and the unpaid gain is recorded in `deferredPayoutUsdc[accountId]`
 - **Claim path**: Once liquidity returns, the account owner calls `claimDeferredPayout(accountId)`. The vault pays the deferred USDC into the `MarginClearinghouse`, which credits the trader's USDC balance there
 - **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
-- **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity
+- **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity and are counted in reserve/solvency accounting
+
+#### Terminal Queue Unwind
+
+- **Behavior**: When a full close or liquidation becomes the account's terminal settlement event, later queued orders for the same account are cancelled before settlement completes
+- **Effect**: Committed margin is unlocked and reserved keeper fees are released from clearinghouse reserve state, preventing stale tail orders from shielding collateral after the live position is gone
+- **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position; terminal settlement can invalidate later intents
 
 #### No Partial Liquidation
 

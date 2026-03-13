@@ -52,7 +52,11 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders prepay a reserved USDC keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents no longer require upfront free USDC; their keeper compensation is funded from the close-path execution fee during settlement.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve a keeper fee at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents no longer require upfront free USDC; their keeper compensation is funded from the close-path execution fee during settlement.
+
+**Keeper Reserve Custody**: Reserved keeper fees remain inside the `MarginClearinghouse` until the order actually resolves. They are tracked as reserved settlement USDC rather than transferred into router custody at commit time, so settlement reachability and queue escrow stay in the same accounting domain.
+
+**Terminal Queue Unwind**: If a full close or liquidation becomes the account's terminal settlement event, later queued orders for that account are cancelled before settlement finishes. Their committed margin is unlocked and their reserved keeper fee is released, preventing stale tail orders from surviving after the live position is gone.
 
 ### IV. CfdEngine — The Mathematical Ledger
 
@@ -62,7 +66,7 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Degraded Mode**: If a profitable close reveals that realized payouts have pushed `effectiveAssets` below the remaining worst-case liability bound, the close still succeeds but the engine latches `degradedMode`. While degraded, new opens and position-backed withdrawals are blocked, while closes, liquidations, mark updates, and recapitalization remain available until the owner clears the mode after solvency is restored.
 
-**Deferred Close Payouts**: A profitable close is never dropped solely because the House Pool is temporarily short on free cash. If the vault cannot immediately fund the realized gain, the position is still destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Once liquidity returns, the trader calls `claimDeferredPayout(accountId)` and the vault settles the deferred amount into the `MarginClearinghouse`, after which it becomes normal withdrawable/reusable account balance.
+**Deferred Close Payouts**: A profitable close is never dropped solely because the House Pool is temporarily short on free cash. If the vault cannot immediately fund the realized gain, the position is still destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are treated as outstanding protocol liabilities in reserve and solvency accounting. Once liquidity returns, the trader calls `claimDeferredPayout(accountId)` and the vault settles the deferred amount into the `MarginClearinghouse`, after which it becomes normal withdrawable/reusable account balance.
 
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
