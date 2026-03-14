@@ -11,7 +11,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
     address trader = address(0xC10A);
 
-    function test_C1_FullCloseMustPreserveQueuedCommittedMarginBuckets() public {
+    function test_C1_FullCloseMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -22,20 +22,21 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
 
-        assertEq(
+        assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
             7_900e6,
-            "Queued committed margin should remain locked after the live position fully closes"
+            "Full close should consume queued committed margin before socializing shortfall"
         );
         assertEq(
             clearinghouse.reservedSettlementUsdc(accountId),
             50_000,
             "Queued execution bounty reserve should remain protected after the live position fully closes"
         );
-        assertEq(router.pendingOrderCounts(accountId), 1, "Queued successor order should remain pending after the live position closes");
+        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Full close should not realize bad debt while queued committed margin remains");
+        assertEq(router.pendingOrderCounts(accountId), 1, "Queued successor order itself should remain pending after the live position closes");
     }
 
-    function test_H1_LiquidationMustPreserveQueuedCollateralBuckets() public {
+    function test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
 
@@ -46,7 +47,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
-        engine.liquidatePosition(accountId, 105_000_000, depth, uint64(block.timestamp));
+        engine.liquidatePosition(accountId, 110_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -56,15 +57,11 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
             50_000,
             "Queued execution bounty escrow must remain protected during liquidation"
         );
-        assertEq(
-            clearinghouse.lockedMarginUsdc(accountId),
-            7900e6,
-            "Queued committed margin must remain locked for the surviving queued order"
-        );
-        assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
-            7_900_050_000,
-            "Only protected queued collateral buckets should remain after liquidation"
+        assertLt(clearinghouse.lockedMarginUsdc(accountId), 7900e6, "Liquidation should consume queued committed margin before bad debt");
+        assertLt(
+            engine.accumulatedBadDebtUsdc(),
+            7_900e6,
+            "Liquidation bad debt should be limited to the true residual after queued committed margin is consumed"
         );
     }
 

@@ -346,9 +346,8 @@ contract MarginClearinghouse is Ownable2Step {
         return getAccountUsdcBuckets(accountId, 0).freeSettlementUsdc;
     }
 
-    /// @notice Returns settlement balance reachable by a position-reducing settlement path.
-    /// @dev Adds the specified position margin back on top of currently free settlement balance,
-    ///      but never exceeds the actual settlement-asset balance.
+    /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
+    /// @dev Protects only reserved execution-bounty escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc
@@ -535,22 +534,31 @@ contract MarginClearinghouse is Ownable2Step {
         emit AssetSeized(accountId, settlementAsset, totalConsumedUsdc, recipient);
     }
 
-    /// @notice Consumes close-path losses from settlement buckets while preserving reserved settlement and protected locked margin.
+    /// @notice Consumes close-path losses from settlement buckets while preserving reserved settlement and any explicitly protected remaining position margin.
     function consumeCloseLoss(
         bytes32 accountId,
         uint256 lossUsdc,
+        uint256 protectedLockedMarginUsdc,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc) {
         if (lossUsdc == 0) {
             return (0, 0);
         }
 
-        uint256 reachableUsdc = getFreeSettlementBalanceUsdc(accountId);
-        seizedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
-        shortfallUsdc = lossUsdc - seizedUsdc;
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, protectedLockedMarginUsdc);
+        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
+            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
+        seizedUsdc = consumption.totalConsumedUsdc;
+        shortfallUsdc = consumption.uncoveredUsdc;
 
         if (seizedUsdc == 0) {
             return (0, shortfallUsdc);
+        }
+
+        if (consumption.otherLockedMarginConsumedUsdc > 0) {
+            lockedMarginUsdc[accountId] = protectedLockedMarginUsdc
+                + (buckets.otherLockedMarginUsdc - consumption.otherLockedMarginConsumedUsdc);
+            emit MarginUnlocked(accountId, consumption.otherLockedMarginConsumedUsdc);
         }
 
         balances[accountId][settlementAsset] -= seizedUsdc;
@@ -583,8 +591,15 @@ contract MarginClearinghouse is Ownable2Step {
 
         if (lockedPositionMarginUsdc > 0) {
             uint256 releasedMarginUsdc = buckets.activePositionMarginUsdc;
-            lockedMarginUsdc[accountId] = buckets.otherLockedMarginUsdc;
+            uint256 otherLockedConsumedUsdc = 0;
+            if (seizedUsdc > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc) {
+                otherLockedConsumedUsdc = seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc;
+            }
+            lockedMarginUsdc[accountId] = buckets.otherLockedMarginUsdc - otherLockedConsumedUsdc;
             emit MarginUnlocked(accountId, releasedMarginUsdc);
+            if (otherLockedConsumedUsdc > 0) {
+                emit MarginUnlocked(accountId, otherLockedConsumedUsdc);
+            }
         }
 
         if (seizedUsdc > 0) {

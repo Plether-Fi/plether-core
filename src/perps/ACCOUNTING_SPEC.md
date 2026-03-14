@@ -167,8 +167,8 @@ Question answered:
 Definition:
 
 - start from account balance in the clearinghouse
-- exclude funds escrowed for pending orders
-- include only free balance and the position margin being settled
+- exclude only keeper execution-bounty reserves that are already earmarked for queued cleanup
+- include free balance, the position margin being settled, and same-account committed margin from pending orders
 - never assume access to funds that are merely theoretical or already reserved elsewhere
 
 Rule:
@@ -207,7 +207,7 @@ Required properties:
 
 - `freeBalance` is the only quantity that may be withdrawn voluntarily,
 - order commits may only reserve from `freeBalance`,
-- liquidation may seize free balance plus the margin of the position being liquidated,
+- liquidation and other terminal settlement paths may seize all same-account settlement collateral except keeper reserves,
 - no operation may make a shortfall disappear by subtracting from an ineligible bucket.
 
 ## Settlement Rules
@@ -219,13 +219,14 @@ All position-reducing paths should satisfy the same economic rules whether they 
 When a close realizes a loss:
 
 1. Seize what is immediately collectible from the account's reachable balance.
-2. If the close fully exits the position, the remaining margin may be consumed in settlement.
+2. If the close fully exits the position, same-account committed margin may also be consumed before bad debt is recorded.
 3. If the close is partial and the realized loss cannot be fully covered without invading the remaining backing of the open residual position, revert the partial close.
 4. Any remaining uncovered realized loss must be recorded as bad debt only when the settlement path intentionally allows the position to end with a shortfall.
 
 Implication:
 
 - a user may not partially close, externalize realized losses to LPs, and keep a protected residual position alive.
+- a user may not shield otherwise reachable settlement USDC by parking it in queued committed margin right before terminal settlement.
 
 ### Liquidation
 

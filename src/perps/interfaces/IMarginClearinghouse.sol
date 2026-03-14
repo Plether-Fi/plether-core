@@ -73,10 +73,11 @@ interface IMarginClearinghouse {
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
-    /// @notice Consumes close-path losses from settlement buckets while preserving explicitly protected locked margin.
+    /// @notice Consumes close-path losses from settlement buckets while preserving the remaining live position margin and reserved escrow.
     function consumeCloseLoss(
         bytes32 accountId,
         uint256 lossUsdc,
+        uint256 protectedLockedMarginUsdc,
         address recipient
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
@@ -120,9 +121,8 @@ interface IMarginClearinghouse {
         bytes32 accountId
     ) external view returns (uint256);
 
-    /// @notice Returns settlement-asset balance reachable during position settlement.
-    /// @dev Includes currently free settlement balance plus the specific position margin
-    ///      that is expected to be unlocked as part of the settlement flow.
+    /// @notice Returns settlement-asset balance reachable during liquidation or other terminal settlement.
+    /// @dev Protects only reserved execution-bounty escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc

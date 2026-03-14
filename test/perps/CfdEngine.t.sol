@@ -619,7 +619,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(statusAfter.traderPayoutClaimableNow);
     }
 
-    function test_CloseLoss_DoesNotConsumeQueuedCommittedMargin() public {
+    function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
         address trader = address(0xABD0);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000 * 1e6);
@@ -635,18 +635,14 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
 
-        assertEq(
-            router.committedMargins(1), 7900e6, "Queued committed margin should remain reserved after the earlier close"
-        );
-        assertEq(
+        assertEq(router.committedMargins(1), 7900e6, "Order record should still reflect the queued committed amount until cancel/execute");
+        assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
             lockedBeforeClose - liveMarginBeforeClose,
-            "Close settlement should release only the live position margin, not the later committed margin"
+            "Close settlement should consume queued committed margin before recording bad debt"
         );
-        assertGt(
-            engine.accumulatedBadDebtUsdc(),
-            badDebtBefore,
-            "Close settlement must not consume queued committed margin before socializing the residual shortfall"
+        assertEq(
+            engine.accumulatedBadDebtUsdc(), badDebtBefore, "Queued committed margin should prevent avoidable close bad debt"
         );
     }
 

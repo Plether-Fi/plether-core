@@ -8,6 +8,7 @@ library MarginClearinghouseAccountingLib {
     struct SettlementConsumption {
         uint256 freeSettlementConsumedUsdc;
         uint256 activeMarginConsumedUsdc;
+        uint256 otherLockedMarginConsumedUsdc;
         uint256 totalConsumedUsdc;
         uint256 uncoveredUsdc;
     }
@@ -47,10 +48,7 @@ library MarginClearinghouseAccountingLib {
     function getLiquidationReachableUsdc(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal pure returns (uint256 reachableUsdc) {
-        reachableUsdc = buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc;
-        if (reachableUsdc > buckets.settlementBalanceUsdc) {
-            reachableUsdc = buckets.settlementBalanceUsdc;
-        }
+        reachableUsdc = getSettlementReachableUsdc(buckets, 0);
     }
 
     function getSettlementReachableUsdc(
@@ -59,6 +57,25 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (uint256 reachableUsdc) {
         uint256 protectedBalance = protectedLockedMarginUsdc + buckets.reservedSettlementUsdc;
         reachableUsdc = buckets.settlementBalanceUsdc > protectedBalance ? buckets.settlementBalanceUsdc - protectedBalance : 0;
+    }
+
+    function planTerminalLossConsumption(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 protectedLockedMarginUsdc,
+        uint256 lossUsdc
+    ) internal pure returns (SettlementConsumption memory consumption) {
+        uint256 reachableUsdc = getSettlementReachableUsdc(buckets, protectedLockedMarginUsdc);
+        consumption.totalConsumedUsdc = reachableUsdc > lossUsdc ? lossUsdc : reachableUsdc;
+        consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
+        consumption.freeSettlementConsumedUsdc = buckets.freeSettlementUsdc > consumption.totalConsumedUsdc
+            ? consumption.totalConsumedUsdc
+            : buckets.freeSettlementUsdc;
+
+        uint256 remainingConsumedUsdc = consumption.totalConsumedUsdc - consumption.freeSettlementConsumedUsdc;
+        consumption.activeMarginConsumedUsdc = buckets.activePositionMarginUsdc > remainingConsumedUsdc
+            ? remainingConsumedUsdc
+            : buckets.activePositionMarginUsdc;
+        consumption.otherLockedMarginConsumedUsdc = remainingConsumedUsdc - consumption.activeMarginConsumedUsdc;
     }
 
 }

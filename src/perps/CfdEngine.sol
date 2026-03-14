@@ -1013,7 +1013,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdEngineSettlementLib.CloseSettlementResult memory result;
         (result.seizedUsdc, result.shortfallUsdc) =
-            clearinghouse.consumeCloseLoss(accountId, uint256(-netSettlement), address(vault));
+            clearinghouse.consumeCloseLoss(accountId, uint256(-netSettlement), remainingPosMarginUsdc, address(vault));
         if (result.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
