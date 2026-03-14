@@ -2,6 +2,15 @@
 
 This document defines the intended accounting model for the Plether Perpetuals Engine. It is the target semantic model for future refactors and the source of truth for distinguishing solvency, withdrawable cash, liquidation equity, and queued-order escrow.
 
+The implementation now treats four engine-side accounting domains as first-class modules:
+
+- close settlement,
+- liquidation settlement,
+- protocol solvency,
+- LP withdrawal reserves.
+
+The spec below defines the semantic boundary for each domain and the points where they are allowed to interact.
+
 ## Purpose
 
 The protocol has several closely related but non-identical views of the same system state:
@@ -93,6 +102,15 @@ This quantity is suitable for conservative LP equity accounting and tranche reco
 Bad debt must be explicit state. It must never be left implicit in a mismatch between expected equity and physically recoverable equity.
 
 ## Accounting Views
+
+The engine should continue to maintain separate kernels for the following four domains:
+
+- `CloseAccounting`: trader-facing position reductions and net settlement.
+- `LiquidationAccounting`: forced close settlement, keeper bounty, residual payout, and bad debt.
+- `SolvencyAccounting`: protocol-level effective assets versus bounded max liability.
+- `WithdrawalAccounting`: LP cash firewall and immediately withdrawable vault cash.
+
+Any shared helper across domains is acceptable only when the assumptions are intentionally identical.
 
 ### A. Risk-Increasing Solvency View
 
@@ -228,6 +246,10 @@ Implication:
 - a user may not partially close, externalize realized losses to LPs, and keep a protected residual position alive.
 - a user may not shield otherwise reachable settlement USDC by parking it in queued committed margin right before terminal settlement.
 
+Implementation note:
+
+- close preview and live execution should share one close-accounting kernel so the net settlement answer differs only where live settlement intentionally mutates state.
+
 ### Liquidation
 
 Liquidation must:
@@ -244,6 +266,10 @@ If the liquidation bounty cannot be paid immediately from the vault:
 7. the unpaid liquidation bounty must become a deferred liquidation-bounty liability,
 8. solvency and LP reconciliation accounting must include that deferred liability immediately.
 
+Implementation note:
+
+- liquidation preview and live execution should share one liquidation-accounting kernel for liquidatability, reachable collateral, bounty, residual payout, and bad debt.
+
 ## Degraded Mode Spec
 
 `degradedMode` is a containment latch, not a retroactive revert mechanism.
@@ -251,6 +277,10 @@ If the liquidation bounty cannot be paid immediately from the vault:
 It must trigger whenever a realized state transition leaves:
 
 - `effectiveSolvencyAssets < maxLiability`
+
+Implementation note:
+
+- solvency accounting should remain distinct from withdrawal accounting even when both start from the same physical vault assets, because solvency may count bounded receivables that LP withdrawals must ignore.
 
 Allowed while degraded:
 

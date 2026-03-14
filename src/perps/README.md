@@ -14,12 +14,21 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 
 ### Architectural Changelog
 
-- Accounting is now split more explicitly by purpose: solvency, LP withdrawals, liquidation settlement, and queued-order escrow no longer rely on the same ad hoc helper paths.
+- Accounting is now split into four first-class engine domains: close settlement, liquidation settlement, protocol solvency, and LP withdrawal reserves.
 - `CfdEngine` now builds typed internal funding and solvency snapshots, and `HousePool` consumes clearer engine-side liability and reserve answers instead of rebuilding them from scattered getters.
 - `OrderRouter` now treats pending-order state as first-class escrow with explicit keeper-fee and committed-margin handling, plus a per-account escrow view for tests and audits.
 - `MarginClearinghouse` now exposes clearer balance semantics for free settlement USDC and liquidation-reachable USDC, reducing dependence on raw balance reads in settlement logic.
-- Close and liquidation flows in `CfdEngine` now share centralized settlement helpers for deficit collection, residual payout/seizure, and bad-debt realization.
+- Close, liquidation, solvency, and withdrawal views in `CfdEngine` now route through dedicated accounting libraries instead of re-embedding those kernels inline.
 - Oracle and mark freshness policy is now centralized around action-specific helpers, and the invariant suite now checks accounting-boundary properties such as reserve backing, liability signaling, and withdrawal-reserve consistency.
+
+### Accounting Domains
+
+- `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, funding settlement, execution fees, and net trader settlement.
+- `LiquidationAccountingLib`: shared kernel for preview/live liquidation settlement, including reachable collateral, keeper bounty, residual payout, and bad debt.
+- `SolvencyAccountingLib`: protocol-level balance-sheet view used for max-liability checks, effective-asset construction, and degraded-mode decisions.
+- `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees, deferred liabilities, and withdrawal-only funding liabilities.
+
+These domains intentionally answer different questions and should not silently share assumptions.
 
 ### I. MarginClearinghouse — The Prime Broker
 
@@ -71,6 +80,8 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 **Fail-Soft Liquidation Bounties**: Liquidations are still fail-soft if the House Pool cannot immediately fund the liquidation bounty. The state transition still completes and the unpaid amount is recorded as a deferred liquidation bounty claim.
 
 **Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred liquidation bounties are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
+
+**Accounting Domains**: `CfdEngine` now uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), solvency (`SolvencyAccountingLib`), and withdrawal reserves (`WithdrawalAccountingLib`). This keeps preview/live execution and protocol-level balance-sheet policy separated by domain instead of by call site.
 
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
