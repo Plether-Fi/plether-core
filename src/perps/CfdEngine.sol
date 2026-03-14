@@ -10,6 +10,7 @@ import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
+import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
@@ -807,63 +808,65 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 preSkewUsdc,
         uint256 vaultDepthUsdc
     ) internal {
-        uint256 newMaxProfit = CfdMath.calculateMaxProfit(order.sizeDelta, price, order.side, CAP_PRICE);
-        _addGlobalLiability(order.side, newMaxProfit, order.sizeDelta);
-        pos.maxProfitUsdc += newMaxProfit;
-
-        uint256 oldNotional = pos.size * pos.entryPrice;
-
-        if (pos.size == 0) {
-            pos.entryPrice = price;
-            pos.side = order.side;
-            pos.entryFundingIndex = order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
-        } else {
-            uint256 totalValue = oldNotional + (order.sizeDelta * price);
-            pos.entryPrice = totalValue / (pos.size + order.sizeDelta);
-        }
-
-        pos.size += order.sizeDelta;
-        uint256 newNotional = pos.size * pos.entryPrice;
-
-        if (order.side == CfdTypes.Side.BULL) {
-            if (newNotional >= oldNotional) {
-                globalBullEntryNotional += newNotional - oldNotional;
-            } else {
-                globalBullEntryNotional -= oldNotional - newNotional;
-            }
-            globalBullEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
-        } else {
-            if (newNotional >= oldNotional) {
-                globalBearEntryNotional += newNotional - oldNotional;
-            } else {
-                globalBearEntryNotional -= oldNotional - newNotional;
-            }
-            globalBearEntryFunding += int256(order.sizeDelta) * pos.entryFundingIndex;
-        }
-
         CfdTypes.RiskParams memory rp = riskParams;
+        OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
+            OpenAccountingLib.OpenInputs({
+                currentSize: pos.size,
+                currentEntryPrice: pos.entryPrice,
+                side: order.side,
+                sizeDelta: order.sizeDelta,
+                price: price,
+                capPrice: CAP_PRICE,
+                preSkewUsdc: preSkewUsdc,
+                postSkewUsdc: _getPostOpenSkewUsdc(order.side, order.sizeDelta, price),
+                vaultDepthUsdc: vaultDepthUsdc,
+                executionFeeBps: EXECUTION_FEE_BPS,
+                currentFundingIndex: order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex,
+                riskParams: rp
+            })
+        );
 
-        uint256 postSkewUsdc = _getAbsSkewUsdc(price);
-        if (vaultDepthUsdc > 0 && ((postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
-            revert CfdEngine__SkewTooHigh();
-        }
-        int256 vpiUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, rp.vpiFactor);
-        pos.vpiAccrued += vpiUsdc;
-
-        uint256 notionalUsdc = (order.sizeDelta * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        if (notionalUsdc * rp.bountyBps < rp.minBountyUsdc * 10_000) {
+        if (openState.notionalUsdc * rp.bountyBps < rp.minBountyUsdc * 10_000) {
             revert CfdEngine__PositionTooSmall();
         }
-        uint256 execFeeUsdc = (notionalUsdc * EXECUTION_FEE_BPS) / 10_000;
 
-        int256 tradeCost = vpiUsdc + int256(execFeeUsdc);
+        _addGlobalLiability(order.side, openState.addedMaxProfitUsdc, order.sizeDelta);
+        if (vaultDepthUsdc > 0 && ((openState.postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
+            revert CfdEngine__SkewTooHigh();
+        }
+        pos.maxProfitUsdc += openState.addedMaxProfitUsdc;
 
-        if (tradeCost < 0) {
-            uint256 rebate = uint256(-tradeCost);
+        if (pos.size == 0) {
+            pos.side = order.side;
+            pos.entryFundingIndex = order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+        }
+        pos.entryPrice = openState.newEntryPrice;
+        pos.size = openState.newSize;
+        pos.vpiAccrued += openState.vpiUsdc;
+
+        if (order.side == CfdTypes.Side.BULL) {
+            if (openState.newEntryNotional >= openState.oldEntryNotional) {
+                globalBullEntryNotional += openState.newEntryNotional - openState.oldEntryNotional;
+            } else {
+                globalBullEntryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
+            }
+            globalBullEntryFunding += openState.positionFundingContribution;
+        } else {
+            if (openState.newEntryNotional >= openState.oldEntryNotional) {
+                globalBearEntryNotional += openState.newEntryNotional - openState.oldEntryNotional;
+            } else {
+                globalBearEntryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
+            }
+            globalBearEntryFunding += openState.positionFundingContribution;
+        }
+
+        if (openState.tradeCostUsdc < 0) {
+            uint256 rebate = uint256(-openState.tradeCostUsdc);
             vault.payOut(address(clearinghouse), rebate);
         }
 
-        int256 netMarginChange = clearinghouse.applyOpenCost(order.accountId, order.marginDelta, tradeCost, address(vault));
+        int256 netMarginChange =
+            clearinghouse.applyOpenCost(order.accountId, order.marginDelta, openState.tradeCostUsdc, address(vault));
 
         if (netMarginChange > 0) {
             pos.margin += uint256(netMarginChange);
@@ -875,19 +878,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             pos.margin -= deficit;
         }
 
-        accumulatedFeesUsdc += execFeeUsdc;
+        accumulatedFeesUsdc += openState.executionFeeUsdc;
 
-        uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
-        uint256 imr = (mmr * 150) / 100;
-        if (imr < rp.minBountyUsdc) {
-            imr = rp.minBountyUsdc;
-        }
-        uint256 effectiveMargin = pos.margin;
-        if (tradeCost < 0) {
-            uint256 rebate = uint256(-tradeCost);
-            effectiveMargin = effectiveMargin > rebate ? effectiveMargin - rebate : 0;
-        }
-        if (effectiveMargin < imr) {
+        if (
+            OpenAccountingLib.effectiveMarginAfterTradeCost(pos.margin, openState.tradeCostUsdc)
+                < openState.initialMarginRequirementUsdc
+        ) {
             revert CfdEngine__InsufficientInitialMargin();
         }
 
@@ -975,6 +971,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 bullUsdc = (bullOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 bearUsdc = (bearOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
+    }
+
+    function _getPostOpenSkewUsdc(
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 price
+    ) internal view returns (uint256) {
+        uint256 postBullOi = bullOI;
+        uint256 postBearOi = bearOI;
+        if (side == CfdTypes.Side.BULL) {
+            postBullOi += sizeDelta;
+        } else {
+            postBearOi += sizeDelta;
+        }
+        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
     function _addGlobalLiability(

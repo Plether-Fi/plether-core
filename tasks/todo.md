@@ -257,3 +257,11 @@ Review:
 - Reused the same projected funding helper for liquidation preview and close-preview funding simulation, reducing preview/live drift in funding accrual logic.
 - Preserved existing close/liquidation settlement libraries; this refactor only centralized the duplicated funding and position-risk math that fed those paths.
 - Verified green: targeted risk/funding parity runs and full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.
+
+- [x] Extract open-position accounting into a first-class module
+
+Review:
+- Added `src/perps/libraries/OpenAccountingLib.sol` to centralize open-path entry-price averaging, added max-profit liability, post-trade skew/VPI cost, execution fee, trade cost, and initial-margin requirement construction.
+- Updated `src/perps/CfdEngine.sol` so `_processIncrease()` now consumes the shared open-accounting state instead of re-embedding the full open-trade math inline.
+- Preserved original revert precedence by continuing to check vault solvency before skew-cap enforcement while still computing VPI and skew against the true post-trade open interest.
+- Verified green: targeted open-path/audit regressions plus full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.
