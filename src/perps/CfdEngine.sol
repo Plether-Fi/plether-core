@@ -643,38 +643,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
-        uint256 bullUsdc = (bullOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-
-        uint256 absSkew;
-        bool bullMajority;
-
-        if (bullUsdc > bearUsdc) {
-            absSkew = bullUsdc - bearUsdc;
-            bullMajority = true;
-        } else {
-            absSkew = bearUsdc - bullUsdc;
-            bullMajority = false;
-        }
-
-        if (absSkew > 0 && vaultDepthUsdc > 0) {
-            uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
-            uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
-            int256 step = int256((currentOraclePrice * fundingDelta) / 1e8);
-
-            if (step > 0) {
-                if (bullMajority) {
-                    bullFundingIndex -= step;
-                    bearFundingIndex += step;
-                } else {
-                    bearFundingIndex -= step;
-                    bullFundingIndex += step;
-                }
-            }
-        }
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: currentOraclePrice,
+                bullOi: bullOI,
+                bearOi: bearOI,
+                timeDelta: timeDelta,
+                vaultDepthUsdc: vaultDepthUsdc,
+                riskParams: riskParams
+            })
+        );
+        bullFundingIndex += step.bullFundingIndexDelta;
+        bearFundingIndex += step.bearFundingIndexDelta;
 
         lastFundingTime = uint64(block.timestamp);
-        emit FundingUpdated(bullFundingIndex, bearFundingIndex, absSkew);
+        emit FundingUpdated(bullFundingIndex, bearFundingIndex, step.absSkewUsdc);
     }
 
     /// @notice Returns unsettled funding owed to (+) or by (-) a position in USDC (6 decimals)

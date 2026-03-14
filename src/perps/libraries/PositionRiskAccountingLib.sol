@@ -6,6 +6,21 @@ import {CfdTypes} from "../CfdTypes.sol";
 
 library PositionRiskAccountingLib {
 
+    struct FundingStepInputs {
+        uint256 price;
+        uint256 bullOi;
+        uint256 bearOi;
+        uint256 timeDelta;
+        uint256 vaultDepthUsdc;
+        CfdTypes.RiskParams riskParams;
+    }
+
+    struct FundingStepResult {
+        uint256 absSkewUsdc;
+        int256 bullFundingIndexDelta;
+        int256 bearFundingIndexDelta;
+    }
+
     struct PositionRiskState {
         int256 pendingFundingUsdc;
         int256 unrealizedPnlUsdc;
@@ -48,33 +63,59 @@ library PositionRiskAccountingLib {
             return getPendingFunding(pos, currentIndex);
         }
 
-        uint256 bullUsdc = (bullOi * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOi * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 absSkew;
+        FundingStepResult memory step = computeFundingStep(
+            FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullOi,
+                bearOi: bearOi,
+                timeDelta: timeDelta,
+                vaultDepthUsdc: vaultDepthUsdc,
+                riskParams: riskParams
+            })
+        );
+        currentIndex = pos.side == CfdTypes.Side.BULL
+            ? currentIndex + step.bullFundingIndexDelta
+            : currentIndex + step.bearFundingIndexDelta;
+
+        return getPendingFunding(pos, currentIndex);
+    }
+
+    function computeFundingStep(
+        FundingStepInputs memory inputs
+    ) internal pure returns (FundingStepResult memory result) {
+        if (inputs.timeDelta == 0 || inputs.vaultDepthUsdc == 0 || inputs.price == 0) {
+            return result;
+        }
+
+        uint256 bullUsdc = (inputs.bullOi * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (inputs.bearOi * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE;
         bool bullMajority;
 
         if (bullUsdc > bearUsdc) {
-            absSkew = bullUsdc - bearUsdc;
+            result.absSkewUsdc = bullUsdc - bearUsdc;
             bullMajority = true;
         } else {
-            absSkew = bearUsdc - bullUsdc;
-            bullMajority = false;
+            result.absSkewUsdc = bearUsdc - bullUsdc;
         }
 
-        if (absSkew > 0) {
-            uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
-            uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
-            int256 step = int256((lastMarkPrice * fundingDelta) / 1e8);
-            if (step > 0) {
-                if (bullMajority) {
-                    currentIndex = pos.side == CfdTypes.Side.BULL ? currentIndex - step : currentIndex + step;
-                } else {
-                    currentIndex = pos.side == CfdTypes.Side.BEAR ? currentIndex - step : currentIndex + step;
-                }
-            }
+        if (result.absSkewUsdc == 0) {
+            return result;
         }
 
-        return getPendingFunding(pos, currentIndex);
+        uint256 annRate = CfdMath.getAnnualizedFundingRate(result.absSkewUsdc, inputs.vaultDepthUsdc, inputs.riskParams);
+        uint256 fundingDelta = (annRate * inputs.timeDelta) / CfdMath.SECONDS_PER_YEAR;
+        int256 step = int256((inputs.price * fundingDelta) / 1e8);
+        if (step == 0) {
+            return result;
+        }
+
+        if (bullMajority) {
+            result.bullFundingIndexDelta = -step;
+            result.bearFundingIndexDelta = step;
+        } else {
+            result.bearFundingIndexDelta = -step;
+            result.bullFundingIndexDelta = step;
+        }
     }
 
     function buildPositionRiskState(
