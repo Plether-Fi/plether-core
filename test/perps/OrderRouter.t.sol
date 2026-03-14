@@ -240,52 +240,73 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CancelOrder_ReleasesEscrowForNonHeadOrder() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        uint256 lockedBeforeCancel = clearinghouse.lockedMarginUsdc(accountId);
         uint256 vaultAssetsBefore = pool.totalAssets();
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint64 firstCloseOrderId = router.nextCommitId();
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1e8, true);
+        uint64 secondCloseOrderId = router.nextCommitId();
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1500 * 1e6);
-        assertEq(router.executionBountyReserves(2), 500_000);
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel);
+        assertEq(router.executionBountyReserves(secondCloseOrderId), 1_000_000);
 
         vm.prank(alice);
-        router.cancelOrder(2);
+        router.cancelOrder(secondCloseOrderId);
 
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), 1000 * 1e6, "Cancelled tail order should unlock only its margin");
-        assertEq(router.executionBountyReserves(2), 0, "Cancelled tail order should clear its execution bounty reserve");
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling a close order should not unlock live position margin");
+        assertEq(router.executionBountyReserves(secondCloseOrderId), 0, "Cancelled tail order should clear its execution bounty reserve");
         assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
-        assertEq(router.nextExecuteId(), 1, "Cancelling a non-head order should not advance FIFO head");
-        assertEq(engine.accumulatedFeesUsdc(), 500_000, "User-cancelled keeper reserve should become protocol revenue");
-        assertEq(pool.totalAssets(), vaultAssetsBefore + 500_000, "Cancelled keeper reserve should return to vault cash as fees");
+        assertEq(router.nextExecuteId(), firstCloseOrderId, "Cancelling a non-head order should not advance FIFO head");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1_000_000, "User-cancelled close-order bounty should become protocol revenue");
+        assertEq(pool.totalAssets() - vaultAssetsBefore, 1_000_000, "Cancelled keeper reserve should return to vault cash as fees");
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
         assertEq(pending.length, 1);
-        assertEq(pending[0].orderId, 1);
+        assertEq(pending[0].orderId, firstCloseOrderId);
     }
 
     function test_CancelOrder_HeadAdvancesNextExecuteId() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        uint256 lockedBeforeCancel = clearinghouse.lockedMarginUsdc(accountId);
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.cancelOrder(1);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1e8, true);
 
-        assertEq(router.nextExecuteId(), 2, "Cancelling the FIFO head should advance nextExecuteId");
+        vm.prank(alice);
+        router.cancelOrder(closeOrderId);
+
+        assertEq(router.nextExecuteId(), closeOrderId + 1, "Cancelling the FIFO head should advance nextExecuteId");
         assertEq(router.pendingOrderCounts(accountId), 0);
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), 0, "Cancelling the head should unlock committed margin");
-        assertEq(engine.accumulatedFeesUsdc(), 1_000_000, "Head cancellation should route the keeper reserve to protocol revenue");
+        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling the head close order should not unlock live position margin");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1_000_000, "Head cancellation should route the keeper reserve to protocol revenue");
     }
 
     function test_CancelOrder_OnlyOwnerCanCancel() public {
+        _open(bytes32(uint256(uint160(alice))), CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1e8, true);
 
         vm.prank(bob);
         vm.expectRevert(OrderRouter.OrderRouter__NotOrderOwner.selector);
+        router.cancelOrder(1);
+    }
+
+    function test_CancelOrder_OpenOrdersAreBinding() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__OpenOrdersAreBinding.selector);
         router.cancelOrder(1);
     }
 
@@ -542,7 +563,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 2_100_000, "executor should earn the reserved mixed-head execution bounties");
+        assertEq(executorReward, 1_000_000, "executor should only earn bounties for successful mixed-head orders");
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -681,11 +702,33 @@ contract OrderRouterPythTest is BasePerpTest {
             9999 * 1e6,
             "Reserved execution bounty should be charged on failure"
         );
-        assertEq(
-            usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            1e6,
-            "Executor should receive the reserved execution bounty"
-        );
+        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 0, "Executor should not receive failed-order bounty");
+        assertEq(engine.accumulatedFeesUsdc(), 1e6, "Failed-order bounty should be routed to protocol revenue");
+    }
+
+    function test_ExitedAccount_StaleCloseOrderForfeitsBountyToProtocol() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        uint64 closeOrderId = router.nextCommitId();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        _close(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.warp(block.timestamp + 120);
+        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), block.timestamp);
+        vm.roll(block.number + 1);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        vm.roll(block.number + 1);
+        router.executeOrder(closeOrderId, empty);
+
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not recover stale close-order bounty after account exit");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1e6, "Stale close-order bounty should be forfeited to protocol revenue");
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -778,8 +821,8 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            2e6,
-            "Batch executor should be paid from the reserved close and tail-order execution bounties"
+            1e6,
+            "Batch executor should only be paid for successful orders; failed tails forfeit their bounties"
         );
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);

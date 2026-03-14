@@ -300,3 +300,12 @@ Review:
 - Updated `src/perps/MarginClearinghouse.sol` so `consumeFundingLoss()`, `consumeCloseLoss()`, and `consumeLiquidationResidual()` all apply bucket updates, settlement debits, and unlock semantics through the shared mutation layer instead of hand-writing each mutation path inline.
 - Preserved existing behavior and event semantics while reducing the remaining planning-vs-application drift surface in the clearinghouse.
 - Verified green: targeted clearinghouse/engine/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `451 tests passed, 0 failed, 0 skipped`.
+
+- [x] Fix remaining audit issues in router bounty custody, cancellation binding, and batch gas handling
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so failed order execution bounties are now forfeited to protocol revenue instead of paid to arbitrary executors, eliminating stale-order reclaimability for router-custodied keeper reserves.
+- Made open orders economically binding by rejecting `cancelOrder()` for non-close orders, while keeping close-order cancellation semantics intact.
+- Changed `executeOrderBatch()` to `break` rather than revert when the per-order gas floor is no longer met, so completed batch work persists.
+- Added/updated regression coverage in `test/perps/OrderRouter.t.sol`, `test/perps/AuditConfirmedFindingsFailing.t.sol`, and `test/perps/AuditV3.t.sol` for failed-order bounty forfeiture, open-order cancellation binding, and mixed batch payout semantics.
+- Verified green: focused router/invariant/blocker runs plus full `forge test --match-path "test/perps/*.t.sol"` with `470 tests passed, 0 failed, 0 skipped`.

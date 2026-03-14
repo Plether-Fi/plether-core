@@ -109,6 +109,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__InsufficientFreeEquity();
     error OrderRouter__NotOrderOwner();
     error OrderRouter__Unauthorized();
+    error OrderRouter__OpenOrdersAreBinding();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -289,6 +290,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (order.accountId != accountId) {
             revert OrderRouter__NotOrderOwner();
+        }
+        if (!order.isClose) {
+            revert OrderRouter__OpenOrdersAreBinding();
         }
 
         _unlockCommittedMargin(orderId);
@@ -570,7 +574,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             uint256 forwardedGas = gasleft() - (gasleft() / 64);
             if (forwardedGas < MIN_ENGINE_GAS) {
-                revert OrderRouter__InsufficientGas();
+                break;
             }
 
             _releaseCommittedMarginForExecution(orderId);
@@ -794,10 +798,11 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
+            _collectExecutionBounty(orderId);
         } else {
             _unlockCommittedMargin(orderId);
+            _forfeitExecutionBountyToProtocolRevenue(orderId);
         }
-        _collectExecutionBounty(orderId);
         return 0;
     }
 

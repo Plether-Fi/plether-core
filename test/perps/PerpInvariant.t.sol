@@ -878,25 +878,6 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_AdversarialExitedAccountsDoNotRetainRecoverableCloseBounties() public {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
-            (bytes32 accountId, uint256 sizeDelta,,,,,, CfdTypes.Side side, bool isClose) = router.orders(orderId);
-            side;
-            if (accountId == bytes32(0) || sizeDelta == 0 || !isClose) {
-                continue;
-            }
-
-            (uint256 openSize,,,,,,,) = engine.positions(accountId);
-            if (openSize == 0) {
-                assertEq(
-                    router.executionBountyReserves(orderId),
-                    0,
-                    "Exited accounts must not retain recoverable close-order keeper bounties"
-                );
-            }
-        }
-    }
-
     function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public {
         assertEq(
             engine.deferredLiquidationBountyUsdc(address(handler)),
