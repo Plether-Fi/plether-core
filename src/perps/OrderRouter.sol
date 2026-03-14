@@ -332,12 +332,6 @@ contract OrderRouter is Ownable2Step, Pausable {
             escrow.executionBountyUsdc += executionBountyReserves[orderId];
             escrow.pendingOrderCount++;
         }
-        uint256 consumed = consumedCommittedMarginUsdc[accountId];
-        if (consumed >= escrow.committedMarginUsdc) {
-            escrow.committedMarginUsdc = 0;
-        } else {
-            escrow.committedMarginUsdc -= consumed;
-        }
     }
 
     function noteCommittedMarginConsumed(
@@ -348,6 +342,22 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         consumedCommittedMarginUsdc[accountId] += amountUsdc;
+
+        uint64 maxOrderId = nextCommitId;
+        uint256 remaining = amountUsdc;
+        for (uint64 orderId = nextExecuteId; orderId < maxOrderId && remaining > 0; orderId++) {
+            CfdTypes.Order memory order = orders[orderId];
+            if (order.accountId != accountId || order.sizeDelta == 0) {
+                continue;
+            }
+            uint256 committed = committedMargins[orderId];
+            if (committed == 0) {
+                continue;
+            }
+            uint256 charge = committed > remaining ? remaining : committed;
+            committedMargins[orderId] = committed - charge;
+            remaining -= charge;
+        }
     }
 
     function getAccountOrderSummary(
@@ -750,15 +760,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         delete committedMargins[orderId];
-        bytes32 accountId = orders[orderId].accountId;
-        uint256 consumed = consumedCommittedMarginUsdc[accountId];
-        if (consumed > 0) {
-            uint256 charge = consumed > amount ? amount : consumed;
-            consumedCommittedMarginUsdc[accountId] = consumed - charge;
-            amount -= charge;
-        }
         if (amount > 0) {
-            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(orders[orderId].accountId, amount);
         }
     }
 
@@ -801,7 +804,11 @@ contract OrderRouter is Ownable2Step, Pausable {
             _collectExecutionBounty(orderId);
         } else {
             _unlockCommittedMargin(orderId);
-            _forfeitExecutionBountyToProtocolRevenue(orderId);
+            if (orders[orderId].isClose) {
+                _forfeitExecutionBountyToProtocolRevenue(orderId);
+            } else {
+                _collectExecutionBounty(orderId);
+            }
         }
         return 0;
     }
@@ -831,13 +838,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _releaseCommittedMarginForExecution(
         uint64 orderId
     ) internal {
-        uint256 amount = committedMargins[orderId];
-        if (amount == 0) {
-            return;
-        }
-        delete committedMargins[orderId];
-        bytes32 accountId = orders[orderId].accountId;
-        IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+        _unlockCommittedMargin(orderId);
     }
 
     /// @notice Claims ETH stuck from failed refund transfers.

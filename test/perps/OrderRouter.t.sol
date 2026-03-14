@@ -563,7 +563,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_000_000, "executor should only earn bounties for successful mixed-head orders");
+        assertEq(executorReward, 1_100_000, "executor should earn bounties for successful orders plus failed binding open heads");
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -702,8 +702,8 @@ contract OrderRouterPythTest is BasePerpTest {
             9999 * 1e6,
             "Reserved execution bounty should be charged on failure"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 0, "Executor should not receive failed-order bounty");
-        assertEq(engine.accumulatedFeesUsdc(), 1e6, "Failed-order bounty should be routed to protocol revenue");
+        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive failed binding open-order bounty");
+        assertEq(engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue");
     }
 
     function test_ExitedAccount_StaleCloseOrderForfeitsBountyToProtocol() public {
@@ -821,8 +821,8 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            1e6,
-            "Batch executor should only be paid for successful orders; failed tails forfeit their bounties"
+            2e6,
+            "Batch executor should be paid for successful orders and failed binding open tails"
         );
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);

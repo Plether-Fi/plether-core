@@ -855,7 +855,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
 
-        assertEq(router.committedMargins(1), 7900e6, "Order record should still reflect the queued committed amount until cancel/execute");
+        assertLt(router.committedMargins(1), 7900e6, "Order record should reflect committed margin consumed by terminal settlement");
         assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
             lockedBeforeClose - liveMarginBeforeClose,

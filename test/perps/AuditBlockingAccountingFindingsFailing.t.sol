@@ -50,6 +50,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
         router.noteCommittedMarginConsumed(accountId, 30e6);
 
         vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__OpenOrdersAreBinding.selector);
         router.cancelOrder(1);
 
         assertGe(
