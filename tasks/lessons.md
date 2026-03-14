@@ -1,1 +1,2 @@
 - When changing keeper-fee currency or payout mechanics, preserve the anti-griefing economics explicitly; do not replace an upfront reserve with success-only rewards unless the user asks to weaken spam resistance.
+- When interface contracts duplicate preview structs, verify the ABI layout stays byte-for-byte identical to the implementation and add a decode-level regression for the interface path.

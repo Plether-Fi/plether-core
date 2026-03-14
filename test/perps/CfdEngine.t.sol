@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -595,6 +596,60 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
+    }
+
+    function test_LiquidationPreview_InterfaceMatchesContractStructLayout() public {
+        address trader = address(0xAB1402);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1_105e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 895e6);
+
+        CfdEngine.LiquidationPreview memory contractPreview = engine.previewLiquidation(accountId, 110_000_000, pool.totalAssets());
+        ICfdEngine.LiquidationPreview memory interfacePreview = ICfdEngine(address(engine)).previewLiquidation(
+            accountId, 110_000_000, pool.totalAssets()
+        );
+
+        assertEq(interfacePreview.liquidatable, contractPreview.liquidatable);
+        assertEq(interfacePreview.oraclePrice, contractPreview.oraclePrice);
+        assertEq(interfacePreview.equityUsdc, contractPreview.equityUsdc);
+        assertEq(interfacePreview.pnlUsdc, contractPreview.pnlUsdc);
+        assertEq(interfacePreview.fundingUsdc, contractPreview.fundingUsdc);
+        assertEq(interfacePreview.reachableCollateralUsdc, contractPreview.reachableCollateralUsdc);
+        assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
+        assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
+        assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
+        assertEq(interfacePreview.deferredPayoutUsdc, contractPreview.deferredPayoutUsdc);
+        assertEq(interfacePreview.badDebtUsdc, contractPreview.badDebtUsdc);
+        assertEq(interfacePreview.triggersDegradedMode, contractPreview.triggersDegradedMode);
+    }
+
+    function test_LiquidationPreview_ProjectsFundingAccrualLikeLiveUpdate() public {
+        address trader = address(0xAB1403);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1_105e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 895e6);
+
+        vm.warp(block.timestamp + 1 days);
+
+        uint256 vaultDepth = pool.totalAssets();
+
+        CfdEngine.LiquidationPreview memory projectedPreview = engine.previewLiquidation(accountId, 110_000_000, vaultDepth);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
+
+        CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(accountId, 110_000_000, vaultDepth);
+
+        assertApproxEqAbs(projectedPreview.fundingUsdc, fundedPreview.fundingUsdc, 1, "Preview should include accrued funding before live update");
+        assertApproxEqAbs(projectedPreview.equityUsdc, fundedPreview.equityUsdc, 1, "Projected funding should flow through liquidation equity");
+        assertEq(projectedPreview.keeperBountyUsdc, fundedPreview.keeperBountyUsdc, "Projected funding should align keeper bounty with live state");
+        assertEq(projectedPreview.liquidatable, fundedPreview.liquidatable, "Preview liquidatability should match the accrued live state");
     }
 
     function test_GetDeferredPayoutStatus_ReflectsClaimability() public {

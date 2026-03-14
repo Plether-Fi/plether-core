@@ -1368,20 +1368,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
+        uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
         CfdTypes.Position memory pos = positions[accountId];
-        preview.oraclePrice = oraclePrice;
+        preview.oraclePrice = price;
         if (pos.size == 0) {
             return preview;
         }
 
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, oraclePrice, CAP_PRICE);
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
         preview.pnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        preview.fundingUsdc = getPendingFunding(pos);
+        preview.fundingUsdc = _previewPendingFunding(pos, vaultDepthUsdc);
         preview.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         LiquidationAccountingLib.LiquidationState memory liqState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,
-            oraclePrice,
+            price,
             preview.reachableCollateralUsdc,
             preview.fundingUsdc,
             preview.pnlUsdc,

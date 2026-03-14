@@ -17,6 +17,7 @@ interface ICfdEngine {
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
         uint256 immediatePayoutUsdc;
+        uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
     }
