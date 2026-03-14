@@ -49,6 +49,11 @@ interface ICfdEngine {
         uint256 amountUsdc
     ) external;
 
+    /// @notice Pulls router-custodied cancellation fees into protocol revenue.
+    function absorbRouterCancellationFee(
+        uint256 amountUsdc
+    ) external;
+
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param accountId          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)

@@ -238,3 +238,13 @@ Review:
 - Updated `src/perps/CfdEngine.sol` to route `getProtocolAccountingView()`, `_getWithdrawalReservedUsdc()`, `_assertPostSolvency()`, degraded-mode latching, and max-liability-after-close calculations through those first-class accounting modules instead of inline arithmetic.
 - Preserved the legacy `CfdEngineSnapshotsLib.SolvencySnapshot` return shape for compatibility by rebuilding it from the new solvency state at the boundary.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_GetProtocolAccountingView_ReflectsDeferredLiabilities|test_DegradedMode_ClearRequiresRecapitalization|test_DegradedMode_LatchesAndBlocksNewOpens|test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency"`, `forge test --match-path test/perps/HousePool.t.sol --match-test "test_M12_GetFreeUSDC_ReservesFees|test_GetVaultLiquidityView_ReturnsCurrentPoolState"`, and `forge test --match-path test/perps/PerpInvariant.t.sol --match-test "invariant_ProtocolAccountingViewMatchesAccessors|invariant_WithdrawalReserveIncludesDeferredLiabilities|invariant_PoolLiquidityViewMatchesProtocolAccounting"`.
+
+- [x] Split perps keeper reserves out of trader collateral and route user-cancelled reserves to protocol revenue
+
+Review:
+- `src/perps/OrderRouter.sol` now seizes keeper execution reserves out of trader collateral at commit time into router custody instead of using `reservedSettlementUsdc` inside `MarginClearinghouse`.
+- Successful/failed execution now pays the router-custodied reserve directly to the executor, while `cancelOrder()` refunds only committed margin and routes the forfeited keeper reserve into protocol revenue via `CfdEngine.absorbRouterCancellationFee()`.
+- `src/perps/CfdEngine.sol` now absorbs router cancellation fees into the vault and books them in `accumulatedFeesUsdc`, preserving protocol-fee accounting and fee withdrawals.
+- `src/perps/ACCOUNTING_SPEC.md` now explicitly states that keeper execution reserve is non-trader-owned once committed and that user-cancelled reserves route to protocol revenue instead of back to the trader.
+- Updated queue/invariant regressions in `test/perps/OrderRouter.t.sol`, `test/perps/AuditRemainingCoverageFindingsFailing.t.sol`, and `test/perps/PerpInvariant.t.sol` to reflect router custody rather than `clearinghouse.reservedSettlementUsdc`.
+- Verified green: targeted router/audit/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.

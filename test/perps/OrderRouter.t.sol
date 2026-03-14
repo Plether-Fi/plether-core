@@ -240,6 +240,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_CancelOrder_ReleasesEscrowForNonHeadOrder() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
+        uint256 vaultAssetsBefore = pool.totalAssets();
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -253,9 +254,11 @@ contract OrderRouterTest is BasePerpTest {
         router.cancelOrder(2);
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), 1000 * 1e6, "Cancelled tail order should unlock only its margin");
-        assertEq(router.executionBountyReserves(2), 0, "Cancelled tail order should release its execution bounty reserve");
+        assertEq(router.executionBountyReserves(2), 0, "Cancelled tail order should clear its execution bounty reserve");
         assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
         assertEq(router.nextExecuteId(), 1, "Cancelling a non-head order should not advance FIFO head");
+        assertEq(engine.accumulatedFeesUsdc(), 500_000, "User-cancelled keeper reserve should become protocol revenue");
+        assertEq(pool.totalAssets(), vaultAssetsBefore + 500_000, "Cancelled keeper reserve should return to vault cash as fees");
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
         assertEq(pending.length, 1);
@@ -274,6 +277,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 2, "Cancelling the FIFO head should advance nextExecuteId");
         assertEq(router.pendingOrderCounts(accountId), 0);
         assertEq(clearinghouse.lockedMarginUsdc(accountId), 0, "Cancelling the head should unlock committed margin");
+        assertEq(engine.accumulatedFeesUsdc(), 1_000_000, "Head cancellation should route the keeper reserve to protocol revenue");
     }
 
     function test_CancelOrder_OnlyOwnerCanCancel() public {
@@ -803,11 +807,7 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
-        assertEq(
-            clearinghouse.reservedSettlementUsdc(accountId),
-            1e6,
-            "Clearinghouse should continue escrowing the keeper reserve"
-        );
+        assertEq(usdc.balanceOf(address(router)), 1e6, "Router custody should continue escrowing the keeper reserve");
     }
 
     function testFuzz_SlippageFailureClearsEscrowAndAdvancesQueue(
@@ -829,11 +829,7 @@ contract OrderRouterPythTest is BasePerpTest {
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
-        assertEq(
-            clearinghouse.reservedSettlementUsdc(accountId),
-            0,
-            "Keeper reserve should be paid out and no longer remain reserved"
-        );
+        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out from router custody");
     }
 
     function test_InsufficientPythFee_Reverts() public {

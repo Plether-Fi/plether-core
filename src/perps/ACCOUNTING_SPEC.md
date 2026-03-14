@@ -215,18 +215,34 @@ Rules:
 
 Each account must have conceptually distinct balances even if the current implementation stores them in fewer variables.
 
-- `balance`: physical collateral deposited in the clearinghouse
-- `lockedMargin`: collateral backing currently open positions
-- `escrowedMargin`: collateral reserved for pending orders
-- `keeperReserve`: USDC reserved to pay order executors
-- `freeBalance = balance - lockedMargin - escrowedMargin - keeperReserve`
+- Trader-owned domain:
+  - `balance`: physical collateral deposited in the clearinghouse
+  - `activePositionMargin`: collateral backing currently open positions
+  - `committedMargin`: collateral reserved for pending orders and still owned by the trader until terminal settlement or valid refund
+- Non-trader-owned domain:
+  - `keeperExecutionReserve`: USDC reserved to pay order executors and no longer economically owned by the trader once committed
+- `freeBalance = balance - activePositionMargin - committedMargin - keeperExecutionReserve`
 
 Required properties:
 
 - `freeBalance` is the only quantity that may be withdrawn voluntarily,
 - order commits may only reserve from `freeBalance`,
-- liquidation and other terminal settlement paths may seize all same-account settlement collateral except keeper reserves,
+- `committedMargin` is refundable on cancel only while it remains trader-owned,
+- `committedMargin` remains terminally reachable whenever it is still refundable to the trader,
+- `keeperExecutionReserve` must not be modeled inside `balances[accountId]` once committed,
+- liquidation and other terminal settlement paths may seize all same-account trader-owned settlement collateral except `keeperExecutionReserve`,
 - no operation may make a shortfall disappear by subtracting from an ineligible bucket.
+
+Canonical invariant:
+
+- `protected_from_terminal_settlement => not_refundable_to_trader`
+- `refundable_to_trader => terminally_reachable`
+
+Operational consequence:
+
+- `cancelOrder()` must never return value that has already crossed into the non-trader-owned domain.
+- user-cancelled keeper reserves should route to explicit protocol-owned revenue rather than back to the trader.
+- once committed, keeper reserves should live in a dedicated queue-fee custody domain rather than inside trader collateral accounting.
 
 ## Settlement Rules
 

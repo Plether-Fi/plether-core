@@ -16,7 +16,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
-/// @dev No longer holds margin escrow. Users deposit to MarginClearinghouse directly.
+/// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is Ownable2Step, Pausable {
 
@@ -266,7 +266,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         emit OrderCommitted(orderId, accountId, side);
     }
 
-    /// @notice Cancels a still-pending order and refunds its reserved execution bounty and committed margin.
+    /// @notice Cancels a still-pending order, refunds committed margin, and routes the keeper reserve to protocol revenue.
     /// @dev The order owner may cancel any pending order, including the FIFO head. Cancelling a non-head
     ///      order leaves a hole that later queue scans skip naturally.
     function cancelOrder(
@@ -283,7 +283,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
 
         _unlockCommittedMargin(orderId);
-        _releaseExecutionBounty(orderId);
+        _forfeitExecutionBountyToProtocolRevenue(orderId);
         _deleteOrder(orderId, orderId == nextExecuteId);
 
         emit OrderCancelled(orderId, accountId);
@@ -381,7 +381,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     /// @notice Keeper executes the next order in strict FIFO sequence.
     ///         Validates oracle freshness (publishTime > commitTime, age ≤ 60s),
     ///         checks slippage, then delegates to CfdEngine. The executor is paid from the
-    ///         order's reserved USDC execution bounty whether the order fills or is invalid/expired,
+    ///         order's router-custodied execution bounty whether the order fills or is invalid/expired,
     ///         so the queue remains economically serviceable as well as un-brickable.
     /// @param orderId Must equal nextExecuteId (stale orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
@@ -686,13 +686,12 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = executionBountyReserves[orderId];
         if (executionBountyUsdc > 0) {
-            IMarginClearinghouse(engine.clearinghouse())
-                .payReservedSettlementUsdc(orders[orderId].accountId, executionBountyUsdc, msg.sender);
             delete executionBountyReserves[orderId];
+            USDC.safeTransfer(msg.sender, executionBountyUsdc);
         }
     }
 
-    function _releaseExecutionBounty(
+    function _forfeitExecutionBountyToProtocolRevenue(
         uint64 orderId
     ) internal {
         uint256 executionBountyUsdc = executionBountyReserves[orderId];
@@ -700,8 +699,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         delete executionBountyReserves[orderId];
-        IMarginClearinghouse(engine.clearinghouse())
-            .releaseReservedSettlementUsdc(orders[orderId].accountId, executionBountyUsdc);
+        USDC.forceApprove(address(engine), executionBountyUsdc);
+        engine.absorbRouterCancellationFee(executionBountyUsdc);
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {
@@ -738,7 +737,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
             revert OrderRouter__InsufficientFreeEquity();
         }
-        clearinghouse.reserveSettlementUsdc(accountId, executionBountyUsdc);
+        clearinghouse.seizeAsset(accountId, address(USDC), executionBountyUsdc, address(this));
         executionBountyReserves[orderId] = executionBountyUsdc;
     }
 

@@ -283,17 +283,7 @@ contract PerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
-        uint256 trackedReservedSettlement;
-        for (uint256 i = 0; i < 3; i++) {
-            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            trackedReservedSettlement += clearinghouse.reservedSettlementUsdc(accountId);
-        }
-
-        assertEq(
-            trackedReservedSettlement,
-            pendingKeeperReserves,
-            "Queued keeper reserves must stay reserved inside the clearinghouse"
-        );
+        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Queued keeper reserves must stay backed in router custody");
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {
@@ -752,18 +742,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
-        uint256 trackedReservedSettlement;
-        for (uint256 i = 0; i < 4; i++) {
-            trackedReservedSettlement += clearinghouse.reservedSettlementUsdc(
-                bytes32(uint256(uint160(handler.actors(i))))
-            );
-        }
-
-        assertEq(
-            trackedReservedSettlement,
-            pendingKeeperReserves,
-            "Adversarial queue keeper reserves must remain fully backed"
-        );
+        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Adversarial queue keeper reserves must remain fully backed");
     }
 
     function invariant_AdversarialBatchProcessingRemainsLive() public {
@@ -785,9 +764,18 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialRouterNeverCustodiesUsdc() public {
+    function invariant_AdversarialRouterCustodiesOnlyPendingKeeperReserves() public {
+        uint256 pendingKeeperReserves;
+        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
+            if (accountId == bytes32(0) || sizeDelta == 0) {
+                continue;
+            }
+            pendingKeeperReserves += router.executionBountyReserves(orderId);
+        }
+
         assertEq(
-            usdc.balanceOf(address(router)), 0, "Router must not retain settlement balances during adversarial flows"
+            usdc.balanceOf(address(router)), pendingKeeperReserves, "Router custody must equal pending keeper reserves during adversarial flows"
         );
     }
 

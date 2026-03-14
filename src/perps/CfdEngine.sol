@@ -458,6 +458,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _assertPostSolvency();
     }
 
+    /// @notice Pulls router-custodied cancellation fees into the vault and books them as protocol revenue.
+    function absorbRouterCancellationFee(
+        uint256 amountUsdc
+    ) external onlyRouter {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
+        accumulatedFeesUsdc += amountUsdc;
+    }
+
     /// @notice Adds isolated margin to an existing open position without changing size.
     function addMargin(
         bytes32 accountId,
