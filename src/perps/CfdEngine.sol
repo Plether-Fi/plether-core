@@ -1362,9 +1362,27 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
 
-        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc);
-        uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
-        preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
+        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
+            _buildAdjustedSolvencyState(),
+            SolvencyAccountingLib.PreviewDelta({
+                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
+                protocolFeesDeltaUsdc: closeState.netSettlementUsdc >= 0
+                    ? preview.executionFeeUsdc
+                    : _planPreviewCloseLossSettlement(
+                        accountId,
+                        uint256(-closeState.netSettlementUsdc),
+                        preview.executionFeeUsdc,
+                        preview.remainingMargin,
+                        closeState.marginToFreeUsdc
+                    ).collectedExecFeeUsdc,
+                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc),
+                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
+                deferredLiquidationBountyDeltaUsdc: 0,
+                pendingVaultPayoutUsdc: 0
+            }),
+            degradedMode
+        );
+        preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
     }
 
     function _previewFundingSettlement(
@@ -1456,9 +1474,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.deferredPayoutUsdc = availableCash >= result.payoutUsdc ? 0 : result.payoutUsdc;
         preview.badDebtUsdc = result.badDebtUsdc;
 
-        uint256 maxLiabilityAfter = viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc);
-        uint256 effectiveAssetsAfter = _buildAdjustedSolvencySnapshot().effectiveSolvencyAssets;
-        preview.triggersDegradedMode = !degradedMode && effectiveAssetsAfter < maxLiabilityAfter;
+        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
+            _buildAdjustedSolvencyState(),
+            SolvencyAccountingLib.PreviewDelta({
+                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
+                protocolFeesDeltaUsdc: 0,
+                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc),
+                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
+                deferredLiquidationBountyDeltaUsdc: 0,
+                pendingVaultPayoutUsdc: preview.keeperBountyUsdc
+            }),
+            degradedMode
+        );
+        preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
         vaultDepthUsdc;
     }
 

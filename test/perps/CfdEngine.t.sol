@@ -521,6 +521,25 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(illiquidPreview.remainingSize, 0);
     }
 
+    function test_PreviewClose_TriggersDegradedModeMatchesLiveClose() public {
+        address bullTrader = address(0xAB1308);
+        address bearTrader = address(0xAB1309);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 500_000e18, 20_000_000, pool.totalAssets());
+        assertTrue(preview.triggersDegradedMode, "Preview should flag the profitable close that reveals insolvency");
+
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
+    }
+
     function test_PreviewClose_NegativeVpiDoesNotPanic() public {
         address trader = address(0xAB1301);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -745,6 +764,25 @@ contract CfdEngineTest is BasePerpTest {
             preview.badDebtUsdc,
             "Illiquid liquidation preview should match live bad debt"
         );
+    }
+
+    function test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation() public {
+        address trader = address(0xAB1410);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 300e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(101_000_000));
+        vm.prank(address(0xAB1411));
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Liquidation preview should match live degraded-mode outcome");
     }
 
     function test_GetDeferredPayoutStatus_ReflectsClaimability() public {

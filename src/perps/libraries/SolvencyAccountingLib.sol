@@ -5,6 +5,21 @@ import {CfdTypes} from "../CfdTypes.sol";
 
 library SolvencyAccountingLib {
 
+    struct PreviewDelta {
+        int256 physicalAssetsDeltaUsdc;
+        uint256 protocolFeesDeltaUsdc;
+        uint256 maxLiabilityAfterUsdc;
+        uint256 deferredTraderPayoutDeltaUsdc;
+        uint256 deferredLiquidationBountyDeltaUsdc;
+        uint256 pendingVaultPayoutUsdc;
+    }
+
+    struct PreviewResult {
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
+        bool triggersDegradedMode;
+    }
+
     struct SolvencyState {
         uint256 physicalAssetsUsdc;
         uint256 protocolFeesUsdc;
@@ -84,6 +99,33 @@ library SolvencyAccountingLib {
         SolvencyState memory state
     ) internal pure returns (bool) {
         return state.effectiveAssetsUsdc < state.maxLiabilityUsdc;
+    }
+
+    function previewPostOpSolvency(
+        SolvencyState memory currentState,
+        PreviewDelta memory delta,
+        bool alreadyDegraded
+    ) internal pure returns (PreviewResult memory result) {
+        uint256 physicalAssetsAfterUsdc = currentState.physicalAssetsUsdc;
+        if (delta.physicalAssetsDeltaUsdc > 0) {
+            physicalAssetsAfterUsdc += uint256(delta.physicalAssetsDeltaUsdc);
+        } else if (delta.physicalAssetsDeltaUsdc < 0) {
+            uint256 debitUsdc = uint256(-delta.physicalAssetsDeltaUsdc);
+            physicalAssetsAfterUsdc = physicalAssetsAfterUsdc > debitUsdc ? physicalAssetsAfterUsdc - debitUsdc : 0;
+        }
+
+        SolvencyState memory afterState = buildSolvencyState(
+            physicalAssetsAfterUsdc,
+            currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
+            delta.maxLiabilityAfterUsdc,
+            currentState.solvencyFundingPnlUsdc,
+            currentState.deferredTraderPayoutUsdc + delta.deferredTraderPayoutDeltaUsdc,
+            currentState.deferredLiquidationBountyUsdc + delta.deferredLiquidationBountyDeltaUsdc
+        );
+
+        result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;
+        result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingVaultPayoutUsdc);
+        result.triggersDegradedMode = !alreadyDegraded && result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
     }
 
 }
