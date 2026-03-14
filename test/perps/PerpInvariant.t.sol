@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
@@ -376,6 +377,46 @@ contract PerpInvariantTest is BasePerpTest {
                 locked,
                 margin + escrow.committedMarginUsdc,
                 "Locked margin must back open-position margin plus pending committed margin"
+            );
+        }
+    }
+
+    function invariant_ClearinghouseBucketsConserveTrackedState() public {
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, size > 0 ? margin : 0);
+
+            assertEq(
+                buckets.settlementBalanceUsdc,
+                buckets.freeSettlementUsdc + buckets.reservedSettlementUsdc + buckets.totalLockedMarginUsdc,
+                "Settlement buckets must sum to tracked balance"
+            );
+            assertEq(
+                buckets.totalLockedMarginUsdc,
+                buckets.activePositionMarginUsdc + buckets.otherLockedMarginUsdc,
+                "Locked buckets must split into active and other locked margin"
+            );
+            assertEq(
+                clearinghouse.lockedMarginUsdc(accountId),
+                buckets.totalLockedMarginUsdc,
+                "Bucket view must match locked margin storage"
+            );
+        }
+    }
+
+    function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public {
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            uint256 protectedMargin = size > 0 ? margin : 0;
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+
+            assertEq(buckets.reservedSettlementUsdc, 0, "Keeper reserves must not remain in trader collateral buckets");
+            assertEq(
+                clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
+                buckets.settlementBalanceUsdc,
+                "All trader-owned settlement collateral should remain terminally reachable"
             );
         }
     }
@@ -784,6 +825,14 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             engine.deferredLiquidationBountyUsdc(address(handler)),
             handler.ghost_expectedDeferredLiquidationBounty(),
             "Liquidation payout failures must only create deferred bounty claims"
+        );
+    }
+
+    function invariant_DeferredLiquidationBountyTotalsConserveClaims() public {
+        assertEq(
+            engine.totalDeferredLiquidationBountyUsdc(),
+            engine.deferredLiquidationBountyUsdc(address(handler)),
+            "Deferred liquidation bounty total must equal tracked keeper claims in invariant harness"
         );
     }
 
