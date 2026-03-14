@@ -555,6 +555,24 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewClose_FullLossBadDebtMatchesLiveSettlement() public {
+        address trader = address(0xAB1304);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 110_000_000, pool.totalAssets());
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 110_000_000);
+
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Preview bad debt should match live terminal settlement planning"
+        );
+    }
+
     function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

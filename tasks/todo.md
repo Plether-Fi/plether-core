@@ -265,3 +265,12 @@ Review:
 - Updated `src/perps/CfdEngine.sol` so `_processIncrease()` now consumes the shared open-accounting state instead of re-embedding the full open-trade math inline.
 - Preserved original revert precedence by continuing to check vault solvency before skew-cap enforcement while still computing VPI and skew against the true post-trade open interest.
 - Verified green: targeted open-path/audit regressions plus full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.
+
+- [x] Unify close preview/live around shared terminal-settlement planning
+
+Review:
+- Added shared terminal close-settlement planning in `src/perps/libraries/CfdEngineSettlementLib.sol` using `MarginClearinghouseAccountingLib.planTerminalLossConsumption(...)` so preview and live close-loss handling derive seized collateral, shortfall, fee collection, and bad debt from the same kernel.
+- Updated `src/perps/CfdEngine.sol` so live `_settleCloseNetSettlement()` and `previewClose()` both use the shared close-loss planner, with preview explicitly modeling the post-unlock bucket state before terminal loss collection.
+- Kept the existing close accounting kernel in `CloseAccountingLib`; this change specifically removes the remaining divergence in terminal settlement planning after close accounting has already produced `netSettlementUsdc`.
+- Added preview/live parity coverage in `test/perps/CfdEngine.t.sol`, including a new regression asserting preview bad debt matches live full-close settlement.
+- Verified green: targeted close regressions plus full `forge test --match-path "test/perps/*.t.sol"` with `450 tests passed, 0 failed, 0 skipped`.

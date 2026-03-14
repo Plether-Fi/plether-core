@@ -14,6 +14,7 @@ import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
+import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -1039,18 +1040,53 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return collectedExecFeeUsdc;
         }
 
-        CfdEngineSettlementLib.CloseSettlementResult memory result;
-        (result.seizedUsdc, result.shortfallUsdc) =
-            clearinghouse.consumeCloseLoss(accountId, uint256(-netSettlement), remainingPosMarginUsdc, address(vault));
-        if (result.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
+        CfdEngineSettlementLib.CloseSettlementResult memory plannedResult =
+            _planCloseLossSettlement(accountId, uint256(-netSettlement), execFeeUsdc, remainingPosMarginUsdc);
+        if (plannedResult.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
 
-        result.collectedExecFeeUsdc = execFeeUsdc > result.shortfallUsdc ? execFeeUsdc - result.shortfallUsdc : 0;
-        result.badDebtUsdc = result.shortfallUsdc > execFeeUsdc ? result.shortfallUsdc - execFeeUsdc : 0;
+        CfdEngineSettlementLib.CloseSettlementResult memory result;
+        (result.seizedUsdc, result.shortfallUsdc) =
+            clearinghouse.consumeCloseLoss(accountId, uint256(-netSettlement), remainingPosMarginUsdc, address(vault));
+
+        result.collectedExecFeeUsdc = plannedResult.collectedExecFeeUsdc;
+        result.badDebtUsdc = plannedResult.badDebtUsdc;
 
         collectedExecFeeUsdc = result.collectedExecFeeUsdc;
         accumulatedBadDebtUsdc += result.badDebtUsdc;
+    }
+
+    function _planCloseLossSettlement(
+        bytes32 accountId,
+        uint256 lossUsdc,
+        uint256 execFeeUsdc,
+        uint256 remainingPosMarginUsdc
+    ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
+        result = CfdEngineSettlementLib.closeSettlementResultForTerminalBuckets(
+            buckets, remainingPosMarginUsdc, lossUsdc, execFeeUsdc
+        );
+    }
+
+    function _planPreviewCloseLossSettlement(
+        bytes32 accountId,
+        uint256 lossUsdc,
+        uint256 execFeeUsdc,
+        uint256 remainingPosMarginUsdc,
+        uint256 marginToFreeUsdc
+    ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
+        uint256 totalLockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+            clearinghouse.balances(accountId, address(USDC)),
+            clearinghouse.reservedSettlementUsdc(accountId),
+            totalLockedMarginUsdc > marginToFreeUsdc ? totalLockedMarginUsdc - marginToFreeUsdc : 0,
+            remainingPosMarginUsdc
+        );
+        result = CfdEngineSettlementLib.closeSettlementResultForTerminalBuckets(
+            buckets, remainingPosMarginUsdc, lossUsdc, execFeeUsdc
+        );
     }
 
     function _settleLiquidationResidual(
@@ -1310,14 +1346,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
             preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
         } else if (closeState.netSettlementUsdc < 0) {
-            uint256 balanceUsdc = clearinghouse.balances(accountId, address(USDC));
-            uint256 lockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
-            uint256 reservedSettlement = clearinghouse.reservedSettlementUsdc(accountId);
-            uint256 freeSettlementAfterUnlock = balanceUsdc > (lockedMarginUsdc - closeState.marginToFreeUsdc) + reservedSettlement
-                ? balanceUsdc - ((lockedMarginUsdc - closeState.marginToFreeUsdc) + reservedSettlement)
-                : 0;
-            CfdEngineSettlementLib.CloseSettlementResult memory result = CfdEngineSettlementLib.closeSettlementResult(
-                freeSettlementAfterUnlock, uint256(-closeState.netSettlementUsdc), preview.executionFeeUsdc
+            CfdEngineSettlementLib.CloseSettlementResult memory result = _planPreviewCloseLossSettlement(
+                accountId,
+                uint256(-closeState.netSettlementUsdc),
+                preview.executionFeeUsdc,
+                preview.remainingMargin,
+                closeState.marginToFreeUsdc
             );
             preview.seizedCollateralUsdc = result.seizedUsdc;
             preview.badDebtUsdc = result.badDebtUsdc;

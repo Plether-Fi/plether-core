@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
+import {MarginClearinghouseAccountingLib} from "./MarginClearinghouseAccountingLib.sol";
+
 library CfdEngineSettlementLib {
 
     struct DebtCollectionResult {
@@ -41,6 +44,17 @@ library CfdEngineSettlementLib {
         result.collectedExecFeeUsdc =
             execFeeUsdc > collection.shortfallUsdc ? execFeeUsdc - collection.shortfallUsdc : 0;
         result.badDebtUsdc = collection.shortfallUsdc > execFeeUsdc ? collection.shortfallUsdc - execFeeUsdc : 0;
+    }
+
+    function closeSettlementResultForTerminalBuckets(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 protectedLockedMarginUsdc,
+        uint256 owedUsdc,
+        uint256 execFeeUsdc
+    ) internal pure returns (CloseSettlementResult memory result) {
+        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
+            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, owedUsdc);
+        result = closeSettlementResult(consumption.totalConsumedUsdc, owedUsdc, execFeeUsdc);
     }
 
     function liquidationSettlementResult(
