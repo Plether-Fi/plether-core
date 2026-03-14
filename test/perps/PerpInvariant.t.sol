@@ -381,6 +381,27 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
+    function invariant_GlobalSideMarginsMatchPositions() public {
+        uint256 sumBullMargin;
+        uint256 sumBearMargin;
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            (uint256 size, uint256 margin,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            if (size == 0) {
+                continue;
+            }
+            if (side == CfdTypes.Side.BULL) {
+                sumBullMargin += margin;
+            } else {
+                sumBearMargin += margin;
+            }
+        }
+
+        assertEq(engine.totalBullMargin(), sumBullMargin, "Bull side margin mirror must equal live bull position margins");
+        assertEq(engine.totalBearMargin(), sumBearMargin, "Bear side margin mirror must equal live bear position margins");
+    }
+
     function invariant_ClearinghouseBucketsConserveTrackedState() public {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
@@ -417,6 +438,31 @@ contract PerpInvariantTest is BasePerpTest {
                 clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
                 buckets.settlementBalanceUsdc,
                 "All trader-owned settlement collateral should remain terminally reachable"
+            );
+        }
+    }
+
+    function invariant_CommittedMarginOwnershipAccountingConservesQueuedExposure() public {
+        uint64 nextExecuteId = router.nextExecuteId();
+        uint64 nextCommitId = router.nextCommitId();
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            uint256 rawQueuedCommitted;
+
+            for (uint64 orderId = nextExecuteId; orderId < nextCommitId; orderId++) {
+                (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
+                if (queuedAccountId != accountId || sizeDelta == 0) {
+                    continue;
+                }
+                rawQueuedCommitted += router.committedMargins(orderId);
+            }
+
+            OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+            assertEq(
+                escrow.committedMarginUsdc + router.consumedCommittedMarginUsdc(accountId),
+                rawQueuedCommitted,
+                "Refundable plus consumed committed margin must equal raw queued committed margin"
             );
         }
     }
@@ -818,6 +864,37 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(
             usdc.balanceOf(address(router)), pendingKeeperReserves, "Router custody must equal pending keeper reserves during adversarial flows"
         );
+    }
+
+    function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public {
+        for (uint256 i = 0; i < 4; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.actors(i))));
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, 0);
+            assertEq(
+                buckets.reservedSettlementUsdc,
+                0,
+                "Queued keeper reserves must not leak back into trader clearinghouse collateral"
+            );
+        }
+    }
+
+    function invariant_AdversarialExitedAccountsDoNotRetainRecoverableCloseBounties() public {
+        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+            (bytes32 accountId, uint256 sizeDelta,,,,,, CfdTypes.Side side, bool isClose) = router.orders(orderId);
+            side;
+            if (accountId == bytes32(0) || sizeDelta == 0 || !isClose) {
+                continue;
+            }
+
+            (uint256 openSize,,,,,,,) = engine.positions(accountId);
+            if (openSize == 0) {
+                assertEq(
+                    router.executionBountyReserves(orderId),
+                    0,
+                    "Exited accounts must not retain recoverable close-order keeper bounties"
+                );
+            }
+        }
     }
 
     function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public {
