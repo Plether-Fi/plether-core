@@ -86,9 +86,12 @@ library MarginClearinghouseAccountingLib {
             : buckets.freeSettlementUsdc;
 
         uint256 remainingConsumedUsdc = consumption.totalConsumedUsdc - consumption.freeSettlementConsumedUsdc;
-        consumption.activeMarginConsumedUsdc = buckets.activePositionMarginUsdc > remainingConsumedUsdc
+        uint256 consumableActiveMarginUsdc = buckets.activePositionMarginUsdc > protectedLockedMarginUsdc
+            ? buckets.activePositionMarginUsdc - protectedLockedMarginUsdc
+            : 0;
+        consumption.activeMarginConsumedUsdc = consumableActiveMarginUsdc > remainingConsumedUsdc
             ? remainingConsumedUsdc
-            : buckets.activePositionMarginUsdc;
+            : consumableActiveMarginUsdc;
         consumption.otherLockedMarginConsumedUsdc = remainingConsumedUsdc - consumption.activeMarginConsumedUsdc;
     }
 
@@ -107,10 +110,12 @@ library MarginClearinghouseAccountingLib {
         uint256 protectedLockedMarginUsdc,
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
+        protectedLockedMarginUsdc;
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
+        mutation.activeMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
         mutation.otherLockedMarginUnlockedUsdc = consumption.otherLockedMarginConsumedUsdc;
-        mutation.resultingLockedMarginUsdc =
-            protectedLockedMarginUsdc + (buckets.otherLockedMarginUsdc - consumption.otherLockedMarginConsumedUsdc);
+        mutation.resultingLockedMarginUsdc = buckets.totalLockedMarginUsdc - consumption.activeMarginConsumedUsdc
+            - consumption.otherLockedMarginConsumedUsdc;
     }
 
     function planLiquidationResidual(

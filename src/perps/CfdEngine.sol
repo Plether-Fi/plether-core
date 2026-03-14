@@ -21,6 +21,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface IOrderRouterAccounting {
+    function noteCommittedMarginConsumed(bytes32 accountId, uint256 amountUsdc) external;
+}
+
 /// @title CfdEngine
 /// @notice The core mathematical ledger for Plether CFDs.
 /// @dev Settles all funds through the MarginClearinghouse and CfdVault.
@@ -704,33 +708,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         int256 closeFundingSettlementUsdc = _settleFunding(order, pos);
+        uint256 marginAfterFunding = pos.margin;
+        _syncTotalSideMargin(marginSide, marginSnapshot, marginAfterFunding);
 
         if (order.isClose) {
             accumulatedFeesUsdc += _processDecrease(
                 order, pos, price, preSkewUsdc, vaultDepthUsdc, closeFundingSettlementUsdc
             );
+            _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
             _enterDegradedModeIfInsolvent(order.accountId, 0);
         } else {
             if (degradedMode) {
                 revert CfdEngine__DegradedMode();
             }
             _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
+            _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
             _assertPostSolvency();
-        }
-
-        uint256 marginAfter = pos.margin;
-        if (marginAfter > marginSnapshot) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                totalBullMargin += marginAfter - marginSnapshot;
-            } else {
-                totalBearMargin += marginAfter - marginSnapshot;
-            }
-        } else if (marginSnapshot > marginAfter) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                totalBullMargin -= marginSnapshot - marginAfter;
-            } else {
-                totalBearMargin -= marginSnapshot - marginAfter;
-            }
         }
 
         pos.lastUpdateTime = uint64(block.timestamp);
@@ -974,6 +967,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
     }
 
+    function _syncTotalSideMargin(
+        CfdTypes.Side side,
+        uint256 marginBefore,
+        uint256 marginAfter
+    ) internal {
+        if (marginAfter > marginBefore) {
+            uint256 delta = marginAfter - marginBefore;
+            if (side == CfdTypes.Side.BULL) {
+                totalBullMargin += delta;
+            } else {
+                totalBearMargin += delta;
+            }
+        } else if (marginBefore > marginAfter) {
+            uint256 delta = marginBefore - marginAfter;
+            if (side == CfdTypes.Side.BULL) {
+                totalBullMargin -= delta;
+            } else {
+                totalBearMargin -= delta;
+            }
+        }
+    }
+
     function _addGlobalLiability(
         CfdTypes.Side side,
         uint256 maxProfitUsdc,
@@ -1025,6 +1040,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         CfdEngineSettlementLib.CloseSettlementResult memory plannedResult =
             _planCloseLossSettlement(accountId, uint256(-netSettlement), execFeeUsdc, remainingPosMarginUsdc);
+        MarginClearinghouseAccountingLib.SettlementConsumption memory plannedConsumption =
+            _planCloseLossConsumption(accountId, uint256(-netSettlement), remainingPosMarginUsdc);
         if (plannedResult.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
@@ -1035,9 +1052,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         result.collectedExecFeeUsdc = plannedResult.collectedExecFeeUsdc;
         result.badDebtUsdc = plannedResult.badDebtUsdc;
+        _noteCommittedMarginConsumed(accountId, plannedConsumption.otherLockedMarginConsumedUsdc);
 
         collectedExecFeeUsdc = result.collectedExecFeeUsdc;
         accumulatedBadDebtUsdc += result.badDebtUsdc;
+    }
+
+    function _planCloseLossConsumption(
+        bytes32 accountId,
+        uint256 lossUsdc,
+        uint256 remainingPosMarginUsdc
+    ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
+        consumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, remainingPosMarginUsdc, lossUsdc);
     }
 
     function _planCloseLossSettlement(
@@ -1046,8 +1074,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 execFeeUsdc,
         uint256 remainingPosMarginUsdc
     ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
         result = CfdEngineSettlementLib.closeSettlementResultForTerminalBuckets(
             buckets, remainingPosMarginUsdc, lossUsdc, execFeeUsdc
         );
@@ -1077,12 +1104,27 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 positionMarginUsdc,
         int256 residualUsdc
     ) internal returns (CfdEngineSettlementLib.LiquidationSettlementResult memory result) {
+        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
+            MarginClearinghouseAccountingLib.planLiquidationResidual(
+                clearinghouse.getAccountUsdcBuckets(accountId, positionMarginUsdc), residualUsdc
+            );
         (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
             accountId, positionMarginUsdc, residualUsdc, address(vault)
         );
+        _noteCommittedMarginConsumed(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
         if (result.payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(accountId, result.payoutUsdc);
         }
+    }
+
+    function _noteCommittedMarginConsumed(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0 || orderRouter == address(0)) {
+            return;
+        }
+        IOrderRouterAccounting(orderRouter).noteCommittedMarginConsumed(accountId, amountUsdc);
     }
 
     function _payOrRecordDeferredTraderPayout(

@@ -78,6 +78,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(uint64 => uint256) public executionBountyReserves;
     mapping(address => uint256) public claimableEth;
     mapping(bytes32 => uint256) public pendingOrderCounts;
+    mapping(bytes32 => uint256) public consumedCommittedMarginUsdc;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -107,11 +108,19 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__CloseSizeExceedsPosition();
     error OrderRouter__InsufficientFreeEquity();
     error OrderRouter__NotOrderOwner();
+    error OrderRouter__Unauthorized();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, string reason);
     event OrderCancelled(uint64 indexed orderId, bytes32 indexed accountId);
+
+    modifier onlyEngine() {
+        if (msg.sender != address(engine)) {
+            revert OrderRouter__Unauthorized();
+        }
+        _;
+    }
 
     /// @param _engine CfdEngine that processes trades and liquidations
     /// @param _vault CfdVault used for vault depth queries and liquidation bounty payouts
@@ -319,6 +328,22 @@ contract OrderRouter is Ownable2Step, Pausable {
             escrow.executionBountyUsdc += executionBountyReserves[orderId];
             escrow.pendingOrderCount++;
         }
+        uint256 consumed = consumedCommittedMarginUsdc[accountId];
+        if (consumed >= escrow.committedMarginUsdc) {
+            escrow.committedMarginUsdc = 0;
+        } else {
+            escrow.committedMarginUsdc -= consumed;
+        }
+    }
+
+    function noteCommittedMarginConsumed(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyEngine {
+        if (amountUsdc == 0) {
+            return;
+        }
+        consumedCommittedMarginUsdc[accountId] += amountUsdc;
     }
 
     function getAccountOrderSummary(
@@ -722,7 +747,15 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         delete committedMargins[orderId];
         bytes32 accountId = orders[orderId].accountId;
-        IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+        uint256 consumed = consumedCommittedMarginUsdc[accountId];
+        if (consumed > 0) {
+            uint256 charge = consumed > amount ? amount : consumed;
+            consumedCommittedMarginUsdc[accountId] = consumed - charge;
+            amount -= charge;
+        }
+        if (amount > 0) {
+            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(accountId, amount);
+        }
     }
 
     function _reserveExecutionBounty(

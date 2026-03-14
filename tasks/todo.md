@@ -284,6 +284,15 @@ Review:
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
 - Verified green: targeted HousePool/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `450 tests passed, 0 failed, 0 skipped`.
 
+- [x] Fix blocker accounting bugs in partial-close terminal settlement and in-flight solvency timing
+
+Review:
+- Fixed partial-close terminal loss planning in `src/perps/libraries/MarginClearinghouseAccountingLib.sol` so protected residual active margin is excluded from both reachability and consumption attribution, and terminal loss mutation now applies exactly the planned active/other locked consumption without recomputation.
+- Added `consumedCommittedMarginUsdc` accounting in `src/perps/OrderRouter.sol` so terminally-consumed queued committed margin is charged against later cancel refunds instead of unlocking below the surviving protected position margin.
+- Fixed in-flight solvency timing in `src/perps/CfdEngine.sol` by synchronizing `totalBullMargin` / `totalBearMargin` immediately after funding settlement and again after the main open/close mutation, so solvency and degraded-mode checks no longer read stale side-margin mirrors.
+- Added focused blocker coverage in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol`; the new H-01/H-02 tests now pass.
+- Verified green: targeted blocker/engine/router/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `465 tests passed, 0 failed, 0 skipped`.
+
 - [x] Extract a clearinghouse bucket mutation layer
 
 Review:

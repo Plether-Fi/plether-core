@@ -559,9 +559,14 @@ contract MarginClearinghouse is Ownable2Step {
             return (0, shortfallUsdc);
         }
 
-        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+        if (mutation.activeMarginUnlockedUsdc > 0 || mutation.otherLockedMarginUnlockedUsdc > 0) {
             lockedMarginUsdc[accountId] = mutation.resultingLockedMarginUsdc;
-            emit MarginUnlocked(accountId, mutation.otherLockedMarginUnlockedUsdc);
+            if (mutation.activeMarginUnlockedUsdc > 0) {
+                emit MarginUnlocked(accountId, mutation.activeMarginUnlockedUsdc);
+            }
+            if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+                emit MarginUnlocked(accountId, mutation.otherLockedMarginUnlockedUsdc);
+            }
         }
 
         balances[accountId][settlementAsset] -= mutation.settlementDebitUsdc;

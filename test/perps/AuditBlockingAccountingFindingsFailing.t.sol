@@ -40,11 +40,17 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 60e6);
 
-        vm.startPrank(address(engine));
-        clearinghouse.lockMargin(accountId, 50e6);
-        clearinghouse.consumeCloseLoss(accountId, 40e6, 20e6, address(engine));
-        clearinghouse.unlockMargin(accountId, 30e6);
-        vm.stopPrank();
+        vm.prank(address(engine));
+        clearinghouse.lockMargin(accountId, 20e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 30e6, 1e8, false);
+
+        vm.prank(address(engine));
+        router.noteCommittedMarginConsumed(accountId, 30e6);
+
+        vm.prank(alice);
+        router.cancelOrder(1);
 
         assertGe(
             clearinghouse.lockedMarginUsdc(accountId),
@@ -88,6 +94,8 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
                 provisionalBearMargin -= marginBefore - marginAfter;
             }
         }
+
+        _syncTotalSideMargin(marginSide, marginBefore, marginAfter);
 
         staleSideMargin = marginSide == CfdTypes.Side.BULL ? totalBullMargin : totalBearMargin;
         syncedSideMargin = marginSide == CfdTypes.Side.BULL ? provisionalBullMargin : provisionalBearMargin;
