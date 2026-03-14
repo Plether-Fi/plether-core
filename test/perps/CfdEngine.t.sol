@@ -573,6 +573,24 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewClose_ClampsOraclePriceToCap() public {
+        address trader = address(0xAB1305);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 5_000e6);
+        _open(accountId, CfdTypes.Side.BEAR, 100_000e18, 4_000e6, 1e8);
+
+        CfdEngine.ClosePreview memory cappedPreview = engine.previewClose(accountId, 100_000e18, 2e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory overCapPreview = engine.previewClose(accountId, 100_000e18, 3e8, pool.totalAssets());
+
+        assertEq(overCapPreview.executionPrice, cappedPreview.executionPrice, "Preview execution price should clamp to CAP_PRICE");
+        assertEq(overCapPreview.realizedPnlUsdc, cappedPreview.realizedPnlUsdc, "Preview PnL should clamp to CAP_PRICE");
+        assertEq(overCapPreview.vpiDeltaUsdc, cappedPreview.vpiDeltaUsdc, "Preview VPI should clamp to CAP_PRICE");
+        assertEq(overCapPreview.executionFeeUsdc, cappedPreview.executionFeeUsdc, "Preview fee should clamp to CAP_PRICE");
+        assertEq(overCapPreview.immediatePayoutUsdc, cappedPreview.immediatePayoutUsdc, "Preview payout should clamp to CAP_PRICE");
+        assertEq(overCapPreview.deferredPayoutUsdc, cappedPreview.deferredPayoutUsdc, "Preview deferred payout should clamp to CAP_PRICE");
+        assertEq(overCapPreview.badDebtUsdc, cappedPreview.badDebtUsdc, "Preview bad debt should clamp to CAP_PRICE");
+    }
+
     function test_PreviewLiquidation_ReturnsBountyAndLiquidatableFlag() public {
         address trader = address(0xAB14);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

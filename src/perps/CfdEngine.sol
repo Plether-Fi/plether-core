@@ -1281,8 +1281,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (ClosePreview memory preview) {
+        uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
         CfdTypes.Position memory pos = positions[accountId];
-        preview.executionPrice = oraclePrice;
+        preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
         if (pos.size == 0) {
             preview.invalidCode = 1;
@@ -1298,8 +1299,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _previewFundingSettlement(pos, sizeDelta == pos.size, vaultDepthUsdc);
         pos.margin = marginAfterFunding;
 
-        uint256 preBullUsdc = (bullOI * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 preBearUsdc = (bearOI * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 preBullUsdc = (bullOI * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 preBearUsdc = (bearOI * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
         uint256 postBullOi = bullOI;
         uint256 postBearOi = bearOI;
@@ -1308,8 +1309,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         } else {
             postBearOi -= sizeDelta;
         }
-        uint256 postBullUsdc = (postBullOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (postBearOi * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
         CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
             pos.size,
@@ -1319,7 +1320,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             pos.vpiAccrued,
             pos.side,
             sizeDelta,
-            oraclePrice,
+            price,
             CAP_PRICE,
             preSkewUsdc,
             postSkewUsdc,
