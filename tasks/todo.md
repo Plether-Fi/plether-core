@@ -248,3 +248,12 @@ Review:
 - `src/perps/ACCOUNTING_SPEC.md` now explicitly states that keeper execution reserve is non-trader-owned once committed and that user-cancelled reserves route to protocol revenue instead of back to the trader.
 - Updated queue/invariant regressions in `test/perps/OrderRouter.t.sol`, `test/perps/AuditRemainingCoverageFindingsFailing.t.sol`, and `test/perps/PerpInvariant.t.sol` to reflect router custody rather than `clearinghouse.reservedSettlementUsdc`.
 - Verified green: targeted router/audit/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.
+
+- [x] Extract shared position-risk and funding accounting across view/preview/live paths
+
+Review:
+- Added `src/perps/libraries/PositionRiskAccountingLib.sol` as the shared kernel for pending-funding calculation, projected funding accrual, equity, maintenance margin, current notional, and liquidatable-state derivation.
+- Updated `src/perps/CfdEngine.sol` so `checkWithdraw()`, `getPendingFunding()`, `getPositionView()`, `previewLiquidation()`, and live liquidation all route through the shared position-risk/funding library instead of recomputing those answers inline.
+- Reused the same projected funding helper for liquidation preview and close-preview funding simulation, reducing preview/live drift in funding accrual logic.
+- Preserved existing close/liquidation settlement libraries; this refactor only centralized the duplicated funding and position-risk math that fed those paths.
+- Verified green: targeted risk/funding parity runs and full `forge test --match-path "test/perps/*.t.sol"` with `449 tests passed, 0 failed, 0 skipped`.

@@ -10,6 +10,7 @@ import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
+import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -612,16 +613,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__MarkPriceStale();
         }
 
-        int256 pendingFunding = getPendingFunding(pos);
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
-
         uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos,
+            price,
+            CAP_PRICE,
+            getPendingFunding(pos),
+            reachableUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
 
-        int256 equity = int256(reachableUsdc) + pendingFunding;
-        equity = isProfit ? equity + int256(pnlAbs) : equity - int256(pnlAbs);
-
-        uint256 mmr = getMaintenanceMarginUsdc(pos.size, price);
-        if (equity < int256(mmr)) {
+        if (riskState.equityUsdc < int256(riskState.maintenanceMarginUsdc)) {
             revert CfdEngine__WithdrawBlockedByOpenPosition();
         }
     }
@@ -683,8 +685,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return 0;
         }
         int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
-        int256 indexDelta = currentIndex - pos.entryFundingIndex;
-        fundingUsdc = (int256(pos.size) * indexDelta) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, currentIndex);
     }
 
     // ==========================================
@@ -1166,12 +1167,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return viewData;
         }
 
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, lastMarkPrice, CAP_PRICE);
-        int256 pendingFunding = getPendingFunding(pos);
         uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
-
-        int256 equityUsdc = int256(reachableUsdc) + pendingFunding;
-        equityUsdc = isProfit ? equityUsdc + int256(pnlAbs) : equityUsdc - int256(pnlAbs);
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos,
+            lastMarkPrice,
+            CAP_PRICE,
+            getPendingFunding(pos),
+            reachableUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
 
         viewData.exists = true;
         viewData.side = pos.side;
@@ -1179,13 +1183,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.margin = pos.margin;
         viewData.entryPrice = pos.entryPrice;
         viewData.entryNotionalUsdc = (pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        viewData.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        viewData.pendingFundingUsdc = pendingFunding;
-        viewData.netEquityUsdc = equityUsdc;
+        viewData.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
+        viewData.pendingFundingUsdc = riskState.pendingFundingUsdc;
+        viewData.netEquityUsdc = riskState.equityUsdc;
         viewData.maxProfitUsdc = CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, CAP_PRICE);
-        uint256 currentNotionalUsdc = (pos.size * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        viewData.liquidatable = equityUsdc <= int256((currentNotionalUsdc * requiredBps) / 10_000);
+        viewData.liquidatable = riskState.liquidatable;
     }
 
     function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
@@ -1346,43 +1348,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdTypes.Position memory pos,
         uint256 vaultDepthUsdc
     ) internal view returns (int256 fundingUsdc) {
-        if (pos.size == 0) {
-            return 0;
-        }
-
-        int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
-        uint256 timeDelta = block.timestamp - lastFundingTime;
-        if (timeDelta == 0 || vaultDepthUsdc == 0 || lastMarkPrice == 0) {
-            return (int256(pos.size) * (currentIndex - pos.entryFundingIndex)) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        }
-
-        uint256 bullUsdc = (bullOI * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOI * lastMarkPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 absSkew;
-        bool bullMajority;
-
-        if (bullUsdc > bearUsdc) {
-            absSkew = bullUsdc - bearUsdc;
-            bullMajority = true;
-        } else {
-            absSkew = bearUsdc - bullUsdc;
-            bullMajority = false;
-        }
-
-        if (absSkew > 0) {
-            uint256 annRate = CfdMath.getAnnualizedFundingRate(absSkew, vaultDepthUsdc, riskParams);
-            uint256 fundingDelta = (annRate * timeDelta) / CfdMath.SECONDS_PER_YEAR;
-            int256 step = int256((lastMarkPrice * fundingDelta) / 1e8);
-            if (step > 0) {
-                if (bullMajority) {
-                    currentIndex = pos.side == CfdTypes.Side.BULL ? currentIndex - step : currentIndex + step;
-                } else {
-                    currentIndex = pos.side == CfdTypes.Side.BEAR ? currentIndex - step : currentIndex + step;
-                }
-            }
-        }
-
-        return (int256(pos.size) * (currentIndex - pos.entryFundingIndex)) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        fundingUsdc = PositionRiskAccountingLib.previewPendingFunding(
+            pos,
+            bullFundingIndex,
+            bearFundingIndex,
+            lastMarkPrice,
+            bullOI,
+            bearOI,
+            lastFundingTime,
+            block.timestamp,
+            vaultDepthUsdc,
+            riskParams
+        );
     }
 
     function previewLiquidation(
@@ -1397,25 +1374,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return preview;
         }
 
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
-        preview.pnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        preview.fundingUsdc = _previewPendingFunding(pos, vaultDepthUsdc);
         preview.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
-        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos,
+            price,
+            CAP_PRICE,
+            _previewPendingFunding(pos, vaultDepthUsdc),
+            preview.reachableCollateralUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
+        preview.pnlUsdc = riskState.unrealizedPnlUsdc;
+        preview.fundingUsdc = riskState.pendingFundingUsdc;
         LiquidationAccountingLib.LiquidationState memory liqState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,
             price,
             preview.reachableCollateralUsdc,
-            preview.fundingUsdc,
-            preview.pnlUsdc,
-            requiredBps,
+            riskState.pendingFundingUsdc,
+            riskState.unrealizedPnlUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps,
             riskParams.minBountyUsdc,
             riskParams.bountyBps,
             pos.margin,
             CfdMath.USDC_TO_TOKEN_SCALE
         );
-        preview.equityUsdc = liqState.equityUsdc;
-        preview.liquidatable = preview.equityUsdc <= int256(liqState.maintenanceMarginUsdc);
+        preview.equityUsdc = riskState.equityUsdc;
+        preview.liquidatable = riskState.liquidatable;
         preview.keeperBountyUsdc = liqState.keeperBountyUsdc;
 
         CfdEngineSettlementLib.LiquidationSettlementResult memory result = LiquidationAccountingLib.settlementForState(liqState);
@@ -1491,34 +1474,36 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__NoPositionToLiquidate();
         }
 
-        int256 pendingFunding = getPendingFunding(pos);
         if (pos.side == CfdTypes.Side.BULL) {
             globalBullEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
         } else {
             globalBearEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
         }
 
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, CAP_PRICE);
-
         uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
-        int256 pnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos,
+            price,
+            CAP_PRICE,
+            getPendingFunding(pos),
+            reachableUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
         LiquidationAccountingLib.LiquidationState memory liqState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,
             price,
             reachableUsdc,
-            pendingFunding,
-            pnlUsdc,
-            requiredBps,
+            riskState.pendingFundingUsdc,
+            riskState.unrealizedPnlUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps,
             riskParams.minBountyUsdc,
             riskParams.bountyBps,
             pos.margin,
             CfdMath.USDC_TO_TOKEN_SCALE
         );
-        int256 equityUsdc = liqState.equityUsdc;
+        int256 equityUsdc = riskState.equityUsdc;
 
-        uint256 mmUsdc = liqState.maintenanceMarginUsdc;
-        if (equityUsdc >= int256(mmUsdc)) {
+        if (!riskState.liquidatable) {
             revert CfdEngine__PositionIsSolvent();
         }
 
