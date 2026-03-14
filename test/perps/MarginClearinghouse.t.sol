@@ -338,6 +338,26 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 0);
     }
 
+    function test_ConsumeFundingLoss_ReturnsUncoveredWhenFreeAndActiveMarginInsufficient() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
+            clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 2_000 * 1e6, engine);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        assertEq(freeConsumed, 1_050 * 1e6);
+        assertEq(marginConsumed, 600 * 1e6);
+        assertEq(uncovered, 350 * 1e6, "Funding loss planner should report residual uncovered loss");
+        assertEq(buckets.settlementBalanceUsdc, 350 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
+    }
+
     function test_ConsumeLiquidationResidual_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, address(usdc), 2000 * 1e6);
@@ -396,6 +416,24 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.reservedSettlementUsdc, 50 * 1e6, "Keeper reserve must remain protected");
         assertEq(buckets.totalLockedMarginUsdc, 150 * 1e6, "Only unconsumed committed margin should remain locked");
         assertEq(buckets.freeSettlementUsdc, 0, "No free settlement should remain after terminal loss collection");
+    }
+
+    function test_ConsumeCloseLoss_ReturnsShortfallWhenTerminalBucketsInsufficient() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.reserveSettlementUsdc(aliceId, 50 * 1e6);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1_500 * 1e6, 0, engine);
+        vm.stopPrank();
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        assertEq(seizedUsdc, 950 * 1e6);
+        assertEq(shortfallUsdc, 550 * 1e6, "Terminal close planner should report uncovered shortfall");
+        assertEq(buckets.settlementBalanceUsdc, 50 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 50 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 0);
     }
 
     function test_ConsumeLiquidationResidual_MustConsumeCommittedMarginBeforeBadDebt() public {

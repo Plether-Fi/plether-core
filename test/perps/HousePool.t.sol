@@ -271,6 +271,29 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.juniorPrincipal(), 1_120_000 * 1e6, "Junior got surplus");
     }
 
+    function test_FinalizeSeniorRate_StaleMarkAccruesCheckpointedYield() public {
+        address trader = address(0x3333);
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 before = pool.lastReconcileTime();
+        uint256 oldRate = pool.seniorRateBps();
+        uint256 principal = pool.seniorPrincipal();
+
+        pool.proposeSeniorRate(1600);
+        vm.warp(block.timestamp + 48 hours + 121);
+        pool.finalizeSeniorRate();
+
+        uint256 elapsed = block.timestamp - before;
+        uint256 expectedOldYield = (principal * oldRate * elapsed) / (10_000 * 365 days);
+        assertEq(pool.unpaidSeniorYield(), expectedOldYield, "Stale-mark finalization should checkpoint accrued old-rate yield");
+        assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
+    }
+
     // ==========================================
     // ERC4626 SHARE ACCOUNTING
     // ==========================================

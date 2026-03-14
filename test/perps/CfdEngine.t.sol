@@ -555,6 +555,31 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewClose_UnderwaterPartialMatchesLiveRevert() public {
+        address juniorLp = address(0xAB1306);
+        address trader = address(0xAB1307);
+        _fundJunior(juniorLp, 1_000_000 * 1e6);
+        _fundTrader(trader, 22_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _open(accountId, CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000 * 1e18, 80_000_000, pool.totalAssets());
+        (uint256 sizeBefore,,,,,,,) = engine.positions(accountId);
+
+        assertFalse(preview.valid, "Preview should reject an underwater partial close that invades residual backing");
+        assertEq(preview.invalidCode, 3, "Preview should use the underwater partial-close invalid code");
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(0.8e8));
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000 * 1e18, 0, 0, true);
+        router.executeOrder(1, priceData);
+
+        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, sizeBefore, "Live close path should leave the position unchanged when preview marks it invalid");
+    }
+
     function test_PreviewClose_FullLossBadDebtMatchesLiveSettlement() public {
         address trader = address(0xAB1304);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -688,6 +713,40 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(projectedPreview.liquidatable, fundedPreview.liquidatable, "Preview liquidatability should match the accrued live state");
     }
 
+    function test_LiquidationPreview_IlliquidDeferredPayoutMatchesLiveOutcome() public {
+        address trader = address(0xAB1404);
+        address keeper = address(0xAB1405);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 300e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(101_000_000));
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(
+            engine.deferredPayoutUsdc(accountId),
+            preview.deferredPayoutUsdc,
+            "Illiquid liquidation preview should match live deferred trader payout"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Illiquid liquidation preview should match live bad debt"
+        );
+    }
+
     function test_GetDeferredPayoutStatus_ReflectsClaimability() public {
         address trader = address(0xAB15);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -708,6 +767,38 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.DeferredPayoutStatus memory statusAfter = engine.getDeferredPayoutStatus(accountId, address(this));
         assertTrue(statusAfter.traderPayoutClaimableNow);
+    }
+
+    function test_DeferredLiquidationBounty_Lifecycle() public {
+        address keeper = address(0xAB1601);
+        uint256 deferredBounty = 25e6;
+
+        vm.prank(address(router));
+        engine.recordDeferredLiquidationBounty(keeper, deferredBounty);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets);
+
+        CfdEngine.ProtocolAccountingView memory protocolViewBefore = engine.getProtocolAccountingView();
+        CfdEngine.DeferredPayoutStatus memory statusBefore = engine.getDeferredPayoutStatus(bytes32(0), keeper);
+        assertEq(protocolViewBefore.totalDeferredLiquidationBountyUsdc, deferredBounty);
+        assertEq(statusBefore.deferredLiquidationBountyUsdc, deferredBounty);
+        assertFalse(statusBefore.liquidationBountyClaimableNow, "Deferred liquidation bounty should be unclaimable while vault is illiquid");
+
+        _fundJunior(address(this), deferredBounty);
+
+        CfdEngine.DeferredPayoutStatus memory statusAfterFunding = engine.getDeferredPayoutStatus(bytes32(0), keeper);
+        assertTrue(statusAfterFunding.liquidationBountyClaimableNow, "Deferred liquidation bounty should become claimable once vault liquidity returns");
+
+        uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
+        vm.prank(keeper);
+        engine.claimDeferredLiquidationBounty();
+
+        CfdEngine.ProtocolAccountingView memory protocolViewAfter = engine.getProtocolAccountingView();
+        assertEq(usdc.balanceOf(keeper) - keeperBalanceBefore, deferredBounty);
+        assertEq(engine.deferredLiquidationBountyUsdc(keeper), 0);
+        assertEq(protocolViewAfter.totalDeferredLiquidationBountyUsdc, 0);
     }
 
     function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
