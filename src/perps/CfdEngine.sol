@@ -10,6 +10,8 @@ import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
+import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
+import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -1175,15 +1177,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
-        viewData.vaultAssetsUsdc = vault.totalAssets();
-        viewData.maxLiabilityUsdc = _maxLiability();
-        viewData.withdrawalReservedUsdc = _getWithdrawalReservedUsdc();
-        viewData.freeUsdc = viewData.vaultAssetsUsdc > viewData.withdrawalReservedUsdc
-            ? viewData.vaultAssetsUsdc - viewData.withdrawalReservedUsdc
-            : 0;
+        uint256 vaultAssetsUsdc = vault.totalAssets();
+        uint256 maxLiabilityUsdc = _maxLiability();
+        WithdrawalAccountingLib.WithdrawalState memory withdrawalState = WithdrawalAccountingLib.buildWithdrawalState(
+            vaultAssetsUsdc,
+            maxLiabilityUsdc,
+            accumulatedFeesUsdc,
+            _getLiabilityOnlyFundingPnl(),
+            totalDeferredPayoutUsdc,
+            totalDeferredLiquidationBountyUsdc
+        );
+        viewData.vaultAssetsUsdc = vaultAssetsUsdc;
+        viewData.maxLiabilityUsdc = maxLiabilityUsdc;
+        viewData.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
+        viewData.freeUsdc = withdrawalState.freeUsdc;
         viewData.accumulatedFeesUsdc = accumulatedFeesUsdc;
         viewData.cappedFundingPnlUsdc = _getSolvencyCappedFundingPnl();
-        viewData.liabilityOnlyFundingPnlUsdc = _getLiabilityOnlyFundingPnl();
+        viewData.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
         viewData.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
         viewData.totalDeferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
         viewData.degradedMode = degradedMode;
@@ -1413,14 +1423,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdTypes.Side side,
         uint256 maxProfitReduction
     ) internal view returns (uint256) {
-        uint256 bullMax = globalBullMaxProfit;
-        uint256 bearMax = globalBearMaxProfit;
-        if (side == CfdTypes.Side.BULL) {
-            bullMax -= maxProfitReduction;
-        } else {
-            bearMax -= maxProfitReduction;
-        }
-        return bullMax > bearMax ? bullMax : bearMax;
+        return SolvencyAccountingLib.getMaxLiabilityAfterClose(
+            globalBullMaxProfit, globalBearMaxProfit, side, maxProfitReduction
+        );
     }
 
     function getPositionSide(
@@ -1533,19 +1538,36 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _assertPostSolvency() internal view {
-        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
-        if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
+        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
+        if (SolvencyAccountingLib.isInsolvent(state)) {
             revert CfdEngine__PostOpSolvencyBreach();
         }
     }
 
     function _maxLiability() internal view returns (uint256) {
-        return globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+        return SolvencyAccountingLib.getMaxLiability(globalBullMaxProfit, globalBearMaxProfit);
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return CfdEngineSnapshotsLib.getWithdrawalReservedUsdc(_maxLiability(), accumulatedFeesUsdc, _getLiabilityOnlyFundingPnl())
-            + totalDeferredPayoutUsdc + totalDeferredLiquidationBountyUsdc;
+        return WithdrawalAccountingLib.buildWithdrawalState(
+            vault.totalAssets(),
+            _maxLiability(),
+            accumulatedFeesUsdc,
+            _getLiabilityOnlyFundingPnl(),
+            totalDeferredPayoutUsdc,
+            totalDeferredLiquidationBountyUsdc
+        ).reservedUsdc;
+    }
+
+    function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        return SolvencyAccountingLib.buildSolvencyState(
+            vault.totalAssets(),
+            accumulatedFeesUsdc,
+            _maxLiability(),
+            _getSolvencyCappedFundingPnl(),
+            totalDeferredPayoutUsdc,
+            totalDeferredLiquidationBountyUsdc
+        );
     }
 
     function _buildAdjustedSolvencySnapshot()
@@ -1553,19 +1575,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         view
         returns (CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot)
     {
-        snapshot = CfdEngineSnapshotsLib.buildSolvencySnapshot(
-            vault.totalAssets(), accumulatedFeesUsdc, _maxLiability(), _buildFundingSnapshot()
-        );
-        if (totalDeferredPayoutUsdc > 0) {
-            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredPayoutUsdc
-                ? snapshot.effectiveSolvencyAssets - totalDeferredPayoutUsdc
-                : 0;
-        }
-        if (totalDeferredLiquidationBountyUsdc > 0) {
-            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > totalDeferredLiquidationBountyUsdc
-                ? snapshot.effectiveSolvencyAssets - totalDeferredLiquidationBountyUsdc
-                : 0;
-        }
+        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
+        snapshot.physicalAssets = state.physicalAssetsUsdc;
+        snapshot.protocolFees = state.protocolFeesUsdc;
+        snapshot.netPhysicalAssets = state.netPhysicalAssetsUsdc;
+        snapshot.maxLiability = state.maxLiabilityUsdc;
+        snapshot.solvencyFunding = state.solvencyFundingPnlUsdc;
+        snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
     }
 
     function _enterDegradedModeIfInsolvent(
@@ -1575,15 +1591,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (degradedMode) {
             return;
         }
-        CfdEngineSnapshotsLib.SolvencySnapshot memory snapshot = _buildAdjustedSolvencySnapshot();
-        if (pendingVaultPayoutUsdc > 0) {
-            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > pendingVaultPayoutUsdc
-                ? snapshot.effectiveSolvencyAssets - pendingVaultPayoutUsdc
-                : 0;
-        }
-        if (snapshot.effectiveSolvencyAssets < snapshot.maxLiability) {
+        SolvencyAccountingLib.SolvencyState memory state = _buildAdjustedSolvencyState();
+        uint256 effectiveAssetsAfter = SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(state, pendingVaultPayoutUsdc);
+        if (effectiveAssetsAfter < state.maxLiabilityUsdc) {
             degradedMode = true;
-            emit DegradedModeEntered(snapshot.effectiveSolvencyAssets, snapshot.maxLiability, accountId);
+            emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, accountId);
         }
     }
 
