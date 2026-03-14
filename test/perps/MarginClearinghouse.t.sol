@@ -450,6 +450,32 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 1650 * 1e6);
     }
 
+    function test_LockMargin_RequiresPhysicalUsdcBackingAfterReservingSettlementEscrow() public {
+        MockToken wbtc = new MockToken("Wrapped BTC", "WBTC", 8);
+        MockOracle wbtcOracle = new MockOracle(60_000 * 1e8);
+        clearinghouse.proposeAssetConfig(address(wbtc), 8, 8000, address(wbtcOracle));
+        vm.warp(block.timestamp + 48 hours + 1);
+        clearinghouse.finalizeAssetConfig();
+
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, address(usdc), 100 * 1e6);
+
+        wbtc.mint(alice, 1 * 1e8);
+        vm.startPrank(alice);
+        wbtc.approve(address(clearinghouse), 1 * 1e8);
+        clearinghouse.deposit(aliceId, address(wbtc), 1 * 1e8);
+        vm.stopPrank();
+
+        vm.startPrank(engine);
+        clearinghouse.reserveSettlementUsdc(aliceId, 1 * 1e6);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientUsdcForSettlement.selector);
+        clearinghouse.lockMargin(aliceId, 100 * 1e6);
+        vm.stopPrank();
+
+        assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Margin lock should fail when reserved escrow already consumes part of physical USDC");
+        assertEq(clearinghouse.reservedSettlementUsdc(aliceId), 1 * 1e6, "Reserved keeper escrow should remain tracked after failed margin lock");
+    }
+
     function test_SupportAsset_InvalidLTV_Reverts() public {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
         clearinghouse.proposeAssetConfig(address(0xBEEF), 18, 10_001, address(0));

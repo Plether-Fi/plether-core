@@ -652,7 +652,7 @@ contract MarginClearinghouse is Ownable2Step {
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + amountUsdc) {
+        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         lockedMarginUsdc[accountId] += amountUsdc;
