@@ -5,6 +5,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
+import {HousePoolWaterfallAccountingLib} from "./libraries/HousePoolWaterfallAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -55,9 +56,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     uint256 public pendingMarkStalenessLimit;
     uint256 public markStalenessLimitActivationTime;
-
-    uint256 internal constant BPS = 10_000;
-    uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
 
     error HousePool__NotAVault();
     error HousePool__RouterAlreadySet();
@@ -270,10 +268,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount > getMaxSeniorWithdraw()) {
             revert HousePool__ExceedsMaxSeniorWithdraw();
         }
-        uint256 remaining = seniorPrincipal - amount;
-        seniorHighWaterMark = seniorHighWaterMark * remaining / seniorPrincipal;
-        unpaidSeniorYield = unpaidSeniorYield * remaining / seniorPrincipal;
-        seniorPrincipal = remaining;
+        HousePoolWaterfallAccountingLib.WaterfallState memory state = _getWaterfallState();
+        HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
+            HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(state, amount);
+        _setWaterfallState(nextState);
         USDC.safeTransfer(receiver, amount);
     }
 
@@ -380,17 +378,16 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
         lastReconcileTime = block.timestamp;
 
-        if (elapsed > 0 && seniorPrincipal > 0) {
-            uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
-            unpaidSeniorYield += yieldInc;
-        }
-
         HousePoolAccountingLib.ReconcileSnapshot memory snapshot = _getReconcileSnapshot();
+        HousePoolWaterfallAccountingLib.ReconcilePlan memory plan = HousePoolWaterfallAccountingLib.planReconcile(
+            seniorPrincipal, juniorPrincipal, snapshot.distributable, seniorRateBps, elapsed
+        );
+        unpaidSeniorYield += plan.yieldAccrued;
 
-        if (snapshot.distributable > claimedEquity) {
-            _distributeRevenue(snapshot.distributable - claimedEquity);
-        } else if (snapshot.distributable < claimedEquity) {
-            _absorbLoss(claimedEquity - snapshot.distributable);
+        if (plan.isRevenue) {
+            _distributeRevenue(plan.deltaUsdc);
+        } else if (plan.deltaUsdc > 0) {
+            _absorbLoss(plan.deltaUsdc);
         }
     }
 
@@ -446,35 +443,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
 
-        uint256 yieldInc = (seniorPrincipal * seniorRateBps * elapsed) / (BPS * SECONDS_PER_YEAR);
-        unpaidSeniorYield += yieldInc;
+        unpaidSeniorYield += HousePoolWaterfallAccountingLib.accrueSeniorYield(seniorPrincipal, seniorRateBps, elapsed);
     }
 
     function _distributeRevenue(
         uint256 revenue
     ) internal {
-        uint256 remaining = revenue;
-
-        if (remaining > 0 && seniorPrincipal < seniorHighWaterMark) {
-            uint256 deficit = seniorHighWaterMark - seniorPrincipal;
-            uint256 restore = remaining < deficit ? remaining : deficit;
-            seniorPrincipal += restore;
-            remaining -= restore;
-        }
-
-        uint256 seniorPayout = unpaidSeniorYield;
-        if (seniorPayout > remaining) {
-            seniorPayout = remaining;
-        }
-        seniorPrincipal += seniorPayout;
-        unpaidSeniorYield -= seniorPayout;
-        remaining -= seniorPayout;
-
-        if (seniorPrincipal > seniorHighWaterMark) {
-            seniorHighWaterMark = seniorPrincipal;
-        }
-
-        juniorPrincipal += remaining;
+        _setWaterfallState(HousePoolWaterfallAccountingLib.distributeRevenue(_getWaterfallState(), revenue));
 
         emit Reconciled(seniorPrincipal, juniorPrincipal, int256(revenue));
     }
@@ -482,20 +457,29 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function _absorbLoss(
         uint256 loss
     ) internal {
-        if (loss <= juniorPrincipal) {
-            juniorPrincipal -= loss;
-        } else {
-            uint256 seniorLoss = loss - juniorPrincipal;
-            juniorPrincipal = 0;
-            if (seniorPrincipal > seniorLoss) {
-                seniorPrincipal -= seniorLoss;
-            } else {
-                seniorPrincipal = 0;
-                unpaidSeniorYield = 0;
-            }
-        }
+        _setWaterfallState(HousePoolWaterfallAccountingLib.absorbLoss(_getWaterfallState(), loss));
 
         emit Reconciled(seniorPrincipal, juniorPrincipal, -int256(loss));
+    }
+
+    function _getWaterfallState()
+        internal
+        view
+        returns (HousePoolWaterfallAccountingLib.WaterfallState memory state)
+    {
+        state.seniorPrincipal = seniorPrincipal;
+        state.juniorPrincipal = juniorPrincipal;
+        state.unpaidSeniorYield = unpaidSeniorYield;
+        state.seniorHighWaterMark = seniorHighWaterMark;
+    }
+
+    function _setWaterfallState(
+        HousePoolWaterfallAccountingLib.WaterfallState memory state
+    ) internal {
+        seniorPrincipal = state.seniorPrincipal;
+        juniorPrincipal = state.juniorPrincipal;
+        unpaidSeniorYield = state.unpaidSeniorYield;
+        seniorHighWaterMark = state.seniorHighWaterMark;
     }
 
 }

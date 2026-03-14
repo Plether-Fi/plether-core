@@ -274,3 +274,12 @@ Review:
 - Kept the existing close accounting kernel in `CloseAccountingLib`; this change specifically removes the remaining divergence in terminal settlement planning after close accounting has already produced `netSettlementUsdc`.
 - Added preview/live parity coverage in `test/perps/CfdEngine.t.sol`, including a new regression asserting preview bad debt matches live full-close settlement.
 - Verified green: targeted close regressions plus full `forge test --match-path "test/perps/*.t.sol"` with `450 tests passed, 0 failed, 0 skipped`.
+
+- [x] Extract HousePool waterfall accounting into a first-class module
+
+Review:
+- Added `src/perps/libraries/HousePoolWaterfallAccountingLib.sol` to own senior-yield accrual, reconcile planning, senior-withdraw scaling, revenue distribution, and loss absorption.
+- Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
+- Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
+- Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
+- Verified green: targeted HousePool/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `450 tests passed, 0 failed, 0 skipped`.
