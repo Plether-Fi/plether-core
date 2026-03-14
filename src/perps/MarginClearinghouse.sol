@@ -517,14 +517,16 @@ contract MarginClearinghouse is Ownable2Step {
         freeSettlementConsumedUsdc = consumption.freeSettlementConsumedUsdc;
         marginConsumedUsdc = consumption.activeMarginConsumedUsdc;
         uncoveredUsdc = consumption.uncoveredUsdc;
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+        MarginClearinghouseAccountingLib.BucketMutation memory mutation =
+            MarginClearinghouseAccountingLib.applyFundingLossMutation(buckets, consumption);
 
-        if (marginConsumedUsdc > 0) {
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
-            lockedMarginUsdc[accountId] = buckets.otherLockedMarginUsdc + (buckets.activePositionMarginUsdc - marginConsumedUsdc);
-            emit MarginUnlocked(accountId, marginConsumedUsdc);
+        if (mutation.activeMarginUnlockedUsdc > 0) {
+            lockedMarginUsdc[accountId] = mutation.resultingLockedMarginUsdc;
+            emit MarginUnlocked(accountId, mutation.activeMarginUnlockedUsdc);
         }
 
-        uint256 totalConsumedUsdc = consumption.totalConsumedUsdc;
+        uint256 totalConsumedUsdc = mutation.settlementDebitUsdc;
         if (totalConsumedUsdc == 0) {
             return (marginConsumedUsdc, freeSettlementConsumedUsdc, uncoveredUsdc);
         }
@@ -548,6 +550,8 @@ contract MarginClearinghouse is Ownable2Step {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, protectedLockedMarginUsdc);
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
+        MarginClearinghouseAccountingLib.BucketMutation memory mutation =
+            MarginClearinghouseAccountingLib.applyTerminalLossMutation(buckets, protectedLockedMarginUsdc, consumption);
         seizedUsdc = consumption.totalConsumedUsdc;
         shortfallUsdc = consumption.uncoveredUsdc;
 
@@ -555,15 +559,14 @@ contract MarginClearinghouse is Ownable2Step {
             return (0, shortfallUsdc);
         }
 
-        if (consumption.otherLockedMarginConsumedUsdc > 0) {
-            lockedMarginUsdc[accountId] = protectedLockedMarginUsdc
-                + (buckets.otherLockedMarginUsdc - consumption.otherLockedMarginConsumedUsdc);
-            emit MarginUnlocked(accountId, consumption.otherLockedMarginConsumedUsdc);
+        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+            lockedMarginUsdc[accountId] = mutation.resultingLockedMarginUsdc;
+            emit MarginUnlocked(accountId, mutation.otherLockedMarginUnlockedUsdc);
         }
 
-        balances[accountId][settlementAsset] -= seizedUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, seizedUsdc);
-        emit AssetSeized(accountId, settlementAsset, seizedUsdc, recipient);
+        balances[accountId][settlementAsset] -= mutation.settlementDebitUsdc;
+        IERC20(settlementAsset).safeTransfer(recipient, mutation.settlementDebitUsdc);
+        emit AssetSeized(accountId, settlementAsset, mutation.settlementDebitUsdc, recipient);
     }
 
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
@@ -575,37 +578,24 @@ contract MarginClearinghouse is Ownable2Step {
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
-        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(buckets);
-
-        if (residualUsdc >= 0) {
-            uint256 targetBalanceUsdc = uint256(residualUsdc);
-            if (reachableUsdc > targetBalanceUsdc) {
-                seizedUsdc = reachableUsdc - targetBalanceUsdc;
-            } else if (targetBalanceUsdc > reachableUsdc) {
-                payoutUsdc = targetBalanceUsdc - reachableUsdc;
-            }
-        } else {
-            seizedUsdc = reachableUsdc;
-            badDebtUsdc = uint256(-residualUsdc);
-        }
+        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
+            MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
+        seizedUsdc = plan.seizedUsdc;
+        payoutUsdc = plan.payoutUsdc;
+        badDebtUsdc = plan.badDebtUsdc;
 
         if (lockedPositionMarginUsdc > 0) {
-            uint256 releasedMarginUsdc = buckets.activePositionMarginUsdc;
-            uint256 otherLockedConsumedUsdc = 0;
-            if (seizedUsdc > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc) {
-                otherLockedConsumedUsdc = seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc;
-            }
-            lockedMarginUsdc[accountId] = buckets.otherLockedMarginUsdc - otherLockedConsumedUsdc;
-            emit MarginUnlocked(accountId, releasedMarginUsdc);
-            if (otherLockedConsumedUsdc > 0) {
-                emit MarginUnlocked(accountId, otherLockedConsumedUsdc);
+            lockedMarginUsdc[accountId] = plan.mutation.resultingLockedMarginUsdc;
+            emit MarginUnlocked(accountId, plan.mutation.activeMarginUnlockedUsdc);
+            if (plan.mutation.otherLockedMarginUnlockedUsdc > 0) {
+                emit MarginUnlocked(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
             }
         }
 
         if (seizedUsdc > 0) {
-            balances[accountId][settlementAsset] -= seizedUsdc;
-            IERC20(settlementAsset).safeTransfer(recipient, seizedUsdc);
-            emit AssetSeized(accountId, settlementAsset, seizedUsdc, recipient);
+            balances[accountId][settlementAsset] -= plan.mutation.settlementDebitUsdc;
+            IERC20(settlementAsset).safeTransfer(recipient, plan.mutation.settlementDebitUsdc);
+            emit AssetSeized(accountId, settlementAsset, plan.mutation.settlementDebitUsdc, recipient);
         }
     }
 

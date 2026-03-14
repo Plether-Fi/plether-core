@@ -283,3 +283,11 @@ Review:
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
 - Verified green: targeted HousePool/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `450 tests passed, 0 failed, 0 skipped`.
+
+- [x] Extract a clearinghouse bucket mutation layer
+
+Review:
+- Extended `src/perps/libraries/MarginClearinghouseAccountingLib.sol` with shared bucket-mutation outputs for funding loss, terminal close loss, and liquidation residual application, so planning and storage-application now live in the same accounting domain.
+- Updated `src/perps/MarginClearinghouse.sol` so `consumeFundingLoss()`, `consumeCloseLoss()`, and `consumeLiquidationResidual()` all apply bucket updates, settlement debits, and unlock semantics through the shared mutation layer instead of hand-writing each mutation path inline.
+- Preserved existing behavior and event semantics while reducing the remaining planning-vs-application drift surface in the clearinghouse.
+- Verified green: targeted clearinghouse/engine/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `451 tests passed, 0 failed, 0 skipped`.
