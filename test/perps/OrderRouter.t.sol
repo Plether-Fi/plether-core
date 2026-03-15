@@ -238,6 +238,108 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[1].executionBountyUsdc, router.quoteCloseOrderExecutionBountyUsdc());
     }
 
+    function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 bobId = bytes32(uint256(uint160(bob)));
+
+        _fundTrader(bob, 10_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(bob);
+        router.commitOrder(CfdTypes.Side.BEAR, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+
+        assertEq(router.pendingHeadOrderId(aliceId), 1, "Alice head should point to her first queued order");
+        assertEq(router.pendingTailOrderId(aliceId), 3, "Alice tail should point to her last queued order");
+        assertEq(router.pendingHeadOrderId(bobId), 2, "Bob head should be isolated from Alice queue state");
+        assertEq(router.pendingTailOrderId(bobId), 2, "Bob tail should equal his only queued order");
+
+        OrderRouter.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
+        assertEq(alicePending[0].orderId, 1, "Alice queue should preserve per-account FIFO order");
+        assertEq(alicePending[1].orderId, 3, "Alice tail should remain reachable after foreign inserts");
+    }
+
+    function test_CancelOrder_UnlinksMiddleNodeAndPreservesAccountHeadTail() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 2000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 3000 * 1e18, 0, 1e8, true);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.cancelOrder(2);
+
+        assertEq(router.pendingHeadOrderId(accountId), 1, "Middle unlink must preserve account head");
+        assertEq(router.pendingTailOrderId(accountId), 3, "Middle unlink must preserve account tail");
+        assertEq(router.pendingOrderCounts(accountId), 2, "Middle unlink should decrement account order count");
+
+        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        assertEq(pending.length, 2, "Middle unlink should leave two reachable queued orders");
+        assertEq(pending[0].orderId, 1, "Head order should remain first after middle unlink");
+        assertEq(pending[1].orderId, 3, "Tail order should remain reachable after middle unlink");
+    }
+
+    function test_CancelOrder_UnlinksTailNodeAndUpdatesAccountTail() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 2000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BULL, 3000 * 1e18, 0, 1e8, true);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.cancelOrder(3);
+
+        assertEq(router.pendingHeadOrderId(accountId), 1, "Tail unlink must preserve head");
+        assertEq(router.pendingTailOrderId(accountId), 2, "Tail unlink must move tail to the prior node");
+
+        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        assertEq(pending.length, 2, "Tail unlink should leave two reachable queued orders");
+        assertEq(pending[0].orderId, 1, "Head order should remain first after tail unlink");
+        assertEq(pending[1].orderId, 2, "Prior node should become the new tail");
+    }
+
+    function test_ExecuteOrder_UnlinksAccountHeadWithoutAffectingForeignQueuePointers() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 bobId = bytes32(uint256(uint160(bob)));
+
+        _fundTrader(bob, 10_000 * 1e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(bob);
+        router.commitOrder(CfdTypes.Side.BEAR, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.pendingHeadOrderId(aliceId), 3, "Executing Alice head should advance her account-local head");
+        assertEq(router.pendingTailOrderId(aliceId), 3, "Alice tail should collapse to her surviving queued order");
+        assertEq(router.pendingHeadOrderId(bobId), 2, "Foreign account head should stay unchanged");
+        assertEq(router.pendingTailOrderId(bobId), 2, "Foreign account tail should stay unchanged");
+
+        OrderRouter.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
+        assertEq(alicePending[0].orderId, 3, "Alice residual queue should still be reachable after execution");
+    }
+
     function test_CancelOrder_ReleasesEscrowForNonHeadOrder() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 

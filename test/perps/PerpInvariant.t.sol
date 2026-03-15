@@ -460,9 +460,9 @@ contract PerpInvariantTest is BasePerpTest {
 
             OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
             assertEq(
-                escrow.committedMarginUsdc + router.consumedCommittedMarginUsdc(accountId),
+                escrow.committedMarginUsdc,
                 rawQueuedCommitted,
-                "Refundable plus consumed committed margin must equal raw queued committed margin"
+                "Account escrow must equal the residual committed margin stored on queued orders"
             );
         }
     }

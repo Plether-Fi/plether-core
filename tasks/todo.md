@@ -155,6 +155,29 @@ Review:
 - Updated `src/perps/CfdEngine.sol` so both `previewLiquidation()` and live liquidation call the same liquidation accounting builder, reducing preview/live drift and making the domain boundary explicit.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewLiquidation_ReturnsBountyAndLiquidatableFlag|LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|Liquidation_PreservesReservedSettlementEscrow|LiquidationBounty_CappedByPositiveEquity"` and `forge test --match-path test/perps/AuditCurrentFindingsVerification.t.sol --match-test "M2_KeeperBountyShouldUsePositiveEquityNotPositionMargin"`.
 
+- [x] Inspect `OrderRouter` committed-margin lifecycle and identify every counter-dependent path
+- [x] Draft a concrete patch plan for single-source committed margins plus an account-local pending-order queue
+
+Review:
+- `src/perps/OrderRouter.sol` currently has a transitional mix: `noteCommittedMarginConsumed()` already decrements per-order `committedMargins`, but `getAccountEscrow()`, `_unlockCommittedMargin()`, and `_releaseCommittedMarginForExecution()` still reconcile against `consumedCommittedMarginUsdc`.
+- The next patch should finish that refactor by removing the account-level consumed counter, adding account-local pending-order pointers, linking/unlinking orders in `commitOrder()` / `_deleteOrder()`, and making all release paths consume only the residual stored in `committedMargins[orderId]`.
+
+- [x] Update tests and invariants for single-source committed margin accounting
+- [x] Run targeted forge tests for OrderRouter, CfdEngine, and invariants
+- [x] Review failures and finalize follow-up changes
+
+Review:
+- Updated `test/perps/PerpInvariant.t.sol` so queued committed-margin conservation now compares `getAccountEscrow(accountId).committedMarginUsdc` directly against the residual per-order sum instead of referencing the removed `consumedCommittedMarginUsdc` getter.
+- Verified green after the `OrderRouter` refactor: `forge test --match-path test/perps/OrderRouter.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt"`, and `forge test --match-path test/perps/PerpInvariant.t.sol`.
+
+- [x] Add dedicated OrderRouter tests for account queue pointers and unlink edge cases
+- [x] Run targeted OrderRouter tests for new queue coverage
+- [x] Draft formal invariants and a commit message for the refactor
+
+Review:
+- Added four focused queue-structure regressions in `test/perps/OrderRouter.t.sol` covering per-account FIFO pointer isolation, middle unlink on cancel, tail unlink on cancel, and head unlink on execution with foreign-account orders interleaved.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "PendingOrderPointers_|CancelOrder_Unlinks|ExecuteOrder_UnlinksAccountHeadWithoutAffectingForeignQueuePointers"` and a full `forge test --match-path test/perps/OrderRouter.t.sol` run (105 passed).
+
 - [x] Identify withdrawal/solvency snapshot logic shared between `CfdEngine` and `HousePool`
 - [x] Extract a dedicated accounting library for perps reserve/solvency views
 - [x] Wire engine/pool callsites to the new library without behavior changes
