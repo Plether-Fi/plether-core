@@ -729,12 +729,11 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         uint256 executorBefore = usdc.balanceOf(address(this));
-
         vm.roll(block.number + 1);
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_100_000, "executor should earn bounties for successful orders plus failed binding open heads");
+        assertEq(executorReward, 1_600_000, "executor should earn successful bounties plus the clearer share of invalid close heads");
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -877,7 +876,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue");
     }
 
-    function test_ExitedAccount_StaleCloseOrderForfeitsBountyToProtocol() public {
+    function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -898,8 +897,32 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not recover stale close-order bounty after account exit");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1e6, "Stale close-order bounty should be forfeited to protocol revenue");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Keeper should recover the full expired close-order bounty");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Expired close-order bounty should not be routed to protocol revenue");
+    }
+
+    function test_ExitedAccount_InvalidCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        uint64 closeOrderId = router.nextCommitId();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+
+        _close(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+
+        vm.warp(block.timestamp + 6);
+        bytes[] memory empty = _pythUpdateData();
+        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), block.timestamp);
+        vm.roll(block.number + 1);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        router.executeOrder(closeOrderId, empty);
+
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of an invalid close-order bounty");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Invalid close-order bounty should split evenly with protocol revenue");
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -1044,6 +1067,28 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
         assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out from router custody");
+    }
+
+    function test_SlippageFailedCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        uint64 closeOrderId = router.nextCommitId();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
+
+        vm.warp(block.timestamp + 6);
+        bytes[] memory empty = _pythUpdateData();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+        vm.roll(block.number + 1);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        router.executeOrder(closeOrderId, empty);
+
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of a slippage-failed close-order bounty");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Slippage-failed close-order bounty should split evenly with protocol revenue");
     }
 
     function test_InsufficientPythFee_Reverts() public {

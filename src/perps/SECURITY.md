@@ -153,7 +153,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` execution bounty up front
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Failed or expired close orders currently forfeit their reserved execution bounty to protocol revenue instead.
+- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Expired close orders also pay the full reserved bounty to the clearer, while invalid close failures (for example slippage or engine rejection) split the reserved bounty 50/50 between the clearer and protocol revenue.
 
 #### Protocol Operators
 

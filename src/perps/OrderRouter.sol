@@ -69,6 +69,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 internal constant INVALID_CLOSE_CLEARER_BOUNTY_BPS = 5_000;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -126,6 +127,11 @@ contract OrderRouter is Ownable2Step, Pausable {
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, string reason);
     event OrderCancelled(uint64 indexed orderId, bytes32 indexed accountId);
+
+    enum FailedOrderBountyPolicy {
+        ClearerFull,
+        CloseSplitWithProtocol
+    }
 
     modifier onlyEngine() {
         if (msg.sender != address(engine)) {
@@ -443,7 +449,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, "Order expired");
-            _finalizeExecution(orderId, 0, false);
+            _finalizeExecution(orderId, 0, false, FailedOrderBountyPolicy.ClearerFull);
             return;
         }
 
@@ -461,7 +467,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _finalizeExecution(orderId, pythFee, false);
+                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.CloseSplitWithProtocol);
                 return;
             }
 
@@ -485,7 +491,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
             return;
         }
 
@@ -502,15 +508,15 @@ contract OrderRouter is Ownable2Step, Pausable {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(orderId, pythFee, false);
+            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
             return;
         }
 
-        _finalizeExecution(orderId, pythFee, true);
+        _finalizeExecution(orderId, pythFee, true, FailedOrderBountyPolicy.ClearerFull);
     }
 
     /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
@@ -552,13 +558,13 @@ contract OrderRouter is Ownable2Step, Pausable {
             CfdTypes.Order memory order = orders[orderId];
 
             if (order.sizeDelta == 0) {
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
                 continue;
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, "Order expired");
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
                 continue;
             }
 
@@ -566,7 +572,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.CloseSplitWithProtocol);
                 continue;
             }
 
@@ -581,7 +587,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
                 continue;
             }
 
@@ -596,13 +602,13 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
-                _cleanupOrder(orderId, true);
+                _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
-                _cleanupOrder(orderId, false);
+                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
             }
         }
 
@@ -631,7 +637,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 break;
             }
             emit OrderFailed(headId, "Order expired");
-            _cleanupOrder(headId, false);
+            _cleanupOrder(headId, false, FailedOrderBountyPolicy.ClearerFull);
         }
     }
 
@@ -678,18 +684,20 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     function _cleanupOrder(
         uint64 orderId,
-        bool success
+        bool success,
+        FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc = _consumeOrderEscrow(orderId, success);
+        executionBountyUsdc = _consumeOrderEscrow(orderId, success, failedPolicy);
         _deleteOrder(orderId, true);
     }
 
     function _finalizeExecution(
         uint64 orderId,
         uint256 pythFee,
-        bool success
+        bool success,
+        FailedOrderBountyPolicy failedPolicy
     ) internal {
-        _consumeOrderEscrow(orderId, success);
+        _consumeOrderEscrow(orderId, success, failedPolicy);
         _deleteOrder(orderId, true);
         _sendEth(msg.sender, msg.value - pythFee);
     }
@@ -745,6 +753,29 @@ contract OrderRouter is Ownable2Step, Pausable {
         delete executionBountyReserves[orderId];
         USDC.forceApprove(address(engine), executionBountyUsdc);
         engine.absorbRouterCancellationFee(executionBountyUsdc);
+    }
+
+    function _splitExecutionBountyWithProtocol(
+        uint64 orderId,
+        uint256 clearerBps
+    ) internal {
+        uint256 executionBountyUsdc = executionBountyReserves[orderId];
+        if (executionBountyUsdc == 0) {
+            return;
+        }
+
+        delete executionBountyReserves[orderId];
+
+        uint256 clearerShare = (executionBountyUsdc * clearerBps) / 10_000;
+        uint256 protocolShare = executionBountyUsdc - clearerShare;
+
+        if (clearerShare > 0) {
+            USDC.safeTransfer(msg.sender, clearerShare);
+        }
+        if (protocolShare > 0) {
+            USDC.forceApprove(address(engine), protocolShare);
+            engine.absorbRouterCancellationFee(protocolShare);
+        }
     }
 
     function _commitReferencePrice() internal view returns (uint256 price) {
@@ -904,17 +935,18 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     function _consumeOrderEscrow(
         uint64 orderId,
-        bool success
+        bool success,
+        FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
             _collectExecutionBounty(orderId);
         } else {
             _releaseCommittedMargin(orderId);
-            if (orders[orderId].isClose) {
-                _forfeitExecutionBountyToProtocolRevenue(orderId);
-            } else {
+            if (!orders[orderId].isClose || failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
+            } else {
+                _splitExecutionBountyWithProtocol(orderId, INVALID_CLOSE_CLEARER_BOUNTY_BPS);
             }
         }
         return 0;
