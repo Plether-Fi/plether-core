@@ -40,6 +40,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
         uint256 freeSettlementUsdc;
+        // Current UI helper only; this does not include terminally reachable queued committed margin.
         uint256 closeReachableUsdc;
         uint256 liquidationReachableUsdc;
         uint256 accountEquityUsdc;
@@ -1226,6 +1227,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
+        // This remains a free-settlement view helper, not the broader terminally reachable amount that
+        // full-close settlement can consume after queued committed margin is released/consumed.
         viewData.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
         viewData.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
         viewData.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
