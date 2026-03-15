@@ -145,10 +145,10 @@ The owner **cannot**:
 
 Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads. At commit time the router seizes the reserved execution bounty from the trader's free settlement into router custody, quoting risk-increasing orders from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
-- **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` execution bounty up front
+- **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents do not reserve router escrow up front; successful and expired closes instead use a vault-funded flat `1.00 USDC` clearer reward path
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Expired close orders also pay the full reserved bounty to the clearer, while invalid close failures (for example slippage or engine rejection) split the reserved bounty 50/50 between the clearer and protocol revenue.
+- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Expired close orders may still pay the full vault-funded close clearer reward, while invalid close failures (for example slippage or engine rejection) pay no clearer bounty and book no protocol revenue.
 
 #### Engine / Router Trust Boundary
 
@@ -221,9 +221,9 @@ When a position goes underwater (equity < 0):
 
 #### Deferred Liquidation Bounties
 
-- **Behavior**: If a liquidation cannot immediately fund the liquidation bounty from the House Pool, the state transition still completes and the unpaid amount is recorded as a deferred liquidation bounty claim
-- **Claim path**: Once liquidity returns, the keeper calls `claimDeferredLiquidationBounty()` and the vault pays the owed USDC directly
-- **Impact**: Liquidations remain live during temporary vault illiquidity; liquidation bounty payment finality becomes deferred rather than blocking the state transition
+- **Behavior**: If the House Pool cannot immediately fund a liquidation bounty or vault-funded close clearer reward, the state transition still completes and the unpaid amount is recorded in the shared deferred bounty liability bucket
+- **Claim path**: Once liquidity returns, the keeper calls `claimDeferredClearerBounty()` and the vault pays the owed USDC directly
+- **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 
 #### Terminal Queue Continuity

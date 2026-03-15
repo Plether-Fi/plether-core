@@ -37,7 +37,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
-        engine.recordDeferredLiquidationBounty(keeper, 950_001e6);
+        engine.recordDeferredClearerBounty(keeper, 950_001e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__PostOpSolvencyBreach.selector);
         engine.withdrawFees(address(this));
@@ -45,7 +45,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
     function test_Reconcile_MustSubtractDeferredLiquidationBounties() public {
         vm.prank(address(router));
-        engine.recordDeferredLiquidationBounty(keeper, 100_000e6);
+        engine.recordDeferredClearerBounty(keeper, 100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();

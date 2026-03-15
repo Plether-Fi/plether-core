@@ -27,7 +27,7 @@ library SolvencyAccountingLib {
         uint256 maxLiabilityUsdc;
         int256 solvencyFundingPnlUsdc;
         uint256 deferredTraderPayoutUsdc;
-        uint256 deferredLiquidationBountyUsdc;
+        uint256 deferredClearerBountyUsdc;
         uint256 effectiveAssetsUsdc;
     }
 
@@ -58,7 +58,7 @@ library SolvencyAccountingLib {
         uint256 maxLiabilityUsdc,
         int256 solvencyFundingPnlUsdc,
         uint256 deferredTraderPayoutUsdc,
-        uint256 deferredLiquidationBountyUsdc
+        uint256 deferredClearerBountyUsdc
     ) internal pure returns (SolvencyState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
         state.protocolFeesUsdc = protocolFeesUsdc;
@@ -66,7 +66,7 @@ library SolvencyAccountingLib {
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.solvencyFundingPnlUsdc = solvencyFundingPnlUsdc;
         state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
-        state.deferredLiquidationBountyUsdc = deferredLiquidationBountyUsdc;
+        state.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
         state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc;
 
         if (solvencyFundingPnlUsdc > 0) {
@@ -77,7 +77,7 @@ library SolvencyAccountingLib {
             state.effectiveAssetsUsdc += uint256(-solvencyFundingPnlUsdc);
         }
 
-        uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredLiquidationBountyUsdc;
+        uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
         if (deferredLiabilitiesUsdc > 0) {
             state.effectiveAssetsUsdc = state.effectiveAssetsUsdc > deferredLiabilitiesUsdc
                 ? state.effectiveAssetsUsdc - deferredLiabilitiesUsdc
@@ -92,7 +92,8 @@ library SolvencyAccountingLib {
         if (pendingVaultPayoutUsdc == 0) {
             return state.effectiveAssetsUsdc;
         }
-        return state.effectiveAssetsUsdc > pendingVaultPayoutUsdc ? state.effectiveAssetsUsdc - pendingVaultPayoutUsdc : 0;
+        return
+            state.effectiveAssetsUsdc > pendingVaultPayoutUsdc ? state.effectiveAssetsUsdc - pendingVaultPayoutUsdc : 0;
     }
 
     function isInsolvent(
@@ -120,7 +121,7 @@ library SolvencyAccountingLib {
             delta.maxLiabilityAfterUsdc,
             currentState.solvencyFundingPnlUsdc,
             currentState.deferredTraderPayoutUsdc + delta.deferredTraderPayoutDeltaUsdc,
-            currentState.deferredLiquidationBountyUsdc + delta.deferredLiquidationBountyDeltaUsdc
+            currentState.deferredClearerBountyUsdc + delta.deferredLiquidationBountyDeltaUsdc
         );
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;

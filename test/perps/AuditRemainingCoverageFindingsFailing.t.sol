@@ -213,7 +213,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
-            engine.deferredLiquidationBountyUsdc(keeper),
+            engine.deferredClearerBountyUsdc(keeper),
             router.quoteCloseOrderExecutionBountyUsdc(),
             "Illiquid close execution should defer the keeper bounty through protocol/vault policy"
         );
@@ -249,9 +249,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
-        assertGt(
-            engine.deferredLiquidationBountyUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting"
-        );
+        assertGt(engine.deferredClearerBountyUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
     }
 
     function test_M3_TerminalCloseMustRemainExecutableUnderLargeForeignQueue() public {

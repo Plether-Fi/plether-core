@@ -824,11 +824,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(
-            executorReward,
-            1_600_000,
-            "executor should earn successful bounties plus the clearer share of invalid close heads"
-        );
+        assertEq(executorReward, 1_100_000, "executor should not earn LP-funded bounty on invalid close heads");
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -1008,7 +1004,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_ExitedAccount_InvalidCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
+    function test_ExitedAccount_InvalidCloseOrderPaysNoBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -1028,15 +1024,27 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Invalid close-order failure should not pay clearer");
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            500_000,
-            "Keeper should recover half of an invalid close-order bounty"
+            engine.accumulatedFeesUsdc() - feesBefore, 0, "Invalid close-order failure should not book protocol revenue"
         );
+    }
+
+    function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 0, 0, true);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseSizeExceedsPosition.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+        vm.stopPrank();
+
         assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            500_000,
-            "Invalid close-order bounty should split evenly with protocol revenue"
+            router.pendingCloseSize(aliceId),
+            6000 * 1e18,
+            "Only the first queued close should count toward pending close size"
         );
     }
 
@@ -1124,7 +1132,7 @@ contract OrderRouterPythTest is BasePerpTest {
             engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
         );
         assertEq(
-            engine.deferredLiquidationBountyUsdc(address(this)),
+            engine.deferredClearerBountyUsdc(address(this)),
             0,
             "Close execution should not rely on deferred liquidation bounties"
         );
@@ -1202,15 +1210,9 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Slippage-failed close order should not pay clearer");
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            500_000,
-            "Keeper should recover half of a slippage-failed close-order bounty"
-        );
-        assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            500_000,
-            "Slippage-failed close-order bounty should split evenly with protocol revenue"
+            engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
         );
     }
 

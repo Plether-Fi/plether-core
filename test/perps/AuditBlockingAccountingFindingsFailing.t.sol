@@ -135,7 +135,7 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
             _maxLiability(),
             staleFunding.solvencyFunding,
             totalDeferredPayoutUsdc,
-            totalDeferredLiquidationBountyUsdc
+            totalDeferredClearerBountyUsdc
         )
         .effectiveAssetsUsdc;
         syncedEffectiveAssets =
@@ -145,7 +145,7 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
             _maxLiability(),
             syncedFunding.solvencyFunding,
             totalDeferredPayoutUsdc,
-            totalDeferredLiquidationBountyUsdc
+            totalDeferredClearerBountyUsdc
         )
         .effectiveAssetsUsdc;
     }

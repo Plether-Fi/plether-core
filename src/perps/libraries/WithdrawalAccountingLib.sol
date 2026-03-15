@@ -9,7 +9,7 @@ library WithdrawalAccountingLib {
         uint256 protocolFeesUsdc;
         int256 fundingLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
-        uint256 deferredLiquidationBountyUsdc;
+        uint256 deferredClearerBountyUsdc;
         uint256 reservedUsdc;
         uint256 freeUsdc;
     }
@@ -20,16 +20,16 @@ library WithdrawalAccountingLib {
         uint256 protocolFeesUsdc,
         int256 fundingLiabilityUsdc,
         uint256 deferredTraderPayoutUsdc,
-        uint256 deferredLiquidationBountyUsdc
+        uint256 deferredClearerBountyUsdc
     ) internal pure returns (WithdrawalState memory state) {
         state.physicalAssetsUsdc = physicalAssetsUsdc;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.protocolFeesUsdc = protocolFeesUsdc;
         state.fundingLiabilityUsdc = fundingLiabilityUsdc;
         state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
-        state.deferredLiquidationBountyUsdc = deferredLiquidationBountyUsdc;
+        state.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
 
-        state.reservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredTraderPayoutUsdc + deferredLiquidationBountyUsdc;
+        state.reservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
         if (fundingLiabilityUsdc > 0) {
             state.reservedUsdc += uint256(fundingLiabilityUsdc);
         }

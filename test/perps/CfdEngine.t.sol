@@ -522,7 +522,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(viewData.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
-        assertEq(viewData.totalDeferredLiquidationBountyUsdc, engine.totalDeferredLiquidationBountyUsdc());
+        assertEq(viewData.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
     }
@@ -555,8 +555,8 @@ contract CfdEngineTest is BasePerpTest {
             snapshot.deferredTraderPayoutUsdc, engine.totalDeferredPayoutUsdc(), "Snapshot payout must match storage"
         );
         assertEq(
-            snapshot.deferredLiquidationBountyUsdc,
-            engine.totalDeferredLiquidationBountyUsdc(),
+            snapshot.deferredClearerBountyUsdc,
+            engine.totalDeferredClearerBountyUsdc(),
             "Snapshot bounty must match storage"
         );
         assertEq(snapshot.protocolFeesUsdc, fees, "Snapshot fees must match storage");
@@ -1058,12 +1058,12 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(statusAfter.traderPayoutClaimableNow);
     }
 
-    function test_DeferredLiquidationBounty_Lifecycle() public {
+    function test_DeferredClearerBounty_Lifecycle() public {
         address keeper = address(0xAB1601);
         uint256 deferredBounty = 25e6;
 
         vm.prank(address(router));
-        engine.recordDeferredLiquidationBounty(keeper, deferredBounty);
+        engine.recordDeferredClearerBounty(keeper, deferredBounty);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -1071,11 +1071,11 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.ProtocolAccountingView memory protocolViewBefore = engine.getProtocolAccountingView();
         CfdEngine.DeferredPayoutStatus memory statusBefore = engine.getDeferredPayoutStatus(bytes32(0), keeper);
-        assertEq(protocolViewBefore.totalDeferredLiquidationBountyUsdc, deferredBounty);
-        assertEq(statusBefore.deferredLiquidationBountyUsdc, deferredBounty);
+        assertEq(protocolViewBefore.totalDeferredClearerBountyUsdc, deferredBounty);
+        assertEq(statusBefore.deferredClearerBountyUsdc, deferredBounty);
         assertFalse(
             statusBefore.liquidationBountyClaimableNow,
-            "Deferred liquidation bounty should be unclaimable while vault is illiquid"
+            "Deferred clearer bounty should be unclaimable while vault is illiquid"
         );
 
         _fundJunior(address(this), deferredBounty);
@@ -1083,17 +1083,17 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.DeferredPayoutStatus memory statusAfterFunding = engine.getDeferredPayoutStatus(bytes32(0), keeper);
         assertTrue(
             statusAfterFunding.liquidationBountyClaimableNow,
-            "Deferred liquidation bounty should become claimable once vault liquidity returns"
+            "Deferred clearer bounty should become claimable once vault liquidity returns"
         );
 
         uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
         vm.prank(keeper);
-        engine.claimDeferredLiquidationBounty();
+        engine.claimDeferredClearerBounty();
 
         CfdEngine.ProtocolAccountingView memory protocolViewAfter = engine.getProtocolAccountingView();
         assertEq(usdc.balanceOf(keeper) - keeperBalanceBefore, deferredBounty);
-        assertEq(engine.deferredLiquidationBountyUsdc(keeper), 0);
-        assertEq(protocolViewAfter.totalDeferredLiquidationBountyUsdc, 0);
+        assertEq(engine.deferredClearerBountyUsdc(keeper), 0);
+        assertEq(protocolViewAfter.totalDeferredClearerBountyUsdc, 0);
     }
 
     function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {

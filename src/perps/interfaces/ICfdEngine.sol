@@ -13,7 +13,7 @@ interface ICfdEngine {
         int256 withdrawalFundingLiabilityUsdc;
         int256 unrealizedMtmLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
-        uint256 deferredLiquidationBountyUsdc;
+        uint256 deferredClearerBountyUsdc;
         uint256 protocolFeesUsdc;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;
@@ -73,8 +73,8 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
-    /// @notice Records a deferred liquidation bounty when immediate vault payment is unavailable.
-    function recordDeferredLiquidationBounty(
+    /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
+    function recordDeferredClearerBounty(
         address keeper,
         uint256 amountUsdc
     ) external;
@@ -128,7 +128,7 @@ interface ICfdEngine {
     function totalDeferredPayoutUsdc() external view returns (uint256);
 
     /// @notice Deferred liquidation bounties still owed after failed immediate payout.
-    function totalDeferredLiquidationBountyUsdc() external view returns (uint256);
+    function totalDeferredClearerBountyUsdc() external view returns (uint256);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).

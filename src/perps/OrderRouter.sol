@@ -52,6 +52,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     struct AccountOrderSummary {
         uint256 pendingOrderCount;
+        uint256 pendingCloseSize;
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
         bool hasTerminalCloseQueued;
@@ -91,7 +92,6 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
-    uint256 internal constant INVALID_CLOSE_CLEARER_BOUNTY_BPS = 5000;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -99,6 +99,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(address => uint256) public claimableEth;
     mapping(bytes32 => uint256) public pendingOrderCounts;
+    mapping(bytes32 => uint256) public pendingCloseSize;
     mapping(bytes32 => uint64) public pendingHeadOrderId;
     mapping(bytes32 => uint64) public pendingTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
@@ -146,8 +147,8 @@ contract OrderRouter is Ownable2Step, Pausable {
     event OrderCancelled(uint64 indexed orderId, bytes32 indexed accountId);
 
     enum FailedOrderBountyPolicy {
-        ClearerFull,
-        CloseSplitWithProtocol
+        None,
+        ClearerFull
     }
 
     modifier onlyEngine() {
@@ -281,7 +282,11 @@ contract OrderRouter is Ownable2Step, Pausable {
             if (engine.getPositionSide(accountId) != side) {
                 revert OrderRouter__CloseSideMismatch();
             }
-            if (sizeDelta > engine.getPositionSize(accountId)) {
+            uint256 positionSize = engine.getPositionSize(accountId);
+            if (sizeDelta > positionSize) {
+                revert OrderRouter__CloseSizeExceedsPosition();
+            }
+            if (pendingCloseSize[accountId] + sizeDelta > positionSize) {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
@@ -307,6 +312,9 @@ contract OrderRouter is Ownable2Step, Pausable {
             isClose: isClose
         });
         record.status = OrderStatus.Pending;
+        if (isClose) {
+            pendingCloseSize[accountId] += sizeDelta;
+        }
         _linkPendingOrder(accountId, orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
@@ -427,6 +435,9 @@ contract OrderRouter is Ownable2Step, Pausable {
             OrderRecord storage record = orderRecords[orderId];
             CfdTypes.Order memory order = record.core;
             summary.pendingOrderCount++;
+            if (order.isClose) {
+                summary.pendingCloseSize += order.sizeDelta;
+            }
             summary.committedMarginUsdc += _remainingCommittedMargin(record);
             summary.executionBountyUsdc += record.executionBountyUsdc;
             if (order.isClose) {
@@ -738,7 +749,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _failedOrderBountyPolicy(
         CfdTypes.Order memory order
     ) internal pure returns (FailedOrderBountyPolicy) {
-        return order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull;
+        return order.isClose ? FailedOrderBountyPolicy.None : FailedOrderBountyPolicy.ClearerFull;
     }
 
     function _cleanupOrder(
@@ -770,7 +781,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         try vault.payOut(msg.sender, liquidationBountyUsdc) {}
         catch {
-            engine.recordDeferredLiquidationBounty(msg.sender, liquidationBountyUsdc);
+            engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
         }
     }
 
@@ -979,7 +990,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         } else {
             _releaseCommittedMargin(orderId);
             if (orderRecords[orderId].core.isClose) {
-                _settleCloseOrderExecutionBounty(failedPolicy);
+                if (failedPolicy != FailedOrderBountyPolicy.None) {
+                    _settleCloseOrderExecutionBounty(failedPolicy);
+                }
             } else if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
             }
@@ -991,12 +1004,10 @@ contract OrderRouter is Ownable2Step, Pausable {
         FailedOrderBountyPolicy failedPolicy
     ) internal {
         uint256 bountyUsdc = _quoteCloseOrderExecutionBountyUsdc();
-        if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
-            engine.settleCloseOrderExecutionBounty(msg.sender, bountyUsdc, 0);
-        } else {
-            uint256 clearerShare = (bountyUsdc * INVALID_CLOSE_CLEARER_BOUNTY_BPS) / 10_000;
-            engine.settleCloseOrderExecutionBounty(msg.sender, clearerShare, bountyUsdc - clearerShare);
+        if (failedPolicy != FailedOrderBountyPolicy.ClearerFull) {
+            return;
         }
+        engine.settleCloseOrderExecutionBounty(msg.sender, bountyUsdc, 0);
     }
 
     function _deleteOrder(
@@ -1013,6 +1024,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         record.status = terminalStatus;
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;
+        }
+        if (accountId != bytes32(0) && record.core.isClose && pendingCloseSize[accountId] >= record.core.sizeDelta) {
+            pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
         if (advanceHead) {
             nextExecuteId++;

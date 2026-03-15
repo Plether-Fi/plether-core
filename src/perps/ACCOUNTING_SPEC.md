@@ -279,7 +279,7 @@ Liquidation must:
 If the liquidation bounty cannot be paid immediately from the vault:
 
 6. the liquidation must still succeed,
-7. the unpaid liquidation bounty must become a deferred liquidation-bounty liability,
+7. the unpaid liquidation bounty must become a deferred clearer-bounty liability,
 8. solvency and LP reconciliation accounting must include that deferred liability immediately.
 
 Implementation note:
@@ -375,6 +375,14 @@ Required transition rules:
 - cancellation releases escrow exactly once,
 - expiry releases user margin and applies the configured execution-bounty policy,
 - non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order.
+
+Current bounty policy notes:
+
+- Risk-increasing orders reserve router-custodied execution bounty at commit time and pay it from that escrow on success/failure/expiry according to policy.
+- Close orders do not reserve user-funded router escrow at commit time.
+- Successful and expired close executions may receive a vault-funded clearer reward through the engine.
+- Invalid close failures do not pay clearer bounty and do not create protocol-fee revenue.
+- The deferred bounty liability bucket is shared by liquidation bounties and vault-funded close clearer rewards when immediate payment is unavailable.
 
 ## Required Invariants for the Refactor
 
