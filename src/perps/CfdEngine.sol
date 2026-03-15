@@ -1424,7 +1424,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewCloseSolvencyState(pos, sizeDelta, postBullOi, postBearOi, closeState.remainingMarginUsdc),
+            _buildPreviewCloseSolvencyState(
+                pos, sizeDelta, postBullOi, postBearOi, closeState.remainingMarginUsdc, vaultDepthUsdc
+            ),
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
                 protocolFeesDeltaUsdc: closeState.netSettlementUsdc >= 0
@@ -1521,7 +1523,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.badDebtUsdc = computation.settlement.badDebtUsdc;
 
         SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewLiquidationSolvencyState(pos),
+            _buildPreviewLiquidationSolvencyState(pos, vaultDepthUsdc),
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
                 protocolFeesDeltaUsdc: 0,
@@ -1662,8 +1664,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = totalDeferredPayoutUsdc;
         snapshot.deferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
-        snapshot.markFreshnessRequired =
-            sides[_sideIndex(CfdTypes.Side.BULL)].maxProfitUsdc + sides[_sideIndex(CfdTypes.Side.BEAR)].maxProfitUsdc > 0;
+        snapshot.markFreshnessRequired = sides[_sideIndex(CfdTypes.Side.BULL)].maxProfitUsdc
+                + sides[_sideIndex(CfdTypes.Side.BEAR)].maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness = isOracleFrozen() ? fadMaxStaleness : markStalenessLimit;
         }
@@ -1696,13 +1698,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 bullEntryFundingAfter,
         int256 bearEntryFundingAfter,
         uint256 bullMarginAfter,
-        uint256 bearMarginAfter
+        uint256 bearMarginAfter,
+        uint256 vaultDepthUsdc
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        int256 bullFundingAfter = (int256(bullOiAfter) * bullState.fundingIndex - bullEntryFundingAfter)
-            / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearFundingAfter = (int256(bearOiAfter) * bearState.fundingIndex - bearEntryFundingAfter)
-            / int256(CfdMath.FUNDING_INDEX_SCALE);
+        (int256 bullFundingIndex, int256 bearFundingIndex) = _previewFundingIndexes(vaultDepthUsdc);
+        int256 bullFundingAfter =
+            (int256(bullOiAfter) * bullFundingIndex - bullEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter =
+            (int256(bearOiAfter) * bearFundingIndex - bearEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
         CfdEngineSnapshotsLib.FundingSnapshot memory fundingSnapshot = CfdEngineSnapshotsLib.buildFundingSnapshot(
             bullFundingAfter, bearFundingAfter, bullMarginAfter, bearMarginAfter
         );
@@ -1722,7 +1725,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 sizeDelta,
         uint256 postBullOi,
         uint256 postBearOi,
-        uint256 remainingMarginUsdc
+        uint256 remainingMarginUsdc,
+        uint256 vaultDepthUsdc
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
         uint256 selectedMarginAfter = selectedState.totalMargin - pos.margin + remainingMarginUsdc;
@@ -1736,12 +1740,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
         uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
         return _buildPreviewSolvencyState(
-            bullOiAfter, bearOiAfter, bullEntryFundingAfter, bearEntryFundingAfter, bullMarginAfter, bearMarginAfter
+            bullOiAfter,
+            bearOiAfter,
+            bullEntryFundingAfter,
+            bearEntryFundingAfter,
+            bullMarginAfter,
+            bearMarginAfter,
+            vaultDepthUsdc
         );
     }
 
     function _buildPreviewLiquidationSolvencyState(
-        CfdTypes.Position memory pos
+        CfdTypes.Position memory pos,
+        uint256 vaultDepthUsdc
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
         uint256 selectedOiAfter = selectedState.openInterest - pos.size;
@@ -1756,8 +1767,40 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
         uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
         return _buildPreviewSolvencyState(
-            bullOiAfter, bearOiAfter, bullEntryFundingAfter, bearEntryFundingAfter, bullMarginAfter, bearMarginAfter
+            bullOiAfter,
+            bearOiAfter,
+            bullEntryFundingAfter,
+            bearEntryFundingAfter,
+            bullMarginAfter,
+            bearMarginAfter,
+            vaultDepthUsdc
         );
+    }
+
+    function _previewFundingIndexes(
+        uint256 vaultDepthUsdc
+    ) internal view returns (int256 bullFundingIndex, int256 bearFundingIndex) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        bullFundingIndex = bullState.fundingIndex;
+        bearFundingIndex = bearState.fundingIndex;
+
+        uint256 timeDelta = block.timestamp - lastFundingTime;
+        if (timeDelta == 0 || vaultDepthUsdc == 0 || lastMarkPrice == 0) {
+            return (bullFundingIndex, bearFundingIndex);
+        }
+
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: timeDelta,
+                vaultDepthUsdc: vaultDepthUsdc,
+                riskParams: riskParams
+            })
+        );
+        bullFundingIndex += step.bullFundingIndexDelta;
+        bearFundingIndex += step.bearFundingIndexDelta;
     }
 
     function _buildLiquidationComputation(

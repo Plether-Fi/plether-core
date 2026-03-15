@@ -9,6 +9,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -44,6 +45,34 @@ contract CfdEngineTest is BasePerpTest {
             bearMaxProfit -= maxProfitReductionUsdc;
         }
         return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+    }
+
+    function _previewFundingIndex(
+        CfdTypes.Side side,
+        uint256 vaultDepthUsdc
+    ) internal view returns (int256) {
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: engine.lastMarkPrice(),
+                bullOi: _sideOpenInterest(CfdTypes.Side.BULL),
+                bearOi: _sideOpenInterest(CfdTypes.Side.BEAR),
+                timeDelta: block.timestamp - engine.lastFundingTime(),
+                vaultDepthUsdc: vaultDepthUsdc,
+                riskParams: _riskParams()
+            })
+        );
+        return side == CfdTypes.Side.BULL
+            ? _sideFundingIndex(CfdTypes.Side.BULL) + step.bullFundingIndexDelta
+            : _sideFundingIndex(CfdTypes.Side.BEAR) + step.bearFundingIndexDelta;
+    }
+
+    function _previewFundingPnl(
+        CfdTypes.Side side,
+        uint256 openInterest,
+        int256 entryFunding
+    ) internal view returns (int256) {
+        return (int256(openInterest) * _previewFundingIndex(side, pool.totalAssets()) - entryFunding)
+            / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -608,7 +637,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
-    function test_PreviewClose_RecomputesPostOpFundingClipForDegradedMode() public {
+    function test_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
         address bullTrader = address(0xAB130A);
         address bearTrader = address(0xAB130B);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -621,16 +650,13 @@ contract CfdEngineTest is BasePerpTest {
         _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + 365 days);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         (uint256 bullSize, uint256 bullMargin,, uint256 bullMaxProfit, int256 bullEntryFunding,,,) =
             engine.positions(bullId);
         int256 bullFundingAfter = 0;
-        int256 bearFundingAfter =
-            (int256(_sideOpenInterest(CfdTypes.Side.BEAR))
-                    * _sideFundingIndex(CfdTypes.Side.BEAR)
-                    - _sideEntryFunding(CfdTypes.Side.BEAR)) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter = _previewFundingPnl(
+            CfdTypes.Side.BEAR, _sideOpenInterest(CfdTypes.Side.BEAR), _sideEntryFunding(CfdTypes.Side.BEAR)
+        );
         int256 currentFunding = engine.getCappedFundingPnl();
         int256 postFunding =
             _cappedFundingAfter(bullFundingAfter, bearFundingAfter, 0, _sideTotalMargin(CfdTypes.Side.BEAR));
@@ -956,7 +982,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedMode() public {
+    function test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
         address bullTrader = address(0xAB1412);
         address bearTrader = address(0xAB1413);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -969,14 +995,11 @@ contract CfdEngineTest is BasePerpTest {
         _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
 
         vm.warp(block.timestamp + 365 days);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         int256 currentFunding = engine.getCappedFundingPnl();
-        int256 bearFundingAfter =
-            (int256(_sideOpenInterest(CfdTypes.Side.BEAR))
-                    * _sideFundingIndex(CfdTypes.Side.BEAR)
-                    - _sideEntryFunding(CfdTypes.Side.BEAR)) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter = _previewFundingPnl(
+            CfdTypes.Side.BEAR, _sideOpenInterest(CfdTypes.Side.BEAR), _sideEntryFunding(CfdTypes.Side.BEAR)
+        );
         int256 postFunding = _cappedFundingAfter(0, bearFundingAfter, 0, _sideTotalMargin(CfdTypes.Side.BEAR));
         assertGt(
             postFunding, currentFunding, "Liquidation should remove the clipped funding receivable from solvency assets"
