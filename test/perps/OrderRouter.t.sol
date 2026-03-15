@@ -193,7 +193,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Pending));
         assertEq(record.core.orderId, 1);
         assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
-        assertEq(record.remainingCommittedMarginUsdc, 1000 * 1e6);
+        assertEq(router.committedMargins(1), 1000 * 1e6);
         assertEq(record.executionBountyUsdc, 1_000_000);
         assertEq(record.nextPendingOrderId, 0);
         assertEq(record.prevPendingOrderId, 0);
@@ -213,7 +213,7 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
         assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Executed));
         assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
-        assertEq(record.remainingCommittedMarginUsdc, 0, "Executed order should clear committed margin escrow");
+        assertEq(router.committedMargins(1), 0, "Executed order should clear committed margin escrow");
         assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty escrow");
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
     }
@@ -232,7 +232,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Cancelled));
         assertEq(record.core.orderId, 1);
         assertEq(record.core.accountId, accountId);
-        assertEq(record.remainingCommittedMarginUsdc, 0);
+        assertEq(router.committedMargins(1), 0);
         assertEq(record.executionBountyUsdc, 0);
         assertEq(record.nextPendingOrderId, 0);
         assertEq(record.prevPendingOrderId, 0);
@@ -347,7 +347,7 @@ contract OrderRouterTest is BasePerpTest {
         assertTrue(router.isInMarginQueue(1), "Partially consumed order should remain linked in the margin queue");
     }
 
-    function test_NoteCommittedMarginConsumed_UnlinksDrainedMarginOrdersAndSkipsCloseOrders() public {
+    function test_NoteCommittedMarginConsumed_DrainsHeadExposureWithoutWalkingQueue() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
@@ -360,13 +360,20 @@ contract OrderRouterTest is BasePerpTest {
         router.noteCommittedMarginConsumed(accountId, 1000 * 1e6);
 
         assertEq(router.committedMargins(1), 0, "First margin-paying order should be fully drained");
-        assertEq(router.marginHeadOrderId(accountId), 3, "Margin queue head should advance past the drained order");
+        assertEq(
+            router.committedMargins(3), 250 * 1e6, "Later positive-margin order should retain its committed margin"
+        );
+        assertEq(
+            router.marginHeadOrderId(accountId),
+            1,
+            "Account margin head stays lazy until the drained order is processed"
+        );
         assertEq(
             router.marginTailOrderId(accountId),
             3,
-            "Residual margin queue should retain the trailing positive-margin order"
+            "Margin queue tail should still point at the trailing positive-margin order"
         );
-        assertFalse(router.isInMarginQueue(1), "Drained order should be removed from the margin queue");
+        assertTrue(router.isInMarginQueue(1), "Drained order stays linked until it is individually processed");
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
     }
