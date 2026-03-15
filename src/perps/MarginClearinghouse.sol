@@ -347,7 +347,7 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
-    /// @dev Protects only reserved execution-bounty escrow; same-account committed margin remains reachable.
+    /// @dev Protects only reserved settlement escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc
@@ -670,7 +670,7 @@ contract MarginClearinghouse is Ownable2Step {
     /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
     ///      into their own contract/account and must forward them explicitly afterward.
     ///      This is stricter than `payReservedSettlementUsdc()`, which can route reserved
-    ///      execution bounty escrow to an arbitrary recipient chosen by the operator.
+    ///      settlement escrow to an arbitrary recipient chosen by the operator.
     /// @param accountId Account to seize from
     /// @param asset ERC20 token to seize (must equal settlementAsset)
     /// @param amount Token amount to seize

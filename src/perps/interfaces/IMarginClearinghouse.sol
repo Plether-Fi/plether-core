@@ -96,7 +96,7 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Returns reserved settlement USDC for pending execution-bounty escrow
+    /// @notice Returns reserved settlement USDC tracked in clearinghouse custody
     function reservedSettlementUsdc(
         bytes32 accountId
     ) external view returns (uint256);
@@ -122,7 +122,7 @@ interface IMarginClearinghouse {
     ) external view returns (uint256);
 
     /// @notice Returns settlement-asset balance reachable during liquidation or other terminal settlement.
-    /// @dev Protects only reserved execution-bounty escrow; same-account committed margin remains reachable.
+    /// @dev Protects only reserved settlement escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc
