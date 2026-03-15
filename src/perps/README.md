@@ -65,6 +65,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty from the trader's free settlement balance into router custody. This keeps failed-order rewards independent from vault liquidity and lets the router distribute clearers' rewards or protocol-fee splits directly when an order resolves.
 
+**Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, residual committed margin, reserved execution bounty, and both intrusive queue link sets. The router still exposes compatibility getters for legacy integrations, but queue/accounting proofs now read from one canonical per-order record.
+
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
 ### IV. CfdEngine — The Mathematical Ledger

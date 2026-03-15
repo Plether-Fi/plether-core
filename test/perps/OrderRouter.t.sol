@@ -185,6 +185,60 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
+    function test_OrderRecord_UnifiesPendingState() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Pending));
+        assertEq(record.core.orderId, 1);
+        assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
+        assertEq(record.remainingCommittedMarginUsdc, 1000 * 1e6);
+        assertEq(record.executionBountyUsdc, 1_000_000);
+        assertEq(record.nextPendingOrderId, 0);
+        assertEq(record.prevPendingOrderId, 0);
+        assertEq(record.nextMarginOrderId, 0);
+        assertEq(record.prevMarginOrderId, 0);
+        assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
+    }
+
+    function test_OrderRecord_PreservesExecutedLifecycle() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Executed));
+        assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
+        assertEq(record.remainingCommittedMarginUsdc, 0, "Executed order should clear committed margin escrow");
+        assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty escrow");
+        assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
+    }
+
+    function test_OrderRecord_PreservesCancelledLifecycle() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+
+        vm.prank(alice);
+        router.cancelOrder(1);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Cancelled));
+        assertEq(record.core.orderId, 1);
+        assertEq(record.core.accountId, accountId);
+        assertEq(record.remainingCommittedMarginUsdc, 0);
+        assertEq(record.executionBountyUsdc, 0);
+        assertEq(record.nextPendingOrderId, 0);
+        assertEq(record.prevPendingOrderId, 0);
+        assertFalse(record.inMarginQueue, "Cancelled order should not remain linked in either queue");
+    }
+
     function test_GetAccountOrderSummary_ReturnsAggregateOrderState() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 

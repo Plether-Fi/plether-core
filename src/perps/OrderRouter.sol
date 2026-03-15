@@ -22,6 +22,27 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
+    enum OrderStatus {
+        None,
+        Pending,
+        Executed,
+        Failed,
+        Cancelled
+    }
+
+    /// @notice Canonical per-order lifecycle, escrow, and queue-link state.
+    struct OrderRecord {
+        CfdTypes.Order core;
+        OrderStatus status;
+        uint256 remainingCommittedMarginUsdc;
+        uint256 executionBountyUsdc;
+        uint64 nextPendingOrderId;
+        uint64 prevPendingOrderId;
+        uint64 nextMarginOrderId;
+        uint64 prevMarginOrderId;
+        bool inMarginQueue;
+    }
+
     struct AccountEscrow {
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
@@ -74,20 +95,13 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
 
-    mapping(uint64 => CfdTypes.Order) public orders;
-    mapping(uint64 => uint256) public committedMargins;
-    mapping(uint64 => uint256) public executionBountyReserves;
+    mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(address => uint256) public claimableEth;
     mapping(bytes32 => uint256) public pendingOrderCounts;
     mapping(bytes32 => uint64) public pendingHeadOrderId;
     mapping(bytes32 => uint64) public pendingTailOrderId;
-    mapping(uint64 => uint64) internal nextPendingOrderId;
-    mapping(uint64 => uint64) internal prevPendingOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
-    mapping(uint64 => uint64) internal nextMarginOrderId;
-    mapping(uint64 => uint64) internal prevMarginOrderId;
-    mapping(uint64 => bool) public isInMarginQueue;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -277,7 +291,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         _reserveExecutionBounty(clearinghouse, accountId, orderId, executionBountyUsdc);
         _reserveCommittedMargin(clearinghouse, accountId, orderId, isClose, marginDelta);
 
-        orders[orderId] = CfdTypes.Order({
+        OrderRecord storage record = orderRecords[orderId];
+        record.core = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
@@ -288,6 +303,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             side: side,
             isClose: isClose
         });
+        record.status = OrderStatus.Pending;
         _linkPendingOrder(accountId, orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
@@ -299,10 +315,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     function cancelOrder(
         uint64 orderId
     ) external {
-        CfdTypes.Order memory order = orders[orderId];
-        if (order.sizeDelta == 0) {
-            revert OrderRouter__OrderNotPending();
-        }
+        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
 
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (order.accountId != accountId) {
@@ -314,7 +327,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         _releaseCommittedMargin(orderId);
         _forfeitExecutionBountyToProtocolRevenue(orderId);
-        _deleteOrder(orderId, orderId == nextExecuteId);
+        _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Cancelled);
 
         emit OrderCancelled(orderId, accountId);
     }
@@ -335,16 +348,58 @@ contract OrderRouter is Ownable2Step, Pausable {
         return _quoteCloseOrderExecutionBountyUsdc();
     }
 
+    function orders(
+        uint64 orderId
+    ) external view returns (bytes32, uint256, uint256, uint256, uint64, uint64, uint64, CfdTypes.Side, bool) {
+        CfdTypes.Order memory order = orderRecords[orderId].core;
+        return (
+            order.accountId,
+            order.sizeDelta,
+            order.marginDelta,
+            order.targetPrice,
+            order.commitTime,
+            order.commitBlock,
+            order.orderId,
+            order.side,
+            order.isClose
+        );
+    }
+
+    function committedMargins(
+        uint64 orderId
+    ) external view returns (uint256) {
+        return orderRecords[orderId].remainingCommittedMarginUsdc;
+    }
+
+    function executionBountyReserves(
+        uint64 orderId
+    ) external view returns (uint256) {
+        return orderRecords[orderId].executionBountyUsdc;
+    }
+
+    function isInMarginQueue(
+        uint64 orderId
+    ) external view returns (bool) {
+        return orderRecords[orderId].inMarginQueue;
+    }
+
+    function getOrderRecord(
+        uint64 orderId
+    ) external view returns (OrderRecord memory) {
+        return orderRecords[orderId];
+    }
+
     /// @notice Returns the total queued escrow state for an account across all pending orders.
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (AccountEscrow memory escrow) {
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
-            escrow.committedMarginUsdc += committedMargins[orderId];
-            escrow.executionBountyUsdc += executionBountyReserves[orderId];
+            OrderRecord storage record = orderRecords[orderId];
+            escrow.committedMarginUsdc += record.remainingCommittedMarginUsdc;
+            escrow.executionBountyUsdc += record.executionBountyUsdc;
             escrow.pendingOrderCount++;
-            orderId = nextPendingOrderId[orderId];
+            orderId = record.nextPendingOrderId;
         }
     }
 
@@ -358,8 +413,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 remaining = amountUsdc;
         uint64 orderId = marginHeadOrderId[accountId];
         while (orderId != 0 && remaining > 0) {
-            uint64 nextOrderId = nextMarginOrderId[orderId];
-            uint256 committed = committedMargins[orderId];
+            OrderRecord storage record = orderRecords[orderId];
+            uint64 nextOrderId = record.nextMarginOrderId;
+            uint256 committed = record.remainingCommittedMarginUsdc;
             if (committed == 0) {
                 _unlinkMarginOrder(accountId, orderId);
                 orderId = nextOrderId;
@@ -368,7 +424,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             uint256 charge = committed > remaining ? remaining : committed;
             uint256 residual = committed - charge;
-            committedMargins[orderId] = residual;
+            record.remainingCommittedMarginUsdc = residual;
             remaining -= charge;
 
             if (residual == 0) {
@@ -387,14 +443,15 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) external view returns (AccountOrderSummary memory summary) {
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
-            CfdTypes.Order memory order = orders[orderId];
+            OrderRecord storage record = orderRecords[orderId];
+            CfdTypes.Order memory order = record.core;
             summary.pendingOrderCount++;
-            summary.committedMarginUsdc += committedMargins[orderId];
-            summary.executionBountyUsdc += executionBountyReserves[orderId];
+            summary.committedMarginUsdc += record.remainingCommittedMarginUsdc;
+            summary.executionBountyUsdc += record.executionBountyUsdc;
             if (order.isClose) {
                 summary.hasTerminalCloseQueued = true;
             }
-            orderId = nextPendingOrderId[orderId];
+            orderId = record.nextPendingOrderId;
         }
     }
 
@@ -405,7 +462,8 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint256 index;
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
-            CfdTypes.Order memory order = orders[orderId];
+            OrderRecord storage record = orderRecords[orderId];
+            CfdTypes.Order memory order = record.core;
             pending[index] = PendingOrderView({
                 orderId: orderId,
                 isClose: order.isClose,
@@ -415,11 +473,11 @@ contract OrderRouter is Ownable2Step, Pausable {
                 targetPrice: order.targetPrice,
                 commitTime: order.commitTime,
                 commitBlock: order.commitBlock,
-                committedMarginUsdc: committedMargins[orderId],
-                executionBountyUsdc: executionBountyReserves[orderId]
+                committedMarginUsdc: record.remainingCommittedMarginUsdc,
+                executionBountyUsdc: record.executionBountyUsdc
             });
             index++;
-            orderId = nextPendingOrderId[orderId];
+            orderId = record.nextPendingOrderId;
         }
     }
 
@@ -442,10 +500,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (orderId != nextExecuteId) {
             revert OrderRouter__FIFOViolation();
         }
-        CfdTypes.Order memory order = orders[orderId];
-        if (order.sizeDelta == 0) {
-            revert OrderRouter__OrderNotPending();
-        }
+        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, "Order expired");
             _finalizeExecution(orderId, 0, false, FailedOrderBountyPolicy.ClearerFull);
@@ -466,7 +521,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.CloseSplitWithProtocol);
+                _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
                 return;
             }
 
@@ -490,12 +545,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(
-                orderId,
-                pythFee,
-                false,
-                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-            );
+            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         }
 
@@ -512,21 +562,11 @@ contract OrderRouter is Ownable2Step, Pausable {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(
-                orderId,
-                pythFee,
-                false,
-                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-            );
+            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(
-                orderId,
-                pythFee,
-                false,
-                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-            );
+            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         }
 
@@ -569,10 +609,11 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         while (nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
-            CfdTypes.Order memory order = orders[orderId];
+            OrderRecord storage record = _orderRecord(orderId);
+            CfdTypes.Order memory order = record.core;
 
-            if (order.sizeDelta == 0) {
-                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
+            if (record.status != OrderStatus.Pending) {
+                nextExecuteId++;
                 continue;
             }
 
@@ -586,7 +627,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.CloseSplitWithProtocol);
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
                 continue;
             }
 
@@ -601,11 +642,7 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                _cleanupOrder(
-                    orderId,
-                    false,
-                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-                );
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
                 continue;
             }
 
@@ -623,18 +660,10 @@ contract OrderRouter is Ownable2Step, Pausable {
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
-                _cleanupOrder(
-                    orderId,
-                    false,
-                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-                );
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
-                _cleanupOrder(
-                    orderId,
-                    false,
-                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
-                );
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
             }
         }
 
@@ -654,8 +683,9 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         while (nextExecuteId < upToId) {
             uint64 headId = nextExecuteId;
-            CfdTypes.Order memory order = orders[headId];
-            if (order.sizeDelta == 0) {
+            OrderRecord storage record = _orderRecord(headId);
+            CfdTypes.Order memory order = record.core;
+            if (record.status != OrderStatus.Pending) {
                 nextExecuteId++;
                 continue;
             }
@@ -708,13 +738,35 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
+    function _orderRecord(
+        uint64 orderId
+    ) internal view returns (OrderRecord storage record) {
+        return orderRecords[orderId];
+    }
+
+    function _pendingOrder(
+        uint64 orderId
+    ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
+        record = _orderRecord(orderId);
+        if (record.status != OrderStatus.Pending) {
+            revert OrderRouter__OrderNotPending();
+        }
+        order = record.core;
+    }
+
+    function _failedOrderBountyPolicy(
+        CfdTypes.Order memory order
+    ) internal pure returns (FailedOrderBountyPolicy) {
+        return order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull;
+    }
+
     function _cleanupOrder(
         uint64 orderId,
         bool success,
         FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = _consumeOrderEscrow(orderId, success, failedPolicy);
-        _deleteOrder(orderId, true);
+        _deleteOrder(orderId, true, success ? OrderStatus.Executed : OrderStatus.Failed);
     }
 
     function _finalizeExecution(
@@ -724,7 +776,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         FailedOrderBountyPolicy failedPolicy
     ) internal {
         _consumeOrderEscrow(orderId, success, failedPolicy);
-        _deleteOrder(orderId, true);
+        _deleteOrder(orderId, true, success ? OrderStatus.Executed : OrderStatus.Failed);
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
@@ -762,9 +814,10 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _collectExecutionBounty(
         uint64 orderId
     ) internal returns (uint256 executionBountyUsdc) {
-        executionBountyUsdc = executionBountyReserves[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        executionBountyUsdc = record.executionBountyUsdc;
         if (executionBountyUsdc > 0) {
-            delete executionBountyReserves[orderId];
+            record.executionBountyUsdc = 0;
             USDC.safeTransfer(msg.sender, executionBountyUsdc);
         }
     }
@@ -772,11 +825,12 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _forfeitExecutionBountyToProtocolRevenue(
         uint64 orderId
     ) internal {
-        uint256 executionBountyUsdc = executionBountyReserves[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        uint256 executionBountyUsdc = record.executionBountyUsdc;
         if (executionBountyUsdc == 0) {
             return;
         }
-        delete executionBountyReserves[orderId];
+        record.executionBountyUsdc = 0;
         USDC.forceApprove(address(engine), executionBountyUsdc);
         engine.absorbRouterCancellationFee(executionBountyUsdc);
     }
@@ -785,12 +839,13 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId,
         uint256 clearerBps
     ) internal {
-        uint256 executionBountyUsdc = executionBountyReserves[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        uint256 executionBountyUsdc = record.executionBountyUsdc;
         if (executionBountyUsdc == 0) {
             return;
         }
 
-        delete executionBountyReserves[orderId];
+        record.executionBountyUsdc = 0;
 
         uint256 clearerShare = (executionBountyUsdc * clearerBps) / 10_000;
         uint256 protocolShare = executionBountyUsdc - clearerShare;
@@ -817,14 +872,15 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _releaseCommittedMargin(
         uint64 orderId
     ) internal {
-        uint256 amount = committedMargins[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        uint256 amount = record.remainingCommittedMarginUsdc;
         if (amount == 0) {
             return;
         }
-        _unlinkMarginOrder(orders[orderId].accountId, orderId);
-        delete committedMargins[orderId];
+        _unlinkMarginOrder(record.core.accountId, orderId);
+        record.remainingCommittedMarginUsdc = 0;
         if (amount > 0) {
-            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(orders[orderId].accountId, amount);
+            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(record.core.accountId, amount);
         }
     }
 
@@ -839,8 +895,8 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
 
-        nextPendingOrderId[tailOrderId] = orderId;
-        prevPendingOrderId[orderId] = tailOrderId;
+        orderRecords[tailOrderId].nextPendingOrderId = orderId;
+        orderRecords[orderId].prevPendingOrderId = tailOrderId;
         pendingTailOrderId[accountId] = orderId;
     }
 
@@ -848,15 +904,16 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId,
         uint64 orderId
     ) internal {
-        uint64 prevOrderId = prevPendingOrderId[orderId];
-        uint64 nextOrderId = nextPendingOrderId[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        uint64 prevOrderId = record.prevPendingOrderId;
+        uint64 nextOrderId = record.nextPendingOrderId;
         uint64 headOrderId = pendingHeadOrderId[accountId];
         uint64 tailOrderId = pendingTailOrderId[accountId];
 
         if (headOrderId == orderId) {
             pendingHeadOrderId[accountId] = nextOrderId;
         } else if (prevOrderId != 0) {
-            nextPendingOrderId[prevOrderId] = nextOrderId;
+            orderRecords[prevOrderId].nextPendingOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
             revert OrderRouter__PendingOrderLinkCorrupted();
         }
@@ -864,20 +921,21 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (tailOrderId == orderId) {
             pendingTailOrderId[accountId] = prevOrderId;
         } else if (nextOrderId != 0) {
-            prevPendingOrderId[nextOrderId] = prevOrderId;
+            orderRecords[nextOrderId].prevPendingOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
             revert OrderRouter__PendingOrderLinkCorrupted();
         }
 
-        delete nextPendingOrderId[orderId];
-        delete prevPendingOrderId[orderId];
+        record.nextPendingOrderId = 0;
+        record.prevPendingOrderId = 0;
     }
 
     function _linkMarginOrder(
         bytes32 accountId,
         uint64 orderId
     ) internal {
-        if (isInMarginQueue[orderId]) {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.inMarginQueue) {
             return;
         }
 
@@ -886,31 +944,32 @@ contract OrderRouter is Ownable2Step, Pausable {
             marginHeadOrderId[accountId] = orderId;
             marginTailOrderId[accountId] = orderId;
         } else {
-            nextMarginOrderId[tailOrderId] = orderId;
-            prevMarginOrderId[orderId] = tailOrderId;
+            orderRecords[tailOrderId].nextMarginOrderId = orderId;
+            record.prevMarginOrderId = tailOrderId;
             marginTailOrderId[accountId] = orderId;
         }
 
-        isInMarginQueue[orderId] = true;
+        record.inMarginQueue = true;
     }
 
     function _unlinkMarginOrder(
         bytes32 accountId,
         uint64 orderId
     ) internal {
-        if (!isInMarginQueue[orderId]) {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (!record.inMarginQueue) {
             return;
         }
 
-        uint64 prevOrderId = prevMarginOrderId[orderId];
-        uint64 nextOrderId = nextMarginOrderId[orderId];
+        uint64 prevOrderId = record.prevMarginOrderId;
+        uint64 nextOrderId = record.nextMarginOrderId;
         uint64 headOrderId = marginHeadOrderId[accountId];
         uint64 tailOrderId = marginTailOrderId[accountId];
 
         if (headOrderId == orderId) {
             marginHeadOrderId[accountId] = nextOrderId;
         } else if (prevOrderId != 0) {
-            nextMarginOrderId[prevOrderId] = nextOrderId;
+            orderRecords[prevOrderId].nextMarginOrderId = nextOrderId;
         } else if (tailOrderId != orderId) {
             revert OrderRouter__MarginOrderLinkCorrupted();
         }
@@ -918,14 +977,14 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (tailOrderId == orderId) {
             marginTailOrderId[accountId] = prevOrderId;
         } else if (nextOrderId != 0) {
-            prevMarginOrderId[nextOrderId] = prevOrderId;
+            orderRecords[nextOrderId].prevMarginOrderId = prevOrderId;
         } else if (headOrderId != orderId) {
             revert OrderRouter__MarginOrderLinkCorrupted();
         }
 
-        delete nextMarginOrderId[orderId];
-        delete prevMarginOrderId[orderId];
-        delete isInMarginQueue[orderId];
+        record.nextMarginOrderId = 0;
+        record.prevMarginOrderId = 0;
+        record.inMarginQueue = false;
     }
 
     function _reserveExecutionBounty(
@@ -941,7 +1000,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             revert OrderRouter__InsufficientFreeEquity();
         }
         clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
-        executionBountyReserves[orderId] = executionBountyUsdc;
+        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
 
     function _reserveCommittedMargin(
@@ -955,7 +1014,7 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         clearinghouse.lockMargin(accountId, marginDelta);
-        committedMargins[orderId] = marginDelta;
+        orderRecords[orderId].remainingCommittedMarginUsdc = marginDelta;
         _linkMarginOrder(accountId, orderId);
     }
 
@@ -966,14 +1025,14 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
-            if (orders[orderId].isClose) {
+            if (orderRecords[orderId].core.isClose) {
                 _settleCloseOrderExecutionBounty(FailedOrderBountyPolicy.ClearerFull);
             } else {
                 _collectExecutionBounty(orderId);
             }
         } else {
             _releaseCommittedMargin(orderId);
-            if (orders[orderId].isClose) {
+            if (orderRecords[orderId].core.isClose) {
                 _settleCloseOrderExecutionBounty(failedPolicy);
             } else if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
@@ -998,14 +1057,16 @@ contract OrderRouter is Ownable2Step, Pausable {
 
     function _deleteOrder(
         uint64 orderId,
-        bool advanceHead
+        bool advanceHead,
+        OrderStatus terminalStatus
     ) internal {
-        bytes32 accountId = orders[orderId].accountId;
+        OrderRecord storage record = _orderRecord(orderId);
+        bytes32 accountId = record.core.accountId;
         if (accountId != bytes32(0)) {
             _unlinkPendingOrder(accountId, orderId);
             _unlinkMarginOrder(accountId, orderId);
         }
-        delete orders[orderId];
+        record.status = terminalStatus;
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;
         }
@@ -1017,9 +1078,10 @@ contract OrderRouter is Ownable2Step, Pausable {
     function _clearCommittedMargin(
         uint64 orderId
     ) internal {
-        if (committedMargins[orderId] > 0) {
-            _unlinkMarginOrder(orders[orderId].accountId, orderId);
-            delete committedMargins[orderId];
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.remainingCommittedMarginUsdc > 0) {
+            _unlinkMarginOrder(record.core.accountId, orderId);
+            record.remainingCommittedMarginUsdc = 0;
         }
     }
 
