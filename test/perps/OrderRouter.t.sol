@@ -185,6 +185,60 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
+    function test_OrderRecord_UnifiesPendingState() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Pending));
+        assertEq(record.core.orderId, 1);
+        assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
+        assertEq(record.remainingCommittedMarginUsdc, 1000 * 1e6);
+        assertEq(record.executionBountyUsdc, 1_000_000);
+        assertEq(record.nextPendingOrderId, 0);
+        assertEq(record.prevPendingOrderId, 0);
+        assertEq(record.nextMarginOrderId, 0);
+        assertEq(record.prevMarginOrderId, 0);
+        assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
+    }
+
+    function test_OrderRecord_PreservesExecutedLifecycle() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Executed));
+        assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
+        assertEq(record.remainingCommittedMarginUsdc, 0, "Executed order should clear committed margin escrow");
+        assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty escrow");
+        assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
+    }
+
+    function test_OrderRecord_PreservesCancelledLifecycle() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+
+        vm.prank(alice);
+        router.cancelOrder(1);
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Cancelled));
+        assertEq(record.core.orderId, 1);
+        assertEq(record.core.accountId, accountId);
+        assertEq(record.remainingCommittedMarginUsdc, 0);
+        assertEq(record.executionBountyUsdc, 0);
+        assertEq(record.nextPendingOrderId, 0);
+        assertEq(record.prevPendingOrderId, 0);
+        assertFalse(record.inMarginQueue, "Cancelled order should not remain linked in either queue");
+    }
+
     function test_GetAccountOrderSummary_ReturnsAggregateOrderState() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -267,8 +321,12 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        assertEq(router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order");
-        assertEq(router.marginTailOrderId(accountId), 3, "Margin queue tail should end at the last positive-margin order");
+        assertEq(
+            router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order"
+        );
+        assertEq(
+            router.marginTailOrderId(accountId), 3, "Margin queue tail should end at the last positive-margin order"
+        );
         assertTrue(router.isInMarginQueue(1), "Positive-margin open should be linked into the margin queue");
         assertFalse(router.isInMarginQueue(2), "Close order should not enter the margin queue");
         assertTrue(router.isInMarginQueue(3), "Later positive-margin open should be linked into the margin queue");
@@ -303,7 +361,11 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.committedMargins(1), 0, "First margin-paying order should be fully drained");
         assertEq(router.marginHeadOrderId(accountId), 3, "Margin queue head should advance past the drained order");
-        assertEq(router.marginTailOrderId(accountId), 3, "Residual margin queue should retain the trailing positive-margin order");
+        assertEq(
+            router.marginTailOrderId(accountId),
+            3,
+            "Residual margin queue should retain the trailing positive-margin order"
+        );
         assertFalse(router.isInMarginQueue(1), "Drained order should be removed from the margin queue");
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
@@ -321,8 +383,16 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.marginHeadOrderId(accountId), 2, "Executing the margin-queue head should advance to the surviving residual order");
-        assertEq(router.marginTailOrderId(accountId), 2, "Executing the margin-queue head should leave the residual order as tail");
+        assertEq(
+            router.marginHeadOrderId(accountId),
+            2,
+            "Executing the margin-queue head should advance to the surviving residual order"
+        );
+        assertEq(
+            router.marginTailOrderId(accountId),
+            2,
+            "Executing the margin-queue head should leave the residual order as tail"
+        );
         assertFalse(router.isInMarginQueue(1), "Executed order should be removed from the margin queue");
         assertTrue(router.isInMarginQueue(2), "Residual positive-margin order should remain linked");
     }
@@ -424,11 +494,23 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.cancelOrder(secondCloseOrderId);
 
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling a close order should not unlock live position margin");
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 0, "Cancelled tail order should have no execution bounty reserve");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBeforeCancel,
+            "Cancelling a close order should not unlock live position margin"
+        );
+        assertEq(
+            router.executionBountyReserves(secondCloseOrderId),
+            0,
+            "Cancelled tail order should have no execution bounty reserve"
+        );
         assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
         assertEq(router.nextExecuteId(), firstCloseOrderId, "Cancelling a non-head order should not advance FIFO head");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Cancelling a close order should not route any prefunded bounty to protocol revenue");
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Cancelling a close order should not route any prefunded bounty to protocol revenue"
+        );
         assertEq(pool.totalAssets() - vaultAssetsBefore, 0, "Cancelling a close order should not move vault cash");
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
@@ -452,8 +534,16 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), closeOrderId + 1, "Cancelling the FIFO head should advance nextExecuteId");
         assertEq(router.pendingOrderCounts(accountId), 0);
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling the head close order should not unlock live position margin");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Head close cancellation should not route any prefunded bounty to protocol revenue");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBeforeCancel,
+            "Cancelling the head close order should not unlock live position margin"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Head close cancellation should not route any prefunded bounty to protocol revenue"
+        );
     }
 
     function test_CancelOrder_OnlyOwnerCanCancel() public {
@@ -727,7 +817,11 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_600_000, "executor should earn successful bounties plus the clearer share of invalid close heads");
+        assertEq(
+            executorReward,
+            1_600_000,
+            "executor should earn successful bounties plus the clearer share of invalid close heads"
+        );
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -866,8 +960,14 @@ contract OrderRouterPythTest is BasePerpTest {
             9999 * 1e6,
             "Reserved execution bounty should be charged on failure"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive failed binding open-order bounty");
-        assertEq(engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperUsdcBefore,
+            1e6,
+            "Executor should receive failed binding open-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue"
+        );
     }
 
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
@@ -891,8 +991,16 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Keeper should recover the full expired close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Expired close-order bounty should not be routed to protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Keeper should recover the full expired close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Expired close-order bounty should not be routed to protocol revenue"
+        );
     }
 
     function test_ExitedAccount_InvalidCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
@@ -915,8 +1023,16 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of an invalid close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Invalid close-order bounty should split evenly with protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            500_000,
+            "Keeper should recover half of an invalid close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            500_000,
+            "Invalid close-order bounty should split evenly with protocol revenue"
+        );
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -1081,8 +1197,16 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of a slippage-failed close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Slippage-failed close-order bounty should split evenly with protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            500_000,
+            "Keeper should recover half of a slippage-failed close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            500_000,
+            "Slippage-failed close-order bounty should split evenly with protocol revenue"
+        );
     }
 
     function test_InsufficientPythFee_Reverts() public {
