@@ -149,11 +149,11 @@ The owner **cannot**:
 #### Keepers
 
 Keepers are permissionless — anyone can execute orders and liquidations:
-- **Order Execution**: Keepers push Pyth price payloads. For risk-increasing orders, the execution bounty is reserved inside the `MarginClearinghouse` at commit time, quoted from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
+- **Order Execution**: Keepers push Pyth price payloads. At commit time the router seizes the reserved execution bounty from the trader's free settlement into router custody, quoting risk-increasing orders from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` execution bounty up front
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor, so stale or invalid heads remain costly for the submitter and economically worthwhile for keepers to clear.
+- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Failed or expired close orders currently forfeit their reserved execution bounty to protocol revenue instead.
 
 #### Protocol Operators
 
@@ -234,8 +234,17 @@ When a position goes underwater (equity < 0):
 #### Terminal Queue Continuity
 
 - **Behavior**: When a full close or liquidation becomes the account's terminal settlement event, the protocol does not scan the global queue to cancel later intents for that account
-- **Effect**: Later stale orders simply fail when they eventually reach the queue head; terminal settlement stays bounded and does not inherit O(n) queue-cost risk
+- **Effect**: Later stale orders simply fail when they eventually reach the queue head; terminal settlement avoids a global FIFO scan, but close/liquidation accounting may still walk the account-local pending-order list when consuming queued committed margin
 - **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position, but invalidation now happens lazily at execution time instead of eagerly at terminal settlement
+
+#### OrderRouter Queue and Escrow Invariants
+
+- **Residual committed margin**: `committedMargins[orderId]` is the single source of truth for queued committed margin. It always represents the exact residual unlockable amount for that order after any close/liquidation consumption.
+- **Account-local pending queue**: Each account maintains its own intrusive FIFO list via `pendingHeadOrderId`, `pendingTailOrderId`, `nextPendingOrderId`, and `prevPendingOrderId`. This queue is used for account-bounded committed-margin consumption and account views; it does not replace the global execution FIFO.
+- **Global execution FIFO**: `nextExecuteId` remains the sole execution head. Orders still execute or expire in global commit order even though committed-margin accounting now traverses an account-local list.
+- **Finalization invariant**: Any path that cancels, fails, or finalizes an order must unlink that order from the account-local pending queue exactly once, clear its residual committed margin, and clear or distribute its reserved execution bounty.
+- **Consumption invariant**: `noteCommittedMarginConsumed(accountId, amountUsdc)` may only decrease residual `committedMargins` on reachable pending orders for that account, in FIFO order, and must revert if the reachable residual committed margin is insufficient.
+- **Queue/accounting agreement**: `pendingOrderCounts[accountId]` should equal the number of orders reachable from `pendingHeadOrderId[accountId]`, and `getAccountEscrow(accountId).committedMarginUsdc` should equal the sum of residual `committedMargins` across that reachable set.
 
 #### No Partial Liquidation
 
