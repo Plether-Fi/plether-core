@@ -127,17 +127,8 @@ contract PerpsForkTest is Test {
         pool.setOrderRouter(address(router));
 
         uint256 t0 = block.timestamp;
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(t0 + 48 hours + 1);
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(t0 + 96 hours + 2);
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
+        clearinghouse.setEngine(address(engine));
         vm.warp(t0 + 144 hours + 3);
-        clearinghouse.finalizeOperator();
 
         // LP deposits $1M to junior tranche
         deal(USDC, lp, 1_000_000e6);
@@ -300,9 +291,7 @@ contract PerpsForkTest is Test {
         OrderRouter realPythRouter =
             new OrderRouter(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
         uint256 t1 = block.timestamp;
-        clearinghouse.proposeOperator(address(realPythRouter), true);
-        vm.warp(t1 + 48 hours + 1);
-        clearinghouse.finalizeOperator();
+        engine.setOrderRouter(address(realPythRouter));
 
         _depositToClearinghouse(alice, 10_000e6);
 

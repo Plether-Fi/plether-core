@@ -2659,18 +2659,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(144 hours + 4);
-        clearinghouse.finalizeOperator();
-
+        clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
     }
 
@@ -2755,18 +2744,7 @@ contract StalenessGriefTest is BasePerpTest {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(144 hours + 4);
-        clearinghouse.finalizeOperator();
-
+        clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
     }
 
@@ -2853,14 +2831,7 @@ contract VpiImrBypassTest is Test {
         pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+        clearinghouse.setEngine(address(engine));
     }
 
     function _fundJunior(
@@ -2976,15 +2947,9 @@ contract KeeperFeeRefundTest is Test {
         pool.setOrderRouter(address(router));
 
         _warpPastTimelock();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
         router.proposeMaxOrderAge(300);
         _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+        clearinghouse.setEngine(address(engine));
         router.finalizeMaxOrderAge();
     }
 
@@ -3157,17 +3122,8 @@ contract WeekendArbitrageTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeWithdrawGuard(address(engine));
         _warpPastTimelock();
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        _warpPastTimelock();
-        clearinghouse.finalizeOperator();
+        clearinghouse.setEngine(address(engine));
     }
 
     // C-03 fix: close orders execute during frozen oracle with stale Friday price

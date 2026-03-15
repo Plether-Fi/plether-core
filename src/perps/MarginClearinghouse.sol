@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
@@ -20,20 +21,9 @@ contract MarginClearinghouse is Ownable2Step {
     mapping(bytes32 => uint256) internal settlementBalances;
 
     mapping(bytes32 => uint256) public lockedMarginUsdc;
-    IWithdrawGuard public withdrawGuard;
-
-    mapping(address => bool) public isProtocolOperator;
 
     address public immutable settlementAsset;
-
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
-
-    address public pendingOperatorAddress;
-    bool public pendingOperatorStatus;
-    uint256 public operatorActivationTime;
-
-    address public pendingWithdrawGuard;
-    uint256 public withdrawGuardActivationTime;
+    address public engine;
 
     error MarginClearinghouse__NotOperator();
     error MarginClearinghouse__NotAccountOwner();
@@ -43,8 +33,8 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
     error MarginClearinghouse__InvalidSeizeRecipient();
-    error MarginClearinghouse__TimelockNotReady();
-    error MarginClearinghouse__NoProposal();
+    error MarginClearinghouse__EngineAlreadySet();
+    error MarginClearinghouse__ZeroAddress();
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
@@ -53,7 +43,11 @@ contract MarginClearinghouse is Ownable2Step {
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
     modifier onlyOperator() {
-        if (!isProtocolOperator[msg.sender]) {
+        address engine_ = engine;
+        if (engine_ == address(0)) {
+            revert MarginClearinghouse__NotOperator();
+        }
+        if (msg.sender != engine_ && msg.sender != ICfdEngine(engine_).orderRouter()) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
@@ -66,66 +60,16 @@ contract MarginClearinghouse is Ownable2Step {
         settlementAsset = _settlementAsset;
     }
 
-    // ==========================================
-    // CONFIGURATION
-    // ==========================================
-
-    /// @notice Proposes granting or revoking operator privileges (48h timelock)
-    function proposeOperator(
-        address operator,
-        bool status
+    function setEngine(
+        address _engine
     ) external onlyOwner {
-        pendingOperatorAddress = operator;
-        pendingOperatorStatus = status;
-        operatorActivationTime = block.timestamp + TIMELOCK_DELAY;
-    }
-
-    /// @notice Finalizes the pending operator proposal after timelock expires
-    function finalizeOperator() external onlyOwner {
-        if (operatorActivationTime == 0) {
-            revert MarginClearinghouse__NoProposal();
+        if (_engine == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
         }
-        if (block.timestamp < operatorActivationTime) {
-            revert MarginClearinghouse__TimelockNotReady();
+        if (engine != address(0)) {
+            revert MarginClearinghouse__EngineAlreadySet();
         }
-        isProtocolOperator[pendingOperatorAddress] = pendingOperatorStatus;
-        pendingOperatorAddress = address(0);
-        pendingOperatorStatus = false;
-        operatorActivationTime = 0;
-    }
-
-    /// @notice Cancels the pending operator proposal
-    function cancelOperatorProposal() external onlyOwner {
-        pendingOperatorAddress = address(0);
-        pendingOperatorStatus = false;
-        operatorActivationTime = 0;
-    }
-
-    /// @notice Proposes a new withdraw guard contract (48h timelock)
-    function proposeWithdrawGuard(
-        address _guard
-    ) external onlyOwner {
-        pendingWithdrawGuard = _guard;
-        withdrawGuardActivationTime = block.timestamp + TIMELOCK_DELAY;
-    }
-
-    /// @notice Finalizes the pending withdraw guard proposal after timelock expires
-    function finalizeWithdrawGuard() external onlyOwner {
-        if (withdrawGuardActivationTime == 0) {
-            revert MarginClearinghouse__NoProposal();
-        }
-        if (block.timestamp < withdrawGuardActivationTime) {
-            revert MarginClearinghouse__TimelockNotReady();
-        }
-        withdrawGuard = IWithdrawGuard(pendingWithdrawGuard);
-        pendingWithdrawGuard = address(0);
-        withdrawGuardActivationTime = 0;
-    }
-
-    /// @notice Cancels the pending withdraw guard proposal
-    function cancelWithdrawGuardProposal() external onlyOwner {
-        pendingWithdrawGuard = address(0);
-        withdrawGuardActivationTime = 0;
+        engine = _engine;
     }
 
     // ==========================================
@@ -168,8 +112,9 @@ contract MarginClearinghouse is Ownable2Step {
 
         settlementBalances[accountId] -= amount;
 
-        if (address(withdrawGuard) != address(0)) {
-            withdrawGuard.checkWithdraw(accountId);
+        address engine_ = engine;
+        if (engine_ != address(0)) {
+            IWithdrawGuard(engine_).checkWithdraw(accountId);
         }
 
         uint256 remainingEquity = getAccountEquityUsdc(accountId);

@@ -43,6 +43,9 @@ interface ICfdEngine {
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
 
+    /// @notice Current order router allowed to execute orders through the engine.
+    function orderRouter() external view returns (address);
+
     /// @notice Settlement token used for fees, margin, and payouts
     function USDC() external view returns (IERC20);
 

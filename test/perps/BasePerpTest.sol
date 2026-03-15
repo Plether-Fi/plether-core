@@ -67,18 +67,7 @@ abstract contract BasePerpTest is Test {
     }
 
     function _bypassAllTimelocks() internal {
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
-        clearinghouse.proposeOperator(address(router), true);
-        vm.warp(144 hours + 4);
-        clearinghouse.finalizeOperator();
-
+        clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
     }
 

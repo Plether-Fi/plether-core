@@ -2724,14 +2724,7 @@ contract VpiChunkingTest is Test {
         engine.setVault(address(pool));
         engine.setOrderRouter(address(this));
 
-        clearinghouse.proposeWithdrawGuard(address(engine));
-        vm.warp(48 hours + 2);
-        clearinghouse.finalizeWithdrawGuard();
-
-        clearinghouse.proposeOperator(address(engine), true);
-        vm.warp(96 hours + 3);
-        clearinghouse.finalizeOperator();
-
+        clearinghouse.setEngine(address(engine));
         vm.warp(1_709_532_000);
 
         usdc.mint(address(this), 10_000_000 * 1e6);

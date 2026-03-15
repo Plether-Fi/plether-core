@@ -248,43 +248,30 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     // ==========================================
-    // MarginClearinghouse TIMELOCK TESTS
+    // MarginClearinghouse CONFIG TESTS
     // ==========================================
 
-    function test_ProposeOperator_TimelockFlow() public {
-        address newOp = address(0xCCC);
-        clearinghouse.proposeOperator(newOp, true);
+    function test_SetEngine_SucceedsOnce() public {
+        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
+        fresh.setEngine(address(engine));
 
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__TimelockNotReady.selector);
-        clearinghouse.finalizeOperator();
-
-        _warpForward(48 hours + 1);
-        clearinghouse.finalizeOperator();
-
-        assertTrue(clearinghouse.isProtocolOperator(newOp));
-        assertEq(clearinghouse.operatorActivationTime(), 0);
+        assertEq(fresh.engine(), address(engine));
     }
 
-    function test_ProposeWithdrawGuard_TimelockFlow() public {
-        address newGuard = address(0xDDD);
-        clearinghouse.proposeWithdrawGuard(newGuard);
+    function test_SetEngine_OnlyOwner() public {
+        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
 
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__TimelockNotReady.selector);
-        clearinghouse.finalizeWithdrawGuard();
-
-        _warpForward(48 hours + 1);
-        clearinghouse.finalizeWithdrawGuard();
-
-        assertEq(address(clearinghouse.withdrawGuard()), newGuard);
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        fresh.setEngine(address(engine));
     }
 
-    function test_CancelOperatorProposal_ClearsPending() public {
-        clearinghouse.proposeOperator(address(0xCCC), true);
-        clearinghouse.cancelOperatorProposal();
-        assertEq(clearinghouse.operatorActivationTime(), 0);
+    function test_SetEngine_CannotBeChanged() public {
+        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
+        fresh.setEngine(address(engine));
 
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NoProposal.selector);
-        clearinghouse.finalizeOperator();
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__EngineAlreadySet.selector);
+        fresh.setEngine(address(router));
     }
 
     // ==========================================
