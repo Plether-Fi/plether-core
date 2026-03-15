@@ -7,6 +7,15 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    struct SideState {
+        uint256 maxProfitUsdc;
+        uint256 openInterest;
+        uint256 entryNotional;
+        uint256 totalMargin;
+        int256 fundingIndex;
+        int256 entryFunding;
+    }
+
     struct LiquidationPreview {
         bool liquidatable;
         uint256 oraclePrice;
@@ -73,10 +82,11 @@ interface ICfdEngine {
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Worst-case payout for all BULL positions (6 decimals)
-    function globalBullMaxProfit() external view returns (uint256);
-    /// @notice Worst-case payout for all BEAR positions (6 decimals)
-    function globalBearMaxProfit() external view returns (uint256);
+    /// @notice Returns the accounting state for a given side.
+    function getSideState(
+        CfdTypes.Side side
+    ) external view returns (SideState memory);
+
     /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
     function getMaxLiability() external view returns (uint256);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)

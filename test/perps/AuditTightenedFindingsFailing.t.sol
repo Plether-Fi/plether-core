@@ -74,7 +74,9 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         vm.warp(block.timestamp + 365 days);
         _close(bullId, CfdTypes.Side.BULL, 100_000 * 1e18, 1e8);
 
-        assertEq(engine.totalBullMargin(), 0, "Full close should remove all bull margin, including funding gains");
+        assertEq(
+            _sideTotalMargin(CfdTypes.Side.BULL), 0, "Full close should remove all bull margin, including funding gains"
+        );
     }
 
     function test_M2_NewDepositResetsCooldownTimestamp() public {

@@ -199,8 +199,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty =
-            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(bounty, 4_960_000, "Keeper bounty should cap at remaining positive equity");
@@ -286,7 +285,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         assertGt(bearFunding, 0, "Setup must make the bear side owed funding");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearFunding)
             ? bal - maxLiability - pendingFees - uint256(bearFunding)
