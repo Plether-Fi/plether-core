@@ -22,7 +22,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
-        clearinghouse.withdraw(accountId, address(usdc), 9999 * 1e6);
+        clearinghouse.withdraw(accountId, 9999 * 1e6);
     }
 
     function test_C2_MtmMustAccountForUncollectibleLosses() public {
@@ -80,9 +80,9 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _open(negativeId, CfdTypes.Side.BULL, 100_000 * 1e18, 1600 * 1e6, 1e8);
 
         vm.prank(traderPositive);
-        clearinghouse.withdraw(positiveId, address(usdc), 8400 * 1e6);
+        clearinghouse.withdraw(positiveId, 8400 * 1e6);
         vm.prank(traderNegative);
-        clearinghouse.withdraw(negativeId, address(usdc), 8400 * 1e6);
+        clearinghouse.withdraw(negativeId, 8400 * 1e6);
 
         // Liquidate at equity ≈ +$5 (just above zero)
         // Bounty capped at min(~$152, $5) = $5
@@ -139,7 +139,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert();
-        clearinghouse.withdraw(accountId, address(usdc), 1e6);
+        clearinghouse.withdraw(accountId, 1e6);
     }
 
     function test_M2_StaleReconcileMustNotAdvanceClock() public {
@@ -198,7 +198,7 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
 
         _close(mmId, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8);
 
-        uint256 mmAfter = clearinghouse.balances(mmId, address(usdc));
+        uint256 mmAfter = clearinghouse.balanceUsdc(mmId);
         uint256 depositAmount = 500_000 * 1e6;
         uint256 execFeesRoundTrip = ((500_000 * 1e6 * 4) / 10_000) * 2;
 

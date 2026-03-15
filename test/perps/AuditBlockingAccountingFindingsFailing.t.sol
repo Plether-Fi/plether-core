@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -9,21 +8,21 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {MockUSDC} from "../mocks/MockUSDC.sol";
-import {BasePerpTest} from "./BasePerpTest.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
-import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
+import {MockUSDC} from "../mocks/MockUSDC.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
     address alice = address(0xA11CE);
 
     function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            60e6, 0, 50e6, 20e6
-        );
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 0, 50e6, 20e6);
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);
@@ -32,8 +31,16 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
         assertEq(plan.freeSettlementConsumedUsdc, 10e6, "Plan should consume free settlement first");
         assertEq(plan.activeMarginConsumedUsdc, 0, "Protected residual margin must not be attributed as consumed");
-        assertEq(plan.otherLockedMarginConsumedUsdc, 30e6, "Plan should consume queued committed margin after free settlement");
-        assertEq(mutation.resultingLockedMarginUsdc, 20e6, "Applied locked margin should equal surviving protected residual margin");
+        assertEq(
+            plan.otherLockedMarginConsumedUsdc,
+            30e6,
+            "Plan should consume queued committed margin after free settlement"
+        );
+        assertEq(
+            mutation.resultingLockedMarginUsdc,
+            20e6,
+            "Applied locked margin should equal surviving protected residual margin"
+        );
     }
 
     function test_H1_PhaseBoundary_PartialCloseThenCancelMustNotUnlockProtectedResidualMargin() public {
@@ -59,6 +66,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
             "Canceling queued collateral after a partial close must not unlock below the surviving protected position margin"
         );
     }
+
 }
 
 contract CfdEngineSolvencyTimingHarness is CfdEngine {
@@ -72,7 +80,15 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
 
     function previewEffectiveAssetsAfterFundingWithoutMarginSync(
         CfdTypes.Order memory order
-    ) external returns (uint256 staleEffectiveAssets, uint256 syncedEffectiveAssets, uint256 staleSideMargin, uint256 syncedSideMargin) {
+    )
+        external
+        returns (
+            uint256 staleEffectiveAssets,
+            uint256 syncedEffectiveAssets,
+            uint256 staleSideMargin,
+            uint256 syncedSideMargin
+        )
+    {
         CfdTypes.Position storage pos = positions[order.accountId];
         uint256 marginBefore = pos.margin;
         CfdTypes.Side marginSide = pos.side;
@@ -104,26 +120,32 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
         CfdEngineSnapshotsLib.FundingSnapshot memory staleFunding =
             CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, totalBullMargin, totalBearMargin);
-        CfdEngineSnapshotsLib.FundingSnapshot memory syncedFunding =
-            CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, provisionalBullMargin, provisionalBearMargin);
+        CfdEngineSnapshotsLib.FundingSnapshot memory syncedFunding = CfdEngineSnapshotsLib.buildFundingSnapshot(
+            bullFunding, bearFunding, provisionalBullMargin, provisionalBearMargin
+        );
 
-        staleEffectiveAssets = SolvencyAccountingLib.buildSolvencyState(
+        staleEffectiveAssets =
+        SolvencyAccountingLib.buildSolvencyState(
             vault.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
             staleFunding.solvencyFunding,
             totalDeferredPayoutUsdc,
             totalDeferredLiquidationBountyUsdc
-        ).effectiveAssetsUsdc;
-        syncedEffectiveAssets = SolvencyAccountingLib.buildSolvencyState(
+        )
+        .effectiveAssetsUsdc;
+        syncedEffectiveAssets =
+        SolvencyAccountingLib.buildSolvencyState(
             vault.totalAssets(),
             accumulatedFeesUsdc,
             _maxLiability(),
             syncedFunding.solvencyFunding,
             totalDeferredPayoutUsdc,
             totalDeferredLiquidationBountyUsdc
-        ).effectiveAssetsUsdc;
+        )
+        .effectiveAssetsUsdc;
     }
+
 }
 
 contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
@@ -163,7 +185,15 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
-        router = new OrderRouter(address(engine), address(pool), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0));
+        router = new OrderRouter(
+            address(engine),
+            address(pool),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -189,22 +219,35 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         CfdEngineSolvencyTimingHarness harness = CfdEngineSolvencyTimingHarness(address(engine));
-        (uint256 staleEffectiveAssets, uint256 syncedEffectiveAssets, uint256 staleBullMargin, uint256 syncedBullMargin) = harness
-            .previewEffectiveAssetsAfterFundingWithoutMarginSync(
-                CfdTypes.Order({
-                    accountId: bullIdA,
-                    sizeDelta: 390_000e18,
-                    marginDelta: 0,
-                    targetPrice: 0,
-                    commitTime: uint64(block.timestamp),
-                    commitBlock: uint64(block.number),
-                    orderId: 0,
-                    side: CfdTypes.Side.BULL,
-                    isClose: true
-                })
-            );
+        (
+            uint256 staleEffectiveAssets,
+            uint256 syncedEffectiveAssets,
+            uint256 staleBullMargin,
+            uint256 syncedBullMargin
+        ) = harness.previewEffectiveAssetsAfterFundingWithoutMarginSync(
+            CfdTypes.Order({
+                accountId: bullIdA,
+                sizeDelta: 390_000e18,
+                marginDelta: 0,
+                targetPrice: 0,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: CfdTypes.Side.BULL,
+                isClose: true
+            })
+        );
 
-        assertEq(staleBullMargin, syncedBullMargin, "Solvency/degraded checks must use the same side margins that would be committed after funding settlement");
-        assertEq(staleEffectiveAssets, syncedEffectiveAssets, "Solvency effective assets must not depend on stale in-flight side-margin totals");
+        assertEq(
+            staleBullMargin,
+            syncedBullMargin,
+            "Solvency/degraded checks must use the same side margins that would be committed after funding settlement"
+        );
+        assertEq(
+            staleEffectiveAssets,
+            syncedEffectiveAssets,
+            "Solvency effective assets must not depend on stale in-flight side-margin totals"
+        );
     }
+
 }

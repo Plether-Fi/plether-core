@@ -180,7 +180,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
@@ -194,7 +194,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         closePrice[0] = abi.encode(uint256(1e8));
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Depth manipulation round-trip must not produce positive PnL");
     }

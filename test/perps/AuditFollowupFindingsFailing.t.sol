@@ -155,7 +155,7 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 8000e6);
+        clearinghouse.withdraw(accountId, 8000e6);
 
         vm.startPrank(address(router));
         engine.liquidatePosition(accountId, 101_900_000, pool.totalAssets(), uint64(block.timestamp));
@@ -195,12 +195,11 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 94e6);
+        clearinghouse.withdraw(accountId, 94e6);
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty =
-            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(bounty, 4_960_000, "Keeper bounty should cap at remaining positive equity");

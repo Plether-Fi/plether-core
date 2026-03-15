@@ -101,7 +101,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         _open(ACCOUNT_ID, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(ACCOUNT_ID, address(usdc), 94e6);
+        clearinghouse.withdraw(ACCOUNT_ID, 94e6);
 
         vm.warp(1_709_971_200); // Saturday during FAD
         uint256 depth = pool.totalAssets();

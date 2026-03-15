@@ -4,10 +4,10 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
-import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Test} from "forge-std/Test.sol";
@@ -69,7 +69,7 @@ contract PerpHandler is Test {
         usdc.mint(trader, marginFuzz);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), marginFuzz);
-        clearinghouse.deposit(accountId, address(usdc), marginFuzz);
+        clearinghouse.deposit(accountId, marginFuzz);
         vm.stopPrank();
         ghost_totalDeposited += marginFuzz;
 
@@ -284,14 +284,18 @@ contract PerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
-        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Queued keeper reserves must stay backed in router custody");
+        assertEq(
+            usdc.balanceOf(address(router)),
+            pendingKeeperReserves,
+            "Queued keeper reserves must stay backed in router custody"
+        );
     }
 
     function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {
         uint256 trackedBalances;
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            trackedBalances += clearinghouse.balances(accountId, address(usdc));
+            trackedBalances += clearinghouse.balanceUsdc(accountId);
         }
 
         assertEq(
@@ -398,15 +402,20 @@ contract PerpInvariantTest is BasePerpTest {
             }
         }
 
-        assertEq(engine.totalBullMargin(), sumBullMargin, "Bull side margin mirror must equal live bull position margins");
-        assertEq(engine.totalBearMargin(), sumBearMargin, "Bear side margin mirror must equal live bear position margins");
+        assertEq(
+            engine.totalBullMargin(), sumBullMargin, "Bull side margin mirror must equal live bull position margins"
+        );
+        assertEq(
+            engine.totalBearMargin(), sumBearMargin, "Bear side margin mirror must equal live bear position margins"
+        );
     }
 
     function invariant_ClearinghouseBucketsConserveTrackedState() public {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, size > 0 ? margin : 0);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+                clearinghouse.getAccountUsdcBuckets(accountId, size > 0 ? margin : 0);
 
             assertEq(
                 buckets.settlementBalanceUsdc,
@@ -431,7 +440,8 @@ contract PerpInvariantTest is BasePerpTest {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+                clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
 
             assertEq(buckets.reservedSettlementUsdc, 0, "Keeper reserves must not remain in trader collateral buckets");
             assertEq(
@@ -600,7 +610,7 @@ contract AdversarialPerpHandler is Test {
         usdc.mint(actor, amount);
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 
@@ -829,7 +839,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             pendingKeeperReserves += router.executionBountyReserves(orderId);
         }
 
-        assertEq(usdc.balanceOf(address(router)), pendingKeeperReserves, "Adversarial queue keeper reserves must remain fully backed");
+        assertEq(
+            usdc.balanceOf(address(router)),
+            pendingKeeperReserves,
+            "Adversarial queue keeper reserves must remain fully backed"
+        );
     }
 
     function invariant_AdversarialBatchProcessingRemainsLive() public {
@@ -862,7 +876,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
 
         assertEq(
-            usdc.balanceOf(address(router)), pendingKeeperReserves, "Router custody must equal pending keeper reserves during adversarial flows"
+            usdc.balanceOf(address(router)),
+            pendingKeeperReserves,
+            "Router custody must equal pending keeper reserves during adversarial flows"
         );
     }
 

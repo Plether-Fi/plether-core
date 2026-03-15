@@ -75,25 +75,7 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
 
         vm.prank(address(router));
         vm.expectRevert();
-        clearinghouse.seizeAsset(accountId, address(usdc), 100e6, attacker);
-    }
-
-    function test_M2_SettleUsdcRejectsNonSettlementAsset() public {
-        MockUSDC stray = new MockUSDC();
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        vm.prank(address(router));
-        vm.expectRevert();
-        clearinghouse.settleUsdc(accountId, address(stray), 1e6);
-    }
-
-    function test_M2_WithdrawRejectsUnsupportedAsset() public {
-        MockUSDC stray = new MockUSDC();
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        vm.prank(address(router));
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__AssetNotSupported.selector);
-        clearinghouse.settleUsdc(accountId, address(stray), 100e6);
+        clearinghouse.seizeUsdc(accountId, 100e6, attacker);
     }
 
 }
@@ -254,7 +236,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
-        clearinghouse.withdraw(accountId, address(usdc), 500e6);
+        clearinghouse.withdraw(accountId, 500e6);
     }
 
 }
@@ -288,13 +270,13 @@ contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
         _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 markThenTradeBalance = clearinghouse.balances(accountId, address(usdc));
+        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(accountId);
 
         vm.revertToState(snap);
 
         vm.warp(block.timestamp + 1 days);
         _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
-        uint256 tradeOnlyBalance = clearinghouse.balances(accountId, address(usdc));
+        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(accountId);
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Funding accrual should not depend on update-vs-trade path");
     }

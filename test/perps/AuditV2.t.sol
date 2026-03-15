@@ -52,7 +52,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(underwaterPrice, uint64(block.timestamp));
 
-        uint256 chBalance = clearinghouse.balances(aliceId, address(usdc));
+        uint256 chBalance = clearinghouse.balanceUsdc(aliceId);
         uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
         uint256 withdrawable = chBalance - locked;
 
@@ -61,7 +61,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         // This should revert (withdrawal exceeds PnL-aware equity) but doesn't.
         vm.prank(alice);
         vm.expectRevert();
-        clearinghouse.withdraw(aliceId, address(usdc), withdrawable);
+        clearinghouse.withdraw(aliceId, withdrawable);
     }
 
 }

@@ -19,7 +19,7 @@ contract LiquidationTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
         vm.stopPrank();
     }
 
@@ -28,12 +28,12 @@ contract LiquidationTest is BasePerpTest {
         uint256 reserveUsdc
     ) internal {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        uint256 balance = clearinghouse.balances(accountId, address(usdc));
+        uint256 balance = clearinghouse.balanceUsdc(accountId);
         uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
         uint256 withdrawable = balance > locked + reserveUsdc ? balance - locked - reserveUsdc : 0;
         if (withdrawable > 0) {
             vm.prank(trader);
-            clearinghouse.withdraw(accountId, address(usdc), withdrawable);
+            clearinghouse.withdraw(accountId, withdrawable);
         }
     }
 
@@ -85,7 +85,7 @@ contract LiquidationTest is BasePerpTest {
         // Clearinghouse after open and withdrawing free USDC: locked margin remains $1960.
         // Liquidation: equity = $1960 + $0 (PnL) = $1960. Bounty = $150.
         // residual = $1960 - $150 = $1810. toSeize = $1960 - $1810 = $150.
-        uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBalance = clearinghouse.balanceUsdc(accountId);
         assertEq(chBalance, 1810 * 1e6, "Alice keeps surplus equity after ethical liquidation");
     }
 
@@ -121,7 +121,7 @@ contract LiquidationTest is BasePerpTest {
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
         // Bounty ~ 0.15% * $101.5k = $152.25, but min $5 → $152.25
         // Residual = $460 - $152.25 = $307.75
-        uint256 chBalance = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBalance = clearinghouse.balanceUsdc(accountId);
         assertApproxEqAbs(chBalance, 307_750_000, 1, "Alice retains equity net of keeper bounty");
     }
 
@@ -233,7 +233,7 @@ contract LiquidationTest is BasePerpTest {
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
 
         uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBefore = clearinghouse.balanceUsdc(accountId);
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
@@ -242,7 +242,7 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(accountId, pythData);
 
         uint256 bounty = usdc.balanceOf(keeper);
-        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         uint256 poolAfter = usdc.balanceOf(address(pool));
 
         uint256 userSeized = chBefore - chAfter;

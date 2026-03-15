@@ -351,7 +351,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         uint256 keeperPayoutFailed = usdc.balanceOf(keeper);
 
         assertEq(keeperPayoutSuccess, 1e6, "H-01: successful execution should pay the keeper in USDC");
-        assertEq(keeperPayoutFailed, 1e6, "H-01: failed binding open execution should still pay the reserved keeper fee");
+        assertEq(
+            keeperPayoutFailed, 1e6, "H-01: failed binding open execution should still pay the reserved keeper fee"
+        );
     }
 
 }

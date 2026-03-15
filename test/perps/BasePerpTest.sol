@@ -67,10 +67,8 @@ abstract contract BasePerpTest is Test {
     }
 
     function _bypassAllTimelocks() internal {
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
@@ -140,7 +138,7 @@ abstract contract BasePerpTest is Test {
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 

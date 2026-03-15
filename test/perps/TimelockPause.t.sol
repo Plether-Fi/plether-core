@@ -29,7 +29,7 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 50_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 50_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 50_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
     }
@@ -276,25 +276,6 @@ contract TimelockPauseTest is BasePerpTest {
         clearinghouse.finalizeWithdrawGuard();
 
         assertEq(address(clearinghouse.withdrawGuard()), newGuard);
-    }
-
-    function test_ProposeAssetConfig_TimelockFlow() public {
-        address newAsset = address(0xEEE);
-        clearinghouse.proposeAssetConfig(newAsset, 18, 9000, address(0));
-
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__TimelockNotReady.selector);
-        clearinghouse.finalizeAssetConfig();
-
-        _warpForward(48 hours + 1);
-        clearinghouse.finalizeAssetConfig();
-
-        (bool supported,,,) = clearinghouse.assetConfigs(newAsset);
-        assertTrue(supported);
-    }
-
-    function test_ProposeAssetConfig_InvalidLTV_Reverts() public {
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidLTV.selector);
-        clearinghouse.proposeAssetConfig(address(0xFFF), 18, 10_001, address(0));
     }
 
     function test_CancelOperatorProposal_ClearsPending() public {

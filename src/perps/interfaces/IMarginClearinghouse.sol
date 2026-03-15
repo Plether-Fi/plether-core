@@ -13,10 +13,9 @@ interface IMarginClearinghouse {
         uint256 freeSettlementUsdc;
     }
 
-    /// @notice Returns the balance of an asset for an account
-    function balances(
-        bytes32 accountId,
-        address asset
+    /// @notice Returns the settlement USDC balance for an account.
+    function balanceUsdc(
+        bytes32 accountId
     ) external view returns (uint256);
     /// @notice Returns the locked USDC margin for an account
     function lockedMarginUsdc(
@@ -35,7 +34,6 @@ interface IMarginClearinghouse {
     /// @notice Adjusts USDC balance for funding, PnL, or rebates (+credit, -debit)
     function settleUsdc(
         bytes32 accountId,
-        address usdc,
         int256 amount
     ) external;
     /// @notice Reserves settlement USDC in place without transferring custody
@@ -86,13 +84,10 @@ interface IMarginClearinghouse {
         uint256 lockedPositionMarginUsdc,
         int256 residualUsdc,
         address recipient
-    )
-        external
-        returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc);
-    /// @notice Transfers assets from an account to a recipient (losses, fees, or bad debt)
-    function seizeAsset(
+    ) external returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc);
+    /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
+    function seizeUsdc(
         bytes32 accountId,
-        address asset,
         uint256 amount,
         address recipient
     ) external;

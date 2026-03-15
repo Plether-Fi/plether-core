@@ -67,7 +67,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
-        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+        clearinghouse.withdraw(accountId, 100e6);
     }
 
     function test_2_HousePoolAcceptsStaleMarkDuringLiveMarketFadWindow() public {

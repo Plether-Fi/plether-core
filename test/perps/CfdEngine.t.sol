@@ -215,7 +215,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        uint256 clearinghouseBefore = clearinghouse.balances(accountId, address(usdc));
+        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
@@ -223,7 +223,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(size, 0, "Profitable close should still destroy the position");
         assertGt(engine.deferredPayoutUsdc(accountId), 0, "Unpaid profit should be recorded as deferred payout");
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouse.balanceUsdc(accountId),
             clearinghouseBefore,
             "Illiquid profitable close should not immediately credit clearinghouse cash"
         );
@@ -293,14 +293,14 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(deferred, 0, "Setup should create a deferred payout");
 
         _fundJunior(address(this), deferred);
-        uint256 clearinghouseBefore = clearinghouse.balances(accountId, address(usdc));
+        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
 
         vm.prank(trader);
         engine.claimDeferredPayout(accountId);
 
         assertEq(engine.deferredPayoutUsdc(accountId), 0, "Claim should clear deferred payout state");
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouse.balanceUsdc(accountId),
             clearinghouseBefore + deferred,
             "Claim should credit the clearinghouse balance"
         );
@@ -472,7 +472,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
 
-        assertEq(viewData.settlementBalanceUsdc, clearinghouse.balances(accountId, address(usdc)));
+        assertEq(viewData.settlementBalanceUsdc, clearinghouse.balanceUsdc(accountId));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
         assertEq(viewData.activePositionMarginUsdc, positionMargin);
@@ -813,7 +813,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+        clearinghouse.withdraw(accountId, 100e6);
 
         CfdEngine.LiquidationPreview memory preview =
             engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
@@ -830,7 +830,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 895e6);
+        clearinghouse.withdraw(accountId, 895e6);
 
         vm.warp(block.timestamp + 1);
         vm.prank(address(router));
@@ -856,7 +856,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 895e6);
+        clearinghouse.withdraw(accountId, 895e6);
 
         CfdEngine.LiquidationPreview memory contractPreview =
             engine.previewLiquidation(accountId, 110_000_000, pool.totalAssets());
@@ -884,7 +884,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 895e6);
+        clearinghouse.withdraw(accountId, 895e6);
 
         vm.warp(block.timestamp + 1 days);
 
@@ -931,7 +931,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+        clearinghouse.withdraw(accountId, 100e6);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -965,7 +965,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 100e6);
+        clearinghouse.withdraw(accountId, 100e6);
 
         CfdEngine.LiquidationPreview memory preview =
             engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
@@ -1264,7 +1264,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
-        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBefore = clearinghouse.balanceUsdc(accountId);
 
         vm.warp(block.timestamp + 90 days);
 
@@ -1282,7 +1282,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
-        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         assertLt(chAfter, chBefore, "Funding drain should reduce clearinghouse balance on close");
     }
 
@@ -1307,7 +1307,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 2500 * 1e6);
+        clearinghouse.withdraw(accountId, 2500 * 1e6);
 
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         vm.prank(address(router));
@@ -1441,7 +1441,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // Price dropped to $0.50 → BULL has $50k unrealized profit
         // User should be able to close and receive profit minus funding minus fees
-        uint256 chBefore = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBefore = clearinghouse.balanceUsdc(accountId);
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             accountId: accountId,
@@ -1462,7 +1462,7 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
 
-        uint256 chAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         assertGt(chAfter, chBefore, "User should net positive after profitable close minus funding");
     }
 
@@ -1525,7 +1525,7 @@ contract CfdEngineTest is BasePerpTest {
             "Liquidation residual settlement must preserve reserved execution bounty escrow"
         );
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouse.balanceUsdc(accountId),
             reservedEscrowUsdc,
             "Only the protected reserved escrow should remain after liquidation consumes reachable collateral"
         );
@@ -1698,7 +1698,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 46_000 * 1e6);
+        clearinghouse.withdraw(accountId, 46_000 * 1e6);
 
         uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
         assertTrue(freeEquityBefore > 0, "User should have free equity beyond locked margin");
@@ -1744,7 +1744,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrder(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(aliceTrader);
-        clearinghouse.withdraw(aliceId, address(usdc), 28_000 * 1e6);
+        clearinghouse.withdraw(aliceId, 28_000 * 1e6);
 
         CfdTypes.Order memory bobOpen = CfdTypes.Order({
             accountId: bobId,
@@ -1823,7 +1823,7 @@ contract CfdEngineTest is BasePerpTest {
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 194 * 1e6);
+        clearinghouse.withdraw(accountId, 194 * 1e6);
 
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(accountId, 100_500_000, vaultDepth, uint64(block.timestamp));
@@ -1889,7 +1889,7 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        uint256 chBeforeOpen = clearinghouse.balances(accountId, address(usdc));
+        uint256 chBeforeOpen = clearinghouse.balanceUsdc(accountId);
         vm.prank(address(router));
         engine.processOrder(openOrder, 1e8, largeDepth, uint64(block.timestamp));
 
@@ -1910,7 +1910,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(closeOrder, 1e8, smallDepth, uint64(block.timestamp));
 
-        uint256 chAfterClose = clearinghouse.balances(accountId, address(usdc));
+        uint256 chAfterClose = clearinghouse.balanceUsdc(accountId);
 
         // Without fix: close at smallDepth yields massive VPI rebate (attacker profits).
         // With fix: stateful bound caps close rebate to what was paid on open → net VPI = 0.
@@ -2148,7 +2148,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 remainingSize,,,,,,,) = engine.positions(accountId);
         assertEq(remainingSize, 200_000 * 1e18, "Underwater partial close should fail and leave the position untouched");
 
-        uint256 balAfter = clearinghouse.balances(accountId, address(usdc));
+        uint256 balAfter = clearinghouse.balanceUsdc(accountId);
         uint256 lockedAfter = clearinghouse.lockedMarginUsdc(accountId);
         assertGe(balAfter, lockedAfter, "Physical balance must cover locked margin (zombie prevention)");
 
@@ -2227,13 +2227,13 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertGt(size, 0, "Position should be open");
 
         uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 usdcBal = clearinghouse.balances(accountId, address(usdc));
+        uint256 usdcBal = clearinghouse.balanceUsdc(accountId);
         uint256 free = usdcBal - locked;
         assertGt(free, 0, "Alice should have free USDC to withdraw");
 
         uint256 balBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(accountId, address(usdc), free);
+        clearinghouse.withdraw(accountId, free);
         assertEq(usdc.balanceOf(alice), balBefore + free, "Free equity withdrawn");
     }
 
@@ -2465,7 +2465,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), margin);
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        clearinghouse.deposit(accountId, address(usdc), margin);
+        clearinghouse.deposit(accountId, margin);
 
         uint256 size = 50_000e18;
         router.commitOrder(CfdTypes.Side.BULL, size, 1000e6, 1e8, false);
@@ -2530,7 +2530,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), margin);
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        clearinghouse.deposit(accountId, address(usdc), margin);
+        clearinghouse.deposit(accountId, margin);
 
         uint256 size = 200_000e18;
         router.commitOrder(CfdTypes.Side.BULL, size, 100_000e6, 1e8, false);
@@ -2548,7 +2548,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         usdc.mint(carol, carolMargin);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), carolMargin);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), carolMargin);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), carolMargin);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 10_000e6, 1e8, false);
         vm.stopPrank();
 
@@ -2702,7 +2702,7 @@ contract VpiDepthTest is BasePerpTest {
 
         _fundTrader(alice, 50_000 * 1e6);
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
@@ -2716,7 +2716,7 @@ contract VpiDepthTest is BasePerpTest {
         closePrice[0] = abi.encode(uint256(1e8));
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Minority VPI depth attack must not be profitable");
     }
@@ -2727,7 +2727,7 @@ contract VpiDepthTest is BasePerpTest {
         _fundTrader(alice, 50_000 * 1e6);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        uint256 aliceBalBefore = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
@@ -2757,7 +2757,7 @@ contract VpiDepthTest is BasePerpTest {
         closePrice[0] = abi.encode(uint256(1e8));
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balances(aliceAccount, address(usdc));
+        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
     }
@@ -2842,7 +2842,7 @@ contract VpiChunkingTest is Test {
         usdc.mint(user, amount);
         vm.startPrank(user);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 
@@ -2916,7 +2916,7 @@ contract VpiChunkingTest is Test {
 
         (uint256 mmSize,,,,,,,) = engine.positions(mmId);
         _close(mmId, CfdTypes.Side.BULL, mmSize, 1e8, DEPTH);
-        uint256 mmUsdcAfter = clearinghouse.balances(mmId, address(usdc));
+        uint256 mmUsdcAfter = clearinghouse.balanceUsdc(mmId);
 
         uint256 totalDeposited = 500_000 * 1e6;
         uint256 approxExecFees = (500_000 * 1e6 * 4 / 10_000) * 2;
@@ -2939,9 +2939,9 @@ contract VpiChunkingTest is Test {
         _deposit(aliceId, 500_000 * 1e6);
         _open(aliceId, CfdTypes.Side.BULL, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
-        uint256 aliceBefore = clearinghouse.balances(aliceId, address(usdc));
+        uint256 aliceBefore = clearinghouse.balanceUsdc(aliceId);
         _close(aliceId, CfdTypes.Side.BULL, 400_000 * 1e18, 1e8, DEPTH);
-        uint256 aliceAfter = clearinghouse.balances(aliceId, address(usdc));
+        uint256 aliceAfter = clearinghouse.balanceUsdc(aliceId);
         int256 aliceNet = int256(aliceAfter) - int256(aliceBefore);
 
         _close(skewerId, CfdTypes.Side.BEAR, 500_000 * 1e18, 1e8, DEPTH);
@@ -2951,10 +2951,10 @@ contract VpiChunkingTest is Test {
         _deposit(bobId, 500_000 * 1e6);
         _open(bobId, CfdTypes.Side.BULL, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
-        uint256 bobBefore = clearinghouse.balances(bobId, address(usdc));
+        uint256 bobBefore = clearinghouse.balanceUsdc(bobId);
         _close(bobId, CfdTypes.Side.BULL, 200_000 * 1e18, 1e8, DEPTH);
         _close(bobId, CfdTypes.Side.BULL, 200_000 * 1e18, 1e8, DEPTH);
-        uint256 bobAfter = clearinghouse.balances(bobId, address(usdc));
+        uint256 bobAfter = clearinghouse.balanceUsdc(bobId);
         int256 bobNet = int256(bobAfter) - int256(bobBefore);
 
         int256 diff = aliceNet > bobNet ? aliceNet - bobNet : bobNet - aliceNet;

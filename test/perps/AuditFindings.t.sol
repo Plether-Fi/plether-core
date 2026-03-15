@@ -355,7 +355,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0);
 
-        uint256 balance = clearinghouse.balances(aliceId, address(usdc));
+        uint256 balance = clearinghouse.balanceUsdc(aliceId);
         uint256 locked = clearinghouse.lockedMarginUsdc(aliceId);
         uint256 freeBalance = balance - locked;
         assertGt(freeBalance, 90_000 * 1e6, "Alice has ~$99k free but can't touch it");
@@ -364,7 +364,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         // Instead, checkWithdraw reverts for ANY size > 0, trapping all excess collateral.
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(aliceId, address(usdc), 1e6);
+        clearinghouse.withdraw(aliceId, 1e6);
         assertEq(usdc.balanceOf(alice), aliceBalanceBefore + 1e6, "H-02: should withdraw $1 of free equity");
     }
 

@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {BasePerpTest} from "./BasePerpTest.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
 
@@ -13,16 +13,18 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
     function test_H1_ExecutionReleaseMustNotUnlockConsumedCommittedMargin() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
-        _fundTrader(alice, 5_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8);
+        _fundTrader(alice, 5000e6);
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 5_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000e18, 500e6, 1e8, false);
 
         vm.prank(address(engine));
         router.noteCommittedMarginConsumed(aliceId, 500e6);
 
-        assertEq(router.committedMargins(1), 0, "Consumed committed margin should be charged to the queued order itself");
+        assertEq(
+            router.committedMargins(1), 0, "Consumed committed margin should be charged to the queued order itself"
+        );
 
         uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceId);
 
@@ -58,4 +60,5 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
             "Clearing a failed binding head should still compensate the clearer"
         );
     }
+
 }

@@ -127,10 +127,8 @@ contract PerpsForkTest is Test {
         pool.setOrderRouter(address(router));
 
         uint256 t0 = block.timestamp;
-        clearinghouse.proposeAssetConfig(USDC, 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         vm.warp(t0 + 48 hours + 1);
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
@@ -160,7 +158,7 @@ contract PerpsForkTest is Test {
         deal(USDC, trader, IERC20(USDC).balanceOf(trader) + amount);
         vm.startPrank(trader);
         IERC20(USDC).approve(address(clearinghouse), amount);
-        clearinghouse.deposit(bytes32(uint256(uint160(trader))), USDC, amount);
+        clearinghouse.deposit(bytes32(uint256(uint160(trader))), amount);
         vm.stopPrank();
     }
 
@@ -615,13 +613,13 @@ contract PerpsForkTest is Test {
         assertGe(seniorAfter, seniorBefore, "Senior should not lose principal");
 
         // Verify Alice got her profit in real USDC
-        uint256 aliceBalance = clearinghouse.balances(_accountId(alice), USDC);
+        uint256 aliceBalance = clearinghouse.balanceUsdc(_accountId(alice));
         assertGt(aliceBalance, 50_000e6, "Alice should have profit");
 
         // Verify real USDC withdrawal from clearinghouse
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         vm.prank(alice);
-        clearinghouse.withdraw(_accountId(alice), USDC, aliceBalance);
+        clearinghouse.withdraw(_accountId(alice), aliceBalance);
         uint256 aliceUsdcAfter = IERC20(USDC).balanceOf(alice);
         assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
     }
@@ -636,7 +634,7 @@ contract PerpsForkTest is Test {
         vm.prank(address(pool));
         IERC20(USDC).transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        uint256 chBefore = clearinghouse.balances(aliceId, USDC);
+        uint256 chBefore = clearinghouse.balanceUsdc(aliceId);
 
         uint256 commitTime = block.timestamp;
         vm.prank(alice);
@@ -652,7 +650,7 @@ contract PerpsForkTest is Test {
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
         assertEq(
-            clearinghouse.balances(aliceId, USDC), chBefore, "Clearinghouse balance should stay unchanged until claim"
+            clearinghouse.balanceUsdc(aliceId), chBefore, "Clearinghouse balance should stay unchanged until claim"
         );
 
         deal(USDC, lp, IERC20(USDC).balanceOf(lp) + deferred);
@@ -664,7 +662,7 @@ contract PerpsForkTest is Test {
         engine.claimDeferredPayout(aliceId);
 
         assertEq(engine.deferredPayoutUsdc(aliceId), 0, "Claim should clear deferred payout state");
-        assertEq(clearinghouse.balances(aliceId, USDC), chBefore + deferred, "Claim should credit clearinghouse USDC");
+        assertEq(clearinghouse.balanceUsdc(aliceId), chBefore + deferred, "Claim should credit clearinghouse USDC");
     }
 
     function test_DeferredPayoutBatchDoesNotBlockTailOrder_RealUsdc() public {

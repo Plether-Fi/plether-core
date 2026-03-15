@@ -52,7 +52,7 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
     }
@@ -76,7 +76,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouse.balanceUsdc(accountId),
             9999 * 1e6,
             "Only the reserved execution bounty should leave Alice's balance"
         );
@@ -267,8 +267,12 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
-        assertEq(router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order");
-        assertEq(router.marginTailOrderId(accountId), 3, "Margin queue tail should end at the last positive-margin order");
+        assertEq(
+            router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order"
+        );
+        assertEq(
+            router.marginTailOrderId(accountId), 3, "Margin queue tail should end at the last positive-margin order"
+        );
         assertTrue(router.isInMarginQueue(1), "Positive-margin open should be linked into the margin queue");
         assertFalse(router.isInMarginQueue(2), "Close order should not enter the margin queue");
         assertTrue(router.isInMarginQueue(3), "Later positive-margin open should be linked into the margin queue");
@@ -303,7 +307,11 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.committedMargins(1), 0, "First margin-paying order should be fully drained");
         assertEq(router.marginHeadOrderId(accountId), 3, "Margin queue head should advance past the drained order");
-        assertEq(router.marginTailOrderId(accountId), 3, "Residual margin queue should retain the trailing positive-margin order");
+        assertEq(
+            router.marginTailOrderId(accountId),
+            3,
+            "Residual margin queue should retain the trailing positive-margin order"
+        );
         assertFalse(router.isInMarginQueue(1), "Drained order should be removed from the margin queue");
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
@@ -321,8 +329,16 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.marginHeadOrderId(accountId), 2, "Executing the margin-queue head should advance to the surviving residual order");
-        assertEq(router.marginTailOrderId(accountId), 2, "Executing the margin-queue head should leave the residual order as tail");
+        assertEq(
+            router.marginHeadOrderId(accountId),
+            2,
+            "Executing the margin-queue head should advance to the surviving residual order"
+        );
+        assertEq(
+            router.marginTailOrderId(accountId),
+            2,
+            "Executing the margin-queue head should leave the residual order as tail"
+        );
         assertFalse(router.isInMarginQueue(1), "Executed order should be removed from the margin queue");
         assertTrue(router.isInMarginQueue(2), "Residual positive-margin order should remain linked");
     }
@@ -424,11 +440,23 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.cancelOrder(secondCloseOrderId);
 
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling a close order should not unlock live position margin");
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 0, "Cancelled tail order should have no execution bounty reserve");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBeforeCancel,
+            "Cancelling a close order should not unlock live position margin"
+        );
+        assertEq(
+            router.executionBountyReserves(secondCloseOrderId),
+            0,
+            "Cancelled tail order should have no execution bounty reserve"
+        );
         assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
         assertEq(router.nextExecuteId(), firstCloseOrderId, "Cancelling a non-head order should not advance FIFO head");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Cancelling a close order should not route any prefunded bounty to protocol revenue");
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Cancelling a close order should not route any prefunded bounty to protocol revenue"
+        );
         assertEq(pool.totalAssets() - vaultAssetsBefore, 0, "Cancelling a close order should not move vault cash");
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
@@ -452,8 +480,16 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), closeOrderId + 1, "Cancelling the FIFO head should advance nextExecuteId");
         assertEq(router.pendingOrderCounts(accountId), 0);
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling the head close order should not unlock live position margin");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Head close cancellation should not route any prefunded bounty to protocol revenue");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBeforeCancel,
+            "Cancelling the head close order should not unlock live position margin"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Head close cancellation should not route any prefunded bounty to protocol revenue"
+        );
     }
 
     function test_CancelOrder_OnlyOwnerCanCancel() public {
@@ -487,7 +523,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.deal(carol, 10 ether);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -583,13 +619,13 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), address(usdc), 100_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), 100_000 * 1e6);
         vm.stopPrank();
 
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, address(usdc), 20_000 * 1e6);
+        clearinghouse.deposit(carolId, 20_000 * 1e6);
         vm.stopPrank();
 
         uint256 spamCount = 200;
@@ -623,7 +659,7 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, address(usdc), 20_000 * 1e6);
+        clearinghouse.deposit(carolId, 20_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -659,7 +695,7 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), address(usdc), 100_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(spammer))), 100_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -700,7 +736,7 @@ contract OrderRouterTest is BasePerpTest {
         usdc.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(carolId, address(usdc), 20_000 * 1e6);
+        clearinghouse.deposit(carolId, 20_000 * 1e6);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -727,7 +763,11 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_600_000, "executor should earn successful bounties plus the clearer share of invalid close heads");
+        assertEq(
+            executorReward,
+            1_600_000,
+            "executor should earn successful bounties plus the clearer share of invalid close heads"
+        );
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -801,7 +841,7 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
@@ -862,12 +902,16 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         assertEq(
-            clearinghouse.balances(accountId, address(usdc)),
-            9999 * 1e6,
-            "Reserved execution bounty should be charged on failure"
+            clearinghouse.balanceUsdc(accountId), 9999 * 1e6, "Reserved execution bounty should be charged on failure"
         );
-        assertEq(usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Executor should receive failed binding open-order bounty");
-        assertEq(engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperUsdcBefore,
+            1e6,
+            "Executor should receive failed binding open-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue"
+        );
     }
 
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
@@ -891,8 +935,16 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Keeper should recover the full expired close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Expired close-order bounty should not be routed to protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Keeper should recover the full expired close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            0,
+            "Expired close-order bounty should not be routed to protocol revenue"
+        );
     }
 
     function test_ExitedAccount_InvalidCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
@@ -915,8 +967,16 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of an invalid close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Invalid close-order bounty should split evenly with protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            500_000,
+            "Keeper should recover half of an invalid close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            500_000,
+            "Invalid close-order bounty should split evenly with protocol revenue"
+        );
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -1081,8 +1141,16 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 500_000, "Keeper should recover half of a slippage-failed close-order bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 500_000, "Slippage-failed close-order bounty should split evenly with protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            500_000,
+            "Keeper should recover half of a slippage-failed close-order bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            500_000,
+            "Slippage-failed close-order bounty should split evenly with protocol revenue"
+        );
     }
 
     function test_InsufficientPythFee_Reverts() public {
@@ -1131,7 +1199,7 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.mint(trader2, 10_000 * 1e6);
         vm.startPrank(trader2);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(trader2))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(trader2))), 10_000 * 1e6);
         vm.stopPrank();
 
         vm.warp(1000);
@@ -1516,7 +1584,7 @@ contract FadStalenessTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(alice))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(alice))), 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
@@ -1645,7 +1713,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(86_000_000, uint64(block.timestamp));
         vm.prank(alice);
-        clearinghouse.withdraw(aliceId, address(usdc), 9300e6);
+        clearinghouse.withdraw(aliceId, 9300e6);
 
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_18UTC + 1);
 
@@ -1721,7 +1789,7 @@ contract FadStalenessTest is BasePerpTest {
         usdc.mint(carol, 10_000 * 1e6);
         vm.startPrank(carol);
         usdc.approve(address(clearinghouse), type(uint256).max);
-        clearinghouse.deposit(bytes32(uint256(uint160(carol))), address(usdc), 10_000 * 1e6);
+        clearinghouse.deposit(bytes32(uint256(uint160(carol))), 10_000 * 1e6);
         vm.stopPrank();
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 10);
@@ -2537,10 +2605,8 @@ contract MarkPriceStalenessTest is BasePerpTest {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
@@ -2635,10 +2701,8 @@ contract StalenessGriefTest is BasePerpTest {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
@@ -2734,9 +2798,7 @@ contract VpiImrBypassTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
 
         clearinghouse.proposeOperator(address(engine), true);
         _warpPastTimelock();
@@ -2766,7 +2828,7 @@ contract VpiImrBypassTest is Test {
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 
@@ -2788,12 +2850,10 @@ contract VpiImrBypassTest is Test {
         vm.startPrank(alice);
         usdc.mint(alice, 1e6);
         usdc.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(aliceAccount, address(usdc), 1e6);
+        clearinghouse.deposit(aliceAccount, 1e6);
         vm.stopPrank();
 
-        assertEq(
-            clearinghouse.balances(aliceAccount, address(usdc)), 1e6, "Alice only funds the reserved execution bounty"
-        );
+        assertEq(clearinghouse.balanceUsdc(aliceAccount), 1e6, "Alice only funds the reserved execution bounty");
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
@@ -2861,9 +2921,7 @@ contract KeeperFeeRefundTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
 
         clearinghouse.proposeOperator(address(engine), true);
         _warpPastTimelock();
@@ -2884,7 +2942,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         vm.prank(alice);
-        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
+        clearinghouse.deposit(accountId, 50_000e6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -2913,7 +2971,7 @@ contract KeeperFeeRefundTest is Test {
         usdc.mint(alice, 50_000e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
-        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
+        clearinghouse.deposit(accountId, 50_000e6);
         vm.stopPrank();
 
         vm.deal(alice, 1 ether);
@@ -2940,7 +2998,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         vm.prank(alice);
-        clearinghouse.deposit(accountId, address(usdc), 50_000e6);
+        clearinghouse.deposit(accountId, 50_000e6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
@@ -3005,7 +3063,7 @@ contract WeekendArbitrageTest is Test {
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 
@@ -3045,10 +3103,8 @@ contract WeekendArbitrageTest is Test {
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         _warpPastTimelock();
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);

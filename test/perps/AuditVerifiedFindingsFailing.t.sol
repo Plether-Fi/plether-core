@@ -257,10 +257,8 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     }
 
     function _bypassAllTimelocks() internal {
-        clearinghouse.proposeAssetConfig(address(usdc), 6, 10_000, address(0));
         clearinghouse.proposeWithdrawGuard(address(engine));
         vm.warp(48 hours + 2);
-        clearinghouse.finalizeAssetConfig();
         clearinghouse.finalizeWithdrawGuard();
 
         clearinghouse.proposeOperator(address(engine), true);
@@ -291,7 +289,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         usdc.mint(trader, amount);
         vm.startPrank(trader);
         usdc.approve(address(clearinghouse), amount);
-        clearinghouse.deposit(accountId, address(usdc), amount);
+        clearinghouse.deposit(accountId, amount);
         vm.stopPrank();
     }
 
@@ -347,13 +345,13 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), freeBefore);
+        clearinghouse.withdraw(accountId, freeBefore);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         assertGe(
-            clearinghouse.balances(accountId, address(usdc)),
+            clearinghouse.balanceUsdc(accountId),
             lockedBefore,
             "Close commits must not strip locked margin to fund keeper reserves"
         );

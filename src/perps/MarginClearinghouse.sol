@@ -9,32 +9,15 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-interface IAssetOracle {
-
-    /// @notice Returns the price of the asset in 8-decimal USD
-    function getPriceUnsafe() external view returns (uint256);
-
-}
-
 /// @title MarginClearinghouse
-/// @notice Universal cross-margin account manager for Plether.
-/// @dev Calculates total Account Equity using LTV haircuts. V1 strictly uses USDC.
+/// @notice USDC-only cross-margin account manager for Plether.
+/// @dev Holds settlement balances, locked margin, and reserved settlement escrow for CFD accounts.
 /// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is Ownable2Step {
 
     using SafeERC20 for IERC20;
 
-    struct AssetConfig {
-        bool isSupported;
-        uint8 decimals;
-        uint16 ltvBps;
-        address oracle;
-    }
-
-    mapping(address => AssetConfig) public assetConfigs;
-    address[] public supportedAssetsList;
-
-    mapping(bytes32 => mapping(address => uint256)) public balances;
+    mapping(bytes32 => uint256) internal settlementBalances;
 
     mapping(bytes32 => uint256) public lockedMarginUsdc;
     mapping(bytes32 => uint256) public reservedSettlementUsdc;
@@ -54,16 +37,8 @@ contract MarginClearinghouse is Ownable2Step {
     address public pendingWithdrawGuard;
     uint256 public withdrawGuardActivationTime;
 
-    address public pendingAsset;
-    uint8 public pendingAssetDecimals;
-    uint16 public pendingAssetLtvBps;
-    address public pendingAssetOracle;
-    uint256 public assetConfigActivationTime;
-
     error MarginClearinghouse__NotOperator();
-    error MarginClearinghouse__InvalidLTV();
     error MarginClearinghouse__NotAccountOwner();
-    error MarginClearinghouse__AssetNotSupported();
     error MarginClearinghouse__ZeroAmount();
     error MarginClearinghouse__InsufficientBalance();
     error MarginClearinghouse__InsufficientFreeEquity();
@@ -158,109 +133,45 @@ contract MarginClearinghouse is Ownable2Step {
         withdrawGuardActivationTime = 0;
     }
 
-    /// @notice Proposes adding or updating a collateral asset configuration (48h timelock)
-    /// @param ltvBps Loan-to-value haircut in basis points (max 10000)
-    /// @param oracle Price feed returning 8-decimal USD price, or address(0) for stablecoins
-    function proposeAssetConfig(
-        address asset,
-        uint8 decimals,
-        uint16 ltvBps,
-        address oracle
-    ) external onlyOwner {
-        if (ltvBps > 10_000) {
-            revert MarginClearinghouse__InvalidLTV();
-        }
-        pendingAsset = asset;
-        pendingAssetDecimals = decimals;
-        pendingAssetLtvBps = ltvBps;
-        pendingAssetOracle = oracle;
-        assetConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
-    }
-
-    /// @notice Finalizes the pending asset config proposal after timelock expires
-    function finalizeAssetConfig() external onlyOwner {
-        if (assetConfigActivationTime == 0) {
-            revert MarginClearinghouse__NoProposal();
-        }
-        if (block.timestamp < assetConfigActivationTime) {
-            revert MarginClearinghouse__TimelockNotReady();
-        }
-        address asset = pendingAsset;
-        if (!assetConfigs[asset].isSupported) {
-            supportedAssetsList.push(asset);
-        }
-        assetConfigs[asset] = AssetConfig({
-            isSupported: true, decimals: pendingAssetDecimals, ltvBps: pendingAssetLtvBps, oracle: pendingAssetOracle
-        });
-        pendingAsset = address(0);
-        pendingAssetDecimals = 0;
-        pendingAssetLtvBps = 0;
-        pendingAssetOracle = address(0);
-        assetConfigActivationTime = 0;
-    }
-
-    /// @notice Cancels the pending asset config proposal
-    function cancelAssetConfigProposal() external onlyOwner {
-        pendingAsset = address(0);
-        pendingAssetDecimals = 0;
-        pendingAssetLtvBps = 0;
-        pendingAssetOracle = address(0);
-        assetConfigActivationTime = 0;
-    }
-
     // ==========================================
     // USER ACTIONS
     // ==========================================
 
-    /// @notice Deposits a supported asset into the specified margin account.
-    ///         Uses balance-before/after pattern to support fee-on-transfer tokens.
+    /// @notice Deposits settlement USDC into the specified margin account.
     /// @param accountId Deterministic account ID derived from msg.sender address
-    /// @param asset ERC20 token to deposit (must be in supportedAssetsList)
-    /// @param amount Token amount to transfer in (actual credited amount may differ for fee-on-transfer)
+    /// @param amount Token amount to transfer in
     function deposit(
         bytes32 accountId,
-        address asset,
         uint256 amount
     ) external {
         if (bytes32(uint256(uint160(msg.sender))) != accountId) {
             revert MarginClearinghouse__NotAccountOwner();
-        }
-        if (!assetConfigs[asset].isSupported) {
-            revert MarginClearinghouse__AssetNotSupported();
         }
         if (amount == 0) {
             revert MarginClearinghouse__ZeroAmount();
         }
 
-        uint256 balBefore = IERC20(asset).balanceOf(address(this));
-        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        uint256 received = IERC20(asset).balanceOf(address(this)) - balBefore;
-        balances[accountId][asset] += received;
+        settlementBalances[accountId] += amount;
+        IERC20(settlementAsset).safeTransferFrom(msg.sender, address(this), amount);
 
-        emit Deposit(accountId, asset, received);
+        emit Deposit(accountId, settlementAsset, amount);
     }
 
-    /// @notice Withdraws assets from a margin account. Only callable by the account owner.
-    ///         Reverts if withdrawal would push equity below locked margin requirements.
+    /// @notice Withdraws settlement USDC from a margin account.
     /// @param accountId Deterministic account ID derived from msg.sender address
-    /// @param asset ERC20 token to withdraw
-    /// @param amount Token amount to withdraw
+    /// @param amount USDC amount to withdraw
     function withdraw(
         bytes32 accountId,
-        address asset,
         uint256 amount
     ) external {
         if (bytes32(uint256(uint160(msg.sender))) != accountId) {
             revert MarginClearinghouse__NotAccountOwner();
         }
-        if (balances[accountId][asset] < amount) {
+        if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientBalance();
         }
-        if (!assetConfigs[asset].isSupported) {
-            revert MarginClearinghouse__AssetNotSupported();
-        }
 
-        balances[accountId][asset] -= amount;
+        settlementBalances[accountId] -= amount;
 
         if (address(withdrawGuard) != address(0)) {
             withdrawGuard.checkWithdraw(accountId);
@@ -271,45 +182,25 @@ contract MarginClearinghouse is Ownable2Step {
         if (remainingEquity < lockedMarginUsdc[accountId] + reserved) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + reserved) {
+        if (settlementBalances[accountId] < lockedMarginUsdc[accountId] + reserved) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
 
-        IERC20(asset).safeTransfer(msg.sender, amount);
-        emit Withdraw(accountId, asset, amount);
+        IERC20(settlementAsset).safeTransfer(msg.sender, amount);
+        emit Withdraw(accountId, settlementAsset, amount);
     }
 
     // ==========================================
     // VALUATION ENGINE
     // ==========================================
 
-    /// @notice Returns the total USD Buying Power of the account (6 decimals)
+    /// @notice Returns the total USD buying power of the account (6 decimals).
     /// @param accountId Account to value
-    /// @return totalEquityUsdc Sum of all asset balances valued in USDC with LTV haircuts applied
+    /// @return totalEquityUsdc Settlement balance in USDC (6 decimals)
     function getAccountEquityUsdc(
         bytes32 accountId
     ) public view returns (uint256 totalEquityUsdc) {
-        uint256 length = supportedAssetsList.length;
-
-        for (uint256 i = 0; i < length; i++) {
-            address asset = supportedAssetsList[i];
-            uint256 bal = balances[accountId][asset];
-
-            if (bal > 0) {
-                AssetConfig memory config = assetConfigs[asset];
-                uint256 usdValue;
-
-                if (config.oracle == address(0)) {
-                    usdValue = bal * 1e6 / (10 ** uint256(config.decimals));
-                } else {
-                    uint256 price8 = IAssetOracle(config.oracle).getPriceUnsafe();
-                    usdValue = (bal * price8) / (10 ** (uint256(config.decimals) + 2));
-                }
-
-                uint256 discountedValue = (usdValue * config.ltvBps) / 10_000;
-                totalEquityUsdc += discountedValue;
-            }
-        }
+        return settlementBalances[accountId];
     }
 
     /// @notice Returns strictly unencumbered purchasing power
@@ -390,19 +281,12 @@ contract MarginClearinghouse is Ownable2Step {
 
     /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
-    /// @dev Restricted to the configured settlement asset so operators cannot mutate
-    ///      arbitrary asset ledgers via the settlement path.
     /// @param accountId Account to settle
-    /// @param usdc Settlement token address (must equal settlementAsset)
     /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)
     function settleUsdc(
         bytes32 accountId,
-        address usdc,
         int256 amount
     ) external onlyOperator {
-        if (usdc != settlementAsset || !assetConfigs[usdc].isSupported) {
-            revert MarginClearinghouse__AssetNotSupported();
-        }
         if (amount > 0) {
             _creditSettlementUsdc(accountId, uint256(amount));
         } else if (amount < 0) {
@@ -417,7 +301,7 @@ contract MarginClearinghouse is Ownable2Step {
         if (amountUsdc == 0) {
             return;
         }
-        uint256 balance = balances[accountId][settlementAsset];
+        uint256 balance = settlementBalances[accountId];
         uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
         if (balance < encumbered + amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
@@ -446,11 +330,11 @@ contract MarginClearinghouse is Ownable2Step {
         if (amountUsdc == 0) {
             return;
         }
-        if (reservedSettlementUsdc[accountId] < amountUsdc || balances[accountId][settlementAsset] < amountUsdc) {
+        if (reservedSettlementUsdc[accountId] < amountUsdc || settlementBalances[accountId] < amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         reservedSettlementUsdc[accountId] -= amountUsdc;
-        balances[accountId][settlementAsset] -= amountUsdc;
+        settlementBalances[accountId] -= amountUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, amountUsdc);
         emit SettlementReservePaid(accountId, amountUsdc, recipient);
     }
@@ -480,7 +364,7 @@ contract MarginClearinghouse is Ownable2Step {
             if (costUsdc > getFreeSettlementBalanceUsdc(accountId)) {
                 revert MarginClearinghouse__InsufficientFreeEquity();
             }
-            balances[accountId][settlementAsset] -= costUsdc;
+            settlementBalances[accountId] -= costUsdc;
             IERC20(settlementAsset).safeTransfer(recipient, costUsdc);
             emit AssetSeized(accountId, settlementAsset, costUsdc, recipient);
         } else if (tradeCostUsdc < 0) {
@@ -531,7 +415,7 @@ contract MarginClearinghouse is Ownable2Step {
             return (marginConsumedUsdc, freeSettlementConsumedUsdc, uncoveredUsdc);
         }
 
-        balances[accountId][settlementAsset] -= totalConsumedUsdc;
+        settlementBalances[accountId] -= totalConsumedUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, totalConsumedUsdc);
         emit AssetSeized(accountId, settlementAsset, totalConsumedUsdc, recipient);
     }
@@ -570,7 +454,7 @@ contract MarginClearinghouse is Ownable2Step {
             }
         }
 
-        balances[accountId][settlementAsset] -= mutation.settlementDebitUsdc;
+        settlementBalances[accountId] -= mutation.settlementDebitUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, mutation.settlementDebitUsdc);
         emit AssetSeized(accountId, settlementAsset, mutation.settlementDebitUsdc, recipient);
     }
@@ -600,7 +484,7 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         if (seizedUsdc > 0) {
-            balances[accountId][settlementAsset] -= plan.mutation.settlementDebitUsdc;
+            settlementBalances[accountId] -= plan.mutation.settlementDebitUsdc;
             IERC20(settlementAsset).safeTransfer(recipient, plan.mutation.settlementDebitUsdc);
             emit AssetSeized(accountId, settlementAsset, plan.mutation.settlementDebitUsdc, recipient);
         }
@@ -611,7 +495,7 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 activePositionMarginUsdc
     ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            balances[accountId][settlementAsset],
+            settlementBalances[accountId],
             reservedSettlementUsdc[accountId],
             lockedMarginUsdc[accountId],
             activePositionMarginUsdc
@@ -632,17 +516,17 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amountUsdc
     ) internal {
-        balances[accountId][settlementAsset] += amountUsdc;
+        settlementBalances[accountId] += amountUsdc;
     }
 
     function _debitSettlementUsdc(
         bytes32 accountId,
         uint256 amountUsdc
     ) internal {
-        if (balances[accountId][settlementAsset] < amountUsdc) {
+        if (settlementBalances[accountId] < amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
-        balances[accountId][settlementAsset] -= amountUsdc;
+        settlementBalances[accountId] -= amountUsdc;
     }
 
     function _lockMargin(
@@ -653,8 +537,7 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
         if (
-            balances[accountId][settlementAsset]
-                < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc
+            settlementBalances[accountId] < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc
         ) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
@@ -674,38 +557,39 @@ contract MarginClearinghouse is Ownable2Step {
         emit MarginUnlocked(accountId, amountUsdc);
     }
 
-    /// @notice Transfers settlement asset from an account to the calling operator.
+    /// @notice Transfers settlement USDC from an account to the calling operator.
     /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
     ///      into their own contract/account and must forward them explicitly afterward.
     ///      This is stricter than `payReservedSettlementUsdc()`, which can route reserved
     ///      settlement escrow to an arbitrary recipient chosen by the operator.
     /// @param accountId Account to seize from
-    /// @param asset ERC20 token to seize (must equal settlementAsset)
-    /// @param amount Token amount to seize
+    /// @param amount USDC amount to seize
     /// @param recipient Recipient of seized tokens (must equal msg.sender)
-    function seizeAsset(
+    function seizeUsdc(
         bytes32 accountId,
-        address asset,
         uint256 amount,
         address recipient
     ) external onlyOperator {
-        if (asset != settlementAsset || !assetConfigs[asset].isSupported) {
-            revert MarginClearinghouse__AssetNotSupported();
-        }
         if (recipient != msg.sender) {
             revert MarginClearinghouse__InvalidSeizeRecipient();
         }
-        if (balances[accountId][asset] < amount) {
+        if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
         if (amount > getFreeSettlementBalanceUsdc(accountId)) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
-        balances[accountId][asset] -= amount;
-        IERC20(asset).safeTransfer(recipient, amount);
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
 
-        emit AssetSeized(accountId, asset, amount, recipient);
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
+    function balanceUsdc(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return settlementBalances[accountId];
     }
 
 }

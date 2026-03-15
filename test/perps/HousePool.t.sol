@@ -290,7 +290,11 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 elapsed = block.timestamp - before;
         uint256 expectedOldYield = (principal * oldRate * elapsed) / (10_000 * 365 days);
-        assertEq(pool.unpaidSeniorYield(), expectedOldYield, "Stale-mark finalization should checkpoint accrued old-rate yield");
+        assertEq(
+            pool.unpaidSeniorYield(),
+            expectedOldYield,
+            "Stale-mark finalization should checkpoint accrued old-rate yield"
+        );
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
     }
 

@@ -69,7 +69,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
-    uint256 internal constant INVALID_CLOSE_CLEARER_BOUNTY_BPS = 5_000;
+    uint256 internal constant INVALID_CLOSE_CLEARER_BOUNTY_BPS = 5000;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -268,7 +268,8 @@ contract OrderRouter is Ownable2Step, Pausable {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
-        uint256 executionBountyUsdc = isClose ? 0 : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
+        uint256 executionBountyUsdc =
+            isClose ? 0 : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -489,7 +490,12 @@ contract OrderRouter is Ownable2Step, Pausable {
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, "Slippage tolerance exceeded");
-            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+            _finalizeExecution(
+                orderId,
+                pythFee,
+                false,
+                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+            );
             return;
         }
 
@@ -506,11 +512,21 @@ contract OrderRouter is Ownable2Step, Pausable {
             emit OrderExecuted(orderId, executionPrice);
         } catch Error(string memory reason) {
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+            _finalizeExecution(
+                orderId,
+                pythFee,
+                false,
+                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+            );
             return;
         } catch {
             emit OrderFailed(orderId, "Engine Math Panic");
-            _finalizeExecution(orderId, pythFee, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+            _finalizeExecution(
+                orderId,
+                pythFee,
+                false,
+                order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+            );
             return;
         }
 
@@ -585,7 +601,11 @@ contract OrderRouter is Ownable2Step, Pausable {
 
             if (!_checkSlippage(order, clampedPrice)) {
                 emit OrderFailed(orderId, "Slippage tolerance exceeded");
-                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(
+                    orderId,
+                    false,
+                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+                );
                 continue;
             }
 
@@ -603,10 +623,18 @@ contract OrderRouter is Ownable2Step, Pausable {
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch Error(string memory reason) {
                 emit OrderFailed(orderId, reason);
-                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(
+                    orderId,
+                    false,
+                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+                );
             } catch {
                 emit OrderFailed(orderId, "Engine Math Panic");
-                _cleanupOrder(orderId, false, order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(
+                    orderId,
+                    false,
+                    order.isClose ? FailedOrderBountyPolicy.CloseSplitWithProtocol : FailedOrderBountyPolicy.ClearerFull
+                );
             }
         }
 
@@ -912,7 +940,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
             revert OrderRouter__InsufficientFreeEquity();
         }
-        clearinghouse.seizeAsset(accountId, address(USDC), executionBountyUsdc, address(this));
+        clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
         executionBountyReserves[orderId] = executionBountyUsdc;
     }
 

@@ -33,7 +33,7 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
 
         vm.prank(address(engine));
         vm.expectRevert();
-        clearinghouse.seizeAsset(accountId, address(usdc), 9800e6, address(engine));
+        clearinghouse.seizeUsdc(accountId, 9800e6, address(engine));
     }
 
     function test_LiquidationSolvency_MustIgnoreLockedMarginInReachableEquity() public {

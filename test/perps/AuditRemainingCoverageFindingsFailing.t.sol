@@ -24,13 +24,25 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
-            7_900e6,
+            7900e6,
             "Full close should consume queued committed margin before socializing shortfall"
         );
-        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 0, "Keeper reserve should no longer live in trader collateral");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            0,
+            "Keeper reserve should no longer live in trader collateral"
+        );
         assertEq(router.executionBountyReserves(1), 50_000, "Queued execution bounty should remain in router custody");
-        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Full close should not realize bad debt while queued committed margin remains");
-        assertEq(router.pendingOrderCounts(accountId), 1, "Queued successor order itself should remain pending after the live position closes");
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            0,
+            "Full close should not realize bad debt while queued committed margin remains"
+        );
+        assertEq(
+            router.pendingOrderCounts(accountId),
+            1,
+            "Queued successor order itself should remain pending after the live position closes"
+        );
     }
 
     function test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeBadDebt() public {
@@ -49,12 +61,20 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
-        assertEq(clearinghouse.reservedSettlementUsdc(accountId), 0, "Keeper reserve should no longer live in trader collateral");
+        assertEq(
+            clearinghouse.reservedSettlementUsdc(accountId),
+            0,
+            "Keeper reserve should no longer live in trader collateral"
+        );
         assertEq(router.executionBountyReserves(1), 50_000, "Queued execution bounty should remain in router custody");
-        assertLt(clearinghouse.lockedMarginUsdc(accountId), 7900e6, "Liquidation should consume queued committed margin before bad debt");
+        assertLt(
+            clearinghouse.lockedMarginUsdc(accountId),
+            7900e6,
+            "Liquidation should consume queued committed margin before bad debt"
+        );
         assertLt(
             engine.accumulatedBadDebtUsdc(),
-            7_900e6,
+            7900e6,
             "Liquidation bad debt should be limited to the true residual after queued committed margin is consumed"
         );
     }
@@ -85,12 +105,11 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
         _open(accountId, CfdTypes.Side.BULL, 100e18, 6e6, 1e8);
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, address(usdc), 94e6);
+        clearinghouse.withdraw(accountId, 94e6);
 
         vm.startPrank(address(router));
         vm.warp(1_709_971_200);
-        uint256 bounty =
-            engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
+        uint256 bounty = engine.liquidatePosition(accountId, 101_000_000, pool.totalAssets(), uint64(block.timestamp));
         vm.stopPrank();
 
         assertEq(bounty, 4_960_000, "Keeper bounty should not exceed the trader's remaining positive equity");

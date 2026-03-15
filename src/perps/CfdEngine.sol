@@ -563,7 +563,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         deferredPayoutUsdc[accountId] = 0;
         totalDeferredPayoutUsdc -= amount;
         vault.payOut(address(clearinghouse), amount);
-        clearinghouse.settleUsdc(accountId, address(USDC), int256(amount));
+        clearinghouse.settleUsdc(accountId, int256(amount));
 
         emit DeferredPayoutClaimed(accountId, amount);
     }
@@ -1125,7 +1125,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
         uint256 totalLockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            clearinghouse.balances(accountId, address(USDC)),
+            clearinghouse.balanceUsdc(accountId),
             clearinghouse.reservedSettlementUsdc(accountId),
             totalLockedMarginUsdc > marginToFreeUsdc ? totalLockedMarginUsdc - marginToFreeUsdc : 0,
             remainingPosMarginUsdc
@@ -1173,7 +1173,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 availableCash = vault.totalAssets();
         if (availableCash >= amountUsdc) {
             vault.payOut(address(clearinghouse), amountUsdc);
-            clearinghouse.settleUsdc(accountId, address(USDC), int256(amountUsdc));
+            clearinghouse.settleUsdc(accountId, int256(amountUsdc));
         } else {
             deferredPayoutUsdc[accountId] += amountUsdc;
             totalDeferredPayoutUsdc += amountUsdc;
