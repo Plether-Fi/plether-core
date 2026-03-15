@@ -17,6 +17,35 @@ import {Test} from "forge-std/Test.sol";
 
 contract CfdEngineTest is BasePerpTest {
 
+    function _cappedFundingAfter(
+        int256 bullFunding,
+        int256 bearFunding,
+        uint256 bullMargin,
+        uint256 bearMargin
+    ) internal pure returns (int256) {
+        if (bullFunding < -int256(bullMargin)) {
+            bullFunding = -int256(bullMargin);
+        }
+        if (bearFunding < -int256(bearMargin)) {
+            bearFunding = -int256(bearMargin);
+        }
+        return bullFunding + bearFunding;
+    }
+
+    function _maxLiabilityAfterClose(
+        CfdTypes.Side side,
+        uint256 maxProfitReductionUsdc
+    ) internal view returns (uint256) {
+        uint256 bullMaxProfit = engine.globalBullMaxProfit();
+        uint256 bearMaxProfit = engine.globalBearMaxProfit();
+        if (side == CfdTypes.Side.BULL) {
+            bullMaxProfit -= maxProfitReductionUsdc;
+        } else {
+            bearMaxProfit -= maxProfitReductionUsdc;
+        }
+        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
@@ -540,6 +569,51 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
+    function test_PreviewClose_RecomputesPostOpFundingClipForDegradedMode() public {
+        address bullTrader = address(0xAB130A);
+        address bearTrader = address(0xAB130B);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 12_000e6);
+        _fundTrader(bearTrader, 30_000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 8_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
+
+        vm.warp(block.timestamp + 365 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        (uint256 bullSize, uint256 bullMargin,, uint256 bullMaxProfit, int256 bullEntryFunding,,,) = engine.positions(bullId);
+        int256 bullFundingAfter = 0;
+        int256 bearFundingAfter =
+            (int256(engine.bearOI()) * engine.bearFundingIndex() - engine.globalBearEntryFunding()) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 currentFunding = engine.getCappedFundingPnl();
+        int256 postFunding = _cappedFundingAfter(bullFundingAfter, bearFundingAfter, 0, engine.totalBearMargin());
+
+        assertGt(postFunding, currentFunding, "Full close should remove the clipped funding receivable from solvency assets");
+        assertGt(postFunding, 0, "Setup must leave post-close funding as a solvency liability");
+
+        CfdEngine.ClosePreview memory preDrainPreview = engine.previewClose(bullId, bullSize, 1e8, pool.totalAssets());
+        assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
+
+        uint256 targetAssets =
+            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc() + uint256(postFunding)
+                - preDrainPreview.seizedCollateralUsdc - 1;
+        uint256 currentAssets = pool.totalAssets();
+        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the vault into the funding-clip gap");
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullSize, 1e8, pool.totalAssets());
+        assertTrue(preview.triggersDegradedMode, "Preview should use post-close funding clip when testing degraded mode");
+
+        _close(bullId, CfdTypes.Side.BULL, bullSize, 1e8);
+        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Close preview should match live degraded-mode outcome after funding clipping");
+    }
+
     function test_PreviewClose_NegativeVpiDoesNotPanic() public {
         address trader = address(0xAB1301);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -783,6 +857,52 @@ contract CfdEngineTest is BasePerpTest {
         router.executeLiquidation(accountId, priceData);
 
         assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Liquidation preview should match live degraded-mode outcome");
+    }
+
+    function test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedMode() public {
+        address bullTrader = address(0xAB1412);
+        address bearTrader = address(0xAB1413);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 12_000e6);
+        _fundTrader(bearTrader, 30_000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 8_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
+
+        vm.warp(block.timestamp + 365 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        int256 currentFunding = engine.getCappedFundingPnl();
+        int256 bearFundingAfter =
+            (int256(engine.bearOI()) * engine.bearFundingIndex() - engine.globalBearEntryFunding()) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 postFunding = _cappedFundingAfter(0, bearFundingAfter, 0, engine.totalBearMargin());
+        assertGt(postFunding, currentFunding, "Liquidation should remove the clipped funding receivable from solvency assets");
+        assertGt(postFunding, 0, "Setup must leave post-liquidation funding as a solvency liability");
+
+        CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
+
+        uint256 bearMaxProfit = engine.globalBearMaxProfit();
+        uint256 targetAssets = bearMaxProfit + engine.accumulatedFeesUsdc() + uint256(postFunding)
+            + preDrainPreview.keeperBountyUsdc - preDrainPreview.seizedCollateralUsdc - 1;
+        uint256 currentAssets = pool.totalAssets();
+        assertGt(currentAssets, targetAssets, "Test setup must be able to drain the vault into the funding-clip gap");
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        assertTrue(preview.triggersDegradedMode, "Liquidation preview should use post-liquidation funding clip when testing degraded mode");
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.prank(address(0xAB1414));
+        router.executeLiquidation(bullId, priceData);
+
+        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Liquidation preview should match live degraded-mode outcome after funding clipping");
     }
 
     function test_GetDeferredPayoutStatus_ReflectsClaimability() public {

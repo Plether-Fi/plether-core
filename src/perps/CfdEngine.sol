@@ -1391,7 +1391,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildAdjustedSolvencyState(),
+            _buildPreviewCloseSolvencyState(pos, sizeDelta, postBullOi, postBearOi, closeState.remainingMarginUsdc),
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
                 protocolFeesDeltaUsdc: closeState.netSettlementUsdc >= 0
@@ -1503,7 +1503,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         preview.badDebtUsdc = result.badDebtUsdc;
 
         SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildAdjustedSolvencyState(),
+            _buildPreviewLiquidationSolvencyState(pos),
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
                 protocolFeesDeltaUsdc: 0,
@@ -1668,6 +1668,69 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _getSolvencyCappedFundingPnl(),
             totalDeferredPayoutUsdc,
             totalDeferredLiquidationBountyUsdc
+        );
+    }
+
+    function _buildPreviewSolvencyState(
+        uint256 bullOiAfter,
+        uint256 bearOiAfter,
+        int256 bullEntryFundingAfter,
+        int256 bearEntryFundingAfter,
+        uint256 bullMarginAfter,
+        uint256 bearMarginAfter
+    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        int256 bullFundingAfter =
+            (int256(bullOiAfter) * bullFundingIndex - bullEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter =
+            (int256(bearOiAfter) * bearFundingIndex - bearEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        CfdEngineSnapshotsLib.FundingSnapshot memory fundingSnapshot =
+            CfdEngineSnapshotsLib.buildFundingSnapshot(bullFundingAfter, bearFundingAfter, bullMarginAfter, bearMarginAfter);
+
+        return SolvencyAccountingLib.buildSolvencyState(
+            vault.totalAssets(),
+            accumulatedFeesUsdc,
+            _maxLiability(),
+            fundingSnapshot.solvencyFunding,
+            totalDeferredPayoutUsdc,
+            totalDeferredLiquidationBountyUsdc
+        );
+    }
+
+    function _buildPreviewCloseSolvencyState(
+        CfdTypes.Position memory pos,
+        uint256 sizeDelta,
+        uint256 postBullOi,
+        uint256 postBearOi,
+        uint256 remainingMarginUsdc
+    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        return _buildPreviewSolvencyState(
+            pos.side == CfdTypes.Side.BULL ? postBullOi : bullOI,
+            pos.side == CfdTypes.Side.BEAR ? postBearOi : bearOI,
+            pos.side == CfdTypes.Side.BULL
+                ? globalBullEntryFunding - int256(sizeDelta) * pos.entryFundingIndex
+                : globalBullEntryFunding,
+            pos.side == CfdTypes.Side.BEAR
+                ? globalBearEntryFunding - int256(sizeDelta) * pos.entryFundingIndex
+                : globalBearEntryFunding,
+            pos.side == CfdTypes.Side.BULL ? totalBullMargin - pos.margin + remainingMarginUsdc : totalBullMargin,
+            pos.side == CfdTypes.Side.BEAR ? totalBearMargin - pos.margin + remainingMarginUsdc : totalBearMargin
+        );
+    }
+
+    function _buildPreviewLiquidationSolvencyState(
+        CfdTypes.Position memory pos
+    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        return _buildPreviewSolvencyState(
+            pos.side == CfdTypes.Side.BULL ? bullOI - pos.size : bullOI,
+            pos.side == CfdTypes.Side.BEAR ? bearOI - pos.size : bearOI,
+            pos.side == CfdTypes.Side.BULL
+                ? globalBullEntryFunding - int256(pos.size) * pos.entryFundingIndex
+                : globalBullEntryFunding,
+            pos.side == CfdTypes.Side.BEAR
+                ? globalBearEntryFunding - int256(pos.size) * pos.entryFundingIndex
+                : globalBearEntryFunding,
+            pos.side == CfdTypes.Side.BULL ? totalBullMargin - pos.margin : totalBullMargin,
+            pos.side == CfdTypes.Side.BEAR ? totalBearMargin - pos.margin : totalBearMargin
         );
     }
 
