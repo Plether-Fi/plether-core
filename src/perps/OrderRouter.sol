@@ -82,6 +82,11 @@ contract OrderRouter is Ownable2Step, Pausable {
     mapping(bytes32 => uint64) public pendingTailOrderId;
     mapping(uint64 => uint64) internal nextPendingOrderId;
     mapping(uint64 => uint64) internal prevPendingOrderId;
+    mapping(bytes32 => uint64) public marginHeadOrderId;
+    mapping(bytes32 => uint64) public marginTailOrderId;
+    mapping(uint64 => uint64) internal nextMarginOrderId;
+    mapping(uint64 => uint64) internal prevMarginOrderId;
+    mapping(uint64 => bool) public isInMarginQueue;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -111,6 +116,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__CloseSizeExceedsPosition();
     error OrderRouter__InsufficientFreeEquity();
     error OrderRouter__InsufficientCommittedMargin();
+    error OrderRouter__MarginOrderLinkCorrupted();
     error OrderRouter__NotOrderOwner();
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
@@ -345,14 +351,23 @@ contract OrderRouter is Ownable2Step, Pausable {
             return;
         }
         uint256 remaining = amountUsdc;
-        uint64 orderId = pendingHeadOrderId[accountId];
+        uint64 orderId = marginHeadOrderId[accountId];
         while (orderId != 0 && remaining > 0) {
-            uint64 nextOrderId = nextPendingOrderId[orderId];
+            uint64 nextOrderId = nextMarginOrderId[orderId];
             uint256 committed = committedMargins[orderId];
-            if (committed > 0) {
-                uint256 charge = committed > remaining ? remaining : committed;
-                committedMargins[orderId] = committed - charge;
-                remaining -= charge;
+            if (committed == 0) {
+                _unlinkMarginOrder(accountId, orderId);
+                orderId = nextOrderId;
+                continue;
+            }
+
+            uint256 charge = committed > remaining ? remaining : committed;
+            uint256 residual = committed - charge;
+            committedMargins[orderId] = residual;
+            remaining -= charge;
+
+            if (residual == 0) {
+                _unlinkMarginOrder(accountId, orderId);
             }
             orderId = nextOrderId;
         }
@@ -749,6 +764,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (amount == 0) {
             return;
         }
+        _unlinkMarginOrder(orders[orderId].accountId, orderId);
         delete committedMargins[orderId];
         if (amount > 0) {
             IMarginClearinghouse(engine.clearinghouse()).unlockMargin(orders[orderId].accountId, amount);
@@ -800,6 +816,61 @@ contract OrderRouter is Ownable2Step, Pausable {
         delete prevPendingOrderId[orderId];
     }
 
+    function _linkMarginOrder(
+        bytes32 accountId,
+        uint64 orderId
+    ) internal {
+        if (isInMarginQueue[orderId]) {
+            return;
+        }
+
+        uint64 tailOrderId = marginTailOrderId[accountId];
+        if (tailOrderId == 0) {
+            marginHeadOrderId[accountId] = orderId;
+            marginTailOrderId[accountId] = orderId;
+        } else {
+            nextMarginOrderId[tailOrderId] = orderId;
+            prevMarginOrderId[orderId] = tailOrderId;
+            marginTailOrderId[accountId] = orderId;
+        }
+
+        isInMarginQueue[orderId] = true;
+    }
+
+    function _unlinkMarginOrder(
+        bytes32 accountId,
+        uint64 orderId
+    ) internal {
+        if (!isInMarginQueue[orderId]) {
+            return;
+        }
+
+        uint64 prevOrderId = prevMarginOrderId[orderId];
+        uint64 nextOrderId = nextMarginOrderId[orderId];
+        uint64 headOrderId = marginHeadOrderId[accountId];
+        uint64 tailOrderId = marginTailOrderId[accountId];
+
+        if (headOrderId == orderId) {
+            marginHeadOrderId[accountId] = nextOrderId;
+        } else if (prevOrderId != 0) {
+            nextMarginOrderId[prevOrderId] = nextOrderId;
+        } else if (tailOrderId != orderId) {
+            revert OrderRouter__MarginOrderLinkCorrupted();
+        }
+
+        if (tailOrderId == orderId) {
+            marginTailOrderId[accountId] = prevOrderId;
+        } else if (nextOrderId != 0) {
+            prevMarginOrderId[nextOrderId] = prevOrderId;
+        } else if (headOrderId != orderId) {
+            revert OrderRouter__MarginOrderLinkCorrupted();
+        }
+
+        delete nextMarginOrderId[orderId];
+        delete prevMarginOrderId[orderId];
+        delete isInMarginQueue[orderId];
+    }
+
     function _reserveExecutionBounty(
         IMarginClearinghouse clearinghouse,
         bytes32 accountId,
@@ -828,6 +899,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
         clearinghouse.lockMargin(accountId, marginDelta);
         committedMargins[orderId] = marginDelta;
+        _linkMarginOrder(accountId, orderId);
     }
 
     function _consumeOrderEscrow(
@@ -855,6 +927,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         bytes32 accountId = orders[orderId].accountId;
         if (accountId != bytes32(0)) {
             _unlinkPendingOrder(accountId, orderId);
+            _unlinkMarginOrder(accountId, orderId);
         }
         delete orders[orderId];
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
@@ -869,6 +942,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         uint64 orderId
     ) internal {
         if (committedMargins[orderId] > 0) {
+            _unlinkMarginOrder(orders[orderId].accountId, orderId);
             delete committedMargins[orderId];
         }
     }

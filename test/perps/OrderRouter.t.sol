@@ -264,6 +264,75 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(alicePending[1].orderId, 3, "Alice tail should remain reachable after foreign inserts");
     }
 
+    function test_MarginQueue_LinksOnlyOrdersWithPositiveCommittedMargin() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        assertEq(router.marginHeadOrderId(accountId), 1, "Margin queue head should start at the first positive-margin order");
+        assertEq(router.marginTailOrderId(accountId), 3, "Margin queue tail should end at the last positive-margin order");
+        assertTrue(router.isInMarginQueue(1), "Positive-margin open should be linked into the margin queue");
+        assertFalse(router.isInMarginQueue(2), "Close order should not enter the margin queue");
+        assertTrue(router.isInMarginQueue(3), "Later positive-margin open should be linked into the margin queue");
+    }
+
+    function test_NoteCommittedMarginConsumed_PartialConsumePreservesMarginQueueMembership() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.prank(address(engine));
+        router.noteCommittedMarginConsumed(accountId, 400 * 1e6);
+
+        assertEq(router.committedMargins(1), 600 * 1e6, "Partial consumption should leave residual committed margin");
+        assertEq(router.marginHeadOrderId(accountId), 1, "Partially consumed order should remain at margin-queue head");
+        assertEq(router.marginTailOrderId(accountId), 1, "Single residual order should remain at margin-queue tail");
+        assertTrue(router.isInMarginQueue(1), "Partially consumed order should remain linked in the margin queue");
+    }
+
+    function test_NoteCommittedMarginConsumed_UnlinksDrainedMarginOrdersAndSkipsCloseOrders() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        vm.prank(address(engine));
+        router.noteCommittedMarginConsumed(accountId, 1000 * 1e6);
+
+        assertEq(router.committedMargins(1), 0, "First margin-paying order should be fully drained");
+        assertEq(router.marginHeadOrderId(accountId), 3, "Margin queue head should advance past the drained order");
+        assertEq(router.marginTailOrderId(accountId), 3, "Residual margin queue should retain the trailing positive-margin order");
+        assertFalse(router.isInMarginQueue(1), "Drained order should be removed from the margin queue");
+        assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
+        assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
+    }
+
+    function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        vm.stopPrank();
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.marginHeadOrderId(accountId), 2, "Executing the margin-queue head should advance to the surviving residual order");
+        assertEq(router.marginTailOrderId(accountId), 2, "Executing the margin-queue head should leave the residual order as tail");
+        assertFalse(router.isInMarginQueue(1), "Executed order should be removed from the margin queue");
+        assertTrue(router.isInMarginQueue(2), "Residual positive-margin order should remain linked");
+    }
+
     function test_CancelOrder_UnlinksMiddleNodeAndPreservesAccountHeadTail() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
