@@ -230,8 +230,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_SymmetricalFunding() public {
-        int256 bullIdx = engine.bullFundingIndex();
-        int256 bearIdx = engine.bearFundingIndex();
+        int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
+        int256 bearIdx = _sideFundingIndex(CfdTypes.Side.BEAR);
         assertEq(bullIdx + bearIdx, 0, "Funding must be zero-sum");
     }
 
@@ -340,8 +340,8 @@ contract PerpInvariantTest is BasePerpTest {
             }
         }
 
-        assertEq(engine.bullOI(), sumBullSize, "Bull OI must match sum of bull positions");
-        assertEq(engine.bearOI(), sumBearSize, "Bear OI must match sum of bear positions");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), sumBullSize, "Bull OI must match sum of bull positions");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), sumBearSize, "Bear OI must match sum of bear positions");
     }
 
     function invariant_EntryNotionalsMatchPositions() public {
@@ -361,8 +361,8 @@ contract PerpInvariantTest is BasePerpTest {
             }
         }
 
-        assertEq(engine.globalBullEntryNotional(), sumBullNotional, "Bull entry notional must match positions");
-        assertEq(engine.globalBearEntryNotional(), sumBearNotional, "Bear entry notional must match positions");
+        assertEq(_sideEntryNotional(CfdTypes.Side.BULL), sumBullNotional, "Bull entry notional must match positions");
+        assertEq(_sideEntryNotional(CfdTypes.Side.BEAR), sumBearNotional, "Bear entry notional must match positions");
     }
 
     function invariant_PositionMarginsBackedByClearinghouse() public {
@@ -403,10 +403,14 @@ contract PerpInvariantTest is BasePerpTest {
         }
 
         assertEq(
-            engine.totalBullMargin(), sumBullMargin, "Bull side margin mirror must equal live bull position margins"
+            _sideTotalMargin(CfdTypes.Side.BULL),
+            sumBullMargin,
+            "Bull side margin mirror must equal live bull position margins"
         );
         assertEq(
-            engine.totalBearMargin(), sumBearMargin, "Bear side margin mirror must equal live bear position margins"
+            _sideTotalMargin(CfdTypes.Side.BEAR),
+            sumBearMargin,
+            "Bear side margin mirror must equal live bear position margins"
         );
     }
 

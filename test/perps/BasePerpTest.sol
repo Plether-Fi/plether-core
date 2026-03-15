@@ -7,6 +7,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -225,6 +226,48 @@ abstract contract BasePerpTest is Test {
             ts := timestamp()
         }
         vm.warp(ts + delta);
+    }
+
+    function _sideState(
+        CfdTypes.Side side
+    ) internal view returns (ICfdEngine.SideState memory) {
+        return engine.getSideState(side);
+    }
+
+    function _sideOpenInterest(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return _sideState(side).openInterest;
+    }
+
+    function _sideEntryNotional(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return _sideState(side).entryNotional;
+    }
+
+    function _sideTotalMargin(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return _sideState(side).totalMargin;
+    }
+
+    function _sideFundingIndex(
+        CfdTypes.Side side
+    ) internal view returns (int256) {
+        return _sideState(side).fundingIndex;
+    }
+
+    function _sideEntryFunding(
+        CfdTypes.Side side
+    ) internal view returns (int256) {
+        return _sideState(side).entryFunding;
+    }
+
+    function _sideMaxProfit(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return _sideState(side).maxProfitUsdc;
     }
 
 }

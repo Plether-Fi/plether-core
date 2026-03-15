@@ -96,8 +96,8 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         _settleFunding(order, pos);
 
         uint256 marginAfter = pos.margin;
-        uint256 provisionalBullMargin = totalBullMargin;
-        uint256 provisionalBearMargin = totalBearMargin;
+        uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
+        uint256 provisionalBearMargin = sides[uint256(CfdTypes.Side.BEAR)].totalMargin;
         if (marginAfter > marginBefore) {
             if (marginSide == CfdTypes.Side.BULL) {
                 provisionalBullMargin += marginAfter - marginBefore;
@@ -114,12 +114,16 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
 
         _syncTotalSideMargin(marginSide, marginBefore, marginAfter);
 
-        staleSideMargin = marginSide == CfdTypes.Side.BULL ? totalBullMargin : totalBearMargin;
+        staleSideMargin = sides[uint256(marginSide)].totalMargin;
         syncedSideMargin = marginSide == CfdTypes.Side.BULL ? provisionalBullMargin : provisionalBearMargin;
 
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        CfdEngineSnapshotsLib.FundingSnapshot memory staleFunding =
-            CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, totalBullMargin, totalBearMargin);
+        CfdEngineSnapshotsLib.FundingSnapshot memory staleFunding = CfdEngineSnapshotsLib.buildFundingSnapshot(
+            bullFunding,
+            bearFunding,
+            sides[uint256(CfdTypes.Side.BULL)].totalMargin,
+            sides[uint256(CfdTypes.Side.BEAR)].totalMargin
+        );
         CfdEngineSnapshotsLib.FundingSnapshot memory syncedFunding = CfdEngineSnapshotsLib.buildFundingSnapshot(
             bullFunding, bearFunding, provisionalBullMargin, provisionalBearMargin
         );

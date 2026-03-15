@@ -183,6 +183,18 @@ contract PerpsForkTest is Test {
         return bytes32(uint256(uint160(trader)));
     }
 
+    function _sideOpenInterest(
+        CfdTypes.Side side
+    ) internal view returns (uint256) {
+        return engine.getSideState(side).openInterest;
+    }
+
+    function _sideFundingIndex(
+        CfdTypes.Side side
+    ) internal view returns (int256) {
+        return engine.getSideState(side).fundingIndex;
+    }
+
     function _configureLongOrderExpiry() internal {
         router.proposeMaxOrderAge(1000);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -502,25 +514,25 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(bob, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8, int64(100_000_000), false);
         this._commitAndExecute(carol, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
-        assertEq(engine.bullOI(), 150_000e18, "Bull OI should be 150k");
-        assertEq(engine.bearOI(), 80_000e18, "Bear OI should be 80k");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 150_000e18, "Bull OI should be 150k");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 80_000e18, "Bear OI should be 80k");
 
         // Close Alice at $0.95 (BULL profits when price drops)
         vm.warp(t0 + 200);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 0, 0, int64(95_000_000), true);
-        assertEq(engine.bullOI(), 50_000e18, "Bull OI should be 50k after Alice close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 50_000e18, "Bull OI should be 50k after Alice close");
 
         // Close Bob at $0.95 (BEAR loses when price drops)
         vm.warp(t0 + 400);
         this._commitAndExecute(bob, CfdTypes.Side.BEAR, 80_000e18, 0, 0, int64(95_000_000), true);
-        assertEq(engine.bearOI(), 0, "Bear OI should be 0 after Bob close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "Bear OI should be 0 after Bob close");
 
         // Close Carol at $1.05 (BULL loses when price rises)
         vm.warp(t0 + 600);
         this._commitAndExecute(carol, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(105_000_000), true);
 
-        assertEq(engine.bullOI(), 0, "Bull OI should be 0 after all close");
-        assertEq(engine.bearOI(), 0, "Bear OI should be 0 after all close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "Bull OI should be 0 after all close");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "Bear OI should be 0 after all close");
 
         // USDC conservation
         uint256 totalUsdcAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
@@ -543,15 +555,15 @@ contract PerpsForkTest is Test {
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should exist");
 
-        int256 bullIdxBefore = engine.bullFundingIndex();
-        int256 bearIdxBefore = engine.bearFundingIndex();
+        int256 bullIdxBefore = _sideFundingIndex(CfdTypes.Side.BULL);
+        int256 bearIdxBefore = _sideFundingIndex(CfdTypes.Side.BEAR);
 
         // Warp 90 days; close position to settle funding
         vm.warp(t0 + 90 days + 60);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, size, 0, 0, int64(100_000_000), true);
 
-        int256 bullIdxAfter = engine.bullFundingIndex();
-        int256 bearIdxAfter = engine.bearFundingIndex();
+        int256 bullIdxAfter = _sideFundingIndex(CfdTypes.Side.BULL);
+        int256 bearIdxAfter = _sideFundingIndex(CfdTypes.Side.BEAR);
 
         // Funding indices should have diverged (bull pays, bear receives)
         assertLt(bullIdxAfter, bullIdxBefore, "Bull index should decrease (pays funding)");

@@ -634,7 +634,7 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiab = engine.globalBearMaxProfit();
+        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 naiveFree = bal - maxLiab - fees;
 
@@ -818,8 +818,8 @@ contract HousePoolAuditTest is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0);
 
-        assertEq(engine.globalBullEntryNotional(), 0, "Bull entry notional should be zero");
-        assertEq(engine.globalBearEntryNotional(), 0, "Bear entry notional should be zero");
+        assertEq(_sideEntryNotional(CfdTypes.Side.BULL), 0, "Bull entry notional should be zero");
+        assertEq(_sideEntryNotional(CfdTypes.Side.BEAR), 0, "Bear entry notional should be zero");
         assertEq(engine.getUnrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
     }
 
@@ -910,8 +910,8 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 0, 0, true);
         router.executeOrder(4, closePrice);
 
-        assertEq(engine.bullOI(), 0, "All bull positions closed");
-        assertEq(engine.bearOI(), 0, "All bear positions closed");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "All bull positions closed");
+        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "All bear positions closed");
 
         assertEq(
             engine.getUnrealizedFundingPnl(), 0, "No positions => zero unrealized funding; spread is distributable"
@@ -1012,7 +1012,7 @@ contract HousePoolAuditTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         assertGt(fees, 0, "Fees should have accumulated");
 
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         assertEq(maxLiability, 500_100e6, "Both positions should be open");
 
         address feeRecipient = address(0xFEE);

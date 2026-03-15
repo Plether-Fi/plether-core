@@ -129,6 +129,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdEngineSettlementLib.LiquidationSettlementResult settlement;
     }
 
+    struct SideState {
+        uint256 maxProfitUsdc;
+        uint256 openInterest;
+        uint256 entryNotional;
+        uint256 totalMargin;
+        int256 fundingIndex;
+        int256 entryFunding;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -139,19 +148,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     // GLOBAL STATE & SOLVENCY BOUNDS
     // ==========================================
 
-    uint256 public globalBullMaxProfit;
-    uint256 public globalBearMaxProfit;
-
-    uint256 public bullOI;
-    uint256 public bearOI;
-
-    uint256 public globalBullEntryNotional;
-    uint256 public globalBearEntryNotional;
+    SideState[2] public sides;
     uint256 public lastMarkPrice;
     uint64 public lastMarkTime;
-
-    uint256 public totalBullMargin;
-    uint256 public totalBearMargin;
 
     uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
@@ -161,11 +160,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     // FUNDING ACCUMULATORS
     // ==========================================
 
-    int256 public bullFundingIndex;
-    int256 public bearFundingIndex;
     uint64 public lastFundingTime;
-    int256 public globalBullEntryFunding;
-    int256 public globalBearEntryFunding;
 
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => CfdTypes.Position) public positions;
@@ -264,6 +259,48 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     event DeferredPayoutClaimed(bytes32 indexed accountId, uint256 amountUsdc);
     event DeferredLiquidationBountyRecorded(address indexed keeper, uint256 amountUsdc);
     event DeferredLiquidationBountyClaimed(address indexed keeper, uint256 amountUsdc);
+
+    function _sideIndex(
+        CfdTypes.Side side
+    ) internal pure returns (uint256) {
+        return uint256(side);
+    }
+
+    function _sideState(
+        CfdTypes.Side side
+    ) internal view returns (SideState storage state) {
+        return sides[_sideIndex(side)];
+    }
+
+    function _oppositeSide(
+        CfdTypes.Side side
+    ) internal pure returns (CfdTypes.Side) {
+        return side == CfdTypes.Side.BULL ? CfdTypes.Side.BEAR : CfdTypes.Side.BULL;
+    }
+
+    function _sideAndOppositeStates(
+        CfdTypes.Side side
+    ) internal view returns (SideState storage selected, SideState storage opposite) {
+        selected = _sideState(side);
+        opposite = _sideState(_oppositeSide(side));
+    }
+
+    function _bullAndBearStates() internal view returns (SideState storage bullState, SideState storage bearState) {
+        bullState = _sideState(CfdTypes.Side.BULL);
+        bearState = _sideState(CfdTypes.Side.BEAR);
+    }
+
+    function getSideState(
+        CfdTypes.Side side
+    ) public view returns (ICfdEngine.SideState memory state) {
+        SideState storage stored = sides[_sideIndex(side)];
+        state.maxProfitUsdc = stored.maxProfitUsdc;
+        state.openInterest = stored.openInterest;
+        state.entryNotional = stored.entryNotional;
+        state.totalMargin = stored.totalMargin;
+        state.fundingIndex = stored.fundingIndex;
+        state.entryFunding = stored.entryFunding;
+    }
 
     function _requireTimelockReady(
         uint256 activationTime
@@ -530,11 +567,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         clearinghouse.lockMargin(accountId, amount);
         pos.margin += amount;
-        if (pos.side == CfdTypes.Side.BULL) {
-            totalBullMargin += amount;
-        } else {
-            totalBearMargin += amount;
-        }
+        _sideState(pos.side).totalMargin += amount;
         pos.lastUpdateTime = uint64(block.timestamp);
         _assertPostSolvency();
 
@@ -681,21 +714,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return;
         }
 
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
             PositionRiskAccountingLib.FundingStepInputs({
                 price: currentOraclePrice,
-                bullOi: bullOI,
-                bearOi: bearOI,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
                 timeDelta: timeDelta,
                 vaultDepthUsdc: vaultDepthUsdc,
                 riskParams: riskParams
             })
         );
-        bullFundingIndex += step.bullFundingIndexDelta;
-        bearFundingIndex += step.bearFundingIndexDelta;
+        bullState.fundingIndex += step.bullFundingIndexDelta;
+        bearState.fundingIndex += step.bearFundingIndexDelta;
 
         lastFundingTime = uint64(block.timestamp);
-        emit FundingUpdated(bullFundingIndex, bearFundingIndex, step.absSkewUsdc);
+        emit FundingUpdated(bullState.fundingIndex, bearState.fundingIndex, step.absSkewUsdc);
     }
 
     /// @notice Returns unsettled funding owed to (+) or by (-) a position in USDC (6 decimals)
@@ -707,7 +741,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         if (pos.size == 0) {
             return 0;
         }
-        int256 currentIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+        int256 currentIndex = _sideState(pos.side).fundingIndex;
         fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, currentIndex);
     }
 
@@ -800,13 +834,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             }
         }
         if (pos.size > 0) {
-            int256 newIdx = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+            SideState storage sideState = _sideState(pos.side);
+            int256 newIdx = sideState.fundingIndex;
             int256 fundingDelta = int256(pos.size) * (newIdx - pos.entryFundingIndex);
-            if (pos.side == CfdTypes.Side.BULL) {
-                globalBullEntryFunding += fundingDelta;
-            } else {
-                globalBearEntryFunding += fundingDelta;
-            }
+            sideState.entryFunding += fundingDelta;
             pos.entryFundingIndex = newIdx;
         }
     }
@@ -831,7 +862,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 postSkewUsdc: _getPostOpenSkewUsdc(order.side, order.sizeDelta, price),
                 vaultDepthUsdc: vaultDepthUsdc,
                 executionFeeBps: EXECUTION_FEE_BPS,
-                currentFundingIndex: order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex,
+                currentFundingIndex: _sideState(order.side).fundingIndex,
                 riskParams: rp
             })
         );
@@ -848,27 +879,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         if (pos.size == 0) {
             pos.side = order.side;
-            pos.entryFundingIndex = order.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
+            pos.entryFundingIndex = _sideState(order.side).fundingIndex;
         }
         pos.entryPrice = openState.newEntryPrice;
         pos.size = openState.newSize;
         pos.vpiAccrued += openState.vpiUsdc;
 
-        if (order.side == CfdTypes.Side.BULL) {
-            if (openState.newEntryNotional >= openState.oldEntryNotional) {
-                globalBullEntryNotional += openState.newEntryNotional - openState.oldEntryNotional;
-            } else {
-                globalBullEntryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
-            }
-            globalBullEntryFunding += openState.positionFundingContribution;
+        SideState storage sideState = _sideState(order.side);
+        if (openState.newEntryNotional >= openState.oldEntryNotional) {
+            sideState.entryNotional += openState.newEntryNotional - openState.oldEntryNotional;
         } else {
-            if (openState.newEntryNotional >= openState.oldEntryNotional) {
-                globalBearEntryNotional += openState.newEntryNotional - openState.oldEntryNotional;
-            } else {
-                globalBearEntryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
-            }
-            globalBearEntryFunding += openState.positionFundingContribution;
+            sideState.entryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
         }
+        sideState.entryFunding += openState.positionFundingContribution;
 
         if (openState.tradeCostUsdc < 0) {
             uint256 rebate = uint256(-openState.tradeCostUsdc);
@@ -912,13 +935,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__CloseSizeExceedsPosition();
         }
 
-        uint256 postBullOi = bullOI;
-        uint256 postBearOi = bearOI;
-        if (pos.side == CfdTypes.Side.BULL) {
-            postBullOi -= order.sizeDelta;
-        } else {
-            postBearOi -= order.sizeDelta;
-        }
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
+        uint256 selectedOi = selectedState.openInterest - order.sizeDelta;
+        uint256 oppositeOi = oppositeState.openInterest;
+        uint256 postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
+        uint256 postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
         uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
@@ -948,13 +969,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
 
         uint256 entryNotionalReduction = order.sizeDelta * pos.entryPrice;
-        if (pos.side == CfdTypes.Side.BULL) {
-            globalBullEntryNotional -= entryNotionalReduction;
-            globalBullEntryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
-        } else {
-            globalBearEntryNotional -= entryNotionalReduction;
-            globalBearEntryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
-        }
+        SideState storage sideState = _sideState(pos.side);
+        sideState.entryNotional -= entryNotionalReduction;
+        sideState.entryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
 
         pos.size -= order.sizeDelta;
         if (pos.size > 0 && pos.margin < riskParams.minBountyUsdc) {
@@ -978,8 +995,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function _getAbsSkewUsdc(
         uint256 currentOraclePrice
     ) internal view returns (uint256) {
-        uint256 bullUsdc = (bullOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearOI * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        uint256 bullUsdc = (bullState.openInterest * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 bearUsdc = (bearState.openInterest * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
     }
 
@@ -988,13 +1006,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 sizeDelta,
         uint256 price
     ) internal view returns (uint256) {
-        uint256 postBullOi = bullOI;
-        uint256 postBearOi = bearOI;
-        if (side == CfdTypes.Side.BULL) {
-            postBullOi += sizeDelta;
-        } else {
-            postBearOi += sizeDelta;
-        }
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(side);
+        uint256 selectedOi = selectedState.openInterest + sizeDelta;
+        uint256 oppositeOi = oppositeState.openInterest;
+        uint256 postBullOi = side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
+        uint256 postBearOi = side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
         uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
@@ -1007,18 +1023,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal {
         if (marginAfter > marginBefore) {
             uint256 delta = marginAfter - marginBefore;
-            if (side == CfdTypes.Side.BULL) {
-                totalBullMargin += delta;
-            } else {
-                totalBearMargin += delta;
-            }
+            _sideState(side).totalMargin += delta;
         } else if (marginBefore > marginAfter) {
             uint256 delta = marginBefore - marginAfter;
-            if (side == CfdTypes.Side.BULL) {
-                totalBullMargin -= delta;
-            } else {
-                totalBearMargin -= delta;
-            }
+            _sideState(side).totalMargin -= delta;
         }
     }
 
@@ -1027,14 +1035,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 maxProfitUsdc,
         uint256 sizeDelta
     ) internal {
-        if (side == CfdTypes.Side.BULL) {
-            globalBullMaxProfit += maxProfitUsdc;
-            bullOI += sizeDelta;
-        } else {
-            globalBearMaxProfit += maxProfitUsdc;
-            bearOI += sizeDelta;
-        }
-        uint256 maxLiability = globalBullMaxProfit > globalBearMaxProfit ? globalBullMaxProfit : globalBearMaxProfit;
+        SideState storage sideState = _sideState(side);
+        sideState.maxProfitUsdc += maxProfitUsdc;
+        sideState.openInterest += sizeDelta;
+        uint256 maxLiability = _maxLiability();
         if (_buildAdjustedSolvencySnapshot().effectiveSolvencyAssets < maxLiability) {
             revert CfdEngine__VaultSolvencyExceeded();
         }
@@ -1045,13 +1049,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 maxProfitUsdc,
         uint256 sizeDelta
     ) internal {
-        if (side == CfdTypes.Side.BULL) {
-            globalBullMaxProfit -= maxProfitUsdc;
-            bullOI -= sizeDelta;
-        } else {
-            globalBearMaxProfit -= maxProfitUsdc;
-            bearOI -= sizeDelta;
-        }
+        SideState storage sideState = _sideState(side);
+        sideState.maxProfitUsdc -= maxProfitUsdc;
+        sideState.openInterest -= sizeDelta;
     }
 
     function _settleCloseNetSettlement(
@@ -1320,7 +1320,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
         viewData.totalDeferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
         viewData.degradedMode = degradedMode;
-        viewData.hasLiveLiability = globalBullMaxProfit + globalBearMaxProfit > 0;
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        viewData.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     function getDeferredPayoutStatus(
@@ -1359,16 +1360,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _previewFundingSettlement(pos, sizeDelta == pos.size, vaultDepthUsdc);
         pos.margin = marginAfterFunding;
 
-        uint256 preBullUsdc = (bullOI * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 preBearUsdc = (bearOI * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
+        uint256 selectedUsdc = (selectedState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 oppositeUsdc = (oppositeState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 preBullUsdc = pos.side == CfdTypes.Side.BULL ? selectedUsdc : oppositeUsdc;
+        uint256 preBearUsdc = pos.side == CfdTypes.Side.BEAR ? selectedUsdc : oppositeUsdc;
         uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
-        uint256 postBullOi = bullOI;
-        uint256 postBearOi = bearOI;
-        if (pos.side == CfdTypes.Side.BULL) {
-            postBullOi -= sizeDelta;
-        } else {
-            postBearOi -= sizeDelta;
-        }
+        uint256 selectedOi = selectedState.openInterest - sizeDelta;
+        uint256 oppositeOi = oppositeState.openInterest;
+        uint256 postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
+        uint256 postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
         uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
@@ -1475,13 +1476,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdTypes.Position memory pos,
         uint256 vaultDepthUsdc
     ) internal view returns (int256 fundingUsdc) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         fundingUsdc = PositionRiskAccountingLib.previewPendingFunding(
             pos,
-            bullFundingIndex,
-            bearFundingIndex,
+            bullState.fundingIndex,
+            bearState.fundingIndex,
             lastMarkPrice,
-            bullOI,
-            bearOI,
+            bullState.openInterest,
+            bearState.openInterest,
             lastFundingTime,
             block.timestamp,
             vaultDepthUsdc,
@@ -1538,8 +1540,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdTypes.Side side,
         uint256 maxProfitReduction
     ) internal view returns (uint256) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         return SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            globalBullMaxProfit, globalBearMaxProfit, side, maxProfitReduction
+            bullState.maxProfitUsdc, bearState.maxProfitUsdc, side, maxProfitReduction
         );
     }
 
@@ -1594,11 +1597,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__NoPositionToLiquidate();
         }
 
-        if (pos.side == CfdTypes.Side.BULL) {
-            globalBullEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
-        } else {
-            globalBearEntryFunding -= int256(pos.size) * pos.entryFundingIndex;
-        }
+        _sideState(pos.side).entryFunding -= int256(pos.size) * pos.entryFundingIndex;
 
         LiquidationComputation memory computation =
             _buildLiquidationComputation(accountId, pos, price, getPendingFunding(pos));
@@ -1611,11 +1610,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         _reduceGlobalLiability(pos.side, pos.maxProfitUsdc, pos.size);
 
         uint256 liqEntryNotional = pos.size * pos.entryPrice;
-        if (pos.side == CfdTypes.Side.BULL) {
-            globalBullEntryNotional -= liqEntryNotional;
-        } else {
-            globalBearEntryNotional -= liqEntryNotional;
-        }
+        _sideState(pos.side).entryNotional -= liqEntryNotional;
 
         uint256 posMargin = pos.margin;
         keeperBountyUsdc = computation.liquidationState.keeperBountyUsdc;
@@ -1624,11 +1619,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _settleLiquidationResidual(accountId, posMargin, residual);
         accumulatedBadDebtUsdc += settlement.badDebtUsdc;
 
-        if (pos.side == CfdTypes.Side.BULL) {
-            totalBullMargin -= posMargin;
-        } else {
-            totalBearMargin -= posMargin;
-        }
+        _sideState(pos.side).totalMargin -= posMargin;
 
         emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
         delete positions[accountId];
@@ -1643,7 +1634,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        return SolvencyAccountingLib.getMaxLiability(globalBullMaxProfit, globalBearMaxProfit);
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        return SolvencyAccountingLib.getMaxLiability(bullState.maxProfitUsdc, bearState.maxProfitUsdc);
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
@@ -1670,7 +1662,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = totalDeferredPayoutUsdc;
         snapshot.deferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
-        snapshot.markFreshnessRequired = globalBullMaxProfit + globalBearMaxProfit > 0;
+        snapshot.markFreshnessRequired =
+            sides[_sideIndex(CfdTypes.Side.BULL)].maxProfitUsdc + sides[_sideIndex(CfdTypes.Side.BEAR)].maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness = isOracleFrozen() ? fadMaxStaleness : markStalenessLimit;
         }
@@ -1705,10 +1698,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 bullMarginAfter,
         uint256 bearMarginAfter
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        int256 bullFundingAfter =
-            (int256(bullOiAfter) * bullFundingIndex - bullEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearFundingAfter =
-            (int256(bearOiAfter) * bearFundingIndex - bearEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        int256 bullFundingAfter = (int256(bullOiAfter) * bullState.fundingIndex - bullEntryFundingAfter)
+            / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter = (int256(bearOiAfter) * bearState.fundingIndex - bearEntryFundingAfter)
+            / int256(CfdMath.FUNDING_INDEX_SCALE);
         CfdEngineSnapshotsLib.FundingSnapshot memory fundingSnapshot = CfdEngineSnapshotsLib.buildFundingSnapshot(
             bullFundingAfter, bearFundingAfter, bullMarginAfter, bearMarginAfter
         );
@@ -1730,34 +1724,39 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 postBearOi,
         uint256 remainingMarginUsdc
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
+        uint256 selectedMarginAfter = selectedState.totalMargin - pos.margin + remainingMarginUsdc;
+        int256 selectedEntryFundingAfter = selectedState.entryFunding - int256(sizeDelta) * pos.entryFundingIndex;
+        uint256 bullOiAfter = pos.side == CfdTypes.Side.BULL ? postBullOi : oppositeState.openInterest;
+        uint256 bearOiAfter = pos.side == CfdTypes.Side.BEAR ? postBearOi : oppositeState.openInterest;
+        int256 bullEntryFundingAfter =
+            pos.side == CfdTypes.Side.BULL ? selectedEntryFundingAfter : oppositeState.entryFunding;
+        int256 bearEntryFundingAfter =
+            pos.side == CfdTypes.Side.BEAR ? selectedEntryFundingAfter : oppositeState.entryFunding;
+        uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
+        uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
         return _buildPreviewSolvencyState(
-            pos.side == CfdTypes.Side.BULL ? postBullOi : bullOI,
-            pos.side == CfdTypes.Side.BEAR ? postBearOi : bearOI,
-            pos.side == CfdTypes.Side.BULL
-                ? globalBullEntryFunding - int256(sizeDelta) * pos.entryFundingIndex
-                : globalBullEntryFunding,
-            pos.side == CfdTypes.Side.BEAR
-                ? globalBearEntryFunding - int256(sizeDelta) * pos.entryFundingIndex
-                : globalBearEntryFunding,
-            pos.side == CfdTypes.Side.BULL ? totalBullMargin - pos.margin + remainingMarginUsdc : totalBullMargin,
-            pos.side == CfdTypes.Side.BEAR ? totalBearMargin - pos.margin + remainingMarginUsdc : totalBearMargin
+            bullOiAfter, bearOiAfter, bullEntryFundingAfter, bearEntryFundingAfter, bullMarginAfter, bearMarginAfter
         );
     }
 
     function _buildPreviewLiquidationSolvencyState(
         CfdTypes.Position memory pos
     ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
+        uint256 selectedOiAfter = selectedState.openInterest - pos.size;
+        int256 selectedEntryFundingAfter = selectedState.entryFunding - int256(pos.size) * pos.entryFundingIndex;
+        uint256 selectedMarginAfter = selectedState.totalMargin - pos.margin;
+        uint256 bullOiAfter = pos.side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeState.openInterest;
+        uint256 bearOiAfter = pos.side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeState.openInterest;
+        int256 bullEntryFundingAfter =
+            pos.side == CfdTypes.Side.BULL ? selectedEntryFundingAfter : oppositeState.entryFunding;
+        int256 bearEntryFundingAfter =
+            pos.side == CfdTypes.Side.BEAR ? selectedEntryFundingAfter : oppositeState.entryFunding;
+        uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
+        uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
         return _buildPreviewSolvencyState(
-            pos.side == CfdTypes.Side.BULL ? bullOI - pos.size : bullOI,
-            pos.side == CfdTypes.Side.BEAR ? bearOI - pos.size : bearOI,
-            pos.side == CfdTypes.Side.BULL
-                ? globalBullEntryFunding - int256(pos.size) * pos.entryFundingIndex
-                : globalBullEntryFunding,
-            pos.side == CfdTypes.Side.BEAR
-                ? globalBearEntryFunding - int256(pos.size) * pos.entryFundingIndex
-                : globalBearEntryFunding,
-            pos.side == CfdTypes.Side.BULL ? totalBullMargin - pos.margin : totalBullMargin,
-            pos.side == CfdTypes.Side.BEAR ? totalBearMargin - pos.margin : totalBearMargin
+            bullOiAfter, bearOiAfter, bullEntryFundingAfter, bearEntryFundingAfter, bullMarginAfter, bearMarginAfter
         );
     }
 
@@ -1818,13 +1817,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
-        bullFunding = (int256(bullOI) * bullFundingIndex - globalBullEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        bearFunding = (int256(bearOI) * bearFundingIndex - globalBearEntryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        bullFunding = (int256(bullState.openInterest) * bullState.fundingIndex - bullState.entryFunding)
+            / int256(CfdMath.FUNDING_INDEX_SCALE);
+        bearFunding = (int256(bearState.openInterest) * bearState.fundingIndex - bearState.entryFunding)
+            / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
     function _buildFundingSnapshot() internal view returns (CfdEngineSnapshotsLib.FundingSnapshot memory snapshot) {
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        return CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, totalBullMargin, totalBearMargin);
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        return CfdEngineSnapshotsLib.buildFundingSnapshot(
+            bullFunding, bearFunding, bullState.totalMargin, bearState.totalMargin
+        );
     }
 
     function _getSolvencyCappedFundingPnl() internal view returns (int256) {
@@ -1920,7 +1925,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Returns true when the protocol still has live bounded directional liability.
     function hasLiveLiability() external view returns (bool) {
-        return globalBullMaxProfit + globalBearMaxProfit > 0;
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        return bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     // ==========================================
@@ -1936,8 +1942,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             return 0;
         }
 
-        int256 bullPnl = int256(globalBullEntryNotional) - int256(bullOI * price);
-        int256 bearPnl = int256(bearOI * price) - int256(globalBearEntryNotional);
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        int256 bullPnl = int256(bullState.entryNotional) - int256(bullState.openInterest * price);
+        int256 bearPnl = int256(bearState.openInterest * price) - int256(bearState.entryNotional);
 
         return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
     }
@@ -1957,8 +1964,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         int256 bullPnl;
         int256 bearPnl;
         if (price > 0) {
-            bullPnl = (int256(globalBullEntryNotional) - int256(bullOI * price)) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
-            bearPnl = (int256(bearOI * price) - int256(globalBearEntryNotional)) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
+            (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+            bullPnl = (int256(bullState.entryNotional) - int256(bullState.openInterest * price))
+                / int256(CfdMath.USDC_TO_TOKEN_SCALE);
+            bearPnl = (int256(bearState.openInterest * price) - int256(bearState.entryNotional))
+                / int256(CfdMath.USDC_TO_TOKEN_SCALE);
         }
 
         (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();

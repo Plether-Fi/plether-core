@@ -285,7 +285,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         assertGt(bearFunding, 0, "Setup must make the bear side owed funding");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearFunding)
             ? bal - maxLiability - pendingFees - uint256(bearFunding)

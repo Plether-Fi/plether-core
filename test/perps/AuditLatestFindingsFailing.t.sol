@@ -57,8 +57,12 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         assertGt(engine.accumulatedBadDebtUsdc(), 0, "Setup must realize bad debt");
 
         uint256 price = engine.lastMarkPrice();
-        int256 bullPnl = (int256(engine.globalBullEntryNotional()) - int256(engine.bullOI() * price)) / int256(1e20);
-        int256 bearPnl = (int256(engine.bearOI() * price) - int256(engine.globalBearEntryNotional())) / int256(1e20);
+        int256 bullPnl =
+            (int256(_sideEntryNotional(CfdTypes.Side.BULL)) - int256(_sideOpenInterest(CfdTypes.Side.BULL) * price))
+                / int256(1e20);
+        int256 bearPnl =
+            (int256(_sideOpenInterest(CfdTypes.Side.BEAR) * price) - int256(_sideEntryNotional(CfdTypes.Side.BEAR)))
+                / int256(1e20);
 
         int256 expectedMtm = 0;
         if (bullPnl > 0) {

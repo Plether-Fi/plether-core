@@ -289,7 +289,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         assertGt(cappedFunding, 0, "Positive funding liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedFunding);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;

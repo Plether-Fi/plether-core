@@ -36,8 +36,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Side side,
         uint256 maxProfitReductionUsdc
     ) internal view returns (uint256) {
-        uint256 bullMaxProfit = engine.globalBullMaxProfit();
-        uint256 bearMaxProfit = engine.globalBearMaxProfit();
+        uint256 bullMaxProfit = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
         if (side == CfdTypes.Side.BULL) {
             bullMaxProfit -= maxProfitReductionUsdc;
         } else {
@@ -151,10 +151,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(mmShort, 1e8, vaultDepth, uint64(block.timestamp));
 
-        int256 bullIndex = engine.bullFundingIndex();
+        int256 bullIndex = _sideFundingIndex(CfdTypes.Side.BULL);
         assertTrue(bullIndex < 0, "BULL index should decrease");
 
-        int256 bearIndex = engine.bearFundingIndex();
+        int256 bearIndex = _sideFundingIndex(CfdTypes.Side.BEAR);
         assertTrue(bearIndex > 0, "BEAR index should increase");
 
         (uint256 size,, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(account1);
@@ -385,7 +385,7 @@ contract CfdEngineTest is BasePerpTest {
 
         (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 totalBullMarginBefore = engine.totalBullMargin();
+        uint256 totalBullMarginBefore = _sideTotalMargin(CfdTypes.Side.BULL);
 
         vm.prank(trader);
         engine.addMargin(accountId, 500 * 1e6);
@@ -398,7 +398,9 @@ contract CfdEngineTest is BasePerpTest {
             "Clearinghouse locked margin should increase by the same amount"
         );
         assertEq(
-            engine.totalBullMargin(), totalBullMarginBefore + 500 * 1e6, "Global bull margin should track addMargin"
+            _sideTotalMargin(CfdTypes.Side.BULL),
+            totalBullMarginBefore + 500 * 1e6,
+            "Global bull margin should track addMargin"
         );
     }
 
@@ -625,11 +627,13 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 bullSize, uint256 bullMargin,, uint256 bullMaxProfit, int256 bullEntryFunding,,,) =
             engine.positions(bullId);
         int256 bullFundingAfter = 0;
-        int256 bearFundingAfter = (int256(engine.bearOI())
-                * engine.bearFundingIndex()
-                - engine.globalBearEntryFunding()) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFundingAfter =
+            (int256(_sideOpenInterest(CfdTypes.Side.BEAR))
+                    * _sideFundingIndex(CfdTypes.Side.BEAR)
+                    - _sideEntryFunding(CfdTypes.Side.BEAR)) / int256(CfdMath.FUNDING_INDEX_SCALE);
         int256 currentFunding = engine.getCappedFundingPnl();
-        int256 postFunding = _cappedFundingAfter(bullFundingAfter, bearFundingAfter, 0, engine.totalBearMargin());
+        int256 postFunding =
+            _cappedFundingAfter(bullFundingAfter, bearFundingAfter, 0, _sideTotalMargin(CfdTypes.Side.BEAR));
 
         assertGt(
             postFunding, currentFunding, "Full close should remove the clipped funding receivable from solvency assets"
@@ -969,10 +973,11 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         int256 currentFunding = engine.getCappedFundingPnl();
-        int256 bearFundingAfter = (int256(engine.bearOI())
-                * engine.bearFundingIndex()
-                - engine.globalBearEntryFunding()) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 postFunding = _cappedFundingAfter(0, bearFundingAfter, 0, engine.totalBearMargin());
+        int256 bearFundingAfter =
+            (int256(_sideOpenInterest(CfdTypes.Side.BEAR))
+                    * _sideFundingIndex(CfdTypes.Side.BEAR)
+                    - _sideEntryFunding(CfdTypes.Side.BEAR)) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 postFunding = _cappedFundingAfter(0, bearFundingAfter, 0, _sideTotalMargin(CfdTypes.Side.BEAR));
         assertGt(
             postFunding, currentFunding, "Liquidation should remove the clipped funding receivable from solvency assets"
         );
@@ -981,7 +986,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
         assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
 
-        uint256 bearMaxProfit = engine.globalBearMaxProfit();
+        uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 targetAssets = bearMaxProfit + engine.accumulatedFeesUsdc() + uint256(postFunding)
             + preDrainPreview.keeperBountyUsdc - preDrainPreview.seizedCollateralUsdc - 1;
         uint256 currentAssets = pool.totalAssets();
@@ -1515,7 +1520,7 @@ contract CfdEngineTest is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
-        assertEq(engine.globalBearMaxProfit(), 0, "Global bear max profit should be zero");
+        assertEq(_sideMaxProfit(CfdTypes.Side.BEAR), 0, "Global bear max profit should be zero");
     }
 
     function test_H9_SolvencyDeadlock_CloseAllowedDuringInsolvency() public {
@@ -1559,9 +1564,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 60_000 * 1e6);
 
-        uint256 maxLiab = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
-            ? engine.globalBullMaxProfit()
-            : engine.globalBearMaxProfit();
+        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
+            ? _sideMaxProfit(CfdTypes.Side.BULL)
+            : _sideMaxProfit(CfdTypes.Side.BEAR);
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
 
         CfdTypes.Order memory aliceClose = CfdTypes.Order({
@@ -1669,9 +1674,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 810_000 * 1e6);
 
-        uint256 maxLiab = engine.globalBullMaxProfit() > engine.globalBearMaxProfit()
-            ? engine.globalBullMaxProfit()
-            : engine.globalBearMaxProfit();
+        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BULL) > _sideMaxProfit(CfdTypes.Side.BEAR)
+            ? _sideMaxProfit(CfdTypes.Side.BULL)
+            : _sideMaxProfit(CfdTypes.Side.BEAR);
         assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Vault should be insolvent");
 
         // Price rises to $1.10 — BULL loses $20k, deeply underwater
@@ -2080,7 +2085,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        int256 indexAfterOpen = engine.bullFundingIndex();
+        int256 indexAfterOpen = _sideFundingIndex(CfdTypes.Side.BULL);
 
         vm.warp(T_PROPOSE);
 
@@ -2106,7 +2111,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        int256 indexAfterSettle = engine.bullFundingIndex();
+        int256 indexAfterSettle = _sideFundingIndex(CfdTypes.Side.BULL);
         int256 indexDrop = indexAfterOpen - indexAfterSettle;
 
         uint256 totalElapsed = T_ORDER2 - T0;
@@ -2176,16 +2181,16 @@ contract MarginCappedMtmTest is BasePerpTest {
         _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 50_000e6);
 
-        assertEq(engine.totalBullMargin(), 0);
-        assertEq(engine.totalBearMargin(), 0);
+        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0);
+        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertEq(engine.totalBullMargin(), 0, "Bull margin unchanged");
-        assertGt(engine.totalBearMargin(), 0, "Bear margin tracked after open");
+        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "Bull margin unchanged");
+        assertGt(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin tracked after open");
     }
 
     function test_MarginTracking_DecreasesOnClose() public {
@@ -2197,14 +2202,14 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        uint256 bearMarginAfterOpen = engine.totalBearMargin();
+        uint256 bearMarginAfterOpen = _sideTotalMargin(CfdTypes.Side.BEAR);
         assertGt(bearMarginAfterOpen, 0);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
         router.executeOrder(2, empty);
 
-        assertEq(engine.totalBearMargin(), 0, "Bear margin zero after full close");
+        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin zero after full close");
     }
 
     function test_MarginTracking_PartialClose() public {
@@ -2216,13 +2221,13 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        uint256 bearMarginFull = engine.totalBearMargin();
+        uint256 bearMarginFull = _sideTotalMargin(CfdTypes.Side.BEAR);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 50_000e18, 0, 1e8, true);
         router.executeOrder(2, empty);
 
-        uint256 bearMarginHalf = engine.totalBearMargin();
+        uint256 bearMarginHalf = _sideTotalMargin(CfdTypes.Side.BEAR);
         assertLt(bearMarginHalf, bearMarginFull, "Margin decreases on partial close");
         assertGt(bearMarginHalf, 0, "Margin still tracked for remaining position");
     }
@@ -2236,14 +2241,14 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertGt(engine.totalBearMargin(), 0);
+        assertGt(_sideTotalMargin(CfdTypes.Side.BEAR), 0);
 
         bytes[] memory liqPrice = new bytes[](1);
         liqPrice[0] = abi.encode(uint256(0.5e8));
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         router.executeLiquidation(accountId, liqPrice);
 
-        assertEq(engine.totalBearMargin(), 0, "Bear margin zero after liquidation");
+        assertEq(_sideTotalMargin(CfdTypes.Side.BEAR), 0, "Bear margin zero after liquidation");
     }
 
     // Regression: C-02
@@ -2266,8 +2271,12 @@ contract MarginCappedMtmTest is BasePerpTest {
         int256 uncappedPnl = engine.getUnrealizedTraderPnl();
         int256 cappedMtm = engine.getVaultMtmAdjustment();
 
-        assertLt(uncappedPnl, -int256(engine.totalBearMargin()), "Uncapped loss exceeds deposited margin");
-        assertGe(cappedMtm, -int256(engine.totalBearMargin() + engine.totalBullMargin()), "Capped MtM bounded");
+        assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
+        assertGe(
+            cappedMtm,
+            -int256(_sideTotalMargin(CfdTypes.Side.BEAR) + _sideTotalMargin(CfdTypes.Side.BULL)),
+            "Capped MtM bounded"
+        );
         assertGt(cappedMtm, uncappedPnl, "Capped MtM is less aggressive than uncapped");
     }
 
@@ -2297,7 +2306,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         uint256 revenue = juniorAfter > juniorBefore ? juniorAfter - juniorBefore : 0;
         assertLe(
             revenue,
-            engine.totalBearMargin() + engine.totalBullMargin(),
+            _sideTotalMargin(CfdTypes.Side.BEAR) + _sideTotalMargin(CfdTypes.Side.BULL),
             "Recognized revenue must not exceed seizable margin"
         );
     }
@@ -2467,7 +2476,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         uint256 freeUsdcNow = pool.getFreeUSDC();
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = engine.globalBullMaxProfit();
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
         uint256 reservedWithoutFunding = maxLiability + pendingFees;
         uint256 freeWithoutFunding = bal > reservedWithoutFunding ? bal - reservedWithoutFunding : 0;
