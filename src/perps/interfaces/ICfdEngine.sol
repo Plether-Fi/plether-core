@@ -7,6 +7,21 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    struct HousePoolInputSnapshot {
+        uint256 netPhysicalAssetsUsdc;
+        uint256 maxLiabilityUsdc;
+        int256 withdrawalFundingLiabilityUsdc;
+        int256 unrealizedMtmLiabilityUsdc;
+        uint256 deferredTraderPayoutUsdc;
+        uint256 deferredLiquidationBountyUsdc;
+        uint256 protocolFeesUsdc;
+        uint64 lastMarkTime;
+        bool markFreshnessRequired;
+        bool oracleFrozen;
+        bool degradedMode;
+        uint256 maxMarkStaleness;
+    }
+
     struct LiquidationPreview {
         bool liquidatable;
         uint256 oraclePrice;
@@ -83,6 +98,12 @@ interface ICfdEngine {
     function accumulatedFeesUsdc() external view returns (uint256);
     /// @notice Total withdrawal reserve required by current protocol liabilities.
     function getWithdrawalReservedUsdc() external view returns (uint256);
+
+    /// @notice Canonical accounting + freshness snapshot consumed by HousePool.
+    /// @param markStalenessLimit Normal live-market staleness limit configured by HousePool.
+    function getHousePoolInputSnapshot(
+        uint256 markStalenessLimit
+    ) external view returns (HousePoolInputSnapshot memory snapshot);
 
     /// @notice Deferred profitable-close payouts still owed to traders.
     function totalDeferredPayoutUsdc() external view returns (uint256);

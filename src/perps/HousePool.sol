@@ -331,16 +331,23 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot = _getHousePoolInputSnapshot();
+        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
+            HousePoolAccountingLib.buildWithdrawalSnapshot(engineSnapshot);
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
+            HousePoolAccountingLib.getMarkFreshnessPolicy(engineSnapshot);
+
         viewData.totalAssetsUsdc = USDC.balanceOf(address(this));
-        viewData.freeUsdc = getFreeUSDC();
-        viewData.withdrawalReservedUsdc = ENGINE.getWithdrawalReservedUsdc();
+        viewData.freeUsdc = withdrawalSnapshot.freeUsdc;
+        viewData.withdrawalReservedUsdc = withdrawalSnapshot.reserved;
         viewData.seniorPrincipalUsdc = seniorPrincipal;
         viewData.juniorPrincipalUsdc = juniorPrincipal;
         viewData.unpaidSeniorYieldUsdc = unpaidSeniorYield;
         viewData.seniorHighWaterMarkUsdc = seniorHighWaterMark;
-        viewData.markFresh = _markIsFreshForReconcile();
-        viewData.oracleFrozen = ENGINE.isOracleFrozen();
-        viewData.degradedMode = ENGINE.degradedMode();
+        viewData.markFresh = !policy.required
+            || HousePoolAccountingLib.isMarkFresh(engineSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp);
+        viewData.oracleFrozen = engineSnapshot.oracleFrozen;
+        viewData.degradedMode = engineSnapshot.degradedMode;
     }
 
     // ==========================================
@@ -354,11 +361,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireFreshMark() internal view {
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot = _getHousePoolInputSnapshot();
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
+            HousePoolAccountingLib.getMarkFreshnessPolicy(engineSnapshot);
         if (!policy.required) {
             return;
         }
-        if (!HousePoolAccountingLib.isMarkFresh(ENGINE.lastMarkTime(), policy.maxStaleness, block.timestamp)) {
+        if (!HousePoolAccountingLib.isMarkFresh(engineSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp)) {
             revert HousePool__MarkPriceStale();
         }
     }
@@ -396,44 +405,26 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         view
         returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot)
     {
-        return HousePoolAccountingLib.buildWithdrawalSnapshot(
-                USDC.balanceOf(address(this)),
-                ENGINE.getMaxLiability(),
-                ENGINE.accumulatedFeesUsdc(),
-                ENGINE.getWithdrawalReservedUsdc()
-            );
+        return HousePoolAccountingLib.buildWithdrawalSnapshot(_getHousePoolInputSnapshot());
     }
 
     function _getReconcileSnapshot() internal view returns (HousePoolAccountingLib.ReconcileSnapshot memory snapshot) {
-        return HousePoolAccountingLib.buildReconcileSnapshot(
-            USDC.balanceOf(address(this)),
-            ENGINE.accumulatedFeesUsdc(),
-            ENGINE.totalDeferredPayoutUsdc() + ENGINE.totalDeferredLiquidationBountyUsdc(),
-            ENGINE.getVaultMtmAdjustment()
-        );
+        return HousePoolAccountingLib.buildReconcileSnapshot(_getHousePoolInputSnapshot());
     }
 
     function _markIsFreshForReconcile() internal view returns (bool) {
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy = _getMarkFreshnessPolicy();
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot = _getHousePoolInputSnapshot();
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
+            HousePoolAccountingLib.getMarkFreshnessPolicy(engineSnapshot);
         if (!policy.required) {
             return true;
         }
 
-        return HousePoolAccountingLib.isMarkFresh(ENGINE.lastMarkTime(), policy.maxStaleness, block.timestamp);
+        return HousePoolAccountingLib.isMarkFresh(engineSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
-    function _getMarkFreshnessPolicy()
-        internal
-        view
-        returns (HousePoolAccountingLib.MarkFreshnessPolicy memory policy)
-    {
-        return HousePoolAccountingLib.getMarkFreshnessPolicy(
-                _hasLiveLiability(), ENGINE.isOracleFrozen(), ENGINE.fadMaxStaleness(), markStalenessLimit
-            );
-    }
-
-    function _hasLiveLiability() internal view returns (bool) {
-        return ENGINE.hasLiveLiability();
+    function _getHousePoolInputSnapshot() internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
+        return ENGINE.getHousePoolInputSnapshot(markStalenessLimit);
     }
 
     function _accrueSeniorYieldOnly() internal {
@@ -462,11 +453,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit Reconciled(seniorPrincipal, juniorPrincipal, -int256(loss));
     }
 
-    function _getWaterfallState()
-        internal
-        view
-        returns (HousePoolWaterfallAccountingLib.WaterfallState memory state)
-    {
+    function _getWaterfallState() internal view returns (HousePoolWaterfallAccountingLib.WaterfallState memory state) {
         state.seniorPrincipal = seniorPrincipal;
         state.juniorPrincipal = juniorPrincipal;
         state.unpaidSeniorYield = unpaidSeniorYield;

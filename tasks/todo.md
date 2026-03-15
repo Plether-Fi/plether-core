@@ -1,3 +1,23 @@
+- [x] Inspect current `HousePool`/`CfdEngine` accounting handoff and identify every getter the pool stitches together
+- [x] Add one canonical `HousePoolInputSnapshot` engine view and refactor `HousePool` to consume it everywhere
+- [x] Update interfaces/tests/docs as needed and run targeted perps verification
+
+Review:
+- Added `ICfdEngine.HousePoolInputSnapshot` plus `getHousePoolInputSnapshot(uint256 markStalenessLimit)` so the engine now hands HousePool one typed accounting/freshness boundary instead of many loosely coupled getters.
+- Refactored `src/perps/HousePool.sol` and `src/perps/libraries/HousePoolAccountingLib.sol` so withdrawal accounting, reconcile accounting, and mark-freshness policy all derive from that single engine snapshot.
+- Added targeted engine tests in `test/perps/CfdEngine.t.sol` covering both normal-market and frozen-oracle snapshot semantics.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "GetHousePoolInputSnapshot|GetProtocolAccountingView_ReflectsDeferredLiabilities"` and `forge test --match-path test/perps/HousePool.t.sol --match-test "M12_GetFreeUSDC_ReservesFees|GetVaultLiquidityView_ReturnsCurrentPoolState|FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals|StaleMarkBlocksWithdrawal"`.
+
+- [x] Extend `HousePoolInputSnapshot` with mark timestamp and view-only status flags
+- [x] Refactor `HousePool` to use the fully self-contained snapshot for freshness + liquidity view reads
+- [x] Update snapshot tests and rerun targeted perps verification
+
+Review:
+- Extended `HousePoolInputSnapshot` with `lastMarkTime`, `oracleFrozen`, and `degradedMode`, making the engine handoff self-contained for both freshness enforcement and liquidity-view status reporting.
+- Refactored `src/perps/HousePool.sol` to stop reaching back into standalone engine getters for mark timestamp and view flags once the snapshot has been fetched.
+- Expanded `test/perps/CfdEngine.t.sol` assertions so snapshot fields are checked against engine state in both normal-market and frozen-oracle paths.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "GetHousePoolInputSnapshot|GetProtocolAccountingView_ReflectsDeferredLiabilities"` and `forge test --match-path test/perps/HousePool.t.sol --match-test "GetVaultLiquidityView_ReturnsCurrentPoolState|FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals|StaleMarkBlocksWithdrawal"`.
+
 - [x] Inspect the USDC keeper-fee change for lost anti-griefing protections
 - [x] Restore an upfront per-order USDC reserve that keeps queue clearing incentivized on failures and expiries
 - [x] Update tests and docs for the reserved-fee model

@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
@@ -1660,6 +1661,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         .reservedUsdc;
     }
 
+    function _buildHousePoolInputSnapshot(
+        uint256 markStalenessLimit
+    ) internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
+        uint256 vaultAssetsUsdc = vault.totalAssets();
+        bool oracleFrozen_ = isOracleFrozen();
+
+        snapshot.protocolFeesUsdc = accumulatedFeesUsdc;
+        snapshot.netPhysicalAssetsUsdc =
+            vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
+        snapshot.maxLiabilityUsdc = _maxLiability();
+        snapshot.withdrawalFundingLiabilityUsdc = _getLiabilityOnlyFundingPnl();
+        snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
+        snapshot.deferredTraderPayoutUsdc = totalDeferredPayoutUsdc;
+        snapshot.deferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
+        snapshot.lastMarkTime = lastMarkTime;
+        snapshot.markFreshnessRequired = globalBullMaxProfit + globalBearMaxProfit > 0;
+        snapshot.oracleFrozen = oracleFrozen_;
+        snapshot.degradedMode = degradedMode;
+        if (snapshot.markFreshnessRequired) {
+            snapshot.maxMarkStaleness = oracleFrozen_ ? fadMaxStaleness : markStalenessLimit;
+        }
+    }
+
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
         return SolvencyAccountingLib.buildSolvencyState(
             vault.totalAssets(),
@@ -1856,6 +1880,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         return _getWithdrawalReservedUsdc();
     }
 
+    function getHousePoolInputSnapshot(
+        uint256 markStalenessLimit
+    ) external view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
+        return _buildHousePoolInputSnapshot(markStalenessLimit);
+    }
+
     /// @notice Updates the cached mark price without settling funding or processing trades
     /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
     /// @param publishTime Pyth publish timestamp
@@ -1912,6 +1942,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ///         through physical USDC transfers (settlements, liquidations).
     /// @return Net MtM adjustment the vault must reserve (always >= 0), in USDC (6 decimals)
     function getVaultMtmAdjustment() external view returns (int256) {
+        return _getVaultMtmLiability();
+    }
+
+    function _getVaultMtmLiability() internal view returns (int256) {
         uint256 price = lastMarkPrice;
 
         int256 bullPnl;

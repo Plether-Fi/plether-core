@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {ICfdEngine} from "../interfaces/ICfdEngine.sol";
+
 library HousePoolAccountingLib {
 
     struct WithdrawalSnapshot {
@@ -26,46 +28,45 @@ library HousePoolAccountingLib {
     }
 
     function buildWithdrawalSnapshot(
-        uint256 physicalAssets,
-        uint256 maxLiability,
-        uint256 protocolFees,
-        uint256 reserved
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
-        snapshot.physicalAssets = physicalAssets;
-        snapshot.maxLiability = maxLiability;
-        snapshot.protocolFees = protocolFees;
-        snapshot.reserved = reserved;
-        snapshot.freeUsdc = physicalAssets > reserved ? physicalAssets - reserved : 0;
+        snapshot.physicalAssets = engineSnapshot.netPhysicalAssetsUsdc + engineSnapshot.protocolFeesUsdc;
+        snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
+        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
+        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
+            + engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredLiquidationBountyUsdc;
+        if (engineSnapshot.withdrawalFundingLiabilityUsdc > 0) {
+            snapshot.reserved += uint256(engineSnapshot.withdrawalFundingLiabilityUsdc);
+        }
+        snapshot.freeUsdc =
+            snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
 
     function buildReconcileSnapshot(
-        uint256 physicalAssets,
-        uint256 protocolFees,
-        uint256 deferredLiabilities,
-        int256 mtm
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        snapshot.physicalAssets = physicalAssets;
-        snapshot.protocolFees = protocolFees;
-        snapshot.deferredLiabilities = deferredLiabilities;
-        uint256 protectedLiabilities = protocolFees + deferredLiabilities;
-        snapshot.cashMinusFees = physicalAssets > protectedLiabilities ? physicalAssets - protectedLiabilities : 0;
-        snapshot.mtm = mtm;
-        if (mtm >= 0) {
-            snapshot.distributable = snapshot.cashMinusFees > uint256(mtm) ? snapshot.cashMinusFees - uint256(mtm) : 0;
+        snapshot.physicalAssets = engineSnapshot.netPhysicalAssetsUsdc + engineSnapshot.protocolFeesUsdc;
+        snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
+        snapshot.deferredLiabilities =
+            engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredLiquidationBountyUsdc;
+        snapshot.cashMinusFees = engineSnapshot.netPhysicalAssetsUsdc > snapshot.deferredLiabilities
+            ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
+            : 0;
+        snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
+        if (snapshot.mtm >= 0) {
+            snapshot.distributable =
+                snapshot.cashMinusFees > uint256(snapshot.mtm) ? snapshot.cashMinusFees - uint256(snapshot.mtm) : 0;
         } else {
-            snapshot.distributable = snapshot.cashMinusFees + uint256(-mtm);
+            snapshot.distributable = snapshot.cashMinusFees + uint256(-snapshot.mtm);
         }
     }
 
     function getMarkFreshnessPolicy(
-        bool required,
-        bool oracleFrozen,
-        uint256 fadMaxStaleness,
-        uint256 markStalenessLimit
+        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (MarkFreshnessPolicy memory policy) {
-        policy.required = required;
-        if (required) {
-            policy.maxStaleness = oracleFrozen ? fadMaxStaleness : markStalenessLimit;
+        policy.required = engineSnapshot.markFreshnessRequired;
+        if (policy.required) {
+            policy.maxStaleness = engineSnapshot.maxMarkStaleness;
         }
     }
 
