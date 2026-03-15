@@ -46,28 +46,6 @@ library CfdEngineSnapshotsLib {
         }
     }
 
-    function buildSolvencySnapshot(
-        uint256 physicalAssets,
-        uint256 protocolFees,
-        uint256 maxLiability,
-        FundingSnapshot memory funding
-    ) internal pure returns (SolvencySnapshot memory snapshot) {
-        snapshot.physicalAssets = physicalAssets;
-        snapshot.protocolFees = protocolFees;
-        snapshot.netPhysicalAssets = physicalAssets > protocolFees ? physicalAssets - protocolFees : 0;
-        snapshot.maxLiability = maxLiability;
-        snapshot.solvencyFunding = funding.solvencyFunding;
-        snapshot.effectiveSolvencyAssets = snapshot.netPhysicalAssets;
-
-        if (snapshot.solvencyFunding > 0) {
-            snapshot.effectiveSolvencyAssets = snapshot.effectiveSolvencyAssets > uint256(snapshot.solvencyFunding)
-                ? snapshot.effectiveSolvencyAssets - uint256(snapshot.solvencyFunding)
-                : 0;
-        } else if (snapshot.solvencyFunding < 0) {
-            snapshot.effectiveSolvencyAssets += uint256(-snapshot.solvencyFunding);
-        }
-    }
-
     function getWithdrawalReservedUsdc(
         uint256 maxLiability,
         uint256 protocolFees,

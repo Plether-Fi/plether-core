@@ -332,3 +332,44 @@ Review:
 - Changed `executeOrderBatch()` to `break` rather than revert when the per-order gas floor is no longer met, so completed batch work persists.
 - Added/updated regression coverage in `test/perps/OrderRouter.t.sol`, `test/perps/AuditConfirmedFindingsFailing.t.sol`, and `test/perps/AuditV3.t.sol` for failed-order bounty forfeiture, open-order cancellation binding, and mixed batch payout semantics.
 - Verified green: focused router/invariant/blocker runs plus full `forge test --match-path "test/perps/*.t.sol"` with `470 tests passed, 0 failed, 0 skipped`.
+
+- [x] Scan `src/perps` for duplicated code patterns
+- [x] Inspect the strongest duplication candidates and classify intentional vs risky repetition
+- [x] Report the highest-value refactor opportunities with file references
+
+Review:
+- Scanned `src/perps` with a normalized repeated-window pass plus function-similarity checks, then manually reviewed the strongest clusters.
+- Highest-risk duplication remains preview/live business logic that still repeats around liquidation and close flows in `src/perps/CfdEngine.sol`.
+- Cross-contract duplication exists in timelocked admin proposal flows and oracle-freeze calendar logic shared between `src/perps/CfdEngine.sol` and `src/perps/OrderRouter.sol`; these are good cleanup targets but lower urgency than the trading-path logic.
+- Tranche senior/junior branching in `src/perps/HousePool.sol` and `src/perps/TrancheVault.sol` is mostly intentional and only worth light deduplication.
+
+- [x] Refactor liquidation preview/live into one shared transition planner in `src/perps/CfdEngine.sol`
+- [ ] Refactor close preview/live post-settlement and solvency wiring into a shared planner or builder
+- [ ] Centralize oracle freeze / market-closed calendar logic shared by `CfdEngine` and `OrderRouter`
+- [ ] Evaluate local deduplication of `OrderRouter` queue unlink helpers without obscuring invariants
+- [ ] Leave tranche senior/junior branching mostly explicit unless a tiny helper clearly improves readability
+- [ ] After each refactor slice, run the narrowest affected Forge suites plus a final `test/perps/*.t.sol` pass
+
+Review:
+- Priority order is safety-first: preview/live parity before governance or cosmetic deduplication.
+- `CfdEngine` liquidation parity is the best first target because it duplicates critical solvency and payout logic across view and live paths.
+- Close-path dedup is next, but only if the shared abstraction stays domain-shaped and does not hide accounting transitions.
+- Oracle calendar centralization is a medium-risk consistency cleanup with good payoff because router/engine disagreement would change execution semantics.
+- Timelock admin flow dedup is intentionally deferred because the payoff is lower and typed proposal state makes over-abstraction easy.
+Review:
+- Added `LiquidationComputation` plus `_buildLiquidationComputation(...)` in `src/perps/CfdEngine.sol` so liquidation preview and live execution now share the same reachable-collateral, risk-state, bounty, and settlement planning kernel.
+- `previewLiquidation()` and `_liquidatePosition()` now consume that shared computation instead of rebuilding the liquidation math inline.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewLiquidation_ReturnsBountyAndLiquidatableFlag|LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|Liquidation_PreservesReservedSettlementEscrow|LiquidationBounty_CappedByPositiveEquity"` and `forge test --match-path "test/perps/*.t.sol"` (`484 passed, 0 failed`).
+
+- [x] Scan `src/perps` for dead code candidates (unused internal/private funcs, structs, vars, branches)
+- [x] Verify each candidate manually to avoid false positives from tests/interfaces/inheritance
+- [x] Report safe removals vs intentionally retained code with file references
+
+Review:
+- Dead code in `src/perps` is limited; the strongest candidates are orphaned helpers/types rather than unreachable branches.
+- High-confidence safe removals are `CfdEngineSnapshotsLib.buildSolvencySnapshot`, `CfdEngine._seizeUsdcToVault`, and the duplicate `MarginClearinghouse.SettlementConsumption` struct.
+- Several low-reference symbols in `TrancheVault` are not dead code because OpenZeppelin `ERC4626` reaches them through overrides.
+Review:
+- Removed three high-confidence dead-code items: `CfdEngine._seizeUsdcToVault`, the duplicate `MarginClearinghouse.SettlementConsumption` struct, and the orphaned `CfdEngineSnapshotsLib.buildSolvencySnapshot` helper.
+- Verified green with `forge test --match-path test/perps/CfdEngine.t.sol` and `forge test --match-path test/perps/MarginClearinghouse.t.sol` (`110 passed, 0 failed`).
+- Current net LOC across the cleanup files is `-18` (`101 added, 119 removed`), with the dead-code deletion slice itself contributing the reduction.

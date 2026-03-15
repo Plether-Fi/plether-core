@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -29,13 +29,6 @@ contract MarginClearinghouse is Ownable2Step {
         uint8 decimals;
         uint16 ltvBps;
         address oracle;
-    }
-
-    struct SettlementConsumption {
-        uint256 freeSettlementConsumedUsdc;
-        uint256 activeMarginConsumedUsdc;
-        uint256 totalConsumedUsdc;
-        uint256 uncoveredUsdc;
     }
 
     mapping(address => AssetConfig) public assetConfigs;
@@ -352,7 +345,9 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 positionMarginUsdc
     ) public view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(_buildAccountUsdcBuckets(accountId, positionMarginUsdc));
+        return MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(
+            _buildAccountUsdcBuckets(accountId, positionMarginUsdc)
+        );
     }
 
     /// @notice Returns settlement balance reachable after protecting only an explicitly remaining margin bucket.
@@ -507,7 +502,11 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
-    ) external onlyOperator returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) {
+    )
+        external
+        onlyOperator
+        returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc)
+    {
         if (lossUsdc == 0) {
             return (0, 0, 0);
         }
@@ -517,7 +516,8 @@ contract MarginClearinghouse is Ownable2Step {
         freeSettlementConsumedUsdc = consumption.freeSettlementConsumedUsdc;
         marginConsumedUsdc = consumption.activeMarginConsumedUsdc;
         uncoveredUsdc = consumption.uncoveredUsdc;
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
             MarginClearinghouseAccountingLib.applyFundingLossMutation(buckets, consumption);
 
@@ -547,7 +547,8 @@ contract MarginClearinghouse is Ownable2Step {
             return (0, 0);
         }
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, protectedLockedMarginUsdc);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            _buildAccountUsdcBuckets(accountId, protectedLockedMarginUsdc);
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
@@ -582,7 +583,8 @@ contract MarginClearinghouse is Ownable2Step {
         int256 residualUsdc,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
         MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
             MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
         seizedUsdc = plan.seizedUsdc;
@@ -609,7 +611,10 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 activePositionMarginUsdc
     ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            balances[accountId][settlementAsset], reservedSettlementUsdc[accountId], lockedMarginUsdc[accountId], activePositionMarginUsdc
+            balances[accountId][settlementAsset],
+            reservedSettlementUsdc[accountId],
+            lockedMarginUsdc[accountId],
+            activePositionMarginUsdc
         );
     }
 
@@ -647,7 +652,10 @@ contract MarginClearinghouse is Ownable2Step {
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (balances[accountId][settlementAsset] < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc) {
+        if (
+            balances[accountId][settlementAsset]
+                < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc
+        ) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         lockedMarginUsdc[accountId] += amountUsdc;
