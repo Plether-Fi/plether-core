@@ -478,6 +478,27 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         accumulatedFeesUsdc += amountUsdc;
     }
 
+    /// @notice Pays a close-order execution bounty from vault/protocol policy, deferring the clearer share if needed.
+    function settleCloseOrderExecutionBounty(
+        address clearer,
+        uint256 clearerShareUsdc,
+        uint256 protocolShareUsdc
+    ) external onlyRouter {
+        if (protocolShareUsdc > 0) {
+            accumulatedFeesUsdc += protocolShareUsdc;
+        }
+        if (clearerShareUsdc == 0) {
+            return;
+        }
+
+        try vault.payOut(clearer, clearerShareUsdc) {}
+        catch {
+            deferredLiquidationBountyUsdc[clearer] += clearerShareUsdc;
+            totalDeferredLiquidationBountyUsdc += clearerShareUsdc;
+            emit DeferredLiquidationBountyRecorded(clearer, clearerShareUsdc);
+        }
+    }
+
     /// @notice Adds isolated margin to an existing open position without changing size.
     function addMargin(
         bytes32 accountId,

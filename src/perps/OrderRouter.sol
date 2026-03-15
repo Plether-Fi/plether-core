@@ -268,9 +268,7 @@ contract OrderRouter is Ownable2Step, Pausable {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
-        uint256 executionBountyUsdc = isClose
-            ? _quoteCloseOrderExecutionBountyUsdc()
-            : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
+        uint256 executionBountyUsdc = isClose ? 0 : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -940,16 +938,34 @@ contract OrderRouter is Ownable2Step, Pausable {
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
-            _collectExecutionBounty(orderId);
+            if (orders[orderId].isClose) {
+                _settleCloseOrderExecutionBounty(FailedOrderBountyPolicy.ClearerFull);
+            } else {
+                _collectExecutionBounty(orderId);
+            }
         } else {
             _releaseCommittedMargin(orderId);
-            if (!orders[orderId].isClose || failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
+            if (orders[orderId].isClose) {
+                _settleCloseOrderExecutionBounty(failedPolicy);
+            } else if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
             } else {
                 _splitExecutionBountyWithProtocol(orderId, INVALID_CLOSE_CLEARER_BOUNTY_BPS);
             }
         }
         return 0;
+    }
+
+    function _settleCloseOrderExecutionBounty(
+        FailedOrderBountyPolicy failedPolicy
+    ) internal {
+        uint256 bountyUsdc = _quoteCloseOrderExecutionBountyUsdc();
+        if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
+            engine.settleCloseOrderExecutionBounty(msg.sender, bountyUsdc, 0);
+        } else {
+            uint256 clearerShare = (bountyUsdc * INVALID_CLOSE_CLEARER_BOUNTY_BPS) / 10_000;
+            engine.settleCloseOrderExecutionBounty(msg.sender, clearerShare, bountyUsdc - clearerShare);
+        }
     }
 
     function _deleteOrder(

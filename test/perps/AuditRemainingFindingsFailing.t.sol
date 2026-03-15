@@ -48,7 +48,11 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         pool.reconcile();
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
-        assertEq(equityAfter, equityBefore, "Execution fees should not increase LP equity");
+        assertEq(
+            equityAfter,
+            equityBefore - router.quoteCloseOrderExecutionBountyUsdc(),
+            "Protocol-funded close-order bounties should reduce LP equity by the paid close bounty"
+        );
         assertEq(
             engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"
         );

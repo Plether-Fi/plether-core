@@ -350,13 +350,12 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
         clearinghouse.withdraw(accountId, address(usdc), freeBefore);
 
         vm.prank(trader);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         assertGe(
             clearinghouse.balances(accountId, address(usdc)),
             lockedBefore,
-            "Rejected close commits must not strip locked margin to fund keeper reserves"
+            "Close commits must not strip locked margin to fund keeper reserves"
         );
     }
 

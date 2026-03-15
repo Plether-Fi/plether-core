@@ -168,22 +168,16 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
     }
 
-    function test_M2_CloseCommitMustReserveFlatKeeperBounty() public {
+    function test_M2_CloseCommitDoesNotRequirePrefundedKeeperBounty() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        _fundTrader(trader, router.quoteCloseOrderExecutionBountyUsdc());
-
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        assertEq(router.nextCommitId(), 2, "Close commits should succeed once the flat keeper bounty is funded");
+        assertEq(router.nextCommitId(), 2, "Close commits should succeed without prefunding a keeper bounty");
     }
 
     function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {
@@ -211,13 +205,13 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
             engine.deferredLiquidationBountyUsdc(keeper),
-            0,
-            "Close execution should not create deferred liquidation bounties"
+            router.quoteCloseOrderExecutionBountyUsdc(),
+            "Illiquid close execution should defer the keeper bounty through protocol/vault policy"
         );
         assertEq(
             usdc.balanceOf(keeper) - keeperUsdcBefore,
-            router.quoteCloseOrderExecutionBountyUsdc(),
-            "Keeper should be paid from the reserved close bounty"
+            0,
+            "Illiquid close execution should not pay the keeper immediately when vault cash is unavailable"
         );
     }
 

@@ -44,8 +44,8 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
         assertEq(
             escrow.executionBountyUsdc,
-            1_050_000,
-            "Dust open plus close intents should escrow both minimum and flat execution bounties"
+            50_000,
+            "Only the open intent should escrow a bounty; close intents should use protocol/vault-funded execution"
         );
     }
 

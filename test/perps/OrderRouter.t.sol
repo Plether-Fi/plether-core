@@ -181,7 +181,7 @@ contract OrderRouterTest is BasePerpTest {
 
         OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
-        assertEq(escrow.executionBountyUsdc, 2_000_000, "Open and close orders should both escrow execution bounties");
+        assertEq(escrow.executionBountyUsdc, 1_000_000, "Only open orders should escrow execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
@@ -196,11 +196,11 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
         assertEq(summary.pendingOrderCount, 2);
         assertEq(summary.committedMarginUsdc, 1000 * 1e6);
-        assertEq(summary.executionBountyUsdc, 2_000_000);
+        assertEq(summary.executionBountyUsdc, 1_000_000);
         assertTrue(summary.hasTerminalCloseQueued);
     }
 
-    function test_CloseCommit_RequiresFlatKeeperBountyReserve() public {
+    function test_CloseCommit_DoesNotRequirePrefundedKeeperBountyReserve() public {
         address trader = address(0x333);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
@@ -208,15 +208,9 @@ contract OrderRouterTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
 
         vm.prank(trader);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        _fundTrader(trader, router.quoteCloseOrderExecutionBountyUsdc());
-
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
-
-        assertEq(router.executionBountyReserves(1), router.quoteCloseOrderExecutionBountyUsdc());
+        assertEq(router.executionBountyReserves(1), 0, "Close orders should not pre-seize a router-custodied bounty");
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -235,7 +229,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[0].executionBountyUsdc, 1_000_000);
         assertEq(pending[1].orderId, 2);
         assertTrue(pending[1].isClose);
-        assertEq(pending[1].executionBountyUsdc, router.quoteCloseOrderExecutionBountyUsdc());
+        assertEq(pending[1].executionBountyUsdc, 0);
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
@@ -425,17 +419,17 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel);
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 1_000_000);
+        assertEq(router.executionBountyReserves(secondCloseOrderId), 0);
 
         vm.prank(alice);
         router.cancelOrder(secondCloseOrderId);
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling a close order should not unlock live position margin");
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 0, "Cancelled tail order should clear its execution bounty reserve");
+        assertEq(router.executionBountyReserves(secondCloseOrderId), 0, "Cancelled tail order should have no execution bounty reserve");
         assertEq(router.pendingOrderCounts(accountId), 1, "Pending order count should decrement after cancellation");
         assertEq(router.nextExecuteId(), firstCloseOrderId, "Cancelling a non-head order should not advance FIFO head");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1_000_000, "User-cancelled close-order bounty should become protocol revenue");
-        assertEq(pool.totalAssets() - vaultAssetsBefore, 1_000_000, "Cancelled keeper reserve should return to vault cash as fees");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Cancelling a close order should not route any prefunded bounty to protocol revenue");
+        assertEq(pool.totalAssets() - vaultAssetsBefore, 0, "Cancelling a close order should not move vault cash");
 
         OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
         assertEq(pending.length, 1);
@@ -459,7 +453,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), closeOrderId + 1, "Cancelling the FIFO head should advance nextExecuteId");
         assertEq(router.pendingOrderCounts(accountId), 0);
         assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel, "Cancelling the head close order should not unlock live position margin");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 1_000_000, "Head cancellation should route the keeper reserve to protocol revenue");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Head close cancellation should not route any prefunded bounty to protocol revenue");
     }
 
     function test_CancelOrder_OnlyOwnerCanCancel() public {
