@@ -535,6 +535,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
         ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolStatusSnapshot memory status = engine.getHousePoolStatusSnapshot();
         uint256 fees = engine.accumulatedFeesUsdc();
 
         assertEq(
@@ -560,15 +561,15 @@ contract CfdEngineTest is BasePerpTest {
             "Snapshot bounty must match storage"
         );
         assertEq(snapshot.protocolFeesUsdc, fees, "Snapshot fees must match storage");
-        assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "Snapshot mark timestamp must match engine state");
         assertTrue(snapshot.markFreshnessRequired, "Open directional liability should require fresh marks");
-        assertEq(snapshot.oracleFrozen, engine.isOracleFrozen(), "Snapshot frozen flag must match engine state");
-        assertEq(snapshot.degradedMode, engine.degradedMode(), "Snapshot degraded flag must match engine state");
         assertEq(
             snapshot.maxMarkStaleness,
             pool.markStalenessLimit(),
             "Live-market snapshot should use HousePool's configured limit"
         );
+        assertEq(status.lastMarkTime, engine.lastMarkTime(), "Status snapshot mark timestamp must match engine state");
+        assertEq(status.oracleFrozen, engine.isOracleFrozen(), "Status snapshot frozen flag must match engine state");
+        assertEq(status.degradedMode, engine.degradedMode(), "Status snapshot degraded flag must match engine state");
     }
 
     function test_GetHousePoolInputSnapshot_UsesFrozenOracleFreshnessLimit() public {
@@ -582,15 +583,16 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(engine.isOracleFrozen(), "Test setup should be inside a frozen oracle window");
 
         ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
-        assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "Frozen snapshot must still carry mark timestamp");
+        ICfdEngine.HousePoolStatusSnapshot memory status = engine.getHousePoolStatusSnapshot();
         assertTrue(snapshot.markFreshnessRequired, "Open liability should still require freshness in frozen mode");
-        assertTrue(snapshot.oracleFrozen, "Frozen snapshot should report frozen oracle mode");
-        assertEq(snapshot.degradedMode, engine.degradedMode(), "Frozen snapshot degraded flag must match engine state");
         assertEq(
             snapshot.maxMarkStaleness,
             engine.fadMaxStaleness(),
             "Frozen-oracle snapshot should use the relaxed engine staleness bound"
         );
+        assertEq(status.lastMarkTime, engine.lastMarkTime(), "Frozen status snapshot must carry mark timestamp");
+        assertTrue(status.oracleFrozen, "Frozen status snapshot should report frozen oracle mode");
+        assertEq(status.degradedMode, engine.degradedMode(), "Frozen status degraded flag must match engine state");
     }
 
     function test_PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown() public {

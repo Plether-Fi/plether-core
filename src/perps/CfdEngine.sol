@@ -1665,8 +1665,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 markStalenessLimit
     ) internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
         uint256 vaultAssetsUsdc = vault.totalAssets();
-        bool oracleFrozen_ = isOracleFrozen();
-
         snapshot.protocolFeesUsdc = accumulatedFeesUsdc;
         snapshot.netPhysicalAssetsUsdc =
             vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
@@ -1675,13 +1673,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = totalDeferredPayoutUsdc;
         snapshot.deferredLiquidationBountyUsdc = totalDeferredLiquidationBountyUsdc;
-        snapshot.lastMarkTime = lastMarkTime;
         snapshot.markFreshnessRequired = globalBullMaxProfit + globalBearMaxProfit > 0;
-        snapshot.oracleFrozen = oracleFrozen_;
-        snapshot.degradedMode = degradedMode;
         if (snapshot.markFreshnessRequired) {
-            snapshot.maxMarkStaleness = oracleFrozen_ ? fadMaxStaleness : markStalenessLimit;
+            snapshot.maxMarkStaleness = isOracleFrozen() ? fadMaxStaleness : markStalenessLimit;
         }
+    }
+
+    function _buildHousePoolStatusSnapshot()
+        internal
+        view
+        returns (ICfdEngine.HousePoolStatusSnapshot memory snapshot)
+    {
+        snapshot.lastMarkTime = lastMarkTime;
+        snapshot.oracleFrozen = isOracleFrozen();
+        snapshot.degradedMode = degradedMode;
     }
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
@@ -1884,6 +1889,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 markStalenessLimit
     ) external view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
         return _buildHousePoolInputSnapshot(markStalenessLimit);
+    }
+
+    function getHousePoolStatusSnapshot() external view returns (ICfdEngine.HousePoolStatusSnapshot memory snapshot) {
+        return _buildHousePoolStatusSnapshot();
     }
 
     /// @notice Updates the cached mark price without settling funding or processing trades

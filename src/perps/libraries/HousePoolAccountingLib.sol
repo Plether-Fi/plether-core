@@ -62,11 +62,11 @@ library HousePoolAccountingLib {
     }
 
     function getMarkFreshnessPolicy(
-        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot
     ) internal pure returns (MarkFreshnessPolicy memory policy) {
-        policy.required = engineSnapshot.markFreshnessRequired;
+        policy.required = accountingSnapshot.markFreshnessRequired;
         if (policy.required) {
-            policy.maxStaleness = engineSnapshot.maxMarkStaleness;
+            policy.maxStaleness = accountingSnapshot.maxMarkStaleness;
         }
     }
 

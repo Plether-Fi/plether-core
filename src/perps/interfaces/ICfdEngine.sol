@@ -15,11 +15,14 @@ interface ICfdEngine {
         uint256 deferredTraderPayoutUsdc;
         uint256 deferredLiquidationBountyUsdc;
         uint256 protocolFeesUsdc;
-        uint64 lastMarkTime;
         bool markFreshnessRequired;
+        uint256 maxMarkStaleness;
+    }
+
+    struct HousePoolStatusSnapshot {
+        uint64 lastMarkTime;
         bool oracleFrozen;
         bool degradedMode;
-        uint256 maxMarkStaleness;
     }
 
     struct LiquidationPreview {
@@ -99,11 +102,14 @@ interface ICfdEngine {
     /// @notice Total withdrawal reserve required by current protocol liabilities.
     function getWithdrawalReservedUsdc() external view returns (uint256);
 
-    /// @notice Canonical accounting + freshness snapshot consumed by HousePool.
+    /// @notice Canonical accounting snapshot consumed by HousePool.
     /// @param markStalenessLimit Normal live-market staleness limit configured by HousePool.
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolInputSnapshot memory snapshot);
+
+    /// @notice Canonical non-accounting market/status snapshot consumed by HousePool.
+    function getHousePoolStatusSnapshot() external view returns (HousePoolStatusSnapshot memory snapshot);
 
     /// @notice Deferred profitable-close payouts still owed to traders.
     function totalDeferredPayoutUsdc() external view returns (uint256);
