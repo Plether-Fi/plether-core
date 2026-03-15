@@ -309,7 +309,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         emit OrderCommitted(orderId, accountId, side);
     }
 
-    /// @notice Cancels a still-pending order, refunds committed margin, and routes the keeper reserve to protocol revenue.
+    /// @notice Cancels a still-pending order and refunds any committed margin.
     /// @dev The order owner may cancel any pending order, including the FIFO head. Cancelling a non-head
     ///      order leaves a hole that later queue scans skip naturally.
     function cancelOrder(
@@ -326,7 +326,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
 
         _releaseCommittedMargin(orderId);
-        _forfeitExecutionBountyToProtocolRevenue(orderId);
         _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Cancelled);
 
         emit OrderCancelled(orderId, accountId);
@@ -822,43 +821,6 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
-    function _forfeitExecutionBountyToProtocolRevenue(
-        uint64 orderId
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint256 executionBountyUsdc = record.executionBountyUsdc;
-        if (executionBountyUsdc == 0) {
-            return;
-        }
-        record.executionBountyUsdc = 0;
-        USDC.forceApprove(address(engine), executionBountyUsdc);
-        engine.absorbRouterCancellationFee(executionBountyUsdc);
-    }
-
-    function _splitExecutionBountyWithProtocol(
-        uint64 orderId,
-        uint256 clearerBps
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint256 executionBountyUsdc = record.executionBountyUsdc;
-        if (executionBountyUsdc == 0) {
-            return;
-        }
-
-        record.executionBountyUsdc = 0;
-
-        uint256 clearerShare = (executionBountyUsdc * clearerBps) / 10_000;
-        uint256 protocolShare = executionBountyUsdc - clearerShare;
-
-        if (clearerShare > 0) {
-            USDC.safeTransfer(msg.sender, clearerShare);
-        }
-        if (protocolShare > 0) {
-            USDC.forceApprove(address(engine), protocolShare);
-            engine.absorbRouterCancellationFee(protocolShare);
-        }
-    }
-
     function _commitReferencePrice() internal view returns (uint256 price) {
         price = engine.lastMarkPrice();
         if (price == 0) {
@@ -1036,8 +998,6 @@ contract OrderRouter is Ownable2Step, Pausable {
                 _settleCloseOrderExecutionBounty(failedPolicy);
             } else if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
-            } else {
-                _splitExecutionBountyWithProtocol(orderId, INVALID_CLOSE_CLEARER_BOUNTY_BPS);
             }
         }
         return 0;

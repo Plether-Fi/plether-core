@@ -419,7 +419,7 @@ contract PerpInvariantTest is BasePerpTest {
 
             assertEq(
                 buckets.settlementBalanceUsdc,
-                buckets.freeSettlementUsdc + buckets.reservedSettlementUsdc + buckets.totalLockedMarginUsdc,
+                buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc,
                 "Settlement buckets must sum to tracked balance"
             );
             assertEq(
@@ -443,7 +443,6 @@ contract PerpInvariantTest is BasePerpTest {
             IMarginClearinghouse.AccountUsdcBuckets memory buckets =
                 clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
 
-            assertEq(buckets.reservedSettlementUsdc, 0, "Keeper reserves must not remain in trader collateral buckets");
             assertEq(
                 clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
                 buckets.settlementBalanceUsdc,
@@ -886,11 +885,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 4; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.actors(i))));
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, 0);
-            assertEq(
-                buckets.reservedSettlementUsdc,
-                0,
-                "Queued keeper reserves must not leak back into trader clearinghouse collateral"
-            );
+            assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
         }
     }
 

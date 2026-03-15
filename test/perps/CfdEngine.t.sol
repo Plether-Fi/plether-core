@@ -113,37 +113,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
-    function test_OpenTradeCostCannotSeizeReservedSettlementEscrow() public {
-        address trader = address(0xB011);
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 2000e6);
-
-        vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, 1950e6);
-
-        CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: accountId,
-            sizeDelta: 100_000e18,
-            marginDelta: 2000e6,
-            targetPrice: 1e8,
-            commitTime: uint64(block.timestamp),
-            commitBlock: uint64(block.number),
-            orderId: 77,
-            side: CfdTypes.Side.BULL,
-            isClose: false
-        });
-
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
-        vm.prank(address(router));
-        engine.processOrder(order, 1e8, 1_000_000e6, uint64(block.timestamp));
-
-        assertEq(
-            clearinghouse.reservedSettlementUsdc(accountId),
-            1950e6,
-            "trade-cost seizure must not consume reserved settlement escrow"
-        );
-    }
-
     function test_FundingAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
@@ -474,7 +443,6 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(viewData.settlementBalanceUsdc, clearinghouse.balanceUsdc(accountId));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
-        assertEq(viewData.reservedSettlementUsdc, clearinghouse.reservedSettlementUsdc(accountId));
         assertEq(viewData.activePositionMarginUsdc, positionMargin);
         assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
@@ -1466,71 +1434,6 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         assertGt(chAfter, chBefore, "User should net positive after profitable close minus funding");
-    }
-
-    function test_FundingLoss_CanConsumeLockedPositionMargin_WhenFreeSettlementIsZero() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
-        bytes32 accountId = bytes32(uint256(0xF0011));
-        _fundTrader(address(uint160(uint256(accountId))), 2000e6);
-
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
-
-        uint256 reservedFreeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, reservedFreeSettlement);
-
-        vm.warp(block.timestamp + 30 days);
-
-        CfdTypes.Order memory closeOrder = CfdTypes.Order({
-            accountId: accountId,
-            sizeDelta: 100_000e18,
-            marginDelta: 0,
-            targetPrice: 1e8,
-            commitTime: uint64(block.timestamp),
-            commitBlock: uint64(block.number),
-            orderId: 2,
-            side: CfdTypes.Side.BULL,
-            isClose: true
-        });
-
-        vm.prank(address(router));
-        engine.processOrder(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
-
-        (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "Funding settlement should still close the position when only locked margin is reachable");
-        assertEq(
-            clearinghouse.reservedSettlementUsdc(accountId),
-            reservedFreeSettlement,
-            "Funding loss settlement must not consume reserved execution bounty escrow"
-        );
-    }
-
-    function test_Liquidation_PreservesReservedSettlementEscrow() public {
-        uint256 vaultDepth = 1_000_000 * 1e6;
-        bytes32 accountId = bytes32(uint256(0x11001));
-        _fundTrader(address(uint160(uint256(accountId))), 2050e6);
-
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-
-        uint256 reservedEscrowUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, reservedEscrowUsdc);
-
-        vm.prank(address(router));
-        engine.liquidatePosition(accountId, 105_000_000, vaultDepth, uint64(block.timestamp));
-
-        (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "Liquidation should still clear the insolvent position");
-        assertEq(
-            clearinghouse.reservedSettlementUsdc(accountId),
-            reservedEscrowUsdc,
-            "Liquidation residual settlement must preserve reserved execution bounty escrow"
-        );
-        assertEq(
-            clearinghouse.balanceUsdc(accountId),
-            reservedEscrowUsdc,
-            "Only the protected reserved escrow should remain after liquidation consumes reachable collateral"
-        );
     }
 
     function test_C2_InsufficientInitialMargin_Reverts() public {

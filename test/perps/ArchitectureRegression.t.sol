@@ -10,32 +10,6 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
 
     address internal alice = address(0xA11CE);
 
-    function test_GetSettlementReachableUsdc_ExcludesReservedSettlement() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _fundTrader(alice, 10_000e6);
-
-        vm.prank(address(engine));
-        clearinghouse.lockMargin(accountId, 2000e6);
-
-        vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, 300e6);
-
-        uint256 reachable = clearinghouse.getSettlementReachableUsdc(accountId, 2000e6);
-        assertEq(reachable, 7700e6, "reachable settlement must exclude reserved execution bounty escrow");
-    }
-
-    function test_SeizeAsset_CannotConsumeReservedSettlement() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _fundTrader(alice, 10_000e6);
-
-        vm.prank(address(router));
-        clearinghouse.reserveSettlementUsdc(accountId, 300e6);
-
-        vm.prank(address(engine));
-        vm.expectRevert();
-        clearinghouse.seizeUsdc(accountId, 9800e6, address(engine));
-    }
-
     function test_LiquidationSolvency_MustIgnoreLockedMarginInReachableEquity() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 20_000e6);

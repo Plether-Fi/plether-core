@@ -11,7 +11,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /// @title MarginClearinghouse
 /// @notice USDC-only cross-margin account manager for Plether.
-/// @dev Holds settlement balances, locked margin, and reserved settlement escrow for CFD accounts.
+/// @dev Holds settlement balances and locked margin for CFD accounts.
 /// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is Ownable2Step {
 
@@ -20,8 +20,6 @@ contract MarginClearinghouse is Ownable2Step {
     mapping(bytes32 => uint256) internal settlementBalances;
 
     mapping(bytes32 => uint256) public lockedMarginUsdc;
-    mapping(bytes32 => uint256) public reservedSettlementUsdc;
-
     IWithdrawGuard public withdrawGuard;
 
     mapping(address => bool) public isProtocolOperator;
@@ -52,9 +50,6 @@ contract MarginClearinghouse is Ownable2Step {
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event MarginLocked(bytes32 indexed accountId, uint256 amountUsdc);
     event MarginUnlocked(bytes32 indexed accountId, uint256 amountUsdc);
-    event SettlementReserved(bytes32 indexed accountId, uint256 amountUsdc);
-    event SettlementReserveReleased(bytes32 indexed accountId, uint256 amountUsdc);
-    event SettlementReservePaid(bytes32 indexed accountId, uint256 amountUsdc, address recipient);
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
     modifier onlyOperator() {
@@ -178,11 +173,10 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
-        uint256 reserved = reservedSettlementUsdc[accountId];
-        if (remainingEquity < lockedMarginUsdc[accountId] + reserved) {
+        if (remainingEquity < lockedMarginUsdc[accountId]) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (settlementBalances[accountId] < lockedMarginUsdc[accountId] + reserved) {
+        if (settlementBalances[accountId] < lockedMarginUsdc[accountId]) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
 
@@ -210,7 +204,7 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) public view returns (uint256) {
         uint256 equity = getAccountEquityUsdc(accountId);
-        uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
+        uint256 encumbered = lockedMarginUsdc[accountId];
         return equity > encumbered ? equity - encumbered : 0;
     }
 
@@ -231,7 +225,6 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
-    /// @dev Protects only reserved settlement escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc
@@ -294,51 +287,6 @@ contract MarginClearinghouse is Ownable2Step {
         }
     }
 
-    function reserveSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        if (amountUsdc == 0) {
-            return;
-        }
-        uint256 balance = settlementBalances[accountId];
-        uint256 encumbered = lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
-        if (balance < encumbered + amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
-        }
-        reservedSettlementUsdc[accountId] += amountUsdc;
-        emit SettlementReserved(accountId, amountUsdc);
-    }
-
-    function releaseReservedSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        if (amountUsdc == 0) {
-            return;
-        }
-        uint256 reserved = reservedSettlementUsdc[accountId];
-        reservedSettlementUsdc[accountId] = reserved > amountUsdc ? reserved - amountUsdc : 0;
-        emit SettlementReserveReleased(accountId, amountUsdc);
-    }
-
-    function payReservedSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc,
-        address recipient
-    ) external onlyOperator {
-        if (amountUsdc == 0) {
-            return;
-        }
-        if (reservedSettlementUsdc[accountId] < amountUsdc || settlementBalances[accountId] < amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
-        }
-        reservedSettlementUsdc[accountId] -= amountUsdc;
-        settlementBalances[accountId] -= amountUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, amountUsdc);
-        emit SettlementReservePaid(accountId, amountUsdc, recipient);
-    }
-
     /// @notice Credits settlement USDC and locks the same amount as active margin.
     function creditSettlementAndLockMargin(
         bytes32 accountId,
@@ -380,7 +328,7 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     /// @notice Consumes a funding loss from free settlement first, then from the active position margin bucket.
-    /// @dev Reserved settlement and unrelated locked margin remain protected.
+    /// @dev Unrelated locked margin remains protected.
     function consumeFundingLoss(
         bytes32 accountId,
         uint256 lockedPositionMarginUsdc,
@@ -420,7 +368,7 @@ contract MarginClearinghouse is Ownable2Step {
         emit AssetSeized(accountId, settlementAsset, totalConsumedUsdc, recipient);
     }
 
-    /// @notice Consumes close-path losses from settlement buckets while preserving reserved settlement and any explicitly protected remaining position margin.
+    /// @notice Consumes close-path losses from settlement buckets while preserving any explicitly protected remaining position margin.
     function consumeCloseLoss(
         bytes32 accountId,
         uint256 lossUsdc,
@@ -459,7 +407,7 @@ contract MarginClearinghouse is Ownable2Step {
         emit AssetSeized(accountId, settlementAsset, mutation.settlementDebitUsdc, recipient);
     }
 
-    /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
+    /// @notice Settles liquidation residual against liquidation-reachable collateral.
     /// @dev Releases the specified active position margin bucket but leaves unrelated committed margin untouched.
     function consumeLiquidationResidual(
         bytes32 accountId,
@@ -495,10 +443,7 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 activePositionMarginUsdc
     ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalances[accountId],
-            reservedSettlementUsdc[accountId],
-            lockedMarginUsdc[accountId],
-            activePositionMarginUsdc
+            settlementBalances[accountId], lockedMarginUsdc[accountId], activePositionMarginUsdc
         );
     }
 
@@ -536,9 +481,7 @@ contract MarginClearinghouse is Ownable2Step {
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (
-            settlementBalances[accountId] < lockedMarginUsdc[accountId] + reservedSettlementUsdc[accountId] + amountUsdc
-        ) {
+        if (settlementBalances[accountId] < lockedMarginUsdc[accountId] + amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
         lockedMarginUsdc[accountId] += amountUsdc;
@@ -560,8 +503,6 @@ contract MarginClearinghouse is Ownable2Step {
     /// @notice Transfers settlement USDC from an account to the calling operator.
     /// @dev The recipient must equal msg.sender, so operators can only pull seized funds
     ///      into their own contract/account and must forward them explicitly afterward.
-    ///      This is stricter than `payReservedSettlementUsdc()`, which can route reserved
-    ///      settlement escrow to an arbitrary recipient chosen by the operator.
     /// @param accountId Account to seize from
     /// @param amount USDC amount to seize
     /// @param recipient Recipient of seized tokens (must equal msg.sender)

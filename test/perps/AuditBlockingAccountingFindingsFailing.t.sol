@@ -22,7 +22,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
     function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 0, 50e6, 20e6);
+            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 50e6, 20e6);
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);

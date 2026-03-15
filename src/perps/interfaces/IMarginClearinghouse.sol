@@ -6,7 +6,6 @@ interface IMarginClearinghouse {
 
     struct AccountUsdcBuckets {
         uint256 settlementBalanceUsdc;
-        uint256 reservedSettlementUsdc;
         uint256 totalLockedMarginUsdc;
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
@@ -35,22 +34,6 @@ interface IMarginClearinghouse {
     function settleUsdc(
         bytes32 accountId,
         int256 amount
-    ) external;
-    /// @notice Reserves settlement USDC in place without transferring custody
-    function reserveSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external;
-    /// @notice Releases previously reserved settlement USDC
-    function releaseReservedSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external;
-    /// @notice Pays reserved settlement USDC to the calling operator
-    function payReservedSettlementUsdc(
-        bytes32 accountId,
-        uint256 amountUsdc,
-        address recipient
     ) external;
     /// @notice Credits settlement USDC and locks the same amount as active margin.
     function creditSettlementAndLockMargin(
@@ -91,10 +74,6 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Returns reserved settlement USDC tracked in clearinghouse custody
-    function reservedSettlementUsdc(
-        bytes32 accountId
-    ) external view returns (uint256);
     /// @notice Returns the explicit USDC bucket split for an account.
     /// @dev `activePositionMarginUsdc` is the margin bucket currently backing the live position being reasoned about.
     function getAccountUsdcBuckets(
@@ -117,7 +96,6 @@ interface IMarginClearinghouse {
     ) external view returns (uint256);
 
     /// @notice Returns settlement-asset balance reachable during liquidation or other terminal settlement.
-    /// @dev Protects only reserved settlement escrow; same-account committed margin remains reachable.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
         uint256 positionMarginUsdc

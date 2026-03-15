@@ -42,7 +42,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     struct AccountCollateralView {
         uint256 settlementBalanceUsdc;
         uint256 lockedMarginUsdc;
-        uint256 reservedSettlementUsdc;
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
         uint256 freeSettlementUsdc;
@@ -1126,7 +1125,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 totalLockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             clearinghouse.balanceUsdc(accountId),
-            clearinghouse.reservedSettlementUsdc(accountId),
             totalLockedMarginUsdc > marginToFreeUsdc ? totalLockedMarginUsdc - marginToFreeUsdc : 0,
             remainingPosMarginUsdc
         );
@@ -1258,7 +1256,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             clearinghouse.getAccountUsdcBuckets(accountId, pos.margin);
         viewData.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         viewData.lockedMarginUsdc = buckets.totalLockedMarginUsdc;
-        viewData.reservedSettlementUsdc = buckets.reservedSettlementUsdc;
         viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;

@@ -29,28 +29,26 @@ library MarginClearinghouseAccountingLib {
 
     function buildAccountUsdcBuckets(
         uint256 settlementBalanceUsdc,
-        uint256 reservedSettlementUsdc,
         uint256 totalLockedMarginUsdc,
         uint256 activePositionMarginUsdc
     ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets.settlementBalanceUsdc = settlementBalanceUsdc;
-        buckets.reservedSettlementUsdc = reservedSettlementUsdc;
         buckets.totalLockedMarginUsdc = totalLockedMarginUsdc;
         buckets.activePositionMarginUsdc =
             activePositionMarginUsdc > totalLockedMarginUsdc ? totalLockedMarginUsdc : activePositionMarginUsdc;
         buckets.otherLockedMarginUsdc = buckets.totalLockedMarginUsdc - buckets.activePositionMarginUsdc;
 
-        uint256 encumberedUsdc = buckets.totalLockedMarginUsdc + buckets.reservedSettlementUsdc;
-        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > encumberedUsdc
-            ? buckets.settlementBalanceUsdc - encumberedUsdc
-            : 0;
+        uint256 encumberedUsdc = buckets.totalLockedMarginUsdc;
+        buckets.freeSettlementUsdc =
+            buckets.settlementBalanceUsdc > encumberedUsdc ? buckets.settlementBalanceUsdc - encumberedUsdc : 0;
     }
 
     function planFundingLossConsumption(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
     ) internal pure returns (SettlementConsumption memory consumption) {
-        consumption.freeSettlementConsumedUsdc = buckets.freeSettlementUsdc > lossUsdc ? lossUsdc : buckets.freeSettlementUsdc;
+        consumption.freeSettlementConsumedUsdc =
+            buckets.freeSettlementUsdc > lossUsdc ? lossUsdc : buckets.freeSettlementUsdc;
 
         uint256 remainingLossUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
         consumption.activeMarginConsumedUsdc =
@@ -69,8 +67,9 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 protectedLockedMarginUsdc
     ) internal pure returns (uint256 reachableUsdc) {
-        uint256 protectedBalance = protectedLockedMarginUsdc + buckets.reservedSettlementUsdc;
-        reachableUsdc = buckets.settlementBalanceUsdc > protectedBalance ? buckets.settlementBalanceUsdc - protectedBalance : 0;
+        uint256 protectedBalance = protectedLockedMarginUsdc;
+        reachableUsdc =
+            buckets.settlementBalanceUsdc > protectedBalance ? buckets.settlementBalanceUsdc - protectedBalance : 0;
     }
 
     function planTerminalLossConsumption(
@@ -89,9 +88,8 @@ library MarginClearinghouseAccountingLib {
         uint256 consumableActiveMarginUsdc = buckets.activePositionMarginUsdc > protectedLockedMarginUsdc
             ? buckets.activePositionMarginUsdc - protectedLockedMarginUsdc
             : 0;
-        consumption.activeMarginConsumedUsdc = consumableActiveMarginUsdc > remainingConsumedUsdc
-            ? remainingConsumedUsdc
-            : consumableActiveMarginUsdc;
+        consumption.activeMarginConsumedUsdc =
+            consumableActiveMarginUsdc > remainingConsumedUsdc ? remainingConsumedUsdc : consumableActiveMarginUsdc;
         consumption.otherLockedMarginConsumedUsdc = remainingConsumedUsdc - consumption.activeMarginConsumedUsdc;
     }
 
