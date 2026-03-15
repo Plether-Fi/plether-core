@@ -333,7 +333,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
 }
 
 // ============================================================
-// H-02: Overly Restrictive withdrawGuard
+// H-02: Overly Restrictive Withdrawal Firewall
 // ============================================================
 
 contract AuditH02_WithdrawBlocked is BasePerpTest {

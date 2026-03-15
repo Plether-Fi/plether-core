@@ -356,6 +356,19 @@ Every order should conceptually live in one of these states:
 - `Cancelled`
 - `Expired`
 
+In the live router implementation, storage persists a slightly lower-level state machine:
+
+- `None`
+- `Pending`
+- `Executed`
+- `Failed`
+- `Cancelled`
+
+Interpretation rules:
+
+- `Executable` is a derived condition, not a stored enum member. An order is executable only while it is `Pending` and has reached the FIFO head with valid oracle inputs.
+- `Expired` is represented as a `Failed` order that resolved through the expiry path/reason, not as its own stored terminal enum value.
+
 Required transition rules:
 
 - execution consumes escrow exactly once,

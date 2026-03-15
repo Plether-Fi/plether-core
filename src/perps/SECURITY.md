@@ -23,16 +23,13 @@ All perpetuals contracts are **non-upgradeable**. Once deployed, the bytecode ca
 | `seniorRateBps` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
 | `markStalenessLimit` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
 | `maxOrderAge` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
-| Supported assets / LTV haircuts | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
-| Protocol operators | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
-| Withdraw guard | MarginClearinghouse | `onlyOwner` — 48-hour timelock |
-
 **One-time setters** (cannot be changed after initial configuration):
 
 | Setter | Contract |
 |--------|----------|
 | `setVault(address)` | CfdEngine |
 | `setOrderRouter(address)` | CfdEngine |
+| `setEngine(address)` | MarginClearinghouse |
 | `setSeniorVault(address)` | HousePool |
 | `setJuniorVault(address)` | HousePool |
 | `setOrderRouter(address)` | HousePool |
@@ -68,7 +65,7 @@ These properties must always hold. Violation indicates a critical bug.
 |-----------|-------------|
 | **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` computes per-side `(PnL + funding)` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
 | **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive funding/PnL). Illiquid receivables never reduce physical reserves |
-| **Margin Tracking** | `totalBullMargin + totalBearMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
+| **Margin Tracking** | `sides[BULL].totalMargin + sides[BEAR].totalMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
 
 ### Funding Invariants
 
@@ -81,9 +78,9 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Balance Integrity** | `balances[accountId][asset]` always equals actual tokens attributable to that account |
-| **Withdrawal Guard** | Users can only withdraw if `remainingEquity >= lockedMarginUsdc` and `balances[settlementAsset] >= lockedMarginUsdc`. Free equity above locked margin is withdrawable even with open positions |
-| **Seizure Bound** | `seizeAsset` reverts if `balances < amount` (no negative balances) |
+| **Balance Integrity** | `balanceUsdc(accountId)` always equals tracked settlement USDC attributable to that account |
+| **Withdrawal Guard** | Users can only withdraw if `remainingEquity >= lockedMarginUsdc` and `balanceUsdc(accountId) >= lockedMarginUsdc`. Free equity above locked margin is withdrawable even with open positions |
+| **Seizure Bound** | `seizeUsdc` reverts if the tracked settlement balance is below `amount` (no negative balances) |
 
 ## Trust Assumptions
 
@@ -106,7 +103,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Assumption**: USDC maintains its $1 peg and operates as a standard ERC-20 token
 - **Risk (Blacklisting)**: Circle can blacklist addresses. If the HousePool, MarginClearinghouse, or TrancheVault contracts are blacklisted, the protocol cannot process payouts or withdrawals
 - **Risk (Upgradeability)**: USDC is an upgradeable proxy. Circle could modify transfer logic or add fees
-- **Risk (Fee-on-Transfer)**: MarginClearinghouse uses balance-before/after for deposits to correctly handle fee-on-transfer tokens. HousePool and TrancheVault assume standard ERC-20 transfers
+- **Risk (Fee-on-Transfer)**: MarginClearinghouse expects standard USDC transfers. HousePool and TrancheVault also assume standard ERC-20 transfers
 - **Mitigation**: None. These are fundamental risks of using USDC as collateral
 
 ### External Library Dependencies
@@ -127,14 +124,12 @@ The protocol owner can (all subject to 48-hour timelock):
 - Configure `fadMaxStaleness` and `fadRunwaySeconds`
 - Set the senior tranche interest rate and mark staleness limit
 - Configure max order age
-- Add supported collateral assets and configure LTV haircuts
-- Grant/revoke operator status on the MarginClearinghouse
-- Set the withdraw guard on the MarginClearinghouse
 
 The owner can (instant, no timelock):
 - Pause/unpause OrderRouter (blocks new `commitOrder`, allows executions/liquidations)
 - Pause/unpause HousePool (blocks new deposits, allows withdrawals)
 - Withdraw accumulated execution fees to any recipient (post-solvency check)
+- Bind the MarginClearinghouse to the CfdEngine once via `setEngine(address)`
 - Transfer ownership (via Ownable2Step two-step pattern)
 
 The owner **cannot**:
@@ -155,16 +150,16 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
 - **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Expired close orders also pay the full reserved bounty to the clearer, while invalid close failures (for example slippage or engine rejection) split the reserved bounty 50/50 between the clearer and protocol revenue.
 
-#### Protocol Operators
+#### Engine / Router Trust Boundary
 
-The CfdEngine and OrderRouter are granted operator status on the MarginClearinghouse. Operators can:
+The MarginClearinghouse authorizes only the configured `engine` and the router returned by `engine.orderRouter()`. Those trusted protocol actors can:
 - Lock/unlock margin on user accounts
 - Settle USDC (credit or debit balances)
-- Seize assets from accounts (for losses, fees, and bad debt)
+- Seize USDC from accounts (for losses, fees, and bad debt)
 - Seize execution-bounty reserves from trader settlement into router custody for later clearer/protocol distribution
 
-Operators **cannot**:
-- Use `seizeAsset()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
+These actors **cannot**:
+- Use `seizeUsdc()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
 - Create negative balances (seizure reverts if balance insufficient)
 
 ## Known Limitations
@@ -299,17 +294,15 @@ When a position goes underwater (equity < 0):
 
 #### V1: USDC-Only Cross-Margin
 
-- **Behavior**: While `MarginClearinghouse` supports multiple asset types with LTV haircuts, the CfdEngine exclusively uses USDC for all margin operations (`lockMargin`, `seizeAsset`, `settleUsdc`).
-- **Guard**: `lockMargin` enforces `balances[accountId][settlementAsset] >= lockedMarginUsdc[accountId] + amountUsdc` — physical USDC must back every dollar of locked margin. Non-USDC collateral inflates buying power (passing the equity check) but cannot substitute for USDC backing.
-- **Impact**: Without this guard, an attacker could deposit small USDC + large WBTC, open a position sized to the inflated buying power, take a loss exceeding their USDC, and socialize the shortfall as bad debt. The guard blocks the position at open.
-- **Remaining limitation**: Settlement-side seizure still targets only USDC. If a user's USDC is depleted by losses but they hold other assets, `seizeAsset` reverts and the deficit becomes bad debt.
-- **Planned**: V2 will add fallback logic in `seizeAsset` to sell non-USDC collateral.
+- **Behavior**: `MarginClearinghouse` is USDC-only. All margin locking, settlement debits/credits, and seizure paths operate on settlement USDC (`lockMargin`, `seizeUsdc`, `settleUsdc`).
+- **Guard**: `lockMargin` enforces `balanceUsdc(accountId) >= lockedMarginUsdc[accountId] + amountUsdc` — physical USDC must back every dollar of locked margin.
+- **Impact**: Trader losses can only socialize once the account's settlement USDC and locked margin are exhausted.
 
 #### No Oracle Staleness in Clearinghouse
 
-- **Behavior**: `getAccountEquityUsdc()` calls `IAssetOracle.getPriceUnsafe()` with no staleness validation.
-- **Impact**: If an asset oracle stops updating, the clearinghouse continues valuing it at the stale price, potentially overvaluing collateral.
-- **Mitigation**: V1 uses only USDC with `oracle = address(0)` (1:1 pricing, no oracle needed). Future multi-asset support must add staleness checks.
+- **Behavior**: Not applicable in V1 because the clearinghouse does not price non-USDC collateral.
+- **Impact**: Clearinghouse valuation does not depend on external asset oracles.
+- **Mitigation**: Future multi-asset support would need explicit staleness and pricing rules before reintroduction.
 
 ### HousePool Limitations
 

@@ -34,9 +34,9 @@ These domains intentionally answer different questions and should not silently s
 
 [`MarginClearinghouse.sol`](MarginClearinghouse.sol)
 
-Universal cross-margin portfolio manager and collateral custodian. Users deposit supported assets (currently USDC). The contract applies Loan-to-Value haircuts via oracles to produce a single **Total Buying Power** metric in 6-decimal USDC.
+USDC-only cross-margin portfolio manager and collateral custodian. Users deposit settlement USDC, and the clearinghouse tracks settlement balances plus locked margin in 6-decimal USDC.
 
-The Execution Engine never touches raw tokens. It commands the Clearinghouse to `lockMargin()`, `unlockMargin()`, or `seizeAsset()`, preserving user equity and enabling future collateral types without altering CFD math.
+The Execution Engine never touches raw tokens. It commands the clearinghouse to `lockMargin()`, `unlockMargin()`, `settleUsdc()`, or `seizeUsdc()`, with the router authorized through the engine's configured `orderRouter()` boundary.
 
 ### II. HousePool + TrancheVault — The House Pool & Firewall
 
@@ -67,6 +67,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, residual committed margin, reserved execution bounty, and both intrusive queue link sets. The router still exposes compatibility getters for legacy integrations, but queue/accounting proofs now read from one canonical per-order record.
 
+**Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, `Failed`, and `Cancelled`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
+
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
 ### IV. CfdEngine — The Mathematical Ledger
@@ -84,6 +86,42 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 **Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred liquidation bounties are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
 
 **Accounting Domains**: `CfdEngine` now uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), solvency (`SolvencyAccountingLib`), and withdrawal reserves (`WithdrawalAccountingLib`). This keeps preview/live execution and protocol-level balance-sheet policy separated by domain instead of by call site.
+
+**Key Invariants**:
+
+**Core Protocol**
+
+- Each `accountId` holds at most one live directional position at a time; side-flips must pass through a close.
+- FIFO execution is strict: `orderId == nextExecuteId`, so no later order can bypass an earlier pending order.
+- Router-custodied execution bounties are conserved across order lifecycle transitions until they are paid to a clearer or absorbed as protocol revenue.
+
+**Side-State / Engine Accounting**
+
+- `SideState` remains symmetric and conservative: side-local mirrors (`maxProfitUsdc`, `openInterest`, `entryNotional`, `totalMargin`, `fundingIndex`, `entryFunding`) must stay consistent with the aggregate live position set.
+- `sides[BULL].totalMargin + sides[BEAR].totalMargin` must equal the sum of `pos.margin` across all live positions.
+- Funding remains zero-sum at the side level: previewed/live bull and bear funding index motion must remain symmetric, with one side paying what the other side receives before clipping.
+- Preview/live parity must hold for the close and liquidation accounting kernels, including degraded-mode checks.
+- Terminal close and liquidation settlement must conserve value across trader payout, vault assets, protocol fees, deferred liabilities, and bad debt.
+
+**Router Queue / Margin Escrow**
+
+- `pendingOrderCounts` must match the actual pending FIFO queue per account.
+- Margin-queue membership must match orders with positive residual committed margin.
+- `marginHeadOffsetUsdc <= marginTailOffsetUsdc` must always hold.
+- Account committed margin is the offset gap: `accountCommittedMarginUsdc = marginTailOffsetUsdc - marginHeadOffsetUsdc`.
+- Locked margin attributable to queued opens must remain consistent with the router's committed-margin accounting and only be released, consumed, or converted through explicit order lifecycle events.
+
+**Solvency / Containment**
+
+- Withdrawal reserve must move monotonically with deferred liabilities; adding deferred trader payouts or liquidation bounties cannot reduce reserves.
+- Effective solvency assets must never overstate realizable vault resources: unrealized trader losses do not count as assets, while deferred liabilities remain senior claims on liquidity.
+- After terminal transitions (close/liquidation) reveal insolvency, `degradedMode` must contain further risk expansion until recapitalization restores solvency.
+
+**HousePool / LP Accounting**
+
+- HousePool withdrawal limits can only expose unencumbered USDC after accounting for protocol fees, max liability, funding withdrawal reserve, and deferred liabilities.
+- Senior high-water-mark accounting must prevent junior from extracting value while senior capital remains impaired.
+- HousePool reconciliation, NAV, and withdrawal-firewall paths must consume the same canonical engine snapshots for accounting inputs.
 
 **Solvency Invariant**: Before opening any trade, the engine proves:
 
@@ -234,9 +272,9 @@ Timelocked parameters:
 | CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds` |
 | HousePool | `seniorRateBps`, `markStalenessLimit` |
 | OrderRouter | `maxOrderAge` |
-| MarginClearinghouse | operator status, withdraw guard, asset configs (LTV, oracle) |
+| MarginClearinghouse | none after one-time `setEngine(address)` |
 
-**Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.
+**Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, `setEngine`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.
 
 ### Emergency Pause
 
