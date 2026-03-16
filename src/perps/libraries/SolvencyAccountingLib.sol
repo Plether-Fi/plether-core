@@ -18,6 +18,7 @@ library SolvencyAccountingLib {
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
         bool triggersDegradedMode;
+        bool postOpDegradedMode;
     }
 
     struct SolvencyState {
@@ -126,7 +127,8 @@ library SolvencyAccountingLib {
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;
         result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingVaultPayoutUsdc);
-        result.triggersDegradedMode = !alreadyDegraded && result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
+        result.postOpDegradedMode = result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
+        result.triggersDegradedMode = !alreadyDegraded && result.postOpDegradedMode;
     }
 
 }

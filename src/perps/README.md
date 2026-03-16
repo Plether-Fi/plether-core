@@ -89,6 +89,8 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Accounting Domains**: `CfdEngine` now uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), solvency (`SolvencyAccountingLib`), and withdrawal reserves (`WithdrawalAccountingLib`). This keeps preview/live execution and protocol-level balance-sheet policy separated by domain instead of by call site.
 
+**Preview Solvency Signals**: Close and liquidation previews expose both the transition-only `triggersDegradedMode` flag and the raw post-op solvency result (`postOpDegradedMode`, `effectiveAssetsAfterUsdc`, `maxLiabilityAfterUsdc`) so integrators can distinguish "this action newly latches degraded mode" from "the system would still be degraded after this action."
+
 **Key Invariants**:
 
 **Core Protocol**

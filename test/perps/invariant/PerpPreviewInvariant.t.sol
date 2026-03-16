@@ -157,6 +157,34 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
+    function invariant_PostOpDegradedFlagMatchesPreviewBalances() public view {
+        uint256 oraclePrice = _previewOraclePrice();
+        uint256 vaultDepthUsdc = vault.totalAssets();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            CfdEngine.LiquidationPreview memory liquidationPreview =
+                engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+            assertEq(
+                liquidationPreview.postOpDegradedMode,
+                liquidationPreview.effectiveAssetsAfterUsdc < liquidationPreview.maxLiabilityAfterUsdc,
+                "Liquidation preview post-op degraded flag mismatch"
+            );
+
+            (uint256 size,,,,,,,) = engine.positions(accountId);
+            if (size == 0) {
+                continue;
+            }
+
+            CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            assertEq(
+                closePreview.postOpDegradedMode,
+                closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
+                "Close preview post-op degraded flag mismatch"
+            );
+        }
+    }
+
     function _previewOraclePrice() internal view returns (uint256) {
         uint256 price = engine.lastMarkPrice();
         return price == 0 ? 1e8 : price;

@@ -412,3 +412,13 @@ Review:
 - Rewrote the affected cancel-path tests in `test/perps/OrderRouter.t.sol` to assert that close-order cancellation attempts revert without mutating queue pointers, escrow, or FIFO head state; updated the audit regression in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` to the renamed binding error.
 - Documented the new binding-intent policy in `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md`.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CancelOrder_CloseOrdersAreBinding|test_CancelOrder_MiddleCloseRevertsAndPreservesAccountHeadTail|test_CancelOrder_TailCloseRevertsAndPreservesAccountTail|test_CancelOrder_NonHeadCloseRevertsWithoutChangingEscrow|test_CancelOrder_HeadCloseRevertsWithoutAdvancingNextExecuteId|test_CancelOrder_OnlyOwnerCanCancel|test_CancelOrder_OpenOrdersAreBinding|test_CancelOrder_NonPendingReverts"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test test_H1_PhaseBoundary_PartialCloseThenCancelMustNotUnlockProtectedResidualMargin`.
+
+- [x] Inspect preview solvency structs and call sites for degraded-mode reporting semantics
+- [x] Implement a clearer post-operation degraded-state signal for integrators
+- [x] Update tests/docs and run targeted preview verification
+
+Review:
+- Extended `ClosePreview`, `LiquidationPreview`, and `ICfdEngine.LiquidationPreview` to expose `postOpDegradedMode`, `effectiveAssetsAfterUsdc`, and `maxLiabilityAfterUsdc` alongside the existing transition-only `triggersDegradedMode` flag.
+- Updated `SolvencyAccountingLib.previewPostOpSolvency()` to compute both the raw post-op degraded state and the existing latch-transition flag so integrators can distinguish "would still be degraded" from "newly triggers degraded mode."
+- Added unit/invariant coverage in `test/perps/CfdEngine.t.sol` and `test/perps/invariant/PerpPreviewInvariant.t.sol`, plus docs in `src/perps/README.md` and `src/perps/ACCOUNTING_SPEC.md`.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_PreviewClose_TriggersDegradedModeMatchesLiveClose|test_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual|test_PreviewClose_ReportsPostOpDegradedStateAfterLatch|test_LiquidationPreview_InterfaceMatchesContractStructLayout|test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation|test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual"` and `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`.

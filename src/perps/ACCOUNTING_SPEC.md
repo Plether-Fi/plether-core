@@ -297,6 +297,7 @@ It must trigger whenever a realized state transition leaves:
 Implementation note:
 
 - solvency accounting should remain distinct from withdrawal accounting even when both start from the same physical vault assets, because solvency may count bounded receivables that LP withdrawals must ignore.
+- preview APIs should expose both the transition flag and the raw post-op solvency state so frontends can tell whether an action newly enters degraded mode or simply remains there.
 
 Allowed while degraded:
 

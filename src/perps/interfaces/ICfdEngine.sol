@@ -47,6 +47,9 @@ interface ICfdEngine {
         uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
+        bool postOpDegradedMode;
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
