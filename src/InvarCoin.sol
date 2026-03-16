@@ -613,6 +613,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__UseLpWithdraw();
         }
         _harvestSafe();
+        if (BEAR.balanceOf(address(this)) > 0) {
+            revert InvarCoin__UseLpWithdraw();
+        }
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
