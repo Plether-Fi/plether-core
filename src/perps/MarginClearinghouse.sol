@@ -43,6 +43,7 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__InvalidMarginBucket();
     error MarginClearinghouse__ReservationAlreadyExists();
     error MarginClearinghouse__ReservationNotActive();
+    error MarginClearinghouse__IncompleteReservationCoverage();
     error MarginClearinghouse__EngineAlreadySet();
     error MarginClearinghouse__ZeroAddress();
     error MarginClearinghouse__InsufficientBucketMargin();
@@ -489,7 +490,6 @@ contract MarginClearinghouse is Ownable2Step {
     /// @dev Unrelated locked margin remains protected.
     function consumeFundingLoss(
         bytes32 accountId,
-        uint64[] calldata reservationOrderIds,
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
@@ -514,9 +514,6 @@ contract MarginClearinghouse is Ownable2Step {
 
         if (mutation.positionMarginUnlockedUsdc > 0) {
             _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc);
-        }
-        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
-            _consumeOtherLockedMarginViaReservations(accountId, reservationOrderIds, mutation.otherLockedMarginUnlockedUsdc);
         }
 
         uint256 totalConsumedUsdc = mutation.settlementDebitUsdc;
@@ -691,6 +688,9 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 consumedReservationUsdc = _consumeOrderReservationsById(reservationOrderIds, amountUsdc);
         uint256 residualOtherLockedUsdc = amountUsdc - consumedReservationUsdc;
         if (residualOtherLockedUsdc > 0) {
+            if (committedOrderMarginUsdc[accountId] > 0) {
+                revert MarginClearinghouse__IncompleteReservationCoverage();
+            }
             _consumeOtherLockedMargin(accountId, residualOtherLockedUsdc);
         }
     }

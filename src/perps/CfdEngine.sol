@@ -796,13 +796,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             } else {
                 uint256 loss = uint256(-pendingFunding);
                 (uint256 marginConsumedUsdc,, uint256 uncoveredUsdc) =
-                    clearinghouse.consumeFundingLoss(
-                        order.accountId,
-                        IOrderRouterAccounting(orderRouter).getMarginReservationIds(order.accountId),
-                        pos.margin,
-                        loss,
-                        address(vault)
-                    );
+                    clearinghouse.consumeFundingLoss(order.accountId, pos.margin, loss, address(vault));
                 pos.margin -= marginConsumedUsdc;
 
                 if (uncoveredUsdc > 0) {
