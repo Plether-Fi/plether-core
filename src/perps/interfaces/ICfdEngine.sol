@@ -7,6 +7,23 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    struct ProtocolAccountingSnapshot {
+        uint256 vaultAssetsUsdc;
+        uint256 netPhysicalAssetsUsdc;
+        uint256 maxLiabilityUsdc;
+        uint256 effectiveSolvencyAssetsUsdc;
+        uint256 withdrawalReservedUsdc;
+        uint256 freeUsdc;
+        uint256 accumulatedFeesUsdc;
+        uint256 accumulatedBadDebtUsdc;
+        int256 cappedFundingPnlUsdc;
+        int256 liabilityOnlyFundingPnlUsdc;
+        uint256 totalDeferredPayoutUsdc;
+        uint256 totalDeferredClearerBountyUsdc;
+        bool degradedMode;
+        bool hasLiveLiability;
+    }
+
     struct HousePoolInputSnapshot {
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
@@ -113,6 +130,8 @@ interface ICfdEngine {
 
     /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
     function getMaxLiability() external view returns (uint256);
+    /// @notice Canonical protocol-wide accounting snapshot across physical assets, liabilities, fees, bad debt, and deferred obligations.
+    function getProtocolAccountingSnapshot() external view returns (ProtocolAccountingSnapshot memory snapshot);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
     /// @notice Total withdrawal reserve required by current protocol liabilities.

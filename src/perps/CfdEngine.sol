@@ -1306,6 +1306,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = _buildProtocolAccountingSnapshot();
+        viewData.vaultAssetsUsdc = snapshot.vaultAssetsUsdc;
+        viewData.maxLiabilityUsdc = snapshot.maxLiabilityUsdc;
+        viewData.withdrawalReservedUsdc = snapshot.withdrawalReservedUsdc;
+        viewData.freeUsdc = snapshot.freeUsdc;
+        viewData.accumulatedFeesUsdc = snapshot.accumulatedFeesUsdc;
+        viewData.cappedFundingPnlUsdc = snapshot.cappedFundingPnlUsdc;
+        viewData.liabilityOnlyFundingPnlUsdc = snapshot.liabilityOnlyFundingPnlUsdc;
+        viewData.totalDeferredPayoutUsdc = snapshot.totalDeferredPayoutUsdc;
+        viewData.totalDeferredClearerBountyUsdc = snapshot.totalDeferredClearerBountyUsdc;
+        viewData.degradedMode = snapshot.degradedMode;
+        viewData.hasLiveLiability = snapshot.hasLiveLiability;
+    }
+
+    function getProtocolAccountingSnapshot() external view returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot) {
+        return _buildProtocolAccountingSnapshot();
+    }
+
+    function _buildProtocolAccountingSnapshot()
+        internal
+        view
+        returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot)
+    {
         uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 maxLiabilityUsdc = _maxLiability();
         WithdrawalAccountingLib.WithdrawalState memory withdrawalState = WithdrawalAccountingLib.buildWithdrawalState(
@@ -1316,18 +1339,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             totalDeferredPayoutUsdc,
             totalDeferredClearerBountyUsdc
         );
-        viewData.vaultAssetsUsdc = vaultAssetsUsdc;
-        viewData.maxLiabilityUsdc = maxLiabilityUsdc;
-        viewData.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
-        viewData.freeUsdc = withdrawalState.freeUsdc;
-        viewData.accumulatedFeesUsdc = accumulatedFeesUsdc;
-        viewData.cappedFundingPnlUsdc = _getSolvencyCappedFundingPnl();
-        viewData.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
-        viewData.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
-        viewData.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
-        viewData.degradedMode = degradedMode;
+        SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
+        snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
+        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
+        snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
+        snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
+        snapshot.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
+        snapshot.freeUsdc = withdrawalState.freeUsdc;
+        snapshot.accumulatedFeesUsdc = accumulatedFeesUsdc;
+        snapshot.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
+        snapshot.cappedFundingPnlUsdc = solvencyState.solvencyFundingPnlUsdc;
+        snapshot.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
+        snapshot.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        snapshot.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
+        snapshot.degradedMode = degradedMode;
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        viewData.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
+        snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     function getDeferredPayoutStatus(

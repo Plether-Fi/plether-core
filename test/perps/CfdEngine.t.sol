@@ -527,6 +527,54 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
     }
 
+    function test_GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState() public {
+        address trader = address(0xAB13);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engine.getProtocolAccountingSnapshot();
+        CfdEngine.ProtocolAccountingView memory viewData = engine.getProtocolAccountingView();
+        ICfdEngine.HousePoolInputSnapshot memory housePoolSnapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
+        assertEq(
+            snapshot.netPhysicalAssetsUsdc,
+            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc : 0
+        );
+        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability());
+        assertEq(snapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
+        assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
+        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, engine.getLiabilityOnlyFundingPnl());
+        assertEq(snapshot.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
+        assertEq(snapshot.degradedMode, engine.degradedMode());
+        assertEq(snapshot.hasLiveLiability, engine.hasLiveLiability());
+        assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
+        assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
+        assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
+        assertEq(snapshot.freeUsdc, viewData.freeUsdc);
+        assertEq(snapshot.accumulatedFeesUsdc, viewData.accumulatedFeesUsdc);
+        assertEq(snapshot.cappedFundingPnlUsdc, viewData.cappedFundingPnlUsdc);
+        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, viewData.liabilityOnlyFundingPnlUsdc);
+        assertEq(snapshot.totalDeferredPayoutUsdc, viewData.totalDeferredPayoutUsdc);
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, viewData.totalDeferredClearerBountyUsdc);
+        assertEq(snapshot.degradedMode, viewData.degradedMode);
+        assertEq(snapshot.hasLiveLiability, viewData.hasLiveLiability);
+        assertEq(snapshot.netPhysicalAssetsUsdc, housePoolSnapshot.netPhysicalAssetsUsdc);
+        assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
+        assertEq(snapshot.totalDeferredPayoutUsdc, housePoolSnapshot.deferredTraderPayoutUsdc);
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, housePoolSnapshot.deferredClearerBountyUsdc);
+        assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
+    }
+
     function test_GetHousePoolInputSnapshot_ReflectsCurrentAccountingState() public {
         address trader = address(0xAB14);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

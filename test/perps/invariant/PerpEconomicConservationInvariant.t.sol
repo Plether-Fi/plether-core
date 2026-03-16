@@ -102,9 +102,15 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
     function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
         ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(60 seconds);
+        ICfdEngine.ProtocolAccountingSnapshot memory protocolSnapshot = engine.getProtocolAccountingSnapshot();
         uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 feesUsdc = engine.accumulatedFeesUsdc();
 
+        assertEq(protocolSnapshot.vaultAssetsUsdc, vaultAssetsUsdc, "Protocol snapshot vault assets mismatch");
+        assertEq(protocolSnapshot.accumulatedFeesUsdc, feesUsdc, "Protocol snapshot fees mismatch");
+        assertEq(protocolSnapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc(), "Protocol snapshot bad debt mismatch");
+        assertEq(protocolSnapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc(), "Protocol snapshot withdrawal reserve mismatch");
+        assertEq(protocolSnapshot.freeUsdc, engine.getProtocolAccountingView().freeUsdc, "Protocol snapshot free USDC mismatch");
         assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
         assertEq(snapshot.deferredTraderPayoutUsdc, engine.totalDeferredPayoutUsdc(), "House-pool snapshot deferred trader payout mismatch");
         assertEq(
@@ -127,6 +133,18 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             snapshot.netPhysicalAssetsUsdc + snapshot.protocolFeesUsdc,
             vaultAssetsUsdc > feesUsdc ? vaultAssetsUsdc : feesUsdc,
             "House-pool snapshot physical asset decomposition mismatch"
+        );
+        assertEq(protocolSnapshot.netPhysicalAssetsUsdc, snapshot.netPhysicalAssetsUsdc, "Protocol snapshot net assets mismatch");
+        assertEq(protocolSnapshot.maxLiabilityUsdc, snapshot.maxLiabilityUsdc, "Protocol snapshot max liability mismatch");
+        assertEq(
+            protocolSnapshot.totalDeferredPayoutUsdc,
+            snapshot.deferredTraderPayoutUsdc,
+            "Protocol snapshot deferred trader payout mismatch"
+        );
+        assertEq(
+            protocolSnapshot.totalDeferredClearerBountyUsdc,
+            snapshot.deferredClearerBountyUsdc,
+            "Protocol snapshot deferred clearer bounty mismatch"
         );
     }
 
