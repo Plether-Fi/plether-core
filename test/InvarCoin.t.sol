@@ -574,6 +574,40 @@ contract InvarCoinTest is Test {
         ic.redeployToCurve(0);
     }
 
+    function test_RedeployToCurve_RevertsOnSpotDiscountDeviation() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        curve.setSpotDiscountBps(51);
+
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.redeployToCurve(0);
+    }
+
+    function test_RedeployToCurve_RevertsOnSpotPremiumDeviation() public {
+        vm.prank(alice);
+        ic.deposit(10_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        curve.setBearBalance(5000e18);
+        bearToken.mint(address(curve), 5000e18);
+
+        ic.emergencyWithdrawFromCurve();
+        ic.unpause();
+
+        curve.setSpotPremiumBps(51);
+
+        vm.expectRevert(InvarCoin.InvarCoin__SpotDeviationTooHigh.selector);
+        ic.redeployToCurve(0);
+    }
+
     function test_LpWithdraw_WorksDuringEmergency() public {
         vm.prank(alice);
         ic.deposit(10_000e6, alice, 0);
@@ -3593,6 +3627,83 @@ contract InvarCoinGaugeTest is Test {
         (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
 
         assertGt(usdcOut, 0);
+    }
+
+    // ==========================================
+    // FORCE REMOVE GAUGE
+    // ==========================================
+
+    function test_ForceRemoveGauge_RevertsWhenNotEmergency() public {
+        _setupGauge();
+
+        vm.expectRevert(InvarCoin.InvarCoin__NotEmergency.selector);
+        ic.forceRemoveGauge();
+    }
+
+    function test_ForceRemoveGauge_RevertsWhenNoGauge() public {
+        ic.setEmergencyMode();
+
+        vm.expectRevert(InvarCoin.InvarCoin__NoGauge.selector);
+        ic.forceRemoveGauge();
+    }
+
+    function test_ForceRemoveGauge_OnlyOwner() public {
+        _setupGauge();
+        ic.setEmergencyMode();
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        ic.forceRemoveGauge();
+    }
+
+    function test_ForceRemoveGauge_ClearsStateAndWritesOffLp() public {
+        _setupGauge();
+
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 trackedBefore = ic.trackedLpBalance();
+        uint256 costVpBefore = ic.curveLpCostVp();
+        uint256 stakedBefore = ic.gaugeStakedLp();
+        assertGt(stakedBefore, 0, "LP should be staked in gauge");
+
+        ic.setEmergencyMode();
+        ic.forceRemoveGauge();
+
+        assertEq(address(ic.curveGauge()), address(0), "gauge should be cleared");
+        assertEq(ic.gaugeStakedLp(), 0, "gaugeStakedLp should be zero");
+        assertEq(ic.pendingGauge(), address(0), "pendingGauge should be cleared");
+        assertEq(ic.gaugeActivationTime(), 0, "gaugeActivationTime should be cleared");
+        assertLt(ic.trackedLpBalance(), trackedBefore, "trackedLpBalance should decrease");
+        assertLt(ic.curveLpCostVp(), costVpBefore, "curveLpCostVp should decrease");
+    }
+
+    function test_ForceRemoveGauge_BrickedGauge_FullRecoveryFlow() public {
+        MockBrickedGauge brickedGauge = new MockBrickedGauge(address(curveLp));
+        ic.setGaugeApproval(address(brickedGauge), true);
+        ic.proposeGauge(address(brickedGauge));
+        vm.warp(block.timestamp + 7 days);
+        oracle.setUpdatedAt(block.timestamp);
+        ic.finalizeGauge();
+
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice, 0);
+        ic.deployToCurve(0);
+
+        uint256 sharesBefore = ic.balanceOf(alice);
+        assertGt(sharesBefore, 0);
+        assertGt(ic.gaugeStakedLp(), 0, "LP should be in gauge");
+
+        brickedGauge.setBricked(true);
+
+        ic.setEmergencyMode();
+        ic.forceRemoveGauge();
+
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(sharesBefore, 0, 0);
+        assertGt(usdcOut, 0, "user should receive USDC from local buffer");
+        assertEq(ic.balanceOf(alice), 0, "all shares should be burned");
     }
 
 }

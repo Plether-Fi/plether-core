@@ -95,6 +95,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     bool public emergencyActive;
 
     ICurveGauge public curveGauge;
+    /// @notice Internally-tracked LP balance staked in the gauge (avoids external balanceOf dependency).
+    uint256 public gaugeStakedLp;
     address public pendingGauge;
     uint256 public gaugeActivationTime;
     uint256 public constant GAUGE_TIMELOCK = 7 days;
@@ -130,6 +132,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     event GaugeRewardsClaimed();
     event GaugeRewardsSwept(address indexed token, address indexed receiver, uint256 amount);
     event UsdcDonated(address indexed donor, uint256 usdcAmount, uint256 invarMinted);
+    event GaugeForceRemoved(address indexed gauge, uint256 lpLost);
     error InvarCoin__ZeroAmount();
     error InvarCoin__StakingNotSet();
     error InvarCoin__ZeroAddress();
@@ -151,6 +154,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__InvalidGauge();
     error InvarCoin__InvalidStakingVault();
     error InvarCoin__GaugeRewardsReceiverNotSet();
+    error InvarCoin__NotEmergency();
 
     /// @param _usdc USDC token address.
     /// @param _bear plDXY-BEAR token address.
@@ -453,14 +457,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp > lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev Total LP held: local + gauge-staked. Reverts if gauge is bricked — use emergencyWithdrawFromCurve().
+    /// @dev Total LP held: local + gauge-staked (internally tracked to avoid external call dependency).
     function _lpBalance() private view returns (uint256) {
-        uint256 bal = CURVE_LP_TOKEN.balanceOf(address(this));
-        ICurveGauge gauge = curveGauge;
-        if (address(gauge) != address(0)) {
-            bal += gauge.balanceOf(address(this));
-        }
-        return bal;
+        return CURVE_LP_TOKEN.balanceOf(address(this)) + gaugeStakedLp;
     }
 
     /// @dev Unstakes LP from gauge if local balance is insufficient for the requested amount.
@@ -469,9 +468,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     ) private {
         uint256 local = CURVE_LP_TOKEN.balanceOf(address(this));
         if (local < amount) {
+            uint256 needed = amount - local;
             ICurveGauge gauge = curveGauge;
             if (address(gauge) != address(0)) {
-                gauge.withdraw(amount - local);
+                gauge.withdraw(needed);
+                gaugeStakedLp -= needed;
             }
         }
     }
@@ -491,6 +492,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         CURVE_LP_TOKEN.approve(address(gauge), 0);
         CURVE_LP_TOKEN.approve(address(gauge), amount);
         gauge.deposit(amount);
+        gaugeStakedLp += amount;
         CURVE_LP_TOKEN.approve(address(gauge), 0);
     }
 
@@ -1007,12 +1009,24 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
+        uint256 oraclePrice =
+            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
         uint256 localUsdc = USDC.balanceOf(address(this));
         uint256 usdcToDeploy = localUsdc > bufferTarget ? localUsdc - bufferTarget : 0;
 
         uint256[2] memory amounts = [usdcToDeploy, bearBal];
+        uint256 expectedLp = CURVE_POOL.calc_token_amount(amounts, true);
+        uint256 totalUsdcValue = usdcToDeploy + (bearBal * oraclePrice) / 1e20;
+        uint256 emaExpectedLp = (totalUsdcValue * 1e30) / CURVE_POOL.lp_price();
+        if (
+            expectedLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)
+                || expectedLp * BPS > emaExpectedLp * (BPS + MAX_SPOT_DEVIATION_BPS)
+        ) {
+            revert InvarCoin__SpotDeviationTooHigh();
+        }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
         trackedLpBalance += lpMinted;
         curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
@@ -1031,6 +1045,33 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (!paused()) {
             _pause();
         }
+    }
+
+    /// @notice Write off a bricked gauge and its stuck LP from accounting.
+    /// @dev Only callable during emergencyActive. Clears curveGauge, proportionally reduces
+    ///      trackedLpBalance and curveLpCostVp for the lost LP, and zeros gaugeStakedLp.
+    ///      After this, emergencyWithdrawFromCurve() or lpWithdraw() can proceed with remaining local LP.
+    function forceRemoveGauge() external onlyOwner {
+        if (!emergencyActive) {
+            revert InvarCoin__NotEmergency();
+        }
+        ICurveGauge gauge = curveGauge;
+        if (address(gauge) == address(0)) {
+            revert InvarCoin__NoGauge();
+        }
+
+        uint256 lostLp = gaugeStakedLp;
+        if (lostLp > 0) {
+            uint256 totalLp = CURVE_LP_TOKEN.balanceOf(address(this)) + lostLp;
+            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lostLp, totalLp);
+            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lostLp, totalLp);
+            gaugeStakedLp = 0;
+        }
+
+        emit GaugeForceRemoved(address(gauge), lostLp);
+        curveGauge = ICurveGauge(address(0));
+        pendingGauge = address(0);
+        gaugeActivationTime = 0;
     }
 
     /// @notice Attempts to recover LP tokens from Curve via balanced remove_liquidity.
@@ -1125,9 +1166,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         _validateGauge(newGauge);
 
         if (address(oldGauge) != address(0)) {
-            uint256 stakedBal = oldGauge.balanceOf(address(this));
+            uint256 stakedBal = gaugeStakedLp;
             if (stakedBal > 0) {
                 oldGauge.withdraw(stakedBal);
+                gaugeStakedLp = 0;
             }
             CURVE_LP_TOKEN.approve(address(oldGauge), 0);
         }
@@ -1173,12 +1215,13 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NoGauge();
         }
         if (amount == 0) {
-            amount = gauge.balanceOf(address(this));
+            amount = gaugeStakedLp;
         }
         if (amount == 0) {
             revert InvarCoin__ZeroAmount();
         }
         gauge.withdraw(amount);
+        gaugeStakedLp -= amount;
         emit GaugeUnstaked(amount);
     }
 
