@@ -1104,6 +1104,38 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewLiquidation_ExcludesRouterExecutionEscrowFromReachableCollateral() public {
+        address trader = address(0xAB1406);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+        ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+
+        assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
+        assertEq(
+            preview.reachableCollateralUsdc,
+            snapshot.liquidationReachableUsdc,
+            "Liquidation preview must use the same liquidation reachability as the account ledger snapshot"
+        );
+        assertLt(
+            preview.reachableCollateralUsdc,
+            clearinghouse.balanceUsdc(accountId) + escrow.executionBountyUsdc,
+            "Liquidation preview must exclude router execution escrow from reachable collateral"
+        );
+        assertEq(snapshot.executionEscrowUsdc, escrow.executionBountyUsdc, "Expanded account ledger must continue to report execution escrow outside liquidation reachability");
+    }
+
     function test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation() public {
         address trader = address(0xAB1410);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

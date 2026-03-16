@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 
 contract PreviewExecutionDifferentialTest is BasePerpTest {
 
@@ -213,5 +214,45 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             "Illiquid liquidation preview bad debt should match live bad debt delta"
         );
         assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Illiquid liquidation preview degraded-mode flag should match live outcome");
+    }
+
+    function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionEscrowOutsideReachability() public {
+        address trader = address(0xC104);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 liquidationPrice = 102_500_000;
+
+        _fundTrader(trader, 350e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, liquidationPrice, pool.totalAssets());
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
+        uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(liquidationPrice);
+
+        vm.prank(KEEPER);
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(preview.reachableCollateralUsdc, snapshotBefore.liquidationReachableUsdc, "Liquidation preview must exclude router execution escrow from reachable collateral");
+        assertEq(
+            (usdc.balanceOf(KEEPER) - keeperWalletBefore) + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            preview.keeperBountyUsdc,
+            "Queued-escrow liquidation preview keeper bounty should match live outcome"
+        );
+        assertEq(engine.deferredPayoutUsdc(accountId) - deferredBefore, preview.deferredPayoutUsdc, "Queued-escrow liquidation preview deferred payout should match live outcome");
+        assertEq(engine.accumulatedBadDebtUsdc() - badDebtBefore, preview.badDebtUsdc, "Queued-escrow liquidation preview bad debt should match live outcome");
+        assertEq(usdc.balanceOf(address(router)), 0, "Queued execution escrow should be removed from the router on liquidation");
+        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Queued-escrow liquidation preview degraded-mode flag should match live outcome");
     }
 }

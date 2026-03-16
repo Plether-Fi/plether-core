@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -1609,7 +1610,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         });
     }
 
-    function test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt() public {
+    function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 350e6);
 
@@ -1626,6 +1627,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), queuedOrderCount * 1e6, "Router should custody the shielded open-order bounty escrow");
         assertEq(router.pendingOrderCounts(accountId), queuedOrderCount, "Queued open orders should remain pending before liquidation");
 
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
 
@@ -1633,14 +1637,16 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
-        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Restored router escrow should prevent avoidable bad debt");
+        assertEq(engine.accumulatedBadDebtUsdc(), preview.badDebtUsdc, "Liquidation should not improve previewed bad debt by restoring execution escrow");
+        assertEq(snapshotBefore.executionEscrowUsdc, queuedOrderCount * 1e6, "Setup must report queued execution escrow outside trader settlement");
+        assertEq(preview.reachableCollateralUsdc, snapshotBefore.liquidationReachableUsdc, "Preview must exclude queued execution escrow from liquidation reachability");
         assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders");
-        assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit restored open-order bounty escrow");
+        assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first open-order bounty escrow");
         assertEq(router.executionBountyReserves(uint64(queuedOrderCount)), 0, "All queued open-order bounty escrow should be cleared");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation");
     }
 
-    function test_ExecuteLiquidation_RestoresEscrowedCloseBountiesBeforeClearingOrders() public {
+    function test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 350e6);
 
@@ -1654,14 +1660,17 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
 
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
 
         router.executeLiquidation(accountId, priceData);
 
+        assertEq(snapshotBefore.executionEscrowUsdc, 2e6, "Setup must report queued close-order execution escrow outside trader settlement");
         assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear queued close orders");
-        assertEq(router.executionBountyReserves(1), 0, "Liquidation should restore the first close-order bounty escrow");
-        assertEq(router.executionBountyReserves(2), 0, "Liquidation should restore the second close-order bounty escrow");
+        assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first close-order bounty escrow");
+        assertEq(router.executionBountyReserves(2), 0, "Liquidation should forfeit the second close-order bounty escrow");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation");
     }
 

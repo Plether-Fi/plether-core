@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
@@ -107,6 +108,32 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 liquidationPreview.reachableCollateralUsdc,
                 clearinghouse.getLiquidationReachableUsdc(accountId, margin),
                 "Liquidation preview reachable collateral mismatch"
+            );
+        }
+    }
+
+    function invariant_LiquidationPreviewExcludesRouterExecutionEscrow() public view {
+        uint256 oraclePrice = _previewOraclePrice();
+        uint256 vaultDepthUsdc = vault.totalAssets();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            if (!snapshot.hasPosition || snapshot.executionEscrowUsdc == 0) {
+                continue;
+            }
+
+            CfdEngine.LiquidationPreview memory liquidationPreview =
+                engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+            assertEq(
+                liquidationPreview.reachableCollateralUsdc,
+                snapshot.liquidationReachableUsdc,
+                "Liquidation preview reachable collateral must match snapshot reachability"
+            );
+            assertLt(
+                liquidationPreview.reachableCollateralUsdc,
+                snapshot.settlementBalanceUsdc + snapshot.executionEscrowUsdc,
+                "Liquidation preview must exclude router execution escrow from reachable collateral"
             );
         }
     }

@@ -784,27 +784,25 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
     }
 
-    function _restoreEscrowedOrderBountiesForLiquidation(
-        IMarginClearinghouse clearinghouse,
+    function _forfeitEscrowedOrderBountiesOnLiquidation(
         bytes32 accountId
     ) internal {
-        uint256 restoredUsdc;
+        uint256 forfeitedUsdc;
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             if (record.executionBountyUsdc > 0) {
-                restoredUsdc += record.executionBountyUsdc;
+                forfeitedUsdc += record.executionBountyUsdc;
                 record.executionBountyUsdc = 0;
             }
             orderId = record.nextPendingOrderId;
         }
 
-        if (restoredUsdc == 0) {
+        if (forfeitedUsdc == 0) {
             return;
         }
 
-        USDC.safeTransfer(address(clearinghouse), restoredUsdc);
-        clearinghouse.settleUsdc(accountId, int256(restoredUsdc));
+        USDC.safeTransfer(address(vault), forfeitedUsdc);
     }
 
     function _clearLiquidatedAccountOrders(
@@ -1207,7 +1205,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     // ==========================================
 
     /// @notice Keeper-triggered liquidation with stricter staleness (≤ 15s).
-    ///         Pays the keeper bounty in USDC directly from the vault.
+    ///         Forfeits any queued-order execution escrow to the vault instead of crediting it back to trader settlement,
+    ///         then pays the liquidation keeper bounty in USDC directly from the vault.
     /// @param accountId The account to liquidate (bytes32-encoded address)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeLiquidation(
@@ -1228,8 +1227,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             }
         }
 
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        _restoreEscrowedOrderBountiesForLiquidation(clearinghouse, accountId);
+        _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
 
         uint256 vaultDepth = vault.totalAssets();
         uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
