@@ -11,12 +11,39 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {LiquidationAccountingLib} from "../../src/perps/libraries/LiquidationAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
+
+contract LiquidationAccountingLibHarness {
+    function build(
+        uint256 size,
+        uint256 oraclePrice,
+        uint256 reachableCollateralUsdc,
+        int256 fundingUsdc,
+        int256 pnlUsdc,
+        uint256 maintMarginBps,
+        uint256 minBountyUsdc,
+        uint256 bountyBps,
+        uint256 tokenScale
+    ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
+        return LiquidationAccountingLib.buildLiquidationState(
+            size,
+            oraclePrice,
+            reachableCollateralUsdc,
+            fundingUsdc,
+            pnlUsdc,
+            maintMarginBps,
+            minBountyUsdc,
+            bountyBps,
+            tokenScale
+        );
+    }
+}
 
 contract CfdEngineTest is BasePerpTest {
 
@@ -967,6 +994,26 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.liquidatable);
         assertEq(preview.keeperBountyUsdc, 15_150_000);
         assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
+    }
+
+    function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {
+        LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
+        LiquidationAccountingLib.LiquidationState memory state = harness.build(
+            10_000e18,
+            100_000_000,
+            125e6,
+            0,
+            -145e6,
+            100,
+            1e6,
+            900,
+            1e20
+        );
+
+        assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
+        assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
+        assertGt(state.keeperBountyUsdc, 5e6, "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable");
+        assertLe(state.keeperBountyUsdc, state.reachableCollateralUsdc, "Keeper bounty should still cap at reachable collateral");
     }
 
     function test_LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold() public {

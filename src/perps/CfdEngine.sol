@@ -1905,7 +1905,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             maintMarginBps,
             riskParams.minBountyUsdc,
             riskParams.bountyBps,
-            pos.margin,
             CfdMath.USDC_TO_TOKEN_SCALE
         );
         computation.settlement = LiquidationAccountingLib.settlementForState(computation.liquidationState);

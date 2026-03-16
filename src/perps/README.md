@@ -223,7 +223,7 @@ Positions must be large enough that their proportional keeper bounty (`notional 
 
 ### Proportional Liquidations
 
-- **Keeper Bounty**: 0.15% of notional size, bounded by a $5 floor. Capped at equity when positive, at `posMargin` when negative (vault never pays more than it seizes)
+- **Keeper Bounty**: 0.15% of notional size, bounded by a $5 floor. Capped at positive equity when available, otherwise capped by physically reachable liquidation collateral (vault never pays more than the liquidation path can actually seize)
 - **Residual Equity Preserved**: The protocol seizes only the exact mathematical loss + keeper bounty; remaining cross-margin equity is returned to the user
 - **Bad Debt Socialization**: If user equity is negative (extreme slippage), the House Pool absorbs the shortfall as a systemic insurance cost
 - **Graceful Self-Close**: Voluntary closes on underwater positions seize available balance and let the vault absorb any shortfall, rather than reverting

@@ -277,6 +277,12 @@ Liquidation must:
 4. re-evaluate protocol solvency,
 5. latch `degradedMode` if the remaining system becomes insolvent.
 
+Keeper bounty rule:
+
+- liquidation keeper bounty should be capped by positive equity when available,
+- otherwise it should be capped by physically reachable liquidation collateral (or the actual seized value derived from the same liquidation accounting path),
+- not by stale notions of active position margin alone.
+
 If the liquidation bounty cannot be paid immediately from the vault:
 
 6. the liquidation must still succeed,

@@ -203,7 +203,7 @@ Funding accumulators use 18-decimal precision (WAD). At extreme low values:
 
 The bounty is calculated as `max(notional × bountyBps, minBountyUsdc)`, then capped:
 - **Positive equity**: Capped at `uint256(equityUsdc)` — keeper cannot extract more than the position's equity
-- **Negative equity**: Capped at `posMargin` — vault only pays what it can seize back, never a net payer
+- **Non-positive equity**: Capped at physically reachable liquidation collateral — keeper cannot extract more than the terminal settlement path can actually seize from the account
 
 This means keepers may receive less than `minBountyUsdc` when equity is small but positive. The minimum position size guard ensures this gap is bounded: at the threshold ($3,333 notional), the proportional bounty equals `minBountyUsdc`, so the cap only binds when PnL has eroded equity. Additionally, partial closes that would leave remaining margin below `minBountyUsdc` revert (`DustPosition`), preventing creation of positions too small for economic liquidation.
 
