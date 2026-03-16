@@ -1496,7 +1496,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         if (closeState.netSettlementUsdc > 0) {
             uint256 settlementGain = uint256(closeState.netSettlementUsdc);
-            uint256 availableCash = vault.totalAssets();
+            uint256 availableCash = vault.totalAssets() + fundingSettlement.fundingVaultCashInflowUsdc
+                - fundingSettlement.fundingVaultCashOutflowUsdc;
             preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
             preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
         } else if (closeState.netSettlementUsdc < 0) {
