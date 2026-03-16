@@ -184,6 +184,20 @@ Review:
 - Updated `src/perps/CfdEngine.sol` so both `previewLiquidation()` and live liquidation call the same liquidation accounting builder, reducing preview/live drift and making the domain boundary explicit.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewLiquidation_ReturnsBountyAndLiquidatableFlag|LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|Liquidation_PreservesReservedSettlementEscrow|LiquidationBounty_CappedByPositiveEquity"` and `forge test --match-path test/perps/AuditCurrentFindingsVerification.t.sol --match-test "M2_KeeperBountyShouldUsePositiveEquityNotPositionMargin"`.
 
+- [x] Inspect oracle freeze / market-closed logic duplicated in `src/perps/CfdEngine.sol` and `src/perps/OrderRouter.sol`
+- [x] Extract a shared calendar/freeze helper that preserves the current Sunday freeze and oracle-freeze semantics exactly
+- [x] Route engine and router call sites through the shared helper without changing behavior
+- [x] Add/update targeted tests that assert router and engine agree on market-open / market-closed boundaries
+- [x] Run focused Forge verification for the refactor slice
+
+Review:
+- Goal: remove the remaining router/engine drift risk around calendar-closed execution by moving both modules onto one shared helper while keeping semantics identical.
+- Success criteria: market-open and market-closed boundary behavior stays unchanged, and both contracts derive those answers from the same implementation.
+- Added `src/perps/libraries/MarketCalendarLib.sol` so the weekend/FAD/oracle-freeze calendar boundaries now live in one pure helper instead of being re-encoded across modules.
+- Updated `src/perps/CfdEngine.sol` and `src/perps/OrderRouter.sol` to consume that shared helper for FAD and oracle-frozen answers without changing the live Sunday boundary behavior.
+- Added `test_MarketCalendar_SundayBoundariesMatchLiveSemantics` in `test/perps/CfdEngine.t.sol` and revalidated the existing Sunday router/liquidation boundary tests.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "MarketCalendar_SundayBoundariesMatchLiveSemantics|GetHousePoolInputSnapshot_UsesFrozenOracleFreshnessLimit"`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "SundayDst_OracleUnfrozenAt21|SundayDst_MevEnforcedAt21|SundayDst_StillFadAt21|SundayDst_WinterStalenessRejects"`, and `forge test --match-path test/perps/Liquidation.t.sol --match-test "testIsFadWindow_Weekend"`.
+
 - [ ] Extract one shared post-funding close-settlement planner that both `previewClose()` and live close execution use
 - [ ] Make the shared planner simulate funding settlement first, including vault cash outflow / clearinghouse margin-credit effects for positive funding and uncovered-funding handling for negative funding
 - [ ] Rebuild clearinghouse bucket snapshots from the simulated post-funding state for partial closes instead of mutating only `otherLockedMarginUsdc`

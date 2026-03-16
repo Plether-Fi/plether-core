@@ -12,6 +12,7 @@ import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
+import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
@@ -1219,53 +1220,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ///         (Friday 19:00 UTC → Sunday 22:00 UTC), on admin-configured FAD days,
     ///         or within fadRunwaySeconds before an admin FAD day (deleverage runway).
     function isFadWindow() public view returns (bool) {
-        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
-        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
-
-        if (dayOfWeek == 5 && hourOfDay >= 19) {
-            return true;
-        }
-        if (dayOfWeek == 6) {
-            return true;
-        }
-        if (dayOfWeek == 0 && hourOfDay < 22) {
-            return true;
-        }
-
         uint256 today = block.timestamp / 86_400;
-
-        if (fadDayOverrides[today]) {
-            return true;
-        }
-
-        uint256 runway = fadRunwaySeconds;
-        if (runway > 0) {
-            uint256 secondsUntilTomorrow = 86_400 - (block.timestamp % 86_400);
-            if (secondsUntilTomorrow <= runway && fadDayOverrides[today + 1]) {
-                return true;
-            }
-        }
-
-        return false;
+        return MarketCalendarLib.isFadWindow(
+            block.timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], fadRunwaySeconds
+        );
     }
 
     /// @notice Returns true only when FX markets are closed and oracle freshness can be relaxed.
     ///         Distinct from FAD, which starts earlier for deleveraging risk controls.
     function isOracleFrozen() public view returns (bool) {
-        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
-        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
-
-        if (dayOfWeek == 5 && hourOfDay >= 22) {
-            return true;
-        }
-        if (dayOfWeek == 6) {
-            return true;
-        }
-        if (dayOfWeek == 0 && hourOfDay < 21) {
-            return true;
-        }
-
-        return fadDayOverrides[block.timestamp / 86_400];
+        return MarketCalendarLib.isOracleFrozen(block.timestamp, fadDayOverrides[block.timestamp / 86_400]);
     }
 
     function hasOpenPosition(

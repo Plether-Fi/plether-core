@@ -8,6 +8,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -1115,20 +1116,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ///      Distinct from isFadWindow() which starts 3 hours earlier for margin purposes.
     ///      Uses Friday 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
     function _isOracleFrozen() internal view returns (bool) {
-        uint256 dayOfWeek = ((block.timestamp / 86_400) + 4) % 7;
-        uint256 hourOfDay = (block.timestamp % 86_400) / 3600;
-
-        if (dayOfWeek == 5 && hourOfDay >= 22) {
-            return true;
-        }
-        if (dayOfWeek == 6) {
-            return true;
-        }
-        if (dayOfWeek == 0 && hourOfDay < 21) {
-            return true;
-        }
-
-        return engine.fadDayOverrides(block.timestamp / 86_400);
+        return MarketCalendarLib.isOracleFrozen(block.timestamp, engine.fadDayOverrides(block.timestamp / 86_400));
     }
 
     /// @dev Inverts a Pyth price (e.g. USD/JPY → JPY/USD) and returns 8-decimal output.

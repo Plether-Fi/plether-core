@@ -743,6 +743,24 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(status.degradedMode, engine.degradedMode(), "Frozen status degraded flag must match engine state");
     }
 
+    function test_MarketCalendar_SundayBoundariesMatchLiveSemantics() public {
+        uint256 sundayTwentyFiftyNine = 1_709_693_999;
+        uint256 sundayTwentyOne = 1_709_694_000;
+        uint256 sundayTwentyTwo = 1_709_697_600;
+
+        vm.warp(sundayTwentyFiftyNine);
+        assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
+        assertTrue(engine.isFadWindow(), "Sunday 20:59:59 should still be FAD");
+
+        vm.warp(sundayTwentyOne);
+        assertFalse(engine.isOracleFrozen(), "Sunday 21:00:00 should unfreeze oracle mode");
+        assertTrue(engine.isFadWindow(), "Sunday 21:00:00 should remain in FAD");
+
+        vm.warp(sundayTwentyTwo);
+        assertFalse(engine.isOracleFrozen(), "Sunday 22:00:00 should remain unfrozen");
+        assertFalse(engine.isFadWindow(), "Sunday 22:00:00 should end FAD");
+    }
+
     function test_PreviewClose_ReturnsDeferredAndImmediateSettlementBreakdown() public {
         address trader = address(0xAB13);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
