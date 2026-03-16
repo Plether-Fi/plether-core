@@ -830,6 +830,9 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
     }
 
+    /// @dev Uses trackedLpBalance (not _lpBalance()) so donated LP cannot inflate harvestable yield.
+    ///      Divergence from actual LP is prevented by internal gaugeStakedLp tracking and
+    ///      forceRemoveGauge() which writes off stuck LP from both trackedLpBalance and curveLpCostVp.
     function _harvest() internal returns (uint256 donated) {
         if (address(stakedInvarCoin) == address(0)) {
             return 0;
