@@ -136,6 +136,110 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
+    function invariant_GhostOrderCommittedMarginStateMachineMatchesRouter() public view {
+        uint64 lastKnownOrderId = handler.lastKnownOrderId();
+        for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
+            uint8 ghostState = handler.ghostOrderLifecycleState(orderId);
+            uint256 ghostRemaining = handler.ghostOrderRemainingCommittedMargin(orderId);
+            uint256 liveRemaining = router.committedMargins(orderId);
+
+            if (ghostState == 1) {
+                assertEq(liveRemaining, ghostRemaining, "Pending ghost order margin must match router remaining margin");
+                if (ghostRemaining > 0) {
+                    assertTrue(router.isInMarginQueue(orderId), "Pending ghost order with margin must stay in margin queue");
+                }
+            } else {
+                assertEq(ghostRemaining, 0, "Terminal ghost orders must have zero remaining committed margin");
+                assertEq(liveRemaining, 0, "Terminal ghost orders must have zero router committed margin");
+                assertFalse(router.isInMarginQueue(orderId), "Terminal ghost orders must not stay in margin queue");
+            }
+        }
+    }
+
+    function invariant_FifoPointersStayWithinCommittedRange() public view {
+        assertLe(router.nextExecuteId(), router.nextCommitId(), "nextExecuteId must not exceed nextCommitId");
+    }
+
+    function invariant_PendingQueueLinksAndCountsStayConsistent() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            uint64 head = router.pendingHeadOrderId(accountId);
+            uint64 tail = router.pendingTailOrderId(accountId);
+            uint256 expectedCount = router.pendingOrderCounts(accountId);
+            uint256 ghostCount = handler.ghostPendingOrderCount(accountId);
+
+            uint256 traversed;
+            uint64 current = head;
+            uint64 previous;
+            while (current != 0) {
+                OrderRouter.OrderRecord memory record = router.getOrderRecord(current);
+                assertEq(record.core.accountId, accountId, "Pending queue owner must match traversed account");
+                assertEq(
+                    uint256(record.status), uint256(OrderRouter.OrderStatus.Pending), "Pending queue may only contain pending orders"
+                );
+                assertEq(record.prevPendingOrderId, previous, "Pending prev pointer must match traversal");
+                if (previous != 0) {
+                    assertGt(current, previous, "Pending queue must preserve FIFO commit order");
+                }
+                previous = current;
+                current = record.nextPendingOrderId;
+                traversed++;
+                assertLe(traversed, expectedCount == 0 ? 1 : expectedCount, "Pending queue traversal exceeded tracked count");
+            }
+
+            assertEq(traversed, expectedCount, "Pending queue traversal count must match pendingOrderCounts");
+            assertEq(traversed, ghostCount, "Pending queue traversal count must match ghost pending count");
+            if (traversed == 0) {
+                assertEq(head, 0, "Empty pending queue must have zero head");
+                assertEq(tail, 0, "Empty pending queue must have zero tail");
+            } else {
+                assertEq(previous, tail, "Pending queue tail must equal last traversed order");
+                assertEq(router.getOrderRecord(head).prevPendingOrderId, 0, "Pending head must have zero prev pointer");
+                assertEq(router.getOrderRecord(tail).nextPendingOrderId, 0, "Pending tail must have zero next pointer");
+            }
+        }
+    }
+
+    function invariant_MarginQueueLinksAndMembershipStayConsistent() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            uint64 head = router.marginHeadOrderId(accountId);
+            uint64 tail = router.marginTailOrderId(accountId);
+            uint256 expectedCount = handler.ghostPendingMarginOrderCount(accountId);
+
+            uint256 traversed;
+            uint64 current = head;
+            uint64 previous;
+            while (current != 0) {
+                OrderRouter.OrderRecord memory record = router.getOrderRecord(current);
+                assertEq(record.core.accountId, accountId, "Margin queue owner must match traversed account");
+                assertEq(
+                    uint256(record.status), uint256(OrderRouter.OrderStatus.Pending), "Margin queue may only contain pending orders"
+                );
+                assertTrue(record.inMarginQueue, "Margin queue traversal must only include in-queue orders");
+                assertGt(router.committedMargins(current), 0, "Margin queue orders must retain committed margin");
+                assertEq(record.prevMarginOrderId, previous, "Margin prev pointer must match traversal");
+                if (previous != 0) {
+                    assertGt(current, previous, "Margin queue must preserve FIFO commit order");
+                }
+                previous = current;
+                current = record.nextMarginOrderId;
+                traversed++;
+                assertLe(traversed, expectedCount == 0 ? 1 : expectedCount, "Margin queue traversal exceeded ghost count");
+            }
+
+            assertEq(traversed, expectedCount, "Margin queue traversal count must match ghost margin count");
+            if (traversed == 0) {
+                assertEq(head, 0, "Empty margin queue must have zero head");
+                assertEq(tail, 0, "Empty margin queue must have zero tail");
+            } else {
+                assertEq(previous, tail, "Margin queue tail must equal last traversed order");
+                assertEq(router.getOrderRecord(head).prevMarginOrderId, 0, "Margin head must have zero prev pointer");
+                assertEq(router.getOrderRecord(tail).nextMarginOrderId, 0, "Margin tail must have zero next pointer");
+            }
+        }
+    }
+
     function _sumPendingExecutionBounties() internal view returns (uint256 totalBounties) {
         for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
             (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);

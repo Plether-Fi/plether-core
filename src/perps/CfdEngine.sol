@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
@@ -21,15 +22,6 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-
-interface IOrderRouterAccounting {
-
-    function noteCommittedMarginConsumed(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external;
-
-}
 
 /// @title CfdEngine
 /// @notice The core mathematical ledger for Plether CFDs.
@@ -1253,6 +1245,71 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         viewData.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
     }
 
+    function getAccountLedgerView(
+        bytes32 accountId
+    ) external view returns (ICfdEngine.AccountLedgerView memory viewData) {
+        ICfdEngine.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(accountId);
+        viewData.settlementBalanceUsdc = snapshot.settlementBalanceUsdc;
+        viewData.freeSettlementUsdc = snapshot.freeSettlementUsdc;
+        viewData.activePositionMarginUsdc = snapshot.activePositionMarginUsdc;
+        viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
+        viewData.executionEscrowUsdc = snapshot.executionEscrowUsdc;
+        viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
+        viewData.deferredPayoutUsdc = snapshot.deferredPayoutUsdc;
+        viewData.pendingOrderCount = snapshot.pendingOrderCount;
+    }
+
+    function getAccountLedgerSnapshot(
+        bytes32 accountId
+    ) external view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
+        return _buildAccountLedgerSnapshot(accountId);
+    }
+
+    function _buildAccountLedgerSnapshot(
+        bytes32 accountId
+    ) internal view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
+        CfdTypes.Position memory pos = positions[accountId];
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            clearinghouse.getAccountUsdcBuckets(accountId, pos.margin);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId);
+
+        snapshot.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
+        snapshot.freeSettlementUsdc = buckets.freeSettlementUsdc;
+        snapshot.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
+        snapshot.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+        snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
+        snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
+        snapshot.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
+        snapshot.pendingOrderCount = escrow.pendingOrderCount;
+        snapshot.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        snapshot.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
+        snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+
+        if (pos.size == 0) {
+            return snapshot;
+        }
+
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos,
+            lastMarkPrice,
+            CAP_PRICE,
+            getPendingFunding(pos),
+            snapshot.liquidationReachableUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
+
+        snapshot.hasPosition = true;
+        snapshot.side = pos.side;
+        snapshot.size = pos.size;
+        snapshot.margin = pos.margin;
+        snapshot.entryPrice = pos.entryPrice;
+        snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
+        snapshot.pendingFundingUsdc = riskState.pendingFundingUsdc;
+        snapshot.netEquityUsdc = riskState.equityUsdc;
+        snapshot.liquidatable = riskState.liquidatable;
+    }
+
     function getPositionView(
         bytes32 accountId
     ) external view returns (PositionView memory viewData) {
@@ -1285,6 +1342,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function getProtocolAccountingView() external view returns (ProtocolAccountingView memory viewData) {
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = _buildProtocolAccountingSnapshot();
+        viewData.vaultAssetsUsdc = snapshot.vaultAssetsUsdc;
+        viewData.maxLiabilityUsdc = snapshot.maxLiabilityUsdc;
+        viewData.withdrawalReservedUsdc = snapshot.withdrawalReservedUsdc;
+        viewData.freeUsdc = snapshot.freeUsdc;
+        viewData.accumulatedFeesUsdc = snapshot.accumulatedFeesUsdc;
+        viewData.cappedFundingPnlUsdc = snapshot.cappedFundingPnlUsdc;
+        viewData.liabilityOnlyFundingPnlUsdc = snapshot.liabilityOnlyFundingPnlUsdc;
+        viewData.totalDeferredPayoutUsdc = snapshot.totalDeferredPayoutUsdc;
+        viewData.totalDeferredClearerBountyUsdc = snapshot.totalDeferredClearerBountyUsdc;
+        viewData.degradedMode = snapshot.degradedMode;
+        viewData.hasLiveLiability = snapshot.hasLiveLiability;
+    }
+
+    function getProtocolAccountingSnapshot() external view returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot) {
+        return _buildProtocolAccountingSnapshot();
+    }
+
+    function _buildProtocolAccountingSnapshot()
+        internal
+        view
+        returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot)
+    {
         uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 maxLiabilityUsdc = _maxLiability();
         WithdrawalAccountingLib.WithdrawalState memory withdrawalState = WithdrawalAccountingLib.buildWithdrawalState(
@@ -1295,18 +1375,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             totalDeferredPayoutUsdc,
             totalDeferredClearerBountyUsdc
         );
-        viewData.vaultAssetsUsdc = vaultAssetsUsdc;
-        viewData.maxLiabilityUsdc = maxLiabilityUsdc;
-        viewData.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
-        viewData.freeUsdc = withdrawalState.freeUsdc;
-        viewData.accumulatedFeesUsdc = accumulatedFeesUsdc;
-        viewData.cappedFundingPnlUsdc = _getSolvencyCappedFundingPnl();
-        viewData.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
-        viewData.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
-        viewData.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
-        viewData.degradedMode = degradedMode;
+        SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
+        snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
+        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
+        snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
+        snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
+        snapshot.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
+        snapshot.freeUsdc = withdrawalState.freeUsdc;
+        snapshot.accumulatedFeesUsdc = accumulatedFeesUsdc;
+        snapshot.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
+        snapshot.cappedFundingPnlUsdc = solvencyState.solvencyFundingPnlUsdc;
+        snapshot.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
+        snapshot.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        snapshot.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
+        snapshot.degradedMode = degradedMode;
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        viewData.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
+        snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
     function getDeferredPayoutStatus(

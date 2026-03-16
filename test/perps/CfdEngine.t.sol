@@ -9,6 +9,8 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -525,6 +527,118 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
+    }
+
+    function test_GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState() public {
+        address trader = address(0xAB13);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engine.getProtocolAccountingSnapshot();
+        CfdEngine.ProtocolAccountingView memory viewData = engine.getProtocolAccountingView();
+        ICfdEngine.HousePoolInputSnapshot memory housePoolSnapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
+        assertEq(
+            snapshot.netPhysicalAssetsUsdc,
+            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc : 0
+        );
+        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability());
+        assertEq(snapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
+        assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
+        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, engine.getLiabilityOnlyFundingPnl());
+        assertEq(snapshot.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
+        assertEq(snapshot.degradedMode, engine.degradedMode());
+        assertEq(snapshot.hasLiveLiability, engine.hasLiveLiability());
+        assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
+        assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
+        assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
+        assertEq(snapshot.freeUsdc, viewData.freeUsdc);
+        assertEq(snapshot.accumulatedFeesUsdc, viewData.accumulatedFeesUsdc);
+        assertEq(snapshot.cappedFundingPnlUsdc, viewData.cappedFundingPnlUsdc);
+        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, viewData.liabilityOnlyFundingPnlUsdc);
+        assertEq(snapshot.totalDeferredPayoutUsdc, viewData.totalDeferredPayoutUsdc);
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, viewData.totalDeferredClearerBountyUsdc);
+        assertEq(snapshot.degradedMode, viewData.degradedMode);
+        assertEq(snapshot.hasLiveLiability, viewData.hasLiveLiability);
+        assertEq(snapshot.netPhysicalAssetsUsdc, housePoolSnapshot.netPhysicalAssetsUsdc);
+        assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
+        assertEq(snapshot.totalDeferredPayoutUsdc, housePoolSnapshot.deferredTraderPayoutUsdc);
+        assertEq(snapshot.totalDeferredClearerBountyUsdc, housePoolSnapshot.deferredClearerBountyUsdc);
+        assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
+    }
+
+    function test_GetAccountLedgerView_ReflectsCompactCrossContractState() public {
+        address trader = address(0xAB15);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 12_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        vm.startPrank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 0, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        vm.stopPrank();
+
+        ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
+        (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            clearinghouse.getAccountUsdcBuckets(accountId, positionMargin);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+
+        assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc);
+        assertEq(ledgerView.freeSettlementUsdc, buckets.freeSettlementUsdc);
+        assertEq(ledgerView.activePositionMarginUsdc, buckets.activePositionMarginUsdc);
+        assertEq(ledgerView.otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
+        assertEq(ledgerView.executionEscrowUsdc, escrow.executionBountyUsdc);
+        assertEq(ledgerView.committedMarginUsdc, escrow.committedMarginUsdc);
+        assertEq(ledgerView.deferredPayoutUsdc, engine.deferredPayoutUsdc(accountId));
+        assertEq(ledgerView.pendingOrderCount, router.pendingOrderCounts(accountId));
+    }
+
+    function test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState() public {
+        address trader = address(0xAB16);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 12_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+        CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
+        CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+
+        assertEq(snapshot.settlementBalanceUsdc, collateralView.settlementBalanceUsdc);
+        assertEq(snapshot.freeSettlementUsdc, collateralView.freeSettlementUsdc);
+        assertEq(snapshot.activePositionMarginUsdc, collateralView.activePositionMarginUsdc);
+        assertEq(snapshot.otherLockedMarginUsdc, collateralView.otherLockedMarginUsdc);
+        assertEq(snapshot.executionEscrowUsdc, escrow.executionBountyUsdc);
+        assertEq(snapshot.committedMarginUsdc, escrow.committedMarginUsdc);
+        assertEq(snapshot.deferredPayoutUsdc, collateralView.deferredPayoutUsdc);
+        assertEq(snapshot.pendingOrderCount, escrow.pendingOrderCount);
+        assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
+        assertEq(snapshot.liquidationReachableUsdc, collateralView.liquidationReachableUsdc);
+        assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
+        assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
+        assertEq(snapshot.hasPosition, positionView.exists);
+        assertEq(uint256(snapshot.side), uint256(positionView.side));
+        assertEq(snapshot.size, positionView.size);
+        assertEq(snapshot.margin, positionView.margin);
+        assertEq(snapshot.entryPrice, positionView.entryPrice);
+        assertEq(snapshot.unrealizedPnlUsdc, positionView.unrealizedPnlUsdc);
+        assertEq(snapshot.pendingFundingUsdc, positionView.pendingFundingUsdc);
+        assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc);
+        assertEq(snapshot.liquidatable, positionView.liquidatable);
     }
 
     function test_GetHousePoolInputSnapshot_ReflectsCurrentAccountingState() public {
