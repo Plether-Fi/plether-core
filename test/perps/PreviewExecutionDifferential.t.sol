@@ -173,14 +173,15 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundJunior(address(0xC107), 1_000_000e6);
-        _fundTrader(trader, 8_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4_000e6, 1e8);
+        _fundTrader(trader, 8000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
 
         uint256 committedBefore = router.committedMargins(1);
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview =
+            engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         vm.prank(trader);
@@ -194,7 +195,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
-        assertEq(router.committedMargins(1), committedBefore, "Queued open-order committed margin must remain untouched");
+        assertEq(
+            router.committedMargins(1), committedBefore, "Queued open-order committed margin must remain untouched"
+        );
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
