@@ -145,6 +145,7 @@ The owner **cannot**:
 
 Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads. At commit time the router seizes the reserved execution bounty from the trader's free settlement into router custody, quoting risk-increasing orders from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
+- **Binding orders**: Traders cannot cancel queued opens or closes once committed, preventing delayed close intents from becoming a free timing option against keepers
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents do not reserve router escrow up front; successful and expired closes instead use a vault-funded flat `1.00 USDC` clearer reward path
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
@@ -378,7 +379,7 @@ Fees are hardcoded (execution = 4 bps, bounty = 15 bps). Funding curve parameter
 ### Keeper Infrastructure Failure
 
 1. Orders queue up in the FIFO queue but are not executed
-2. No time-based expiry — orders persist until explicitly executed or cancelled
+2. No time-based expiry or user cancellation — orders persist until executed or terminally failed
 3. Users can continue committing orders (they queue)
 4. Resume keeper bots to drain the queue
 5. **Risk**: Stale orders may execute at unfavorable prices. Users should use `targetPrice` for slippage protection.

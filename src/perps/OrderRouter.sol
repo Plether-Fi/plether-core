@@ -139,7 +139,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__NotOrderOwner();
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
-    error OrderRouter__OpenOrdersAreBinding();
+    error OrderRouter__OrdersAreBinding();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -320,9 +320,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         emit OrderCommitted(orderId, accountId, side);
     }
 
-    /// @notice Cancels a still-pending order and refunds any committed margin.
-    /// @dev The order owner may cancel any pending order, including the FIFO head. Cancelling a non-head
-    ///      order leaves a hole that later queue scans skip naturally.
+    /// @notice Reverts because committed orders are binding once they enter the FIFO queue.
     function cancelOrder(
         uint64 orderId
     ) external {
@@ -332,14 +330,7 @@ contract OrderRouter is Ownable2Step, Pausable {
         if (order.accountId != accountId) {
             revert OrderRouter__NotOrderOwner();
         }
-        if (!order.isClose) {
-            revert OrderRouter__OpenOrdersAreBinding();
-        }
-
-        _releaseCommittedMargin(orderId);
-        _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Cancelled);
-
-        emit OrderCancelled(orderId, accountId);
+        revert OrderRouter__OrdersAreBinding();
     }
 
     /// @notice Quotes the reserved USDC execution bounty for a new open order using the latest engine mark price.

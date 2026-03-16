@@ -69,6 +69,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, `Failed`, and `Cancelled`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
+**Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option.
+
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
 ### IV. CfdEngine — The Mathematical Ledger

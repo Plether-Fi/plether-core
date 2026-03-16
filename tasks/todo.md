@@ -104,6 +104,15 @@ Review:
 - Expanded `src/perps/README.md` with a dedicated fees section covering protocol execution fees, order execution bounties, deferred liabilities, and the rationale for separating take-rate from executor incentives; updated `src/perps/SECURITY.md` and `src/perps/ACCOUNTING_SPEC.md` to match.
 - Verified green: `forge build`, `forge test --match-path test/perps/OrderRouter.t.sol --match-contract OrderRouterTest`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test DeferredPayoutStatus`, `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees`, and `forge test --match-path test/perps/PerpInvariant.t.sol --match-contract PerpInvariantTest`.
 
+- [x] Verify the new external security review against the current refactor state
+
+Review:
+- Invalid: the claimed infinite close-order drain is blocked in two places in the live code: `pendingCloseSize[accountId] + sizeDelta <= positionSize` is enforced in `src/perps/OrderRouter.sol`, and failed close orders use `FailedOrderBountyPolicy.None`, so reverting duplicate closes do not pay a keeper bounty.
+- Invalid: the claimed liquidation-evasion via open-order escrow shielding is neutralized by `executeLiquidation()` restoring router-held open-order bounties back into the clearinghouse before `engine.liquidatePosition()`, which is also covered by `test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt` and `test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery`.
+- Valid issue remains: close orders are still cancellable by the owner in `src/perps/OrderRouter.sol`, while open orders are binding, so there is still a free/cheap option style cancellation surface for delayed closes.
+- Preview/DST/dead-code findings are not current security bugs: the degraded-mode preview flag is intentionally transition-only (`PerpPreviewInvariant` asserts this), Sunday unfreezes at `21:00 UTC` by design and is covered by `test_SundayDst_OracleUnfrozenAt21`, and `_seizeUsdcToVault` is already absent from the current `src/perps/CfdEngine.sol`.
+- Re-verified the previously claimed fixes: zero-clamped MtM in `getVaultMtmAdjustment()`, the stateful VPI bound in `CloseAccountingLib`, and batch gas `break` behavior all exist in code and their targeted regressions pass.
+
 - [x] Inspect current clearinghouse and engine settlement interfaces for funding/liquidation spend paths
 - [x] Implement clearinghouse spend primitives for funding loss and liquidation residual settlement
 - [x] Refactor engine funding and liquidation settlement to use canonical clearinghouse helpers
@@ -393,3 +402,13 @@ Review:
 - Removed three high-confidence dead-code items: `CfdEngine._seizeUsdcToVault`, the duplicate `MarginClearinghouse.SettlementConsumption` struct, and the orphaned `CfdEngineSnapshotsLib.buildSolvencySnapshot` helper.
 - Verified green with `forge test --match-path test/perps/CfdEngine.t.sol` and `forge test --match-path test/perps/MarginClearinghouse.t.sol` (`110 passed, 0 failed`).
 - Current net LOC across the cleanup files is `-18` (`101 added, 119 removed`), with the dead-code deletion slice itself contributing the reduction.
+
+- [x] Make queued close orders binding instead of user-cancellable
+- [x] Update router tests and docs for binding close-order semantics
+- [x] Run targeted Forge verification for cancel-path regressions
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so `cancelOrder()` now always reverts with `OrderRouter__OrdersAreBinding()` after ownership/pending checks, making close orders binding just like opens.
+- Rewrote the affected cancel-path tests in `test/perps/OrderRouter.t.sol` to assert that close-order cancellation attempts revert without mutating queue pointers, escrow, or FIFO head state; updated the audit regression in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` to the renamed binding error.
+- Documented the new binding-intent policy in `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CancelOrder_CloseOrdersAreBinding|test_CancelOrder_MiddleCloseRevertsAndPreservesAccountHeadTail|test_CancelOrder_TailCloseRevertsAndPreservesAccountTail|test_CancelOrder_NonHeadCloseRevertsWithoutChangingEscrow|test_CancelOrder_HeadCloseRevertsWithoutAdvancingNextExecuteId|test_CancelOrder_OnlyOwnerCanCancel|test_CancelOrder_OpenOrdersAreBinding|test_CancelOrder_NonPendingReverts"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test test_H1_PhaseBoundary_PartialCloseThenCancelMustNotUnlockProtectedResidualMargin`.

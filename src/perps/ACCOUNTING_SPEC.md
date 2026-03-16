@@ -372,7 +372,7 @@ Interpretation rules:
 Required transition rules:
 
 - execution consumes escrow exactly once,
-- cancellation releases escrow exactly once,
+- user cancellation is disallowed once an order is pending,
 - expiry releases user margin and applies the configured execution-bounty policy,
 - non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order.
 
