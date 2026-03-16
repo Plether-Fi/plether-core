@@ -184,6 +184,23 @@ Review:
 - Updated `src/perps/CfdEngine.sol` so both `previewLiquidation()` and live liquidation call the same liquidation accounting builder, reducing preview/live drift and making the domain boundary explicit.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewLiquidation_ReturnsBountyAndLiquidatableFlag|LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold|Liquidation_PreservesReservedSettlementEscrow|LiquidationBounty_CappedByPositiveEquity"` and `forge test --match-path test/perps/AuditCurrentFindingsVerification.t.sol --match-test "M2_KeeperBountyShouldUsePositiveEquityNotPositionMargin"`.
 
+- [ ] Extract one shared post-funding close-settlement planner that both `previewClose()` and live close execution use
+- [ ] Make the shared planner simulate funding settlement first, including vault cash outflow / clearinghouse margin-credit effects for positive funding and uncovered-funding handling for negative funding
+- [ ] Rebuild clearinghouse bucket snapshots from the simulated post-funding state for partial closes instead of mutating only `otherLockedMarginUsdc`
+- [ ] Route both preview and live close loss planning through the rebuilt bucket snapshot so committed-order reservations are excluded consistently and `IncompleteReservationCoverage` cannot appear after a valid preview
+- [ ] Align preview post-close solvency modeling with live execution by rolling the remaining side exposure onto the preview funding index exactly as `_settleFunding()` does before size reduction finalization
+- [ ] Include simulated funding payout cash movement in preview solvency deltas so `valid`, `badDebtUsdc`, `effectiveAssetsAfterUsdc`, `triggersDegradedMode`, and `postOpDegradedMode` match live execution for positive-funding partial closes
+- [ ] Add focused regression tests in `test/perps/CfdEngine.t.sol` for: partial close with committed margin excluded, accrued-funding partial close parity, positive-funding vault cash outflow parity, and preview-invalid/live-revert agreement
+- [ ] Extend `test/perps/PreviewExecutionDifferential.t.sol` with partial-close cases that compare preview outputs against live execution across negative funding, positive funding, and queued committed-margin scenarios
+- [ ] Strengthen `test/perps/invariant/PerpPreviewInvariant.t.sol` so partial closes preserve preview/live parity for validity, bad debt, degraded-mode transitions, and reachable collateral accounting under funding accrual
+- [ ] Update `src/perps/ACCOUNTING_SPEC.md` Unrealized MtM Liability wording to include the collectible side-margin cap before the per-side zero clamp
+- [ ] Update `src/perps/SECURITY.md` MtM rationale so it matches the current capped-negative-funding code path and no longer describes aggregate-side-margin capping as rejected when that is what the code now does
+- [ ] Re-run targeted verification: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_|CloseLoss_|Funding"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`, `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`, and any affected audit regression slices
+
+Review:
+- Goal: eliminate the last known partial-close preview/live divergence by making preview and execution consume the same post-funding close-settlement model, then align the docs that still describe the pre-cap MtM semantics.
+- Success criteria: a partial close that previews valid must not fail live because committed reservations were implicitly needed, and previewed solvency/degraded-mode outputs must match live execution after funding accrual on both positive- and negative-funding paths.
+
 - [x] Inspect `OrderRouter` committed-margin lifecycle and identify every counter-dependent path
 - [x] Draft a concrete patch plan for single-source committed margins plus an account-local pending-order queue
 

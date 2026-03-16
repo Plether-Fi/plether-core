@@ -127,6 +127,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         CfdEngineSettlementLib.LiquidationSettlementResult settlement;
     }
 
+    struct CloseExecutionPlan {
+        CloseAccountingLib.CloseState closeState;
+        uint256 postBullOi;
+        uint256 postBearOi;
+    }
+
     struct SideState {
         uint256 maxProfitUsdc;
         uint256 openInterest;
@@ -921,32 +927,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__CloseSizeExceedsPosition();
         }
 
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        uint256 selectedOi = selectedState.openInterest - order.sizeDelta;
-        uint256 oppositeOi = oppositeState.openInterest;
-        uint256 postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
-        uint256 postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
-        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-
-        CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.vpiAccrued,
-            pos.side,
-            order.sizeDelta,
-            price,
-            CAP_PRICE,
-            preSkewUsdc,
-            postSkewUsdc,
-            vaultDepthUsdc,
-            riskParams.vpiFactor,
-            EXECUTION_FEE_BPS,
-            fundingSettlementUsdc
+        CfdTypes.Position memory positionAfterFunding = pos;
+        CloseExecutionPlan memory closePlan = _buildCloseExecutionPlan(
+            positionAfterFunding, order.sizeDelta, price, preSkewUsdc, vaultDepthUsdc, fundingSettlementUsdc
         );
+        CloseAccountingLib.CloseState memory closeState = closePlan.closeState;
 
         pos.margin = closeState.remainingMarginUsdc;
 
@@ -1474,30 +1459,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 preBullUsdc = pos.side == CfdTypes.Side.BULL ? selectedUsdc : oppositeUsdc;
         uint256 preBearUsdc = pos.side == CfdTypes.Side.BEAR ? selectedUsdc : oppositeUsdc;
         uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
-        uint256 selectedOi = selectedState.openInterest - sizeDelta;
-        uint256 oppositeOi = oppositeState.openInterest;
-        uint256 postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
-        uint256 postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
-        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-        CloseAccountingLib.CloseState memory closeState = CloseAccountingLib.buildCloseState(
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.vpiAccrued,
-            pos.side,
-            sizeDelta,
-            price,
-            CAP_PRICE,
-            preSkewUsdc,
-            postSkewUsdc,
-            vaultDepthUsdc,
-            riskParams.vpiFactor,
-            EXECUTION_FEE_BPS,
-            closeFundingSettlementUsdc
-        );
+        CloseExecutionPlan memory closePlan =
+            _buildCloseExecutionPlan(pos, sizeDelta, price, preSkewUsdc, vaultDepthUsdc, closeFundingSettlementUsdc);
+        CloseAccountingLib.CloseState memory closeState = closePlan.closeState;
 
         preview.realizedPnlUsdc = closeState.realizedPnlUsdc;
         preview.remainingMargin = closeState.remainingMarginUsdc;
@@ -1536,8 +1500,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _buildPreviewCloseSolvencyState(
                 pos,
                 sizeDelta,
-                postBullOi,
-                postBearOi,
+                closePlan.postBullOi,
+                closePlan.postBearOi,
                 closeState.remainingMarginUsdc,
                 vaultDepthUsdc,
                 fundingConsumedFromMarginUsdc
@@ -1591,6 +1555,43 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         } else {
             marginAfterFunding -= loss;
         }
+    }
+
+    function _buildCloseExecutionPlan(
+        CfdTypes.Position memory pos,
+        uint256 sizeDelta,
+        uint256 price,
+        uint256 preSkewUsdc,
+        uint256 vaultDepthUsdc,
+        int256 fundingSettlementUsdc
+    ) internal view returns (CloseExecutionPlan memory plan) {
+        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
+        uint256 selectedOiAfter = selectedState.openInterest - sizeDelta;
+        uint256 oppositeOi = oppositeState.openInterest;
+        plan.postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
+        plan.postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
+
+        uint256 postBullUsdc = (plan.postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postBearUsdc = (plan.postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
+
+        plan.closeState = CloseAccountingLib.buildCloseState(
+            pos.size,
+            pos.margin,
+            pos.entryPrice,
+            pos.maxProfitUsdc,
+            pos.vpiAccrued,
+            pos.side,
+            sizeDelta,
+            price,
+            CAP_PRICE,
+            preSkewUsdc,
+            postSkewUsdc,
+            vaultDepthUsdc,
+            riskParams.vpiFactor,
+            EXECUTION_FEE_BPS,
+            fundingSettlementUsdc
+        );
     }
 
     function _previewPendingFunding(
