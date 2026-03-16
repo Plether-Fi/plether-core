@@ -172,6 +172,18 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.committedMargins(2), 0, "Order 2 committed margin must be cleared on failure");
     }
 
+    function test_CommitOrder_RevertsWhenPendingOrderCountHitsCap() public {
+        uint256 limit = router.MAX_PENDING_ORDERS();
+
+        vm.startPrank(alice);
+        for (uint256 i = 0; i < limit; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 1e8, false);
+        }
+        vm.expectRevert(OrderRouter.OrderRouter__TooManyPendingOrders.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 1e8, false);
+        vm.stopPrank();
+    }
+
     function test_AccountEscrowView_TracksPendingOrders() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -182,7 +194,7 @@ contract OrderRouterTest is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
-        assertEq(escrow.executionBountyUsdc, 1_000_000, "Only open orders should escrow execution bounties");
+        assertEq(escrow.executionBountyUsdc, 2_000_000, "Open and close orders should both escrow execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
     }
 
@@ -235,7 +247,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(record.core.orderId, 1);
         assertEq(record.core.accountId, accountId);
         assertEq(router.committedMargins(1), 0);
-        assertEq(record.executionBountyUsdc, 0);
+        assertEq(record.executionBountyUsdc, 1_000_000);
         assertEq(router.pendingHeadOrderId(accountId), 1);
         assertEq(router.pendingTailOrderId(accountId), 1);
         assertFalse(record.inMarginQueue, "Close order should remain outside the margin queue");
@@ -252,21 +264,21 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
         assertEq(summary.pendingOrderCount, 2);
         assertEq(summary.committedMarginUsdc, 1000 * 1e6);
-        assertEq(summary.executionBountyUsdc, 1_000_000);
+        assertEq(summary.executionBountyUsdc, 2_000_000);
         assertTrue(summary.hasTerminalCloseQueued);
     }
 
-    function test_CloseCommit_DoesNotRequirePrefundedKeeperBountyReserve() public {
+    function test_CloseCommit_ReservesPrefundedKeeperBounty() public {
         address trader = address(0x333);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        _fundTrader(trader, 1000e6);
+        _fundTrader(trader, 1001e6);
         _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        assertEq(router.executionBountyReserves(1), 0, "Close orders should not pre-seize a router-custodied bounty");
+        assertEq(router.executionBountyReserves(1), 1_000_000, "Close orders should pre-seize the flat router bounty");
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -502,7 +514,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel);
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 0);
+        assertEq(router.executionBountyReserves(secondCloseOrderId), 1_000_000);
 
         vm.prank(alice);
         vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
@@ -515,8 +527,8 @@ contract OrderRouterTest is BasePerpTest {
         );
         assertEq(
             router.executionBountyReserves(secondCloseOrderId),
-            0,
-            "Binding revert should not manufacture execution bounty reserve"
+            1_000_000,
+            "Binding revert should preserve the prefunded close execution bounty reserve"
         );
         assertEq(router.pendingOrderCounts(accountId), 2, "Binding revert should preserve pending order count");
         assertEq(router.nextExecuteId(), firstCloseOrderId, "Binding revert should not advance FIFO head");
@@ -758,7 +770,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(carolSize, 5000 * 1e18, "later valid order must still execute");
     }
 
-    function test_LargeForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
+    function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
         address spammer = address(0x557);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
@@ -778,7 +790,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        uint256 spamCount = 200;
+        uint256 spamCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
             router.commitOrder(CfdTypes.Side.BEAR, 1000 * 1e18, 100 * 1e6, 2e8, false);
@@ -790,7 +802,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 gasUsed = gasBefore - gasleft();
 
         (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "terminal close should still succeed with a large foreign queue behind it");
+        assertEq(size, 0, "terminal close should still succeed with a bounded foreign queue behind it");
         assertEq(router.nextExecuteId(), 3, "queue head should advance after the full close");
         assertLt(gasUsed, 40_000_000, "terminal close gas budget regressed");
 
@@ -1001,11 +1013,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            1e6,
-            "Keeper should recover the full expired close-order bounty"
-        );
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Keeper should recover the full expired close-order bounty");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
             0,
@@ -1013,7 +1021,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_ExitedAccount_InvalidCloseOrderPaysNoBounty() public {
+    function test_ExitedAccount_InvalidCloseOrderPaysEscrowedBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -1033,10 +1041,8 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Invalid close-order failure should not pay clearer");
-        assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore, 0, "Invalid close-order failure should not book protocol revenue"
-        );
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Invalid close-order failure should pay the escrowed clearer bounty");
+        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Invalid close-order failure should not book protocol revenue");
     }
 
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
@@ -1610,14 +1616,15 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        for (uint256 i = 0; i < 30; i++) {
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), 30e6, "Router should custody the shielded open-order bounty escrow");
-        assertEq(router.pendingOrderCounts(accountId), 30, "Queued open orders should remain pending before liquidation");
+        assertEq(usdc.balanceOf(address(router)), queuedOrderCount * 1e6, "Router should custody the shielded open-order bounty escrow");
+        assertEq(router.pendingOrderCounts(accountId), queuedOrderCount, "Queued open orders should remain pending before liquidation");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -1629,8 +1636,33 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(engine.accumulatedBadDebtUsdc(), 0, "Restored router escrow should prevent avoidable bad debt");
         assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders");
         assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit restored open-order bounty escrow");
-        assertEq(router.executionBountyReserves(30), 0, "All queued open-order bounty escrow should be cleared");
+        assertEq(router.executionBountyReserves(uint64(queuedOrderCount)), 0, "All queued open-order bounty escrow should be cleared");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation");
+    }
+
+    function test_ExecuteLiquidation_RestoresEscrowedCloseBountiesBeforeClearingOrders() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 5_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5_000e18, 0, 0, true);
+        clearinghouse.withdraw(accountId, 68e6);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(102_500_000));
+
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear queued close orders");
+        assertEq(router.executionBountyReserves(1), 0, "Liquidation should restore the first close-order bounty escrow");
+        assertEq(router.executionBountyReserves(2), 0, "Liquidation should restore the second close-order bounty escrow");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation");
     }
 
     function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {

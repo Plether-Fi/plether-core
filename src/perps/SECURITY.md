@@ -56,7 +56,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody, while close orders reserve no router escrow at commit and instead follow the vault-funded close clearer policy on successful or expired execution |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody, while close orders reserve a flat `1.00 USDC` execution bounty the same way |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -146,10 +146,11 @@ The owner **cannot**:
 Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads. At commit time the router seizes the reserved execution bounty from the trader's free settlement into router custody, quoting risk-increasing orders from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
 - **Binding orders**: Traders cannot cancel queued opens or closes once committed, preventing delayed close intents from becoming a free timing option against keepers
-- **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents do not reserve router escrow up front; successful and expired closes instead use a vault-funded flat `1.00 USDC` clearer reward path
+- **Per-account queue cap**: No account may have more than `5` pending orders at once, bounding account-local liquidation cleanup and queue-griefing surface
+- **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` router escrow at commit so clearers are paid from user-funded escrow instead of vault subsidy
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired risk-increasing orders still pay their reserved execution bounty to the executor. Expired close orders may still pay the full vault-funded close clearer reward, while invalid close failures (for example slippage or engine rejection) pay no clearer bounty and book no protocol revenue.
+- **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
 
 #### Engine / Router Trust Boundary
 
@@ -222,7 +223,7 @@ When a position goes underwater (equity < 0):
 
 #### Deferred Liquidation Bounties
 
-- **Behavior**: If the House Pool cannot immediately fund a liquidation bounty or vault-funded close clearer reward, the state transition still completes and the unpaid amount is recorded in the shared deferred bounty liability bucket
+- **Behavior**: If the House Pool cannot immediately fund a liquidation bounty, the state transition still completes and the unpaid amount is recorded in the deferred bounty liability bucket. Order-execution bounties are router-custodied and therefore do not share this vault-liability path.
 - **Claim path**: Once liquidity returns, the keeper calls `claimDeferredClearerBounty()` and the vault pays the owed USDC directly
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid

@@ -61,15 +61,17 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve zero router-custodied bounty at commit time; instead, successful and expired close executions may receive a vault-funded flat `1.00 USDC` clearer reward through `engine.settleCloseOrderExecutionBounty(...)`. Invalid close failures do not pay the clearer and do not book protocol revenue.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents also reserve a flat `1.00 USDC` router-custodied execution bounty at commit time. Successful, expired, and otherwise invalid order attempts therefore all compensate the clearer from user-funded escrow rather than from vault subsidy.
 
-**Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty from the trader's free settlement balance into router custody for risk-increasing orders only. Failed-order rewards for those orders therefore remain independent from vault liquidity. Close-order clearer rewards follow a separate vault-funded policy path and are not user-funded router escrow.
+**Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty from the trader's free settlement balance into router custody for both opens and closes. Failed-order rewards therefore remain independent from vault liquidity across the full order lifecycle.
 
 **Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, residual committed margin, reserved execution bounty, and both intrusive queue link sets. The router still exposes compatibility getters for legacy integrations, but queue/accounting proofs now read from one canonical per-order record.
 
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, `Failed`, and `Cancelled`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
 **Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option.
+
+**Per-Account Queue Cap**: Each account may hold at most `5` pending orders at a time. This bounds account-local cleanup work during liquidation and prevents a single trader from bloating the FIFO with unbounded queued intents.
 
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
@@ -83,7 +85,7 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Deferred Close Payouts**: A profitable close is never dropped solely because the House Pool is temporarily short on free cash. If the vault cannot immediately fund the realized gain, the position is still destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are treated as outstanding protocol liabilities in reserve and solvency accounting. Once liquidity returns, the trader calls `claimDeferredPayout(accountId)` and the vault settles the deferred amount into the `MarginClearinghouse`, after which it becomes normal withdrawable/reusable account balance.
 
-**Fail-Soft Keeper Bounties**: Liquidations are still fail-soft if the House Pool cannot immediately fund the liquidation bounty. The state transition still completes and the unpaid amount is recorded as a deferred bounty claim. The same deferred-bounty bucket is also used for vault-funded close clearer rewards when liquidity is temporarily unavailable.
+**Fail-Soft Keeper Bounties**: Liquidations are still fail-soft if the House Pool cannot immediately fund the liquidation bounty. The state transition still completes and the unpaid amount is recorded as a deferred bounty claim. Order-execution bounties remain router-custodied user escrow, so normal order execution does not depend on vault liquidity.
 
 **Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty claims are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
 

@@ -380,10 +380,10 @@ Required transition rules:
 Current bounty policy notes:
 
 - Risk-increasing orders reserve router-custodied execution bounty at commit time and pay it from that escrow on success/failure/expiry according to policy.
-- Close orders do not reserve user-funded router escrow at commit time.
-- Successful and expired close executions may receive a vault-funded clearer reward through the engine.
-- Invalid close failures do not pay clearer bounty and do not create protocol-fee revenue.
-- The deferred bounty liability bucket is shared by liquidation bounties and vault-funded close clearer rewards when immediate payment is unavailable.
+- Close orders reserve a flat user-funded router escrow bounty at commit time.
+- Successful, expired, and otherwise invalid close executions pay the clearer from that router escrow according to the same terminal bounty policy used by other orders.
+- Close-order execution bounty flow does not create protocol-fee revenue or deferred vault liabilities.
+- The deferred bounty liability bucket is reserved for liquidation bounties when immediate vault payment is unavailable. Order-execution bounties are user-funded router escrow and should never enter this liability bucket.
 
 ## Required Invariants for the Refactor
 
@@ -398,6 +398,7 @@ The refactor should preserve or enforce the following:
 7. a successful close may reduce solvency, but it must never be reverted solely to preserve it
 8. terminal full closes and liquidations must not perform work proportional to total queue length
 9. terminal settlement must not eagerly cancel unrelated queued orders; stale tails may fail lazily at execution time instead
+10. each account must have a hard upper bound on simultaneously pending orders so liquidation cleanup remains bounded in practice
 8. every path that deletes a position re-checks degraded-mode containment
 
 ## Refactor Target Modules

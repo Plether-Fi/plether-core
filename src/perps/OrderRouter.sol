@@ -93,6 +93,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 public constant MAX_PENDING_ORDERS = 5;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -141,6 +142,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
     error OrderRouter__OrdersAreBinding();
+    error OrderRouter__TooManyPendingOrders();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -276,6 +278,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (pendingOrderCounts[accountId] >= MAX_PENDING_ORDERS) {
+            revert OrderRouter__TooManyPendingOrders();
+        }
         if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
             revert OrderRouter__NoOpenPosition();
         }
@@ -291,8 +296,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
-        uint256 executionBountyUsdc =
-            isClose ? 0 : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
+        uint256 executionBountyUsdc = isClose
+            ? _quoteCloseOrderExecutionBountyUsdc()
+            : _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
 
         uint64 orderId = nextCommitId++;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -741,7 +747,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _failedOrderBountyPolicy(
         CfdTypes.Order memory order
     ) internal pure returns (FailedOrderBountyPolicy) {
-        return order.isClose ? FailedOrderBountyPolicy.None : FailedOrderBountyPolicy.ClearerFull;
+        order;
+        return FailedOrderBountyPolicy.ClearerFull;
     }
 
     function _cleanupOrder(
@@ -777,7 +784,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
     }
 
-    function _restoreEscrowedOpenOrderBountiesForLiquidation(
+    function _restoreEscrowedOrderBountiesForLiquidation(
         IMarginClearinghouse clearinghouse,
         bytes32 accountId
     ) internal {
@@ -785,7 +792,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
-            if (!record.core.isClose && record.executionBountyUsdc > 0) {
+            if (record.executionBountyUsdc > 0) {
                 restoredUsdc += record.executionBountyUsdc;
                 record.executionBountyUsdc = 0;
             }
@@ -1010,32 +1017,14 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
             _clearCommittedMargin(orderId);
-            if (orderRecords[orderId].core.isClose) {
-                _settleCloseOrderExecutionBounty(FailedOrderBountyPolicy.ClearerFull);
-            } else {
-                _collectExecutionBounty(orderId);
-            }
+            _collectExecutionBounty(orderId);
         } else {
             _releaseCommittedMargin(orderId);
-            if (orderRecords[orderId].core.isClose) {
-                if (failedPolicy != FailedOrderBountyPolicy.None) {
-                    _settleCloseOrderExecutionBounty(failedPolicy);
-                }
-            } else if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
+            if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
             }
         }
         return 0;
-    }
-
-    function _settleCloseOrderExecutionBounty(
-        FailedOrderBountyPolicy failedPolicy
-    ) internal {
-        uint256 bountyUsdc = _quoteCloseOrderExecutionBountyUsdc();
-        if (failedPolicy != FailedOrderBountyPolicy.ClearerFull) {
-            return;
-        }
-        engine.settleCloseOrderExecutionBounty(msg.sender, bountyUsdc, 0);
     }
 
     function _deleteOrder(
@@ -1240,7 +1229,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        _restoreEscrowedOpenOrderBountiesForLiquidation(clearinghouse, accountId);
+        _restoreEscrowedOrderBountiesForLiquidation(clearinghouse, accountId);
 
         uint256 vaultDepth = vault.totalAssets();
         uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
