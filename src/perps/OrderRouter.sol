@@ -785,6 +785,42 @@ contract OrderRouter is Ownable2Step, Pausable {
         }
     }
 
+    function _restoreEscrowedOpenOrderBountiesForLiquidation(
+        IMarginClearinghouse clearinghouse,
+        bytes32 accountId
+    ) internal {
+        uint256 restoredUsdc;
+        uint64 orderId = pendingHeadOrderId[accountId];
+        while (orderId != 0) {
+            OrderRecord storage record = orderRecords[orderId];
+            if (!record.core.isClose && record.executionBountyUsdc > 0) {
+                restoredUsdc += record.executionBountyUsdc;
+                record.executionBountyUsdc = 0;
+            }
+            orderId = record.nextPendingOrderId;
+        }
+
+        if (restoredUsdc == 0) {
+            return;
+        }
+
+        USDC.safeTransfer(address(clearinghouse), restoredUsdc);
+        clearinghouse.settleUsdc(accountId, int256(restoredUsdc));
+    }
+
+    function _clearLiquidatedAccountOrders(
+        bytes32 accountId
+    ) internal {
+        uint64 orderId = pendingHeadOrderId[accountId];
+        while (orderId != 0) {
+            uint64 nextOrderId = orderRecords[orderId].nextPendingOrderId;
+            _releaseCommittedMargin(orderId);
+            emit OrderFailed(orderId, "Account liquidated");
+            _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Failed);
+            orderId = nextOrderId;
+        }
+    }
+
     function _quoteOpenOrderExecutionBountyUsdc(
         uint256 sizeDelta,
         uint256 price
@@ -1211,8 +1247,13 @@ contract OrderRouter is Ownable2Step, Pausable {
             }
         }
 
+        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
+        _restoreEscrowedOpenOrderBountiesForLiquidation(clearinghouse, accountId);
+
         uint256 vaultDepth = vault.totalAssets();
         uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
+
+        _clearLiquidatedAccountOrders(accountId);
 
         _payOrDeferLiquidationBounty(keeperBountyUsdc);
 

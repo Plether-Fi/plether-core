@@ -1576,6 +1576,84 @@ contract NormalizePythFuzzTest is Test {
 
 }
 
+contract OrderRouterLiquidationEscrowTest is BasePerpTest {
+
+    address trader = address(0xC10A);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 1e6,
+            bountyBps: 9
+        });
+    }
+
+    function test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        for (uint256 i = 0; i < 30; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(address(router)), 30e6, "Router should custody the shielded open-order bounty escrow");
+        assertEq(router.pendingOrderCounts(accountId), 30, "Queued open orders should remain pending before liquidation");
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(102_500_000));
+
+        router.executeLiquidation(accountId, priceData);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Liquidation should still clear the underwater position");
+        assertEq(engine.accumulatedBadDebtUsdc(), 0, "Restored router escrow should prevent avoidable bad debt");
+        assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders");
+        assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit restored open-order bounty escrow");
+        assertEq(router.executionBountyReserves(30), 0, "All queued open-order bounty escrow should be cleared");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation");
+    }
+
+    function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        for (uint256 i = 0; i < 30; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        uint256 traderUsdcBefore = usdc.balanceOf(trader);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(102_500_000));
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(router.nextExecuteId(), 31, "Liquidation should consume the liquidated account's queued orders");
+
+        vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        router.executeOrderBatch(30, priceData);
+
+        assertEq(usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation");
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no escrow for post-liquidation recovery");
+    }
+}
+
 contract FadStalenessTest is BasePerpTest {
 
     MockPyth mockPyth;
