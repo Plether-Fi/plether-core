@@ -489,6 +489,7 @@ contract MarginClearinghouse is Ownable2Step {
     /// @dev Unrelated locked margin remains protected.
     function consumeFundingLoss(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
@@ -513,6 +514,9 @@ contract MarginClearinghouse is Ownable2Step {
 
         if (mutation.positionMarginUnlockedUsdc > 0) {
             _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc);
+        }
+        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+            _consumeOtherLockedMarginViaReservations(accountId, reservationOrderIds, mutation.otherLockedMarginUnlockedUsdc);
         }
 
         uint256 totalConsumedUsdc = mutation.settlementDebitUsdc;

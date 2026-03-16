@@ -345,8 +345,9 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
+        uint64[] memory reservationIds = new uint64[](0);
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
-            clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 1200 * 1e6, engine);
+            clearinghouse.consumeFundingLoss(aliceId, reservationIds, 600 * 1e6, 1200 * 1e6, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -366,12 +367,15 @@ contract MarginClearinghouseTest is Test {
 
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
-        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 61, 300 * 1e6);
+        uint64[] memory reservationIds = new uint64[](1);
+        reservationIds[0] = 61;
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
-            clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 2000 * 1e6, engine);
+            clearinghouse.consumeFundingLoss(aliceId, reservationIds, 600 * 1e6, 2000 * 1e6, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(61);
         assertEq(freeConsumed, 1100 * 1e6);
         assertEq(marginConsumed, 600 * 1e6);
         assertEq(uncovered, 300 * 1e6, "Funding loss planner should report residual uncovered loss");
@@ -380,6 +384,8 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.activePositionMarginUsdc, 0);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
+        assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
+        assertEq(reservation.remainingAmountUsdc, 300 * 1e6);
     }
 
     function test_ConsumeLiquidationResidual_ConsumesQueuedCommittedMarginBeforeBadDebt() public {

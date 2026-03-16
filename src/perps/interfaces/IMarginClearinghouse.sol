@@ -146,6 +146,7 @@ interface IMarginClearinghouse {
     /// @notice Consumes funding loss from free settlement plus the active position margin bucket.
     function consumeFundingLoss(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
