@@ -420,7 +420,7 @@ contract PerpInvariantTest is BasePerpTest {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-                clearinghouse.getAccountUsdcBuckets(accountId, size > 0 ? margin : 0);
+                clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
                 buckets.settlementBalanceUsdc,
@@ -446,7 +446,7 @@ contract PerpInvariantTest is BasePerpTest {
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
             IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-                clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+                clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
                 clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
@@ -889,7 +889,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public {
         for (uint256 i = 0; i < 4; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.actors(i))));
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId, 0);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
             assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
         }
     }

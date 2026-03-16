@@ -847,7 +847,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 amount = _remainingCommittedMargin(record);
         _consumeCommittedMarginForOrder(record);
         if (amount > 0) {
-            IMarginClearinghouse(engine.clearinghouse()).unlockMargin(record.core.accountId, amount);
+            IMarginClearinghouse(engine.clearinghouse()).unlockCommittedOrderMargin(record.core.accountId, amount);
         }
     }
 
@@ -984,7 +984,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         if (isClose || marginDelta == 0) {
             return;
         }
-        clearinghouse.lockMargin(accountId, marginDelta);
+        clearinghouse.lockCommittedOrderMargin(accountId, marginDelta);
         orderRecords[orderId].committedMarginOffsetUsdc = marginTailOffsetUsdc[accountId];
         orderRecords[orderId].committedMarginUsdc = marginDelta;
         marginTailOffsetUsdc[accountId] += marginDelta;

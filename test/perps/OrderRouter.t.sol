@@ -9,6 +9,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
@@ -369,6 +370,60 @@ contract OrderRouterTest is BasePerpTest {
         assertTrue(router.isInMarginQueue(1), "Drained order stays linked until it is individually processed");
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
+    }
+
+    function test_NoteCommittedMarginConsumed_ReconcilesPerOrderReleaseAfterPartialBucketConsumption() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        vm.stopPrank();
+
+        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        vm.prank(alice);
+        clearinghouse.withdraw(accountId, freeSettlement);
+
+        IMarginClearinghouse.LockedMarginBuckets memory beforeBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        assertEq(beforeBuckets.committedOrderMarginUsdc, 50 * 1e6, "Setup must lock both committed-order buckets");
+
+        vm.prank(address(engine));
+        clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
+
+        vm.prank(address(engine));
+        router.noteCommittedMarginConsumed(accountId, 30 * 1e6);
+
+        assertEq(router.committedMargins(1), 0, "First order should be fully consumed before release");
+        assertEq(router.committedMargins(2), 20 * 1e6, "Second order should retain only the unconsumed committed margin");
+
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+        router.executeOrder(2, empty);
+
+        IMarginClearinghouse.LockedMarginBuckets memory afterBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        assertEq(afterBuckets.committedOrderMarginUsdc, 0, "Per-order release must reconcile with partially consumed committed-order buckets");
+        assertEq(router.committedMargins(1), 0, "First order committed margin should stay zero after release");
+        assertEq(router.committedMargins(2), 0, "Second order committed margin should release only the residual tracked amount");
+    }
+
+    function test_ReleaseCommittedMargin_RevertsIfClearinghouseBucketWasConsumedWithoutRouterSync() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        vm.stopPrank();
+
+        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        vm.prank(alice);
+        clearinghouse.withdraw(accountId, freeSettlement);
+
+        vm.prank(address(engine));
+        clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
+
+        bytes[] memory empty;
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
+        router.executeOrder(1, empty);
     }
 
     function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {

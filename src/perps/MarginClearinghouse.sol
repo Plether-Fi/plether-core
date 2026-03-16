@@ -20,7 +20,9 @@ contract MarginClearinghouse is Ownable2Step {
 
     mapping(bytes32 => uint256) internal settlementBalances;
 
-    mapping(bytes32 => uint256) public lockedMarginUsdc;
+    mapping(bytes32 => uint256) internal positionMarginUsdc;
+    mapping(bytes32 => uint256) internal committedOrderMarginUsdc;
+    mapping(bytes32 => uint256) internal reservedSettlementUsdc;
 
     address public immutable settlementAsset;
     address public engine;
@@ -33,13 +35,15 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__InsufficientUsdcForSettlement();
     error MarginClearinghouse__InsufficientAssetToSeize();
     error MarginClearinghouse__InvalidSeizeRecipient();
+    error MarginClearinghouse__InvalidMarginBucket();
     error MarginClearinghouse__EngineAlreadySet();
     error MarginClearinghouse__ZeroAddress();
+    error MarginClearinghouse__InsufficientBucketMargin();
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
-    event MarginLocked(bytes32 indexed accountId, uint256 amountUsdc);
-    event MarginUnlocked(bytes32 indexed accountId, uint256 amountUsdc);
+    event MarginLocked(bytes32 indexed accountId, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
+    event MarginUnlocked(bytes32 indexed accountId, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
     event AssetSeized(bytes32 indexed accountId, address indexed asset, uint256 amount, address recipient);
 
     modifier onlyOperator() {
@@ -118,10 +122,11 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         uint256 remainingEquity = getAccountEquityUsdc(accountId);
-        if (remainingEquity < lockedMarginUsdc[accountId]) {
+        uint256 totalLockedMargin = _totalLockedMarginUsdc(accountId);
+        if (remainingEquity < totalLockedMargin) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (settlementBalances[accountId] < lockedMarginUsdc[accountId]) {
+        if (settlementBalances[accountId] < totalLockedMargin) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
 
@@ -149,33 +154,31 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) public view returns (uint256) {
         uint256 equity = getAccountEquityUsdc(accountId);
-        uint256 encumbered = lockedMarginUsdc[accountId];
+        uint256 encumbered = _totalLockedMarginUsdc(accountId);
         return equity > encumbered ? equity - encumbered : 0;
     }
 
-    /// @notice Returns the explicit USDC bucket split after subtracting locked margin.
-    /// @dev This is the physically reachable settlement USDC left after backing active positions.
-    ///      In the current USDC-only model it aligns with free buying power once the active bucket is chosen.
+    /// @notice Returns the explicit USDC bucket split after subtracting the clearinghouse's typed locked-margin buckets.
     function getAccountUsdcBuckets(
-        bytes32 accountId,
-        uint256 activePositionMarginUsdc
+        bytes32 accountId
     ) public view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
-        buckets = _buildAccountUsdcBuckets(accountId, activePositionMarginUsdc);
+        buckets = _buildAccountUsdcBuckets(accountId);
     }
 
     function getFreeSettlementBalanceUsdc(
         bytes32 accountId
     ) public view returns (uint256) {
-        return getAccountUsdcBuckets(accountId, 0).freeSettlementUsdc;
+        return getAccountUsdcBuckets(accountId).freeSettlementUsdc;
     }
 
     /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
     function getLiquidationReachableUsdc(
         bytes32 accountId,
-        uint256 positionMarginUsdc
+        uint256 protectedPositionMarginUsdc
     ) public view returns (uint256) {
+        protectedPositionMarginUsdc;
         return MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(
-            _buildAccountUsdcBuckets(accountId, positionMarginUsdc)
+            _buildAccountUsdcBuckets(accountId)
         );
     }
 
@@ -188,7 +191,7 @@ contract MarginClearinghouse is Ownable2Step {
         uint256 protectedLockedMarginUsdc
     ) public view returns (uint256) {
         return MarginClearinghouseAccountingLib.getSettlementReachableUsdc(
-            _buildAccountUsdcBuckets(accountId, 0), protectedLockedMarginUsdc
+            _buildAccountUsdcBuckets(accountId), protectedLockedMarginUsdc
         );
     }
 
@@ -200,21 +203,49 @@ contract MarginClearinghouse is Ownable2Step {
     ///         Requires sufficient USDC to back settlement (non-USDC equity alone is insufficient).
     /// @param accountId Account to lock margin on
     /// @param amountUsdc USDC amount to lock (6 decimals)
-    function lockMargin(
+    function lockPositionMargin(
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
-        _lockMargin(accountId, amountUsdc);
+        _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
-    /// @notice Unlocks margin when a CFD trade closes
+    /// @notice Unlocks active position margin when a CFD trade closes
     /// @param accountId Account to unlock margin on
     /// @param amountUsdc USDC amount to unlock (6 decimals), clamped to current locked amount
-    function unlockMargin(
+    function unlockPositionMargin(
         bytes32 accountId,
         uint256 amountUsdc
     ) external onlyOperator {
-        _unlockMargin(accountId, amountUsdc);
+        _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
+    }
+
+    function lockCommittedOrderMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        _lockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
+    }
+
+    function unlockCommittedOrderMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
+    }
+
+    function lockReservedSettlement(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        _lockMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+    }
+
+    function unlockReservedSettlement(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyOperator {
+        _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
     /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
@@ -242,7 +273,7 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         _creditSettlementUsdc(accountId, amountUsdc);
-        _lockMargin(accountId, amountUsdc);
+        _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
     /// @notice Applies an open/increase trade cost by debiting or crediting settlement and updating locked margin.
@@ -266,9 +297,9 @@ contract MarginClearinghouse is Ownable2Step {
 
         netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
         if (netMarginChangeUsdc > 0) {
-            _lockMargin(accountId, uint256(netMarginChangeUsdc));
+            _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(netMarginChangeUsdc));
         } else if (netMarginChangeUsdc < 0) {
-            _unlockMargin(accountId, uint256(-netMarginChangeUsdc));
+            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
         }
     }
 
@@ -289,18 +320,17 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            _planFundingLossConsumption(accountId, lockedPositionMarginUsdc, lossUsdc);
+            _planFundingLossConsumption(accountId, lossUsdc);
         freeSettlementConsumedUsdc = consumption.freeSettlementConsumedUsdc;
         marginConsumedUsdc = consumption.activeMarginConsumedUsdc;
         uncoveredUsdc = consumption.uncoveredUsdc;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+            _buildAccountUsdcBuckets(accountId);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
             MarginClearinghouseAccountingLib.applyFundingLossMutation(buckets, consumption);
 
-        if (mutation.activeMarginUnlockedUsdc > 0) {
-            lockedMarginUsdc[accountId] = mutation.resultingLockedMarginUsdc;
-            emit MarginUnlocked(accountId, mutation.activeMarginUnlockedUsdc);
+        if (mutation.positionMarginUnlockedUsdc > 0) {
+            _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc);
         }
 
         uint256 totalConsumedUsdc = mutation.settlementDebitUsdc;
@@ -325,7 +355,7 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            _buildAccountUsdcBuckets(accountId, protectedLockedMarginUsdc);
+            _buildAccountUsdcBuckets(accountId);
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
@@ -337,14 +367,11 @@ contract MarginClearinghouse is Ownable2Step {
             return (0, shortfallUsdc);
         }
 
-        if (mutation.activeMarginUnlockedUsdc > 0 || mutation.otherLockedMarginUnlockedUsdc > 0) {
-            lockedMarginUsdc[accountId] = mutation.resultingLockedMarginUsdc;
-            if (mutation.activeMarginUnlockedUsdc > 0) {
-                emit MarginUnlocked(accountId, mutation.activeMarginUnlockedUsdc);
-            }
-            if (mutation.otherLockedMarginUnlockedUsdc > 0) {
-                emit MarginUnlocked(accountId, mutation.otherLockedMarginUnlockedUsdc);
-            }
+        if (mutation.positionMarginUnlockedUsdc > 0) {
+            _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc);
+        }
+        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+            _consumeOtherLockedMargin(accountId, mutation.otherLockedMarginUnlockedUsdc);
         }
 
         settlementBalances[accountId] -= mutation.settlementDebitUsdc;
@@ -361,19 +388,18 @@ contract MarginClearinghouse is Ownable2Step {
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc);
+            _buildAccountUsdcBuckets(accountId);
         MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
             MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
         seizedUsdc = plan.seizedUsdc;
         payoutUsdc = plan.payoutUsdc;
         badDebtUsdc = plan.badDebtUsdc;
 
-        if (lockedPositionMarginUsdc > 0) {
-            lockedMarginUsdc[accountId] = plan.mutation.resultingLockedMarginUsdc;
-            emit MarginUnlocked(accountId, plan.mutation.activeMarginUnlockedUsdc);
-            if (plan.mutation.otherLockedMarginUnlockedUsdc > 0) {
-                emit MarginUnlocked(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
-            }
+        if (plan.mutation.positionMarginUnlockedUsdc > 0) {
+            _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, plan.mutation.positionMarginUnlockedUsdc);
+        }
+        if (plan.mutation.otherLockedMarginUnlockedUsdc > 0) {
+            _consumeOtherLockedMargin(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
         }
 
         if (seizedUsdc > 0) {
@@ -384,21 +410,19 @@ contract MarginClearinghouse is Ownable2Step {
     }
 
     function _buildAccountUsdcBuckets(
-        bytes32 accountId,
-        uint256 activePositionMarginUsdc
+        bytes32 accountId
     ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalances[accountId], lockedMarginUsdc[accountId], activePositionMarginUsdc
+            settlementBalances[accountId], positionMarginUsdc[accountId], committedOrderMarginUsdc[accountId], reservedSettlementUsdc[accountId]
         );
     }
 
     function _planFundingLossConsumption(
         bytes32 accountId,
-        uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc
     ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
         return MarginClearinghouseAccountingLib.planFundingLossConsumption(
-            _buildAccountUsdcBuckets(accountId, lockedPositionMarginUsdc), lossUsdc
+            _buildAccountUsdcBuckets(accountId), lossUsdc
         );
     }
 
@@ -421,28 +445,108 @@ contract MarginClearinghouse is Ownable2Step {
 
     function _lockMargin(
         bytes32 accountId,
+        IMarginClearinghouse.MarginBucket bucket,
         uint256 amountUsdc
     ) internal {
         if (getFreeBuyingPowerUsdc(accountId) < amountUsdc) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        if (settlementBalances[accountId] < lockedMarginUsdc[accountId] + amountUsdc) {
+        if (settlementBalances[accountId] < _totalLockedMarginUsdc(accountId) + amountUsdc) {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
-        lockedMarginUsdc[accountId] += amountUsdc;
-        emit MarginLocked(accountId, amountUsdc);
+        _setBucketStorage(bucket, accountId, _bucketStorage(bucket, accountId) + amountUsdc);
+        emit MarginLocked(accountId, bucket, amountUsdc);
     }
 
     function _unlockMargin(
         bytes32 accountId,
+        IMarginClearinghouse.MarginBucket bucket,
         uint256 amountUsdc
     ) internal {
-        if (lockedMarginUsdc[accountId] >= amountUsdc) {
-            lockedMarginUsdc[accountId] -= amountUsdc;
-        } else {
-            lockedMarginUsdc[accountId] = 0;
+        _consumeLockedMargin(accountId, bucket, amountUsdc);
+    }
+
+    /// @dev Consumes non-position locked margin by priority: committed-order margin first, then reserved settlement.
+    ///      Queued order margin is released before reserved settlement because failed/cancelled order intents are softer
+    ///      obligations than explicitly reserved settlement buckets.
+    function _consumeOtherLockedMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
         }
-        emit MarginUnlocked(accountId, amountUsdc);
+
+        uint256 committedConsumedUsdc = amountUsdc > committedOrderMarginUsdc[accountId]
+            ? committedOrderMarginUsdc[accountId]
+            : amountUsdc;
+        if (committedConsumedUsdc > 0) {
+            committedOrderMarginUsdc[accountId] -= committedConsumedUsdc;
+            emit MarginUnlocked(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, committedConsumedUsdc);
+        }
+
+        uint256 remainingUsdc = amountUsdc - committedConsumedUsdc;
+        if (remainingUsdc > 0) {
+            if (reservedSettlementUsdc[accountId] < remainingUsdc) {
+                revert MarginClearinghouse__InsufficientBucketMargin();
+            }
+            reservedSettlementUsdc[accountId] -= remainingUsdc;
+            emit MarginUnlocked(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, remainingUsdc);
+        }
+    }
+
+    function _consumeLockedMargin(
+        bytes32 accountId,
+        IMarginClearinghouse.MarginBucket bucket,
+        uint256 amountUsdc
+    ) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+        uint256 currentBucket = _bucketStorage(bucket, accountId);
+        if (currentBucket < amountUsdc) {
+            revert MarginClearinghouse__InsufficientBucketMargin();
+        }
+        _setBucketStorage(bucket, accountId, currentBucket - amountUsdc);
+        emit MarginUnlocked(accountId, bucket, amountUsdc);
+    }
+
+    function _bucketStorage(
+        IMarginClearinghouse.MarginBucket bucket,
+        bytes32 accountId
+    ) internal view returns (uint256 bucketValue) {
+        if (bucket == IMarginClearinghouse.MarginBucket.Position) {
+            return positionMarginUsdc[accountId];
+        }
+        if (bucket == IMarginClearinghouse.MarginBucket.CommittedOrder) {
+            return committedOrderMarginUsdc[accountId];
+        }
+        if (bucket == IMarginClearinghouse.MarginBucket.ReservedSettlement) {
+            return reservedSettlementUsdc[accountId];
+        }
+        revert MarginClearinghouse__InvalidMarginBucket();
+    }
+
+    function _setBucketStorage(
+        IMarginClearinghouse.MarginBucket bucket,
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        if (bucket == IMarginClearinghouse.MarginBucket.Position) {
+            positionMarginUsdc[accountId] = amountUsdc;
+        } else if (bucket == IMarginClearinghouse.MarginBucket.CommittedOrder) {
+            committedOrderMarginUsdc[accountId] = amountUsdc;
+        } else if (bucket == IMarginClearinghouse.MarginBucket.ReservedSettlement) {
+            reservedSettlementUsdc[accountId] = amountUsdc;
+        } else {
+            revert MarginClearinghouse__InvalidMarginBucket();
+        }
+    }
+
+    function _totalLockedMarginUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return positionMarginUsdc[accountId] + committedOrderMarginUsdc[accountId] + reservedSettlementUsdc[accountId];
     }
 
     /// @notice Transfers settlement USDC from an account to the calling operator.
@@ -476,6 +580,21 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) external view returns (uint256) {
         return settlementBalances[accountId];
+    }
+
+    function lockedMarginUsdc(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return _totalLockedMarginUsdc(accountId);
+    }
+
+    function getLockedMarginBuckets(
+        bytes32 accountId
+    ) external view returns (IMarginClearinghouse.LockedMarginBuckets memory buckets) {
+        buckets.positionMarginUsdc = positionMarginUsdc[accountId];
+        buckets.committedOrderMarginUsdc = committedOrderMarginUsdc[accountId];
+        buckets.reservedSettlementUsdc = reservedSettlementUsdc[accountId];
+        buckets.totalLockedMarginUsdc = _totalLockedMarginUsdc(accountId);
     }
 
 }

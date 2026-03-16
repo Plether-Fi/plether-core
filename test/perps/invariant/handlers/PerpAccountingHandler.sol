@@ -667,7 +667,7 @@ contract PerpAccountingHandler is Test {
         (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         uint256 protectedMargin = size > 0 ? margin : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+            clearinghouse.getAccountUsdcBuckets(accountId);
         return buckets.freeSettlementUsdc;
     }
 

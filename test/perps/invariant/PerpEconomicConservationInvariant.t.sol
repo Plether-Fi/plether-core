@@ -82,12 +82,28 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             uint256 protectedMargin = size > 0 ? margin : 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-                clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+                clearinghouse.getAccountUsdcBuckets(accountId);
+            IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
 
             assertEq(
                 buckets.totalLockedMarginUsdc,
                 buckets.activePositionMarginUsdc + buckets.otherLockedMarginUsdc,
                 "Tracked account locked margin buckets must reconcile"
+            );
+            assertEq(
+                buckets.activePositionMarginUsdc,
+                lockedBuckets.positionMarginUsdc,
+                "Tracked account active margin must equal typed position margin bucket"
+            );
+            assertEq(
+                buckets.otherLockedMarginUsdc,
+                lockedBuckets.committedOrderMarginUsdc + lockedBuckets.reservedSettlementUsdc,
+                "Tracked account other locked margin must equal typed non-position buckets"
+            );
+            assertEq(
+                buckets.totalLockedMarginUsdc,
+                lockedBuckets.totalLockedMarginUsdc,
+                "Tracked account total locked margin must equal typed bucket total"
             );
             assertEq(
                 buckets.settlementBalanceUsdc,
@@ -110,7 +126,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
             ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-                clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+                clearinghouse.getAccountUsdcBuckets(accountId);
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
             assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc, "Account ledger settlement mismatch");
@@ -156,6 +172,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
             CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
             CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
 
             assertEq(snapshot.settlementBalanceUsdc, ledgerView.settlementBalanceUsdc, "Account snapshot settlement mismatch");
             assertEq(snapshot.freeSettlementUsdc, ledgerView.freeSettlementUsdc, "Account snapshot free settlement mismatch");
@@ -168,6 +185,27 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 snapshot.otherLockedMarginUsdc,
                 ledgerView.otherLockedMarginUsdc,
                 "Account snapshot other locked margin mismatch"
+            );
+            assertEq(snapshot.positionMarginBucketUsdc, lockedBuckets.positionMarginUsdc, "Account snapshot position bucket mismatch");
+            assertEq(
+                snapshot.committedOrderMarginBucketUsdc,
+                lockedBuckets.committedOrderMarginUsdc,
+                "Account snapshot committed-order bucket mismatch"
+            );
+            assertEq(
+                snapshot.reservedSettlementBucketUsdc,
+                lockedBuckets.reservedSettlementUsdc,
+                "Account snapshot reserved-settlement bucket mismatch"
+            );
+            assertEq(
+                snapshot.activePositionMarginUsdc,
+                snapshot.positionMarginBucketUsdc,
+                "Account snapshot active margin must equal typed position bucket"
+            );
+            assertEq(
+                snapshot.otherLockedMarginUsdc,
+                snapshot.committedOrderMarginBucketUsdc + snapshot.reservedSettlementBucketUsdc,
+                "Account snapshot other locked margin must equal typed non-position buckets"
             );
             assertEq(snapshot.executionEscrowUsdc, ledgerView.executionEscrowUsdc, "Account snapshot execution escrow mismatch");
             assertEq(snapshot.committedMarginUsdc, ledgerView.committedMarginUsdc, "Account snapshot committed margin mismatch");

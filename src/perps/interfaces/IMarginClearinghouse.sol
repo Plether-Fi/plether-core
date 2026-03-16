@@ -4,6 +4,19 @@ pragma solidity 0.8.33;
 /// @notice USDC-only cross-margin account system that holds settlement balances and settles PnL for CFD positions.
 interface IMarginClearinghouse {
 
+    enum MarginBucket {
+        Position,
+        CommittedOrder,
+        ReservedSettlement
+    }
+
+    struct LockedMarginBuckets {
+        uint256 positionMarginUsdc;
+        uint256 committedOrderMarginUsdc;
+        uint256 reservedSettlementUsdc;
+        uint256 totalLockedMarginUsdc;
+    }
+
     struct AccountUsdcBuckets {
         uint256 settlementBalanceUsdc;
         uint256 totalLockedMarginUsdc;
@@ -20,13 +33,37 @@ interface IMarginClearinghouse {
     function lockedMarginUsdc(
         bytes32 accountId
     ) external view returns (uint256);
-    /// @notice Locks margin to back a new CFD position
-    function lockMargin(
+    /// @notice Returns the typed locked-margin buckets for an account.
+    function getLockedMarginBuckets(
+        bytes32 accountId
+    ) external view returns (LockedMarginBuckets memory buckets);
+    /// @notice Locks trader-owned settlement into the active position margin bucket.
+    function lockPositionMargin(
         bytes32 accountId,
         uint256 amountUsdc
     ) external;
-    /// @notice Unlocks margin when a CFD position closes
-    function unlockMargin(
+    /// @notice Unlocks active position margin back into free settlement.
+    function unlockPositionMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Locks trader-owned settlement into the committed-order bucket reserved for queued open orders.
+    function lockCommittedOrderMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Unlocks committed-order margin back into free settlement when a queued open order is released.
+    function unlockCommittedOrderMargin(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
+    function lockReservedSettlement(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
+    /// @notice Unlocks settlement from the reserved bucket back into free settlement.
+    function unlockReservedSettlement(
         bytes32 accountId,
         uint256 amountUsdc
     ) external;
@@ -74,11 +111,8 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
-    /// @notice Returns the explicit USDC bucket split for an account.
-    /// @dev `activePositionMarginUsdc` is the margin bucket currently backing the live position being reasoned about.
     function getAccountUsdcBuckets(
-        bytes32 accountId,
-        uint256 activePositionMarginUsdc
+        bytes32 accountId
     ) external view returns (AccountUsdcBuckets memory buckets);
     /// @notice Returns total account equity in settlement USDC (6 decimals)
     function getAccountEquityUsdc(

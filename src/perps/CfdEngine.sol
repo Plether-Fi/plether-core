@@ -542,7 +542,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__NoOpenPosition();
         }
 
-        clearinghouse.lockMargin(accountId, amount);
+        clearinghouse.lockPositionMargin(accountId, amount);
         pos.margin += amount;
         _sideState(pos.side).totalMargin += amount;
         pos.lastUpdateTime = uint64(block.timestamp);
@@ -955,7 +955,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__DustPosition();
         }
 
-        clearinghouse.unlockMargin(order.accountId, closeState.marginToFreeUsdc);
+        clearinghouse.unlockPositionMargin(order.accountId, closeState.marginToFreeUsdc);
         pos.vpiAccrued -= closeState.proportionalAccrualUsdc;
 
         collectedExecFeeUsdc = _settleCloseNetSettlement(
@@ -1074,7 +1074,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 remainingPosMarginUsdc
     ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
+            clearinghouse.getAccountUsdcBuckets(accountId);
         consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, remainingPosMarginUsdc, lossUsdc);
     }
@@ -1086,7 +1086,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 remainingPosMarginUsdc
     ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, remainingPosMarginUsdc);
+            clearinghouse.getAccountUsdcBuckets(accountId);
         result = CfdEngineSettlementLib.closeSettlementResultForTerminalBuckets(
             buckets, remainingPosMarginUsdc, lossUsdc, execFeeUsdc
         );
@@ -1099,11 +1099,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 remainingPosMarginUsdc,
         uint256 marginToFreeUsdc
     ) internal view returns (CfdEngineSettlementLib.CloseSettlementResult memory result) {
-        uint256 totalLockedMarginUsdc = clearinghouse.lockedMarginUsdc(accountId);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             clearinghouse.balanceUsdc(accountId),
-            totalLockedMarginUsdc > marginToFreeUsdc ? totalLockedMarginUsdc - marginToFreeUsdc : 0,
-            remainingPosMarginUsdc
+            lockedBuckets.positionMarginUsdc > marginToFreeUsdc ? lockedBuckets.positionMarginUsdc - marginToFreeUsdc : 0,
+            lockedBuckets.committedOrderMarginUsdc,
+            lockedBuckets.reservedSettlementUsdc
         );
         result = CfdEngineSettlementLib.closeSettlementResultForTerminalBuckets(
             buckets, remainingPosMarginUsdc, lossUsdc, execFeeUsdc
@@ -1117,7 +1118,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal returns (CfdEngineSettlementLib.LiquidationSettlementResult memory result) {
         MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
             MarginClearinghouseAccountingLib.planLiquidationResidual(
-                clearinghouse.getAccountUsdcBuckets(accountId, positionMarginUsdc), residualUsdc
+                clearinghouse.getAccountUsdcBuckets(accountId), residualUsdc
             );
         (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) =
             clearinghouse.consumeLiquidationResidual(accountId, positionMarginUsdc, residualUsdc, address(vault));
@@ -1230,7 +1231,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) external view returns (AccountCollateralView memory viewData) {
         CfdTypes.Position memory pos = positions[accountId];
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, pos.margin);
+            clearinghouse.getAccountUsdcBuckets(accountId);
         viewData.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         viewData.lockedMarginUsdc = buckets.totalLockedMarginUsdc;
         viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
@@ -1270,13 +1271,17 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     ) internal view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
         CfdTypes.Position memory pos = positions[accountId];
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, pos.margin);
+            clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId);
 
         snapshot.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
         snapshot.freeSettlementUsdc = buckets.freeSettlementUsdc;
         snapshot.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
         snapshot.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+        snapshot.positionMarginBucketUsdc = lockedBuckets.positionMarginUsdc;
+        snapshot.committedOrderMarginBucketUsdc = lockedBuckets.committedOrderMarginUsdc;
+        snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
         snapshot.executionEscrowUsdc = escrow.executionBountyUsdc;
         snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
         snapshot.deferredPayoutUsdc = deferredPayoutUsdc[accountId];

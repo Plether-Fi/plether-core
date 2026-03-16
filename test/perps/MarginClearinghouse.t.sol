@@ -91,7 +91,7 @@ contract MarginClearinghouseTest is Test {
 
         // 1. Engine locks $4,000 of Buying Power for a CFD trade
         vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 4000 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 4000 * 1e6);
 
         // 2. Check Free Buying Power
         uint256 freeBp = clearinghouse.getFreeBuyingPowerUsdc(aliceId);
@@ -119,7 +119,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 5000 * 1e6);
 
         vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 4500 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 4500 * 1e6);
 
         uint256 freeBp = clearinghouse.getFreeBuyingPowerUsdc(aliceId);
         assertEq(freeBp, 500 * 1e6, "Free BP should be $500");
@@ -129,14 +129,16 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.withdraw(aliceId, 1000 * 1e6);
     }
 
-    function test_GetAccountUsdcBuckets_SplitsActiveAndQueuedMarginBuckets() public {
+    function test_GetAccountUsdcBuckets_SplitsTypedLockedMarginBuckets() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
-        vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
+        vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 600 * 1e6);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
 
         assertEq(buckets.settlementBalanceUsdc, 2000 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
@@ -145,18 +147,37 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 1100 * 1e6);
     }
 
-    function test_GetAccountUsdcBuckets_ClampsActiveMarginToTotalLocked() public {
+    function test_GetLockedMarginBuckets_ReturnsTypedBucketBreakdown() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
 
-        vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 200 * 1e6);
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 200 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 100 * 1e6);
+        vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 500 * 1e6);
+        IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
 
-        assertEq(buckets.activePositionMarginUsdc, 200 * 1e6);
-        assertEq(buckets.otherLockedMarginUsdc, 0);
-        assertEq(buckets.freeSettlementUsdc, 800 * 1e6);
+        assertEq(buckets.positionMarginUsdc, 200 * 1e6);
+        assertEq(buckets.committedOrderMarginUsdc, 100 * 1e6);
+        assertEq(buckets.reservedSettlementUsdc, 0);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+    }
+
+    function test_UnlockCommittedOrderMargin_DoesNotTouchPositionBucket() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 400 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 200 * 1e6);
+        clearinghouse.unlockCommittedOrderMargin(aliceId, 200 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
+        assertEq(buckets.positionMarginUsdc, 400 * 1e6, "Unlocking committed order margin must not touch position margin");
+        assertEq(buckets.committedOrderMarginUsdc, 0, "Committed order margin should unlock independently");
+        assertEq(buckets.totalLockedMarginUsdc, 400 * 1e6);
     }
 
     function test_Withdraw_WrongOwner_Reverts() public {
@@ -169,18 +190,18 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.withdraw(aliceId, 500 * 1e6);
     }
 
-    function test_UnlockMargin_DefensiveUnderflow() public {
+    function test_UnlockPositionMargin_RevertsOnBucketUnderflow() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 5000 * 1e6);
 
         vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 1000 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 1000 * 1e6);
 
-        // Unlock more than locked — should defensively set to 0
         vm.prank(engine);
-        clearinghouse.unlockMargin(aliceId, 2000 * 1e6);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
+        clearinghouse.unlockPositionMargin(aliceId, 2000 * 1e6);
 
-        assertEq(clearinghouse.lockedMarginUsdc(aliceId), 0, "Locked margin should be zero after defensive unlock");
+        assertEq(clearinghouse.lockedMarginUsdc(aliceId), 1000 * 1e6, "Bucketed lock should remain unchanged after failed over-unlock");
     }
 
     function test_SeizeAsset_RecipientMustEqualOperator() public {
@@ -197,7 +218,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 1000 * 1e6);
 
         vm.prank(engine);
-        clearinghouse.lockMargin(aliceId, 1000 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 1000 * 1e6);
 
         vm.prank(alice);
         vm.expectRevert();
@@ -209,18 +230,20 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
             clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 1200 * 1e6, engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(freeConsumed, 1100 * 1e6);
         assertEq(marginConsumed, 100 * 1e6);
         assertEq(uncovered, 0);
         assertEq(buckets.settlementBalanceUsdc, 800 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 800 * 1e6);
-        assertEq(buckets.otherLockedMarginUsdc, 800 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 500 * 1e6);
+        assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
     }
 
@@ -229,17 +252,19 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
             clearinghouse.consumeFundingLoss(aliceId, 600 * 1e6, 2000 * 1e6, engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(freeConsumed, 1100 * 1e6);
         assertEq(marginConsumed, 600 * 1e6);
         assertEq(uncovered, 300 * 1e6, "Funding loss planner should report residual uncovered loss");
         assertEq(buckets.settlementBalanceUsdc, 300 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 0);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
     }
@@ -249,12 +274,13 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
             clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(seizedUsdc, 1800 * 1e6);
         assertEq(payoutUsdc, 0);
         assertEq(badDebtUsdc, 0);
@@ -269,11 +295,12 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1800 * 1e6, 0, engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(seizedUsdc, 1800 * 1e6);
         assertEq(shortfallUsdc, 0);
         assertEq(buckets.settlementBalanceUsdc, 200 * 1e6);
@@ -290,11 +317,12 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1800 * 1e6, 0, engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(
             seizedUsdc, 1800 * 1e6, "Close loss should consume same-account committed margin before socializing loss"
         );
@@ -309,11 +337,12 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 1000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1500 * 1e6, 0, engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(seizedUsdc, 1000 * 1e6);
         assertEq(shortfallUsdc, 500 * 1e6, "Terminal close planner should report uncovered shortfall");
         assertEq(buckets.settlementBalanceUsdc, 0);
@@ -325,12 +354,13 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.deposit(aliceId, 2000 * 1e6);
 
         vm.startPrank(engine);
-        clearinghouse.lockMargin(aliceId, 900 * 1e6);
+        clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
+        clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
             clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
         vm.stopPrank();
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 0);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(
             seizedUsdc,
             1800 * 1e6,
@@ -356,7 +386,7 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.creditSettlementAndLockMargin(aliceId, 200 * 1e6);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 200 * 1e6);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(buckets.settlementBalanceUsdc, 1200 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 200 * 1e6);
         assertEq(buckets.activePositionMarginUsdc, 200 * 1e6);
@@ -370,7 +400,7 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, 300 * 1e6, int256(200 * 1e6), engine);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId, 100 * 1e6);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         assertEq(netMarginChangeUsdc, 100 * 1e6);
         assertEq(buckets.settlementBalanceUsdc, 1800 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 100 * 1e6);

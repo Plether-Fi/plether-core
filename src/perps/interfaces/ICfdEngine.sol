@@ -24,12 +24,16 @@ interface ICfdEngine {
     }
 
     /// @notice Expanded per-account ledger snapshot for debugging account health, reachability, and queued-order state.
-    /// @dev Extends `AccountLedgerView` with terminal settlement reachability, equity, buying power, and live position risk.
+    /// @dev Extends `AccountLedgerView` with typed clearinghouse locked-margin buckets, terminal settlement reachability,
+    ///      equity, buying power, and live position risk.
     struct AccountLedgerSnapshot {
         uint256 settlementBalanceUsdc;
         uint256 freeSettlementUsdc;
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
+        uint256 positionMarginBucketUsdc;
+        uint256 committedOrderMarginBucketUsdc;
+        uint256 reservedSettlementBucketUsdc;
         uint256 executionEscrowUsdc;
         uint256 committedMarginUsdc;
         uint256 deferredPayoutUsdc;

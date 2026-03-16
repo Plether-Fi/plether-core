@@ -15,8 +15,7 @@ library MarginClearinghouseAccountingLib {
 
     struct BucketMutation {
         uint256 settlementDebitUsdc;
-        uint256 resultingLockedMarginUsdc;
-        uint256 activeMarginUnlockedUsdc;
+        uint256 positionMarginUnlockedUsdc;
         uint256 otherLockedMarginUnlockedUsdc;
     }
 
@@ -29,14 +28,14 @@ library MarginClearinghouseAccountingLib {
 
     function buildAccountUsdcBuckets(
         uint256 settlementBalanceUsdc,
-        uint256 totalLockedMarginUsdc,
-        uint256 activePositionMarginUsdc
+        uint256 positionMarginUsdc,
+        uint256 committedOrderMarginUsdc,
+        uint256 reservedSettlementUsdc
     ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets.settlementBalanceUsdc = settlementBalanceUsdc;
-        buckets.totalLockedMarginUsdc = totalLockedMarginUsdc;
-        buckets.activePositionMarginUsdc =
-            activePositionMarginUsdc > totalLockedMarginUsdc ? totalLockedMarginUsdc : activePositionMarginUsdc;
-        buckets.otherLockedMarginUsdc = buckets.totalLockedMarginUsdc - buckets.activePositionMarginUsdc;
+        buckets.activePositionMarginUsdc = positionMarginUsdc;
+        buckets.otherLockedMarginUsdc = committedOrderMarginUsdc + reservedSettlementUsdc;
+        buckets.totalLockedMarginUsdc = positionMarginUsdc + committedOrderMarginUsdc + reservedSettlementUsdc;
 
         uint256 encumberedUsdc = buckets.totalLockedMarginUsdc;
         buckets.freeSettlementUsdc =
@@ -98,9 +97,7 @@ library MarginClearinghouseAccountingLib {
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
-        mutation.activeMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
-        mutation.resultingLockedMarginUsdc =
-            buckets.otherLockedMarginUsdc + (buckets.activePositionMarginUsdc - consumption.activeMarginConsumedUsdc);
+        mutation.positionMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
     }
 
     function applyTerminalLossMutation(
@@ -110,10 +107,8 @@ library MarginClearinghouseAccountingLib {
     ) internal pure returns (BucketMutation memory mutation) {
         protectedLockedMarginUsdc;
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
-        mutation.activeMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
+        mutation.positionMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
         mutation.otherLockedMarginUnlockedUsdc = consumption.otherLockedMarginConsumedUsdc;
-        mutation.resultingLockedMarginUsdc = buckets.totalLockedMarginUsdc - consumption.activeMarginConsumedUsdc
-            - consumption.otherLockedMarginConsumedUsdc;
     }
 
     function planLiquidationResidual(
@@ -135,13 +130,10 @@ library MarginClearinghouseAccountingLib {
         }
 
         plan.mutation.settlementDebitUsdc = plan.seizedUsdc;
-        plan.mutation.activeMarginUnlockedUsdc = buckets.activePositionMarginUsdc;
-        if (plan.seizedUsdc > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc) {
-            plan.mutation.otherLockedMarginUnlockedUsdc =
-                plan.seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc;
-        }
-        plan.mutation.resultingLockedMarginUsdc =
-            buckets.otherLockedMarginUsdc - plan.mutation.otherLockedMarginUnlockedUsdc;
+        plan.mutation.positionMarginUnlockedUsdc = buckets.activePositionMarginUsdc;
+        plan.mutation.otherLockedMarginUnlockedUsdc = plan.seizedUsdc > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc
+            ? plan.seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc
+            : 0;
     }
 
 }

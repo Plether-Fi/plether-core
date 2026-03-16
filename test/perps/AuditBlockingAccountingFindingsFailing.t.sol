@@ -22,7 +22,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
     function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 50e6, 20e6);
+            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 20e6, 30e6, 0);
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);
@@ -37,7 +37,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
             "Plan should consume queued committed margin after free settlement"
         );
         assertEq(
-            mutation.resultingLockedMarginUsdc,
+            buckets.totalLockedMarginUsdc - mutation.positionMarginUnlockedUsdc - mutation.otherLockedMarginUnlockedUsdc,
             20e6,
             "Applied locked margin should equal surviving protected residual margin"
         );

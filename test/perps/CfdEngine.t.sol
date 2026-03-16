@@ -591,7 +591,7 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId, positionMargin);
+            clearinghouse.getAccountUsdcBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
         assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc);
@@ -616,12 +616,16 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
         CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
         CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
         assertEq(snapshot.settlementBalanceUsdc, collateralView.settlementBalanceUsdc);
         assertEq(snapshot.freeSettlementUsdc, collateralView.freeSettlementUsdc);
         assertEq(snapshot.activePositionMarginUsdc, collateralView.activePositionMarginUsdc);
         assertEq(snapshot.otherLockedMarginUsdc, collateralView.otherLockedMarginUsdc);
+        assertEq(snapshot.positionMarginBucketUsdc, lockedBuckets.positionMarginUsdc);
+        assertEq(snapshot.committedOrderMarginBucketUsdc, lockedBuckets.committedOrderMarginUsdc);
+        assertEq(snapshot.reservedSettlementBucketUsdc, lockedBuckets.reservedSettlementUsdc);
         assertEq(snapshot.executionEscrowUsdc, escrow.executionBountyUsdc);
         assertEq(snapshot.committedMarginUsdc, escrow.committedMarginUsdc);
         assertEq(snapshot.deferredPayoutUsdc, collateralView.deferredPayoutUsdc);
