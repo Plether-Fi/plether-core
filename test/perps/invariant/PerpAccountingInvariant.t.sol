@@ -4,6 +4,8 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpGhostLedger} from "./ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -157,6 +159,118 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(reservationRemaining, 0, "Terminal orders must have zero reservation remaining margin");
                 assertFalse(router.isInMarginQueue(orderId), "Terminal ghost orders must not stay in margin queue");
             }
+        }
+    }
+
+    function invariant_ReservationConservationHoldsPerOrder() public view {
+        uint64 lastKnownOrderId = handler.lastKnownOrderId();
+        for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
+            uint256 original = handler.reservationOriginalAmount(orderId);
+            uint256 consumed = handler.reservationConsumedAmount(orderId);
+            uint256 released = handler.reservationReleasedAmount(orderId);
+            uint256 remaining = handler.reservationRemainingCommittedMargin(orderId);
+            if (original == 0 && consumed == 0 && released == 0 && remaining == 0) {
+                continue;
+            }
+
+            assertEq(consumed + released + remaining, original, "Reservation conservation must hold per order");
+            assertLe(consumed, original, "Consumed reservation amount must not exceed original amount");
+            assertLe(released, original, "Released reservation amount must not exceed original amount");
+        }
+    }
+
+    function invariant_AggregateReservationParityMatchesClearinghouseTotals() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            assertEq(
+                handler.accountReservationRemainingSum(accountId),
+                handler.accountActiveReservationCommittedMargin(accountId),
+                "Committed reservation remaining sum must match clearinghouse account summary"
+            );
+        }
+    }
+
+    function invariant_ExplicitFifoReservationConsumptionUsesSuppliedIdsInOrder() public view {
+        (bytes32 accountId, uint256 count, uint256 activeCountBefore, uint64[5] memory ids, uint256[5] memory remainingBefore) =
+            handler.lastTerminalReservationInfo();
+        if (accountId == bytes32(0)) {
+            return;
+        }
+
+        assertEq(count, activeCountBefore, "Explicit terminal reservation set must cover all active pre-action reservations");
+        for (uint256 i = 0; i < count; i++) {
+            assertGt(ids[i], 0, "Explicit terminal reservation ids must be populated");
+            if (i > 0) {
+                assertGt(ids[i], ids[i - 1], "Explicit terminal reservation ids must stay in FIFO order");
+            }
+            assertEq(handler.reservationAccount(ids[i]), accountId, "Explicit terminal reservation ids must belong to the acted-on account");
+            assertGt(remainingBefore[i], 0, "Explicit terminal reservation ids must have active remaining balance before action");
+        }
+    }
+
+    function invariant_QueueReservationAgreementIsBidirectional() public view {
+        uint64 lastKnownOrderId = handler.lastKnownOrderId();
+        for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
+            uint8 status = handler.reservationStatus(orderId);
+            uint256 remaining = handler.reservationRemainingCommittedMargin(orderId);
+            uint8 ghostState = handler.ghostOrderLifecycleState(orderId);
+            bool shouldBeInMarginQueue = status == 1 && remaining > 0 && ghostState == 1;
+
+            if (shouldBeInMarginQueue) {
+                assertTrue(router.isInMarginQueue(orderId), "Active pending reservations with remaining balance must appear in margin queue");
+            }
+        }
+    }
+
+    function invariant_NoDoubleFinalizationAfterReservationTerminalState() public view {
+        uint64 lastKnownOrderId = handler.lastKnownOrderId();
+        for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
+            uint8 status = handler.reservationStatus(orderId);
+            uint256 original = handler.reservationOriginalAmount(orderId);
+            uint256 consumed = handler.reservationConsumedAmount(orderId);
+            uint256 released = handler.reservationReleasedAmount(orderId);
+            if (status == 2 || status == 3) {
+                assertEq(handler.reservationRemainingCommittedMargin(orderId), 0, "Terminal reservations must have zero remaining balance");
+                assertEq(consumed + released, original, "Terminal reservations must close exactly once against original amount");
+            }
+        }
+    }
+
+    function invariant_TerminalPathExactnessOnlyTouchesExplicitReservationSet() public view {
+        (bytes32 accountId, uint256 count,, uint64[5] memory ids,) = handler.lastTerminalReservationInfo();
+        if (accountId == bytes32(0)) {
+            return;
+        }
+
+        uint64 lastKnownOrderId = handler.lastKnownOrderId();
+        for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
+            if (handler.reservationAccount(orderId) != accountId) {
+                continue;
+            }
+            uint8 status = handler.reservationStatus(orderId);
+            uint256 remaining = handler.reservationRemainingCommittedMargin(orderId);
+            if (status == 1 && remaining > 0) {
+                bool found;
+                for (uint256 i = 0; i < count; i++) {
+                    if (ids[i] == orderId) {
+                        found = true;
+                        break;
+                    }
+                }
+                assertTrue(found, "Terminal path should only leave active reservations from the explicit supplied set");
+            }
+        }
+    }
+
+    function invariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(accountId);
+            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
+
+            assertEq(snapshot.committedMarginUsdc, summary.activeCommittedOrderMarginUsdc, "Account ledger snapshot committed margin must match reservation summary");
+            assertEq(snapshot.committedMarginUsdc, buckets.committedOrderMarginUsdc, "Account ledger snapshot committed margin must match typed committed bucket");
         }
     }
 
