@@ -43,30 +43,6 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
         );
     }
 
-    function test_H1_PhaseBoundary_PartialCloseThenCancelMustNotUnlockProtectedResidualMargin() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _fundTrader(alice, 60e6);
-
-        vm.prank(address(engine));
-        clearinghouse.lockMargin(accountId, 20e6);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 30e6, 1e8, false);
-
-        vm.prank(address(engine));
-        router.noteCommittedMarginConsumed(accountId, 30e6);
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(1);
-
-        assertGe(
-            clearinghouse.lockedMarginUsdc(accountId),
-            20e6,
-            "Canceling queued collateral after a partial close must not unlock below the surviving protected position margin"
-        );
-    }
-
 }
 
 contract CfdEngineSolvencyTimingHarness is CfdEngine {

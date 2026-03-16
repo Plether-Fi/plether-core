@@ -230,9 +230,9 @@ When a position goes underwater (equity < 0):
 
 #### Terminal Queue Continuity
 
-- **Behavior**: When a full close or liquidation becomes the account's terminal settlement event, the protocol does not scan the global queue to cancel later intents for that account
-- **Effect**: Later stale orders simply fail when they eventually reach the queue head; terminal settlement avoids a global FIFO scan, but close/liquidation accounting may still walk the account-local pending-order list when consuming queued committed margin
-- **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position, but invalidation now happens lazily at execution time instead of eagerly at terminal settlement
+- **Behavior**: Full closes do not scan the global queue to cancel later intents for the same account, while liquidations perform bounded eager account-local cleanup of that liquidated account's pending orders
+- **Effect**: Terminal settlement still avoids any global FIFO scan. Full-close stale tails fail lazily when they eventually reach the queue head, while liquidation invalidation happens immediately but only across the liquidated account's capped local queue
+- **Trade-off**: Integrators must treat queued orders as contingent on the continued existence of the account's live position. The protocol keeps cleanup bounded by the per-account pending-order cap rather than leaving liquidation-local stale tails for lazy failure
 
 #### OrderRouter Queue and Escrow Invariants
 
@@ -380,7 +380,7 @@ Fees are hardcoded (execution = 4 bps, bounty = 15 bps). Funding curve parameter
 ### Keeper Infrastructure Failure
 
 1. Orders queue up in the FIFO queue but are not executed
-2. No time-based expiry or user cancellation — orders persist until executed or terminally failed
+2. Orders still expire once `maxOrderAge` elapses, but users cannot cancel queued intents manually
 3. Users can continue committing orders (they queue)
 4. Resume keeper bots to drain the queue
 5. **Risk**: Stale orders may execute at unfavorable prices. Users should use `targetPrice` for slippage protection.

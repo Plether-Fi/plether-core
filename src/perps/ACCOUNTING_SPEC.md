@@ -240,7 +240,7 @@ Canonical invariant:
 
 Operational consequence:
 
-- `cancelOrder()` must never return value that has already crossed into the non-trader-owned domain.
+- no future order-deletion path may return value that has already crossed into the non-trader-owned domain.
 - user-cancelled keeper reserves should route to explicit protocol-owned revenue rather than back to the trader.
 - once committed, keeper reserves should live in a dedicated queue-fee custody domain rather than inside trader collateral accounting.
 
@@ -354,7 +354,6 @@ Every order should conceptually live in one of these states:
 - `Committed`
 - `Executable`
 - `Executed`
-- `Cancelled`
 - `Expired`
 
 In the live router implementation, storage persists a slightly lower-level state machine:
@@ -363,7 +362,6 @@ In the live router implementation, storage persists a slightly lower-level state
 - `Pending`
 - `Executed`
 - `Failed`
-- `Cancelled`
 
 Interpretation rules:
 
@@ -397,7 +395,7 @@ The refactor should preserve or enforce the following:
 6. solvency accounting and withdrawal accounting never share a helper unless both intentionally use the same assumptions
 7. a successful close may reduce solvency, but it must never be reverted solely to preserve it
 8. terminal full closes and liquidations must not perform work proportional to total queue length
-9. terminal settlement must not eagerly cancel unrelated queued orders; stale tails may fail lazily at execution time instead
+9. full closes must not eagerly cancel unrelated queued orders, while liquidations may perform bounded account-local eager cleanup under the per-account pending-order cap
 10. each account must have a hard upper bound on simultaneously pending orders so liquidation cleanup remains bounded in practice
 8. every path that deletes a position re-checks degraded-mode containment
 

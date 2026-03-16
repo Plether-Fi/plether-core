@@ -21,19 +21,18 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](12);
+        bytes4[] memory selectors = new bytes4[](11);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
-        selectors[3] = handler.cancelCloseOrder.selector;
-        selectors[4] = handler.executeNextOrderModelled.selector;
-        selectors[5] = handler.liquidate.selector;
-        selectors[6] = handler.claimDeferredClearerBounty.selector;
-        selectors[7] = handler.createDeferredTraderPayout.selector;
-        selectors[8] = handler.claimDeferredPayout.selector;
-        selectors[9] = handler.fundVault.selector;
-        selectors[10] = handler.setRouterPayoutFailureMode.selector;
-        selectors[11] = handler.setVaultAssets.selector;
+        selectors[3] = handler.executeNextOrderModelled.selector;
+        selectors[4] = handler.liquidate.selector;
+        selectors[5] = handler.claimDeferredClearerBounty.selector;
+        selectors[6] = handler.createDeferredTraderPayout.selector;
+        selectors[7] = handler.claimDeferredPayout.selector;
+        selectors[8] = handler.fundVault.selector;
+        selectors[9] = handler.setRouterPayoutFailureMode.selector;
+        selectors[10] = handler.setVaultAssets.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));

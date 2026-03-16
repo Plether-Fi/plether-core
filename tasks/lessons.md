@@ -3,3 +3,4 @@
 - When a refactor changes ownership, custody, or timing, add ownership/timing/economic invariants immediately; pure accounting-conservation checks are not enough to catch shield-and-reclaim or free-option bugs.
 - Do not report a task as completed or committed unless a new action actually happened in this turn; verify the latest tool result before answering.
 - When the user asks to reduce duplication/bloat, optimize for net LOC reduction explicitly; do not add abstraction that improves parity but still increases code size unless you call out that tradeoff first.
+- When behavior changes, update README/SECURITY/ACCOUNTING_SPEC and remove dead state-machine branches in the same pass; stale docs and unreachable enum states linger unless checked explicitly.

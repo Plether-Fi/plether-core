@@ -67,13 +67,13 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, residual committed margin, reserved execution bounty, and both intrusive queue link sets. The router still exposes compatibility getters for legacy integrations, but queue/accounting proofs now read from one canonical per-order record.
 
-**Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, `Failed`, and `Cancelled`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
+**Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
 **Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option.
 
 **Per-Account Queue Cap**: Each account may hold at most `5` pending orders at a time. This bounds account-local cleanup work during liquidation and prevents a single trader from bloating the FIFO with unbounded queued intents.
 
-**Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
+**Terminal Settlement Liveness**: Full closes remain FIFO-local and do not eagerly scan later queued orders, but liquidations perform bounded eager account-local cleanup. When an account is liquidated, the router walks only that account's capped pending-order list (max 5), clears those orders, and forfeits their execution escrow to the vault.
 
 ### IV. CfdEngine — The Mathematical Ledger
 
@@ -309,7 +309,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | IMR | 1.5× MMR (1.5%) | Initial margin requirement |
 | Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
 | Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
-| Close execution bounty | 1.00 USDC | Not reserved at commit; paid by the engine/vault only on successful or expired close execution |
+| Close execution bounty | 1.00 USDC | Reserved at commit as router-custodied escrow |
 | Normal oracle staleness | 60s | Max Pyth price age for execution |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |

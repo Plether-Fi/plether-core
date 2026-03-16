@@ -232,28 +232,6 @@ contract OrderRouterTest is BasePerpTest {
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
     }
 
-    function test_CancelOrder_CloseOrdersAreBinding() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(1);
-
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
-        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Pending));
-        assertEq(record.core.orderId, 1);
-        assertEq(record.core.accountId, accountId);
-        assertEq(router.committedMargins(1), 0);
-        assertEq(record.executionBountyUsdc, 1_000_000);
-        assertEq(router.pendingHeadOrderId(accountId), 1);
-        assertEq(router.pendingTailOrderId(accountId), 1);
-        assertFalse(record.inMarginQueue, "Close order should remain outside the margin queue");
-    }
-
     function test_GetAccountOrderSummary_ReturnsAggregateOrderState() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -298,7 +276,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(pending[0].executionBountyUsdc, 1_000_000);
         assertEq(pending[1].orderId, 2);
         assertTrue(pending[1].isClose);
-        assertEq(pending[1].executionBountyUsdc, 0);
+        assertEq(pending[1].executionBountyUsdc, 1_000_000);
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
@@ -419,57 +397,6 @@ contract OrderRouterTest is BasePerpTest {
         assertTrue(router.isInMarginQueue(2), "Residual positive-margin order should remain linked");
     }
 
-    function test_CancelOrder_MiddleCloseRevertsAndPreservesAccountHeadTail() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-
-        vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BULL, 2000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BULL, 3000 * 1e18, 0, 1e8, true);
-        vm.stopPrank();
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(2);
-
-        assertEq(router.pendingHeadOrderId(accountId), 1, "Binding revert must preserve account head");
-        assertEq(router.pendingTailOrderId(accountId), 3, "Binding revert must preserve account tail");
-        assertEq(router.pendingOrderCounts(accountId), 3, "Binding revert must preserve account order count");
-
-        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
-        assertEq(pending.length, 3, "Binding revert should leave all queued orders reachable");
-        assertEq(pending[0].orderId, 1, "Head order should remain first after binding revert");
-        assertEq(pending[1].orderId, 2, "Middle order should remain queued after binding revert");
-        assertEq(pending[2].orderId, 3, "Tail order should remain reachable after binding revert");
-    }
-
-    function test_CancelOrder_TailCloseRevertsAndPreservesAccountTail() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-
-        vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BULL, 2000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BULL, 3000 * 1e18, 0, 1e8, true);
-        vm.stopPrank();
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(3);
-
-        assertEq(router.pendingHeadOrderId(accountId), 1, "Binding revert must preserve head");
-        assertEq(router.pendingTailOrderId(accountId), 3, "Binding revert must preserve tail");
-
-        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
-        assertEq(pending.length, 3, "Binding revert should leave all queued orders reachable");
-        assertEq(pending[0].orderId, 1, "Head order should remain first after tail unlink");
-        assertEq(pending[1].orderId, 2, "Prior node should become the new tail");
-        assertEq(pending[2].orderId, 3, "Tail order should remain queued after binding revert");
-    }
-
     function test_ExecuteOrder_UnlinksAccountHeadWithoutAffectingForeignQueuePointers() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 bobId = bytes32(uint256(uint160(bob)));
@@ -497,107 +424,6 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouter.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
         assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
         assertEq(alicePending[0].orderId, 3, "Alice residual queue should still be reachable after execution");
-    }
-
-    function test_CancelOrder_NonHeadCloseRevertsWithoutChangingEscrow() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-        uint256 lockedBeforeCancel = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 vaultAssetsBefore = pool.totalAssets();
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        uint64 firstCloseOrderId = router.nextCommitId();
-
-        vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
-        uint64 secondCloseOrderId = router.nextCommitId();
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
-        vm.stopPrank();
-
-        assertEq(clearinghouse.lockedMarginUsdc(accountId), lockedBeforeCancel);
-        assertEq(router.executionBountyReserves(secondCloseOrderId), 1_000_000);
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(secondCloseOrderId);
-
-        assertEq(
-            clearinghouse.lockedMarginUsdc(accountId),
-            lockedBeforeCancel,
-            "Cancelling a close order should not unlock live position margin"
-        );
-        assertEq(
-            router.executionBountyReserves(secondCloseOrderId),
-            1_000_000,
-            "Binding revert should preserve the prefunded close execution bounty reserve"
-        );
-        assertEq(router.pendingOrderCounts(accountId), 2, "Binding revert should preserve pending order count");
-        assertEq(router.nextExecuteId(), firstCloseOrderId, "Binding revert should not advance FIFO head");
-        assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            0,
-            "Binding revert should not route any prefunded bounty to protocol revenue"
-        );
-        assertEq(pool.totalAssets() - vaultAssetsBefore, 0, "Binding revert should not move vault cash");
-
-        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
-        assertEq(pending.length, 2);
-        assertEq(pending[0].orderId, firstCloseOrderId);
-        assertEq(pending[1].orderId, secondCloseOrderId);
-    }
-
-    function test_CancelOrder_HeadCloseRevertsWithoutAdvancingNextExecuteId() public {
-        bytes32 accountId = bytes32(uint256(uint160(alice)));
-
-        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-        uint256 lockedBeforeCancel = clearinghouse.lockedMarginUsdc(accountId);
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        uint64 closeOrderId = router.nextCommitId();
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1e8, true);
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(closeOrderId);
-
-        assertEq(router.nextExecuteId(), closeOrderId, "Binding head should keep nextExecuteId pinned until execution");
-        assertEq(router.pendingOrderCounts(accountId), 1);
-        assertEq(
-            clearinghouse.lockedMarginUsdc(accountId),
-            lockedBeforeCancel,
-            "Binding revert should not unlock live position margin"
-        );
-        assertEq(
-            engine.accumulatedFeesUsdc() - feesBefore,
-            0,
-            "Binding revert should not route any prefunded bounty to protocol revenue"
-        );
-    }
-
-    function test_CancelOrder_OnlyOwnerCanCancel() public {
-        _open(bytes32(uint256(uint160(alice))), CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 1e8, true);
-
-        vm.prank(bob);
-        vm.expectRevert(OrderRouter.OrderRouter__NotOrderOwner.selector);
-        router.cancelOrder(1);
-    }
-
-    function test_CancelOrder_OpenOrdersAreBinding() public {
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrdersAreBinding.selector);
-        router.cancelOrder(1);
-    }
-
-    function test_CancelOrder_NonPendingReverts() public {
-        vm.prank(alice);
-        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
-        router.cancelOrder(99);
     }
 
     function test_BatchExecution_AllSucceed() public {
@@ -694,7 +520,7 @@ contract OrderRouterTest is BasePerpTest {
         );
     }
 
-    function test_LargeQueue_BatchClearsHundredsOfFailedOrdersAndExecutesTail() public {
+    function test_BoundedQueue_BatchClearsFailedOrdersAndExecutesTail() public {
         address spammer = address(0x444);
         address carol = address(0x555);
         bytes32 carolId = bytes32(uint256(uint160(carol)));
@@ -711,7 +537,7 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.deposit(carolId, 20_000 * 1e6);
         vm.stopPrank();
 
-        uint256 spamCount = 200;
+        uint256 spamCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
             router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 2e8, false);
@@ -812,7 +638,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 4, "tail queue should remain live after terminal close cleanup");
     }
 
-    function test_QueueEconomics_MixedHeadOrdersPayExecutorAcrossFailuresAndSuccesses() public {
+    function test_QueueEconomics_MixedHeadOrdersPayExecutorAcrossCloseFailuresAndSuccesses() public {
         address carol = address(0x558);
         bytes32 carolId = bytes32(uint256(uint160(carol)));
 
@@ -846,7 +672,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_100_000, "executor should not earn LP-funded bounty on invalid close heads");
+        assertEq(executorReward, 2_100_000, "executor should earn only router-custodied bounties across mixed heads");
         assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
@@ -1208,7 +1034,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out from router custody");
     }
 
-    function test_SlippageFailedCloseOrderSplitsBountyBetweenClearerAndProtocol() public {
+    function test_SlippageFailedCloseOrderPaysEscrowedClearerBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -1226,7 +1052,7 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Slippage-failed close order should not pay clearer");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Slippage-failed close order should pay the escrowed clearer bounty");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
         );
@@ -1681,7 +1507,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        for (uint256 i = 0; i < 30; i++) {
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
@@ -1693,11 +1520,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(102_500_000));
         router.executeLiquidation(accountId, priceData);
 
-        assertEq(router.nextExecuteId(), 31, "Liquidation should consume the liquidated account's queued orders");
+        assertEq(router.nextExecuteId(), queuedOrderCount + 1, "Liquidation should consume the liquidated account's queued orders");
 
         vm.prank(trader);
         vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
-        router.executeOrderBatch(30, priceData);
+        router.executeOrderBatch(uint64(queuedOrderCount), priceData);
 
         assertEq(usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no escrow for post-liquidation recovery");

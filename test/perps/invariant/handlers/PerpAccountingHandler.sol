@@ -17,9 +17,8 @@ contract PerpAccountingHandler is Test {
     uint8 internal constant GHOST_ORDER_NONE = 0;
     uint8 internal constant GHOST_ORDER_PENDING = 1;
     uint8 internal constant GHOST_ORDER_EXECUTED = 2;
-    uint8 internal constant GHOST_ORDER_CANCELLED = 3;
-    uint8 internal constant GHOST_ORDER_FAILED = 4;
-    uint8 internal constant GHOST_ORDER_LIQUIDATED = 5;
+    uint8 internal constant GHOST_ORDER_FAILED = 3;
+    uint8 internal constant GHOST_ORDER_LIQUIDATED = 4;
     uint8 internal constant REACHABILITY_ACTION_NONE = 0;
     uint8 internal constant REACHABILITY_ACTION_DEPOSIT = 1;
     uint8 internal constant REACHABILITY_ACTION_WITHDRAW = 2;
@@ -179,25 +178,6 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try router.commitOrder(side, size, 0, targetPrice, true) {
             _registerPendingOrder(orderId, accountId, 0);
-        } catch {}
-    }
-
-    function cancelCloseOrder(
-        uint256 actorIndex
-    ) external {
-        address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
-        uint64 orderId = _firstPendingCloseOrderId(_accountId(actor));
-        if (orderId == 0) {
-            return;
-        }
-
-        vm.prank(actor);
-        try router.cancelOrder(orderId) {
-            _finalizeGhostOrder(orderId, GHOST_ORDER_CANCELLED);
         } catch {}
     }
 
@@ -662,9 +642,6 @@ contract PerpAccountingHandler is Test {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
         if (record.status == OrderRouter.OrderStatus.Executed) {
             return GHOST_ORDER_EXECUTED;
-        }
-        if (record.status == OrderRouter.OrderStatus.Cancelled) {
-            return GHOST_ORDER_CANCELLED;
         }
         return GHOST_ORDER_FAILED;
     }

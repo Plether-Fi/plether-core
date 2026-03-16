@@ -27,8 +27,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         None,
         Pending,
         Executed,
-        Failed,
-        Cancelled
+        Failed
     }
 
     /// @notice Canonical per-order lifecycle, escrow, and queue-link state.
@@ -138,16 +137,13 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__InsufficientFreeEquity();
     error OrderRouter__InsufficientCommittedMargin();
     error OrderRouter__MarginOrderLinkCorrupted();
-    error OrderRouter__NotOrderOwner();
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
-    error OrderRouter__OrdersAreBinding();
     error OrderRouter__TooManyPendingOrders();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, string reason);
-    event OrderCancelled(uint64 indexed orderId, bytes32 indexed accountId);
 
     enum FailedOrderBountyPolicy {
         None,
@@ -325,19 +321,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         _linkPendingOrder(accountId, orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
-    }
-
-    /// @notice Reverts because committed orders are binding once they enter the FIFO queue.
-    function cancelOrder(
-        uint64 orderId
-    ) external {
-        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
-
-        bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
-        if (order.accountId != accountId) {
-            revert OrderRouter__NotOrderOwner();
-        }
-        revert OrderRouter__OrdersAreBinding();
     }
 
     /// @notice Quotes the reserved USDC execution bounty for a new open order using the latest engine mark price.
