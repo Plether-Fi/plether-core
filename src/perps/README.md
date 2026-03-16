@@ -34,9 +34,9 @@ These domains intentionally answer different questions and should not silently s
 
 [`MarginClearinghouse.sol`](MarginClearinghouse.sol)
 
-USDC-only cross-margin portfolio manager and collateral custodian. Users deposit settlement USDC, and the clearinghouse tracks settlement balances plus locked margin in 6-decimal USDC.
+USDC-only cross-margin portfolio manager and collateral custodian. Users deposit settlement USDC, and the clearinghouse tracks settlement balances plus typed locked-margin buckets in 6-decimal USDC.
 
-The Execution Engine never touches raw tokens. It commands the clearinghouse to `lockMargin()`, `unlockMargin()`, `settleUsdc()`, or `seizeUsdc()`, with the router authorized through the engine's configured `orderRouter()` boundary.
+The Execution Engine never touches raw tokens. It commands the clearinghouse through typed bucket and reservation APIs (`lockPositionMargin()`, `unlockPositionMargin()`, `reserveCommittedOrderMargin()`, `releaseOrderReservation()`, `consumeOrderReservation()`, `settleUsdc()`, `seizeUsdc()`), with the router authorized through the engine's configured `orderRouter()` boundary.
 
 ### II. HousePool + TrancheVault — The House Pool & Firewall
 
@@ -65,7 +65,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty from the trader's free settlement balance into router custody for both opens and closes. Failed-order rewards therefore remain independent from vault liquidity across the full order lifecycle.
 
-**Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, residual committed margin, reserved execution bounty, and both intrusive queue link sets. The router still exposes compatibility getters for legacy integrations, but queue/accounting proofs now read from one canonical per-order record.
+**Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, reserved execution bounty, and both intrusive queue link sets. Residual committed margin now lives in clearinghouse-owned reservation records keyed by `orderId`, while the router still exposes compatibility getters for legacy integrations.
 
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 

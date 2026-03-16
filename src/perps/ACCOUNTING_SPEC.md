@@ -254,7 +254,7 @@ All position-reducing paths should satisfy the same economic rules whether they 
 When a close realizes a loss:
 
 1. Seize what is immediately collectible from the account's reachable balance.
-2. If the close fully exits the position, same-account committed margin may also be consumed before bad debt is recorded.
+2. If the close fully exits the position, same-account committed reservations may also be consumed by explicit reservation id before bad debt is recorded.
 3. If the close is partial and the realized loss cannot be fully covered without invading the remaining backing of the open residual position, revert the partial close.
 4. Any remaining uncovered realized loss must be recorded as bad debt only when the settlement path intentionally allows the position to end with a shortfall.
 
