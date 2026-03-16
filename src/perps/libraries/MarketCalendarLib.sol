@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 library MarketCalendarLib {
+
     uint256 internal constant SECONDS_PER_DAY = 86_400;
     uint256 internal constant SECONDS_PER_HOUR = 3600;
 
@@ -36,7 +37,10 @@ library MarketCalendarLib {
         return false;
     }
 
-    function isOracleFrozen(uint256 timestamp, bool todayOverride) internal pure returns (bool) {
+    function isOracleFrozen(
+        uint256 timestamp,
+        bool todayOverride
+    ) internal pure returns (bool) {
         (uint256 dayOfWeek, uint256 hourOfDay) = _dayAndHour(timestamp);
 
         if (dayOfWeek == 5 && hourOfDay >= 22) {
@@ -52,8 +56,11 @@ library MarketCalendarLib {
         return todayOverride;
     }
 
-    function _dayAndHour(uint256 timestamp) private pure returns (uint256 dayOfWeek, uint256 hourOfDay) {
+    function _dayAndHour(
+        uint256 timestamp
+    ) private pure returns (uint256 dayOfWeek, uint256 hourOfDay) {
         dayOfWeek = ((timestamp / SECONDS_PER_DAY) + 4) % 7;
         hourOfDay = (timestamp % SECONDS_PER_DAY) / SECONDS_PER_HOUR;
     }
+
 }
