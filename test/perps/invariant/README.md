@@ -24,6 +24,23 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies deferred trader payout ghost accounting stays fully model-derived and reconciles with engine totals
   - Verifies close and liquidation previews use all-or-nothing immediate vs deferred payout gating
 
+- `PerpOracleBoundaryInvariant.t.sol`
+  - Catches stale-threshold, frozen-window, and FAD-boundary drift
+  - Verifies oracle-frozen boundary logic matches the intended weekend/admin-day formula
+  - Verifies house-pool freshness limits switch correctly between weekday and frozen-oracle modes
+  - Verifies maintenance margin switches cleanly between weekday and FAD settings
+
+- `PerpMultiAccountInvariant.t.sol`
+  - Catches cross-account contamination bugs under overlapping commits, cancels, executions, liquidations, and claims
+  - Verifies per-account pending counts and margin-order counts aggregate cleanly into live global order ownership
+  - Verifies deferred trader payout obligations remain isolated per account while still reconciling globally
+
+- `PerpFeeFlowInvariant.t.sol`
+  - Catches fee accrual, custody, and withdrawal drift
+  - Verifies a handler-side fee model tracks accumulated and withdrawn fees
+  - Verifies the canonical protocol accounting snapshot includes the same live fee bucket
+  - Verifies the live fee bucket remains vault-custodied
+
 - `PerpEconomicConservationInvariant.t.sol`
   - Catches protocol-wide ledger drift and conservation bugs
   - Verifies known actor and protocol balances conserve total USDC supply
@@ -61,5 +78,8 @@ This directory contains stateful Foundry invariant suites for the perps system.
 forge test --match-contract PerpAccountingInvariantTest
 forge test --match-contract PerpPreviewInvariantTest
 forge test --match-contract PerpDeferredPayoutInvariantTest
+forge test --match-contract PerpOracleBoundaryInvariantTest
+forge test --match-contract PerpMultiAccountInvariantTest
+forge test --match-contract PerpFeeFlowInvariantTest
 forge test --match-contract PerpEconomicConservationInvariantTest
 ```
