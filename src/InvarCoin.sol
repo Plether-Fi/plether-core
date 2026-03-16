@@ -306,24 +306,16 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @notice Total assets backing INVAR (USDC, 6 decimals).
     /// @dev Uses pessimistic LP pricing: min(Curve EMA, oracle-derived) to prevent stale-EMA exploitation.
     function totalAssets() public view returns (uint256) {
-        return _totalAssetsWithLpBal(_lpBalance());
+        (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
+        uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
+        return _totalAssetsWithPrice(_lpBalance(), oraclePrice);
     }
 
     /// @notice Total assets backing INVAR with strict oracle validation (USDC, 6 decimals).
     /// @dev Reverts if sequencer/oracle checks fail (stale, invalid, or within sequencer grace period).
     function totalAssetsValidated() external view returns (uint256) {
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
         return _totalAssetsWithPrice(_lpBalance(), oraclePrice);
-    }
-
-    /// @dev Total assets using a pre-fetched LP balance (avoids redundant gauge.balanceOf calls).
-    function _totalAssetsWithLpBal(
-        uint256 lpBal
-    ) private view returns (uint256) {
-        (, int256 rawPrice,,,) = BASKET_ORACLE.latestRoundData();
-        uint256 oraclePrice = rawPrice > 0 ? uint256(rawPrice) : 0;
-        return _totalAssetsWithPrice(lpBal, oraclePrice);
     }
 
     /// @dev Total assets using pre-fetched LP balance and validated oracle price.
@@ -433,7 +425,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return 2 * vp * Math.sqrt(oraclePrice * 1e28) / 1e18;
     }
 
-    /// @dev min(Curve EMA, oracle-derived) — protects withdrawals from stale-high EMA.
     function _pessimisticLpPrice(
         uint256 oraclePrice
     ) private view returns (uint256) {
@@ -445,7 +436,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         return oracleLp < lpPrice ? oracleLp : lpPrice;
     }
 
-    /// @dev max(Curve EMA, oracle-derived) — used for vault NAV to prevent deposit dilution.
     function _optimisticLpPrice(
         uint256 oraclePrice
     ) private view returns (uint256) {
@@ -455,6 +445,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
         uint256 oracleLp = _oracleLpPrice(oraclePrice);
         return oracleLp > lpPrice ? oracleLp : lpPrice;
+    }
+
+    function _validatedOraclePrice() private view returns (uint256) {
+        return OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
     }
 
     /// @dev Total LP held: local + gauge-staked (internally tracked to avoid external call dependency).
@@ -475,6 +469,22 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
                 gaugeStakedLp -= needed;
             }
         }
+    }
+
+    function _reduceLpAccounting(
+        uint256 lpReduced,
+        uint256 totalLp
+    ) private {
+        trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpReduced, totalLp);
+        curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpReduced, totalLp);
+    }
+
+    function _recordLpDeployment(
+        uint256 lpMinted
+    ) private {
+        trackedLpBalance += lpMinted;
+        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
+        _stakeLpToGauge(lpMinted);
     }
 
     function _stakeLpToGauge(
@@ -542,8 +552,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__ZeroAmount();
         }
         _harvest();
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
 
         uint256 assets = _totalAssetsOptimistic(oraclePrice);
         uint256 supply = totalSupply();
@@ -626,8 +635,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             uint256 lpShare = Math.mulDiv(lpBal, glUsdAmount, supply);
             if (lpShare > 0) {
-                trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpShare, lpBal);
-                curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpShare, lpBal);
+                _reduceLpAccounting(lpShare, lpBal);
                 uint256 minCurveOut = minUsdcOut > usdcOut ? minUsdcOut - usdcOut : 0;
                 try CURVE_POOL.lp_price() returns (uint256 lpPrice) {
                     uint256 emaMin = (lpShare * lpPrice) / 1e30 * (BPS - MAX_SPOT_DEVIATION_BPS) / BPS;
@@ -692,8 +700,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 lpBal = _lpBalance();
         if (lpBal > 0) {
             uint256 lpToBurn = Math.mulDiv(lpBal, glUsdAmount, supply);
-            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBal);
-            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBal);
+            _reduceLpAccounting(lpToBurn, lpBal);
             _ensureUnstakedLp(lpToBurn);
             uint256[2] memory min_amounts = [uint256(0), uint256(0)];
             uint256[2] memory withdrawn = CURVE_POOL.remove_liquidity(lpToBurn, min_amounts);
@@ -738,8 +745,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__ZeroAmount();
         }
         _harvest();
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
 
         uint256 assets = _totalAssetsOptimistic(oraclePrice);
         uint256 supply = totalSupply();
@@ -762,12 +768,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__SpotDeviationTooHigh();
         }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, expectedLp > 0 ? expectedLp - 1 : 0);
-        trackedLpBalance += lpMinted;
-
         uint256 lpValue = (lpMinted * _pessimisticLpPrice(oraclePrice)) / 1e30;
-        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
-
-        _stakeLpToGauge(lpMinted);
+        _recordLpDeployment(lpMinted);
 
         glUsdMinted = Math.mulDiv(lpValue, supply + VIRTUAL_SHARES, assets + VIRTUAL_ASSETS);
 
@@ -837,12 +839,18 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         if (lpBal > 0) {
             uint256 currentVpValue = (lpBal * CURVE_POOL.get_virtual_price()) / 1e18;
             if (currentVpValue > curveLpCostVp) {
-                uint256 oraclePrice = OracleLib.getValidatedPrice(
-                    BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT
-                );
+                uint256 oraclePrice = _validatedOraclePrice();
                 donated = _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
             }
         }
+    }
+
+    function _mintAndDonate(
+        uint256 amount
+    ) private {
+        _mint(address(this), amount);
+        IERC20(this).approve(address(stakedInvarCoin), amount);
+        stakedInvarCoin.donateYield(amount);
     }
 
     function _harvestWithPrice(
@@ -865,9 +873,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         donated = Math.mulDiv(totalYieldUsdc, supply + VIRTUAL_SHARES, assetsBeforeYield + VIRTUAL_ASSETS);
 
-        _mint(address(this), donated);
-        IERC20(this).approve(address(stakedInvarCoin), donated);
-        stakedInvarCoin.donateYield(donated);
+        _mintAndDonate(donated);
 
         emit YieldHarvested(donated, 0, donated);
     }
@@ -886,8 +892,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         _harvest();
 
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
 
         uint256 supply = totalSupply();
         uint256 assetsBefore = _totalAssetsOptimistic(oraclePrice);
@@ -899,9 +904,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             return;
         }
 
-        _mint(address(this), invarMinted);
-        IERC20(this).approve(address(stakedInvarCoin), invarMinted);
-        stakedInvarCoin.donateYield(invarMinted);
+        _mintAndDonate(invarMinted);
 
         emit UsdcDonated(msg.sender, usdcAmount, invarMinted);
     }
@@ -914,8 +917,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function deployToCurve(
         uint256 maxUsdc
     ) external nonReentrant whenNotPaused returns (uint256 lpMinted) {
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
         uint256 assets = _totalAssetsWithPrice(_lpBalance(), oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
 
@@ -937,10 +939,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__SpotDeviationTooHigh();
         }
         lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp > 0 ? calcLp - 1 : 0);
-        trackedLpBalance += lpMinted;
-        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
-
-        _stakeLpToGauge(lpMinted);
+        _recordLpDeployment(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
@@ -954,8 +953,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256 maxLpToBurn
     ) external nonReentrant whenNotPaused returns (uint256 usdcRecovered) {
         _harvestSafe();
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
         uint256 lpBalBefore = _lpBalance();
         uint256 assets = _totalAssetsWithPrice(lpBalBefore, oraclePrice);
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
@@ -988,8 +986,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
         _ensureUnstakedLp(lpToBurn);
         CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut * (BPS - 5) / BPS);
-        trackedLpBalance -= Math.mulDiv(trackedLpBalance, lpToBurn, lpBalBefore);
-        curveLpCostVp -= Math.mulDiv(curveLpCostVp, lpToBurn, lpBalBefore);
+        _reduceLpAccounting(lpToBurn, lpBalBefore);
 
         usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
 
@@ -1012,8 +1009,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__NothingToDeploy();
         }
 
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        uint256 oraclePrice = _validatedOraclePrice();
 
         uint256 assets = totalAssets();
         uint256 bufferTarget = (assets * BUFFER_TARGET_BPS) / BPS;
@@ -1031,11 +1027,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__SpotDeviationTooHigh();
         }
         uint256 lpMinted = CURVE_POOL.add_liquidity(amounts, minLpOut);
-        trackedLpBalance += lpMinted;
-        curveLpCostVp += (lpMinted * CURVE_POOL.get_virtual_price()) / 1e18;
+        _recordLpDeployment(lpMinted);
         emergencyActive = false;
-
-        _stakeLpToGauge(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, bearBal, lpMinted);
     }
@@ -1065,9 +1058,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256 lostLp = gaugeStakedLp;
         if (lostLp > 0) {
-            uint256 totalLp = CURVE_LP_TOKEN.balanceOf(address(this)) + lostLp;
-            trackedLpBalance -= Math.mulDiv(trackedLpBalance, lostLp, totalLp);
-            curveLpCostVp -= Math.mulDiv(curveLpCostVp, lostLp, totalLp);
+            _reduceLpAccounting(lostLp, CURVE_LP_TOKEN.balanceOf(address(this)) + lostLp);
             gaugeStakedLp = 0;
         }
 
