@@ -85,6 +85,7 @@ contract MarginClearinghouse is Ownable2Step {
         settlementAsset = _settlementAsset;
     }
 
+    /// @notice Sets the CfdEngine address (one-time, reverts if already set).
     function setEngine(
         address _engine
     ) external onlyOwner {
@@ -239,6 +240,9 @@ contract MarginClearinghouse is Ownable2Step {
         _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
+    /// @notice Locks margin to back a pending order commitment.
+    /// @param accountId Account to lock margin on
+    /// @param amountUsdc USDC amount to lock (6 decimals)
     function lockCommittedOrderMargin(
         bytes32 accountId,
         uint256 amountUsdc
@@ -273,6 +277,9 @@ contract MarginClearinghouse is Ownable2Step {
         emit ReservationCreated(orderId, accountId, IMarginClearinghouse.ReservationBucket.CommittedOrder, amountUsdc);
     }
 
+    /// @notice Unlocks committed order margin when an order is cancelled or filled.
+    /// @param accountId Account to unlock margin on
+    /// @param amountUsdc USDC amount to unlock (6 decimals)
     function unlockCommittedOrderMargin(
         bytes32 accountId,
         uint256 amountUsdc

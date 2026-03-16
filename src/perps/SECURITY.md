@@ -401,6 +401,9 @@ Fees are hardcoded (execution = 4 bps, bounty = 15 bps). Funding curve parameter
    - Set `fadMarginBps` very high (force all positions to be liquidatable)
    - Let keepers clear remaining positions
    - LPs bear losses pro-rata through reduced share value
+5. After recapitalization or full position clearance:
+   - `clearBadDebt()` resets the accumulated bad debt counter
+   - `clearDegradedMode()` exits the degraded latch, re-enabling risk-increasing trades
 
 ## Strict Asset Isolation: No External Yield in Core Perpetuals
 

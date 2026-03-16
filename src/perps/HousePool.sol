@@ -218,10 +218,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         markStalenessLimitActivationTime = 0;
     }
 
+    /// @notice Pause deposits into both tranches
     function pause() external onlyOwner {
         _pause();
     }
 
+    /// @notice Unpause deposits into both tranches
     function unpause() external onlyOwner {
         _unpause();
     }
@@ -364,6 +366,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
     }
 
+    /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
+    /// @return viewData Struct containing balances, reserves, and status flags
     function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
