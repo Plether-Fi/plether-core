@@ -325,6 +325,53 @@ contract MarginClearinghouse is Ownable2Step {
         return _consumeAccountOrderReservations(accountId, amountUsdc, true);
     }
 
+    function consumeOrderReservationsById(
+        uint64[] calldata orderIds,
+        uint256 amountUsdc
+    ) external onlyOperator returns (uint256 consumedUsdc) {
+        return _consumeOrderReservationsById(orderIds, amountUsdc);
+    }
+
+    function _consumeOrderReservationsById(
+        uint64[] memory orderIds,
+        uint256 amountUsdc
+    ) internal returns (uint256 consumedUsdc) {
+        if (amountUsdc == 0) {
+            return 0;
+        }
+
+        uint256 remainingUsdc = amountUsdc;
+        for (uint256 i = 0; i < orderIds.length && remainingUsdc > 0; i++) {
+            IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderIds[i]];
+            if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
+                continue;
+            }
+
+            uint256 reservationConsumedUsdc = remainingUsdc > reservation.remainingAmountUsdc
+                ? reservation.remainingAmountUsdc
+                : remainingUsdc;
+            if (reservationConsumedUsdc == 0) {
+                continue;
+            }
+
+            reservation.remainingAmountUsdc -= reservationConsumedUsdc;
+            _consumeReservationBucket(reservation.accountId, reservation.bucket, reservationConsumedUsdc);
+            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
+                activeCommittedOrderReservationUsdc[reservation.accountId] -= reservationConsumedUsdc;
+            } else {
+                activeReservedSettlementReservationUsdc[reservation.accountId] -= reservationConsumedUsdc;
+            }
+
+            if (reservation.remainingAmountUsdc == 0) {
+                _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Consumed);
+            }
+
+            remainingUsdc -= reservationConsumedUsdc;
+            consumedUsdc += reservationConsumedUsdc;
+            emit ReservationConsumed(orderIds[i], reservation.accountId, reservationConsumedUsdc, reservation.remainingAmountUsdc);
+        }
+    }
+
     function _consumeAccountOrderReservations(
         bytes32 accountId,
         uint256 amountUsdc,
@@ -481,6 +528,7 @@ contract MarginClearinghouse is Ownable2Step {
     /// @notice Consumes close-path losses from settlement buckets while preserving any explicitly protected remaining position margin.
     function consumeCloseLoss(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
         address recipient
@@ -506,7 +554,7 @@ contract MarginClearinghouse is Ownable2Step {
             _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc);
         }
         if (mutation.otherLockedMarginUnlockedUsdc > 0) {
-            _consumeOtherLockedMarginViaReservations(accountId, mutation.otherLockedMarginUnlockedUsdc);
+            _consumeOtherLockedMarginViaReservations(accountId, reservationOrderIds, mutation.otherLockedMarginUnlockedUsdc);
         }
 
         settlementBalances[accountId] -= mutation.settlementDebitUsdc;
@@ -518,6 +566,7 @@ contract MarginClearinghouse is Ownable2Step {
     /// @dev Releases the specified active position margin bucket but leaves unrelated committed margin untouched.
     function consumeLiquidationResidual(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lockedPositionMarginUsdc,
         int256 residualUsdc,
         address recipient
@@ -534,7 +583,7 @@ contract MarginClearinghouse is Ownable2Step {
             _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, plan.mutation.positionMarginUnlockedUsdc);
         }
         if (plan.mutation.otherLockedMarginUnlockedUsdc > 0) {
-            _consumeOtherLockedMarginViaReservations(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
+            _consumeOtherLockedMarginViaReservations(accountId, reservationOrderIds, plan.mutation.otherLockedMarginUnlockedUsdc);
         }
 
         if (seizedUsdc > 0) {
@@ -632,9 +681,10 @@ contract MarginClearinghouse is Ownable2Step {
 
     function _consumeOtherLockedMarginViaReservations(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 amountUsdc
     ) internal {
-        uint256 consumedReservationUsdc = _consumeAccountOrderReservations(accountId, amountUsdc, true);
+        uint256 consumedReservationUsdc = _consumeOrderReservationsById(reservationOrderIds, amountUsdc);
         uint256 residualOtherLockedUsdc = amountUsdc - consumedReservationUsdc;
         if (residualOtherLockedUsdc > 0) {
             _consumeOtherLockedMargin(accountId, residualOtherLockedUsdc);

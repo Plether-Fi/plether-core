@@ -270,6 +270,29 @@ contract MarginClearinghouseTest is Test {
         assertEq(summary.activeReservationCount, 1);
     }
 
+    function test_ConsumeOrderReservationsById_UsesSuppliedReservationOrder() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 51, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 52, 120 * 1e6);
+        uint64[] memory reservationIds = new uint64[](2);
+        reservationIds[0] = 52;
+        reservationIds[1] = 51;
+        uint256 consumedUsdc = clearinghouse.consumeOrderReservationsById(reservationIds, 150 * 1e6);
+        vm.stopPrank();
+
+        IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(51);
+        IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(52);
+
+        assertEq(consumedUsdc, 150 * 1e6);
+        assertEq(uint256(second.status), uint256(IMarginClearinghouse.ReservationStatus.Consumed));
+        assertEq(second.remainingAmountUsdc, 0);
+        assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
+        assertEq(first.remainingAmountUsdc, 70 * 1e6);
+    }
+
     function test_Withdraw_WrongOwner_Reverts() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
@@ -366,8 +389,10 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceId, 41, 300 * 1e6);
+        uint64[] memory reservationIds = new uint64[](1);
+        reservationIds[0] = 41;
         (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
-            clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
+            clearinghouse.consumeLiquidationResidual(aliceId, reservationIds, 600 * 1e6, int256(200 * 1e6), engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -390,7 +415,9 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceId, 31, 300 * 1e6);
-        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1800 * 1e6, 0, engine);
+        uint64[] memory reservationIds = new uint64[](1);
+        reservationIds[0] = 31;
+        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -415,7 +442,8 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
-        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1800 * 1e6, 0, engine);
+        uint64[] memory reservationIds = new uint64[](0);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -435,7 +463,8 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
-        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, 1500 * 1e6, 0, engine);
+        uint64[] memory reservationIds = new uint64[](0);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1500 * 1e6, 0, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -452,8 +481,9 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
+        uint64[] memory reservationIds = new uint64[](0);
         (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
-            clearinghouse.consumeLiquidationResidual(aliceId, 600 * 1e6, int256(200 * 1e6), engine);
+            clearinghouse.consumeLiquidationResidual(aliceId, reservationIds, 600 * 1e6, int256(200 * 1e6), engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);

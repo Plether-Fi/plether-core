@@ -27,4 +27,9 @@ interface IOrderRouterAccounting {
     function pendingOrderCounts(
         bytes32 accountId
     ) external view returns (uint256);
+
+    /// @notice Returns the current margin-queue order ids for an account in FIFO order.
+    function getMarginReservationIds(
+        bytes32 accountId
+    ) external view returns (uint64[] memory orderIds);
 }

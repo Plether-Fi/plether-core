@@ -1057,8 +1057,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         CfdEngineSettlementLib.CloseSettlementResult memory result;
+        uint64[] memory reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
         (result.seizedUsdc, result.shortfallUsdc) =
-            clearinghouse.consumeCloseLoss(accountId, uint256(-netSettlement), remainingPosMarginUsdc, address(vault));
+            clearinghouse.consumeCloseLoss(accountId, reservationOrderIds, uint256(-netSettlement), remainingPosMarginUsdc, address(vault));
 
         result.collectedExecFeeUsdc = plannedResult.collectedExecFeeUsdc;
         result.badDebtUsdc = plannedResult.badDebtUsdc;
@@ -1120,8 +1121,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             MarginClearinghouseAccountingLib.planLiquidationResidual(
                 clearinghouse.getAccountUsdcBuckets(accountId), residualUsdc
             );
+        uint64[] memory reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
         (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) =
-            clearinghouse.consumeLiquidationResidual(accountId, positionMarginUsdc, residualUsdc, address(vault));
+            clearinghouse.consumeLiquidationResidual(accountId, reservationOrderIds, positionMarginUsdc, residualUsdc, address(vault));
         _syncMarginQueue(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
         if (result.payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(accountId, result.payoutUsdc);

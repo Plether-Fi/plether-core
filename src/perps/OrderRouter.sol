@@ -416,6 +416,24 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
     }
 
+    function getMarginReservationIds(
+        bytes32 accountId
+    ) external view returns (uint64[] memory orderIds) {
+        uint64 cursor = marginHeadOrderId[accountId];
+        uint256 count;
+        while (cursor != 0) {
+            count++;
+            cursor = orderRecords[cursor].nextMarginOrderId;
+        }
+
+        orderIds = new uint64[](count);
+        cursor = marginHeadOrderId[accountId];
+        for (uint256 i = 0; i < count; i++) {
+            orderIds[i] = cursor;
+            cursor = orderRecords[cursor].nextMarginOrderId;
+        }
+    }
+
     function getPendingOrdersForAccount(
         bytes32 accountId
     ) external view returns (PendingOrderView[] memory pending) {

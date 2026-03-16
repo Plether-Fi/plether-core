@@ -401,7 +401,10 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(beforeBuckets.committedOrderMarginUsdc, 50 * 1e6, "Setup must lock both committed-order buckets");
 
         vm.prank(address(engine));
-        clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
+        uint64[] memory reservationIds = new uint64[](2);
+        reservationIds[0] = 1;
+        reservationIds[1] = 2;
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
 
         vm.prank(address(engine));
         router.syncMarginQueue(accountId);
@@ -451,7 +454,10 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.withdraw(accountId, freeSettlement);
 
         vm.prank(address(engine));
-        clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
+        uint64[] memory reservationIds = new uint64[](2);
+        reservationIds[0] = 1;
+        reservationIds[1] = 2;
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
 
         bytes[] memory empty;
         router.executeOrder(1, empty);

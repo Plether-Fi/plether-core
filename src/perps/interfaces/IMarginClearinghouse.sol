@@ -111,6 +111,11 @@ interface IMarginClearinghouse {
         bytes32 accountId,
         uint256 amountUsdc
     ) external returns (uint256 consumedUsdc);
+    /// @notice Consumes the supplied active order reservations in FIFO order until the requested amount is exhausted.
+    function consumeOrderReservationsById(
+        uint64[] calldata orderIds,
+        uint256 amountUsdc
+    ) external returns (uint256 consumedUsdc);
     /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
     function lockReservedSettlement(
         bytes32 accountId,
@@ -148,6 +153,7 @@ interface IMarginClearinghouse {
     /// @notice Consumes close-path losses from settlement buckets while preserving the remaining live position margin and reserved escrow.
     function consumeCloseLoss(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
         address recipient
@@ -155,6 +161,7 @@ interface IMarginClearinghouse {
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
     function consumeLiquidationResidual(
         bytes32 accountId,
+        uint64[] calldata reservationOrderIds,
         uint256 lockedPositionMarginUsdc,
         int256 residualUsdc,
         address recipient
