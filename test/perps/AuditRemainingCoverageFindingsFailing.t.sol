@@ -187,7 +187,9 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        assertEq(router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty");
+        assertEq(
+            router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
+        );
         assertEq(router.executionBountyReserves(1), 1e6, "Close commits should escrow the flat clearer bounty");
     }
 

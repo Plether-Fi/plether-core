@@ -79,7 +79,9 @@ contract PerpAccountingHandler is Test {
         ghost = new PerpGhostLedger(address(this));
     }
 
-    function actorAt(uint256 index) external view returns (address) {
+    function actorAt(
+        uint256 index
+    ) external view returns (address) {
         return actors[index];
     }
 
@@ -154,7 +156,7 @@ contract PerpAccountingHandler is Test {
         }
 
         uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
-        uint256 sizeDelta = bound(sizeFuzz, 1_000e18, 100_000e18);
+        uint256 sizeDelta = bound(sizeFuzz, 1000e18, 100_000e18);
         uint256 marginDelta = bound(marginDeltaFuzz, 0, 50_000e6);
         uint256 neededUsdc = marginDelta + 2e6;
         _ensureFreeSettlement(actor, neededUsdc);
@@ -223,7 +225,8 @@ contract PerpAccountingHandler is Test {
             router.orders(orderId);
         uint256 deferredTraderPayoutUsdc;
         if (isClose && marginDelta == 0) {
-            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice, vaultAssetDepth());
+            CfdEngine.ClosePreview memory preview =
+                engine.previewClose(accountId, sizeDelta, targetPrice, vaultAssetDepth());
             if (preview.valid) {
                 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
             }
@@ -316,7 +319,9 @@ contract PerpAccountingHandler is Test {
             uint64 startExecuteId = router.nextExecuteId();
             uint256[4] memory openCommittedBefore = _snapshotTrackedCommittedMargin();
             try router.executeOrderBatch(openOrderId, openPriceData) {
-                _reconcileCommittedMarginAfterProcessedOrders(openCommittedBefore, startExecuteId, router.nextExecuteId());
+                _reconcileCommittedMarginAfterProcessedOrders(
+                    openCommittedBefore, startExecuteId, router.nextExecuteId()
+                );
             } catch {
                 return;
             }
@@ -330,7 +335,8 @@ contract PerpAccountingHandler is Test {
         vault.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
-        CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, closeOraclePrice, vault.totalAssets());
+        CfdEngine.ClosePreview memory closePreview =
+            engine.previewClose(accountId, size, closeOraclePrice, vault.totalAssets());
         uint256 deferredTraderPayoutUsdc = closePreview.deferredPayoutUsdc;
         _recordTerminalReservationSet(accountId);
 
@@ -347,7 +353,9 @@ contract PerpAccountingHandler is Test {
         uint64 closeStartExecuteId = router.nextExecuteId();
         uint256[4] memory closeCommittedBefore = _snapshotTrackedCommittedMargin();
         try router.executeOrderBatch(closeOrderId, closePriceData) {
-            _reconcileCommittedMarginAfterProcessedOrders(closeCommittedBefore, closeStartExecuteId, router.nextExecuteId());
+            _reconcileCommittedMarginAfterProcessedOrders(
+                closeCommittedBefore, closeStartExecuteId, router.nextExecuteId()
+            );
             if (deferredTraderPayoutUsdc > 0) {
                 ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
             }
@@ -374,7 +382,7 @@ contract PerpAccountingHandler is Test {
         uint256 amountFuzz
     ) external {
         _clearTerminalReservationSet();
-        uint256 amount = bound(amountFuzz, 1_000e6, 250_000e6);
+        uint256 amount = bound(amountFuzz, 1000e6, 250_000e6);
         vault.seedAssets(amount);
         ghostTotalVaultMinted += amount;
     }
@@ -508,7 +516,10 @@ contract PerpAccountingHandler is Test {
     ) external view returns (uint256 totalRemainingUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
-            if (reservation.accountId == accountId && reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
+            if (
+                reservation.accountId == accountId
+                    && reservation.status == IMarginClearinghouse.ReservationStatus.Active
+            ) {
                 totalRemainingUsdc += reservation.remainingAmountUsdc;
             }
         }
@@ -520,7 +531,8 @@ contract PerpAccountingHandler is Test {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
             if (
-                reservation.accountId == accountId && reservation.status == IMarginClearinghouse.ReservationStatus.Active
+                reservation.accountId == accountId
+                    && reservation.status == IMarginClearinghouse.ReservationStatus.Active
                     && reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder
             ) {
                 count++;
@@ -813,8 +825,7 @@ contract PerpAccountingHandler is Test {
     ) internal view returns (uint256) {
         (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         uint256 protectedMargin = size > 0 ? margin : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         return buckets.freeSettlementUsdc;
     }
 
@@ -841,4 +852,5 @@ contract PerpAccountingHandler is Test {
     ) internal view returns (bool) {
         return ghost.liquidationSnapshot(_accountId(actor)).liquidated;
     }
+
 }

@@ -69,6 +69,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__NoProposal();
     error HousePool__SeniorImpaired();
     error HousePool__DegradedMode();
+    error HousePool__ZeroAddress();
+    error HousePool__ZeroStaleness();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -105,6 +107,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function setOrderRouter(
         address _router
     ) external onlyOwner {
+        if (_router == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
         if (orderRouter != address(0)) {
             revert HousePool__RouterAlreadySet();
         }
@@ -115,6 +120,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function setSeniorVault(
         address _vault
     ) external onlyOwner {
+        if (_vault == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
         if (seniorVault != address(0)) {
             revert HousePool__SeniorVaultAlreadySet();
         }
@@ -125,6 +133,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function setJuniorVault(
         address _vault
     ) external onlyOwner {
+        if (_vault == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
         if (juniorVault != address(0)) {
             revert HousePool__JuniorVaultAlreadySet();
         }
@@ -174,6 +185,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function proposeMarkStalenessLimit(
         uint256 _limit
     ) external onlyOwner {
+        if (_limit == 0) {
+            revert HousePool__ZeroStaleness();
+        }
         pendingMarkStalenessLimit = _limit;
         markStalenessLimitActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit MarkStalenessLimitProposed(_limit, markStalenessLimitActivationTime);

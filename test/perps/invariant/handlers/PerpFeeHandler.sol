@@ -38,7 +38,9 @@ contract PerpFeeHandler is Test {
         actors[1] = address(0x8102);
     }
 
-    function actorAt(uint256 index) external view returns (address) {
+    function actorAt(
+        uint256 index
+    ) external view returns (address) {
         return actors[index];
     }
 
@@ -56,7 +58,10 @@ contract PerpFeeHandler is Test {
         }
     }
 
-    function openPosition(uint256 actorIndex, uint256 marginFuzz) external {
+    function openPosition(
+        uint256 actorIndex,
+        uint256 marginFuzz
+    ) external {
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -65,7 +70,7 @@ contract PerpFeeHandler is Test {
         }
 
         uint256 beforeFees = engine.accumulatedFeesUsdc();
-        uint256 margin = bound(marginFuzz, 2_000e6, 10_000e6);
+        uint256 margin = bound(marginFuzz, 2000e6, 10_000e6);
         vm.prank(actor);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, margin, 0, false);
         bytes[] memory empty;
@@ -73,7 +78,10 @@ contract PerpFeeHandler is Test {
         _syncFeeDelta(beforeFees, engine.accumulatedFeesUsdc());
     }
 
-    function closePosition(uint256 actorIndex, uint256 priceFuzz) external {
+    function closePosition(
+        uint256 actorIndex,
+        uint256 priceFuzz
+    ) external {
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
         (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
@@ -101,10 +109,15 @@ contract PerpFeeHandler is Test {
         engine.withdrawFees(address(this));
         ghostTrackedFeesUsdc -= beforeFees;
         ghostWithdrawnFeesUsdc += beforeFees;
-        assertEq(usdc.balanceOf(address(this)) - beforeBalance, beforeFees, "Fee withdrawal must transfer full tracked fees");
+        assertEq(
+            usdc.balanceOf(address(this)) - beforeBalance, beforeFees, "Fee withdrawal must transfer full tracked fees"
+        );
     }
 
-    function _syncFeeDelta(uint256 beforeFees, uint256 afterFees) internal {
+    function _syncFeeDelta(
+        uint256 beforeFees,
+        uint256 afterFees
+    ) internal {
         if (afterFees > beforeFees) {
             uint256 delta = afterFees - beforeFees;
             ghostTrackedFeesUsdc += delta;
@@ -114,7 +127,10 @@ contract PerpFeeHandler is Test {
         }
     }
 
-    function _accountId(address actor) internal pure returns (bytes32) {
+    function _accountId(
+        address actor
+    ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(actor)));
     }
+
 }

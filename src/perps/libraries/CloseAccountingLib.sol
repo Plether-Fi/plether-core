@@ -61,7 +61,8 @@ library CloseAccountingLib {
 
         uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.executionFeeUsdc = (notionalUsdc * executionFeeBps) / 10_000;
-        state.netSettlementUsdc = state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc) + fundingSettlementUsdc;
+        state.netSettlementUsdc =
+            state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc) + fundingSettlementUsdc;
     }
 
 }

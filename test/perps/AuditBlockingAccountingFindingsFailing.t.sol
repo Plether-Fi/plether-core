@@ -37,7 +37,8 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
             "Plan should consume queued committed margin after free settlement"
         );
         assertEq(
-            buckets.totalLockedMarginUsdc - mutation.positionMarginUnlockedUsdc - mutation.otherLockedMarginUnlockedUsdc,
+            buckets.totalLockedMarginUsdc - mutation.positionMarginUnlockedUsdc
+                - mutation.otherLockedMarginUnlockedUsdc,
             20e6,
             "Applied locked margin should equal surviving protected residual margin"
         );

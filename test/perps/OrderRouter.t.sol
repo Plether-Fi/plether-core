@@ -179,10 +179,10 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         for (uint256 i = 0; i < limit; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 1e8, false);
+            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
         }
         vm.expectRevert(OrderRouter.OrderRouter__TooManyPendingOrders.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 1_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
         vm.stopPrank();
     }
 
@@ -378,11 +378,22 @@ contract OrderRouterTest is BasePerpTest {
             3,
             "Margin queue tail should still point at the trailing positive-margin order"
         );
-        assertFalse(router.isInMarginQueue(1), "Drained order should be pruned from the margin queue once reservations are consumed");
+        assertFalse(
+            router.isInMarginQueue(1),
+            "Drained order should be pruned from the margin queue once reservations are consumed"
+        );
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
-        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0, "First reservation should be fully consumed alongside router head exposure");
-        assertEq(clearinghouse.getOrderReservation(3).remainingAmountUsdc, 250 * 1e6, "Later reservation should retain its committed margin");
+        assertEq(
+            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            0,
+            "First reservation should be fully consumed alongside router head exposure"
+        );
+        assertEq(
+            clearinghouse.getOrderReservation(3).remainingAmountUsdc,
+            250 * 1e6,
+            "Later reservation should retain its committed margin"
+        );
     }
 
     function test_NoteCommittedMarginConsumed_ReconcilesPerOrderReleaseAfterPartialBucketConsumption() public {
@@ -410,7 +421,9 @@ contract OrderRouterTest is BasePerpTest {
         router.syncMarginQueue(accountId);
 
         assertEq(router.committedMargins(1), 0, "First order should be fully consumed before release");
-        assertEq(router.committedMargins(2), 20 * 1e6, "Second order should retain only the unconsumed committed margin");
+        assertEq(
+            router.committedMargins(2), 20 * 1e6, "Second order should retain only the unconsumed committed margin"
+        );
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -419,9 +432,17 @@ contract OrderRouterTest is BasePerpTest {
         IMarginClearinghouse.LockedMarginBuckets memory afterBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IMarginClearinghouse.OrderReservation memory firstReservation = clearinghouse.getOrderReservation(1);
         IMarginClearinghouse.OrderReservation memory secondReservation = clearinghouse.getOrderReservation(2);
-        assertEq(afterBuckets.committedOrderMarginUsdc, 0, "Per-order release must reconcile with partially consumed committed-order buckets");
+        assertEq(
+            afterBuckets.committedOrderMarginUsdc,
+            0,
+            "Per-order release must reconcile with partially consumed committed-order buckets"
+        );
         assertEq(router.committedMargins(1), 0, "First order committed margin should stay zero after release");
-        assertEq(router.committedMargins(2), 0, "Second order committed margin should release only the residual tracked amount");
+        assertEq(
+            router.committedMargins(2),
+            0,
+            "Second order committed margin should release only the residual tracked amount"
+        );
         assertEq(uint256(firstReservation.status), uint256(IMarginClearinghouse.ReservationStatus.Consumed));
         assertEq(uint256(secondReservation.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
     }
@@ -433,12 +454,27 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 1e8, false);
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(1);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(accountId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(accountId);
 
-        assertEq(router.committedMargins(1), 250 * 1e6, "Router should still track the per-order committed margin locally");
-        assertEq(reservation.remainingAmountUsdc, 250 * 1e6, "Clearinghouse reservation should mirror the router committed margin");
-        assertEq(summary.activeCommittedOrderMarginUsdc, 250 * 1e6, "Reservation summary should match the live committed-order bucket");
-        assertEq(summary.activeReservationCount, 1, "Exactly one active reservation should exist after a single open-order commit");
+        assertEq(
+            router.committedMargins(1), 250 * 1e6, "Router should still track the per-order committed margin locally"
+        );
+        assertEq(
+            reservation.remainingAmountUsdc,
+            250 * 1e6,
+            "Clearinghouse reservation should mirror the router committed margin"
+        );
+        assertEq(
+            summary.activeCommittedOrderMarginUsdc,
+            250 * 1e6,
+            "Reservation summary should match the live committed-order bucket"
+        );
+        assertEq(
+            summary.activeReservationCount,
+            1,
+            "Exactly one active reservation should exist after a single open-order commit"
+        );
     }
 
     function test_ReleaseCommittedMargin_NoopsWhenReservationAlreadyConsumed() public {
@@ -462,7 +498,11 @@ contract OrderRouterTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0, "Consumed reservation should remain zero after execution cleanup");
+        assertEq(
+            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            0,
+            "Consumed reservation should remain zero after execution cleanup"
+        );
     }
 
     function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {
@@ -934,7 +974,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Keeper should recover the full expired close-order bounty");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Keeper should recover the full expired close-order bounty"
+        );
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
             0,
@@ -962,8 +1006,14 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Invalid close-order failure should pay the escrowed clearer bounty");
-        assertEq(engine.accumulatedFeesUsdc() - feesBefore, 0, "Invalid close-order failure should not book protocol revenue");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Invalid close-order failure should pay the escrowed clearer bounty"
+        );
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore, 0, "Invalid close-order failure should not book protocol revenue"
+        );
     }
 
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
@@ -1146,7 +1196,11 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Slippage-failed close order should pay the escrowed clearer bounty");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Slippage-failed close order should pay the escrowed clearer bounty"
+        );
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
         );
@@ -1544,11 +1598,20 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), queuedOrderCount * 1e6, "Router should custody the shielded open-order bounty escrow");
-        assertEq(router.pendingOrderCounts(accountId), queuedOrderCount, "Queued open orders should remain pending before liquidation");
+        assertEq(
+            usdc.balanceOf(address(router)),
+            queuedOrderCount * 1e6,
+            "Router should custody the shielded open-order bounty escrow"
+        );
+        assertEq(
+            router.pendingOrderCounts(accountId),
+            queuedOrderCount,
+            "Queued open orders should remain pending before liquidation"
+        );
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview =
+            engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -1557,13 +1620,33 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
-        assertEq(engine.accumulatedBadDebtUsdc(), preview.badDebtUsdc, "Liquidation should not improve previewed bad debt by restoring execution escrow");
-        assertEq(snapshotBefore.executionEscrowUsdc, queuedOrderCount * 1e6, "Setup must report queued execution escrow outside trader settlement");
-        assertEq(preview.reachableCollateralUsdc, snapshotBefore.liquidationReachableUsdc, "Preview must exclude queued execution escrow from liquidation reachability");
-        assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders");
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            preview.badDebtUsdc,
+            "Liquidation should not improve previewed bad debt by restoring execution escrow"
+        );
+        assertEq(
+            snapshotBefore.executionEscrowUsdc,
+            queuedOrderCount * 1e6,
+            "Setup must report queued execution escrow outside trader settlement"
+        );
+        assertEq(
+            preview.reachableCollateralUsdc,
+            snapshotBefore.liquidationReachableUsdc,
+            "Preview must exclude queued execution escrow from liquidation reachability"
+        );
+        assertEq(
+            router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders"
+        );
         assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first open-order bounty escrow");
-        assertEq(router.executionBountyReserves(uint64(queuedOrderCount)), 0, "All queued open-order bounty escrow should be cleared");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation");
+        assertEq(
+            router.executionBountyReserves(uint64(queuedOrderCount)),
+            0,
+            "All queued open-order bounty escrow should be cleared"
+        );
+        assertEq(
+            usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation"
+        );
     }
 
     function test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders() public {
@@ -1573,8 +1656,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 5_000e18, 0, 0, true);
-        router.commitOrder(CfdTypes.Side.BULL, 5_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
         clearinghouse.withdraw(accountId, 68e6);
         vm.stopPrank();
 
@@ -1587,11 +1670,19 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         router.executeLiquidation(accountId, priceData);
 
-        assertEq(snapshotBefore.executionEscrowUsdc, 2e6, "Setup must report queued close-order execution escrow outside trader settlement");
+        assertEq(
+            snapshotBefore.executionEscrowUsdc,
+            2e6,
+            "Setup must report queued close-order execution escrow outside trader settlement"
+        );
         assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear queued close orders");
         assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first close-order bounty escrow");
-        assertEq(router.executionBountyReserves(2), 0, "Liquidation should forfeit the second close-order bounty escrow");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation");
+        assertEq(
+            router.executionBountyReserves(2), 0, "Liquidation should forfeit the second close-order bounty escrow"
+        );
+        assertEq(
+            usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation"
+        );
     }
 
     function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {
@@ -1614,15 +1705,22 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(102_500_000));
         router.executeLiquidation(accountId, priceData);
 
-        assertEq(router.nextExecuteId(), queuedOrderCount + 1, "Liquidation should consume the liquidated account's queued orders");
+        assertEq(
+            router.nextExecuteId(),
+            queuedOrderCount + 1,
+            "Liquidation should consume the liquidated account's queued orders"
+        );
 
         vm.prank(trader);
         vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
         router.executeOrderBatch(uint64(queuedOrderCount), priceData);
 
-        assertEq(usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation");
+        assertEq(
+            usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation"
+        );
         assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no escrow for post-liquidation recovery");
     }
+
 }
 
 contract FadStalenessTest is BasePerpTest {
@@ -1827,7 +1925,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.prank(alice);
         clearinghouse.withdraw(aliceId, 9300e6);
 
-        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_18UTC + 1);
+        mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), uint64(block.timestamp));
 
         vm.warp(SATURDAY_NOON);
         bytes[] memory empty = _pythUpdateData();

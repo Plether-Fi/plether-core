@@ -4,7 +4,7 @@ Institutional-grade, zero-slippage, bounded synthetic perpetuals. Traders take l
 
 ## Core Insight: Bounded Solvency
 
-Traditional perpetuals face infinite upside tail risk. Plether's synthetic assets are bounded by a fixed Protocol CAP (`P_bull + P_bear = CAP`), making the maximum payout of any trade deterministic at inception. Before any trade opens, the engine proves that the House Pool holds enough USDC to pay every winner simultaneously — even if the oracle instantly teleports to the extremes. Bad debt to LPs is mathematically impossible.
+Traditional perpetuals face infinite upside tail risk. Plether's synthetic assets are bounded by a fixed Protocol CAP (`P_bull + P_bear = CAP`), making the maximum directional payout of any trade deterministic at inception. Before any trade opens, the engine proves that the House Pool holds enough USDC to pay the bounded worst-case directional liability — even if the oracle instantly teleports to the extremes. LP bad debt is still possible from realized settlement shortfalls or delayed liquidation, but those losses are explicitly bounded, socialized, and contained through bad-debt accounting, degraded mode, and withdrawal reserves.
 
 ## Architecture
 

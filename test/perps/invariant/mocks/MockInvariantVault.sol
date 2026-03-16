@@ -77,4 +77,5 @@ contract MockInvariantVault is ICfdVault {
     function markStalenessLimit() external pure returns (uint256) {
         return 120;
     }
+
 }

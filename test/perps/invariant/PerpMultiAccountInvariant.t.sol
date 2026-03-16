@@ -49,7 +49,9 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             sumMarginOrders += handler.ghostPendingMarginOrderCount(accountId);
         }
 
-        assertEq(sumMarginOrders, _liveMarginOrderCount(), "Per-account pending margin counts must sum to live margin orders");
+        assertEq(
+            sumMarginOrders, _liveMarginOrderCount(), "Per-account pending margin counts must sum to live margin orders"
+        );
     }
 
     function invariant_LiveOrderOwnershipMatchesAccountLedgerCounts() public view {
@@ -65,8 +67,16 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            assertEq(liveCounts[i], router.pendingOrderCounts(accountId), "Live order ownership must match account pending count");
-            assertEq(liveCounts[i], engine.getAccountLedgerView(accountId).pendingOrderCount, "Account ledger pending count must match live ownership");
+            assertEq(
+                liveCounts[i],
+                router.pendingOrderCounts(accountId),
+                "Live order ownership must match account pending count"
+            );
+            assertEq(
+                liveCounts[i],
+                engine.getAccountLedgerView(accountId).pendingOrderCount,
+                "Account ledger pending count must match live ownership"
+            );
         }
     }
 
@@ -78,7 +88,11 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             aggregateDeferredPayouts += ledger.deferredPayoutUsdc;
         }
 
-        assertEq(aggregateDeferredPayouts, engine.totalDeferredPayoutUsdc(), "Per-account deferred payouts must stay isolated and sum cleanly");
+        assertEq(
+            aggregateDeferredPayouts,
+            engine.totalDeferredPayoutUsdc(),
+            "Per-account deferred payouts must stay isolated and sum cleanly"
+        );
     }
 
     function _livePendingOrderCount() internal view returns (uint256 count) {
@@ -99,11 +113,15 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function _accountId(address actor) internal pure returns (bytes32) {
+    function _accountId(
+        address actor
+    ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(actor)));
     }
 
-    function _actorIndex(bytes32 accountId) internal view returns (uint256) {
+    function _actorIndex(
+        bytes32 accountId
+    ) internal view returns (uint256) {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             if (_accountId(handler.actorAt(i)) == accountId) {
                 return i;
@@ -111,4 +129,5 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         }
         revert("unknown actor");
     }
+
 }

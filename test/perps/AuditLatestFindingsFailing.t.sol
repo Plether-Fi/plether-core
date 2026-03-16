@@ -105,9 +105,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         uint256 equityAfter = pool.seniorPrincipal() + pool.juniorPrincipal();
         assertEq(
-            equityAfter,
-            equityBefore,
-            "User-funded close-order bounties should not reduce LP distributable equity"
+            equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP distributable equity"
         );
         assertEq(
             engine.accumulatedFeesUsdc(), 80e6, "Open and close execution fees should both accrue as protocol revenue"

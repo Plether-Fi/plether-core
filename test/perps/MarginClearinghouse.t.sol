@@ -175,7 +175,9 @@ contract MarginClearinghouseTest is Test {
         vm.stopPrank();
 
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
-        assertEq(buckets.positionMarginUsdc, 400 * 1e6, "Unlocking committed order margin must not touch position margin");
+        assertEq(
+            buckets.positionMarginUsdc, 400 * 1e6, "Unlocking committed order margin must not touch position margin"
+        );
         assertEq(buckets.committedOrderMarginUsdc, 0, "Committed order margin should unlock independently");
         assertEq(buckets.totalLockedMarginUsdc, 400 * 1e6);
     }
@@ -189,7 +191,8 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(11);
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
 
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(reservation.accountId, aliceId);
@@ -213,7 +216,8 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(12);
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
 
         assertEq(releasedUsdc, 180 * 1e6);
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
@@ -235,7 +239,8 @@ contract MarginClearinghouseTest is Test {
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(13);
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
 
         assertEq(consumedUsdc, 70 * 1e6);
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
@@ -258,7 +263,8 @@ contract MarginClearinghouseTest is Test {
         IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(21);
         IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(22);
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
-        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
 
         assertEq(consumedUsdc, 150 * 1e6);
         assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Consumed));
@@ -268,7 +274,9 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.committedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeCommittedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeReservationCount, 1);
-        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past terminal reservation prefix");
+        assertEq(
+            clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past terminal reservation prefix"
+        );
     }
 
     function test_ConsumeOrderReservationsById_UsesSuppliedReservationOrder() public {
@@ -292,7 +300,11 @@ contract MarginClearinghouseTest is Test {
         assertEq(second.remainingAmountUsdc, 0);
         assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(first.remainingAmountUsdc, 70 * 1e6);
-        assertEq(clearinghouse.reservationHeadIndex(aliceId), 0, "Out-of-order explicit consumption must not advance the FIFO head index past an active prefix");
+        assertEq(
+            clearinghouse.reservationHeadIndex(aliceId),
+            0,
+            "Out-of-order explicit consumption must not advance the FIFO head index past an active prefix"
+        );
     }
 
     function test_ReleaseOrderReservation_AdvancesHeadIndexAcrossTerminalPrefix() public {
@@ -310,7 +322,11 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.releaseOrderReservation(72);
 
-        assertEq(clearinghouse.reservationHeadIndex(aliceId), 2, "Head index should advance to array end once all reservations are terminal");
+        assertEq(
+            clearinghouse.reservationHeadIndex(aliceId),
+            2,
+            "Head index should advance to array end once all reservations are terminal"
+        );
     }
 
     function test_Withdraw_WrongOwner_Reverts() public {
@@ -334,7 +350,11 @@ contract MarginClearinghouseTest is Test {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
         clearinghouse.unlockPositionMargin(aliceId, 2000 * 1e6);
 
-        assertEq(clearinghouse.lockedMarginUsdc(aliceId), 1000 * 1e6, "Bucketed lock should remain unchanged after failed over-unlock");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(aliceId),
+            1000 * 1e6,
+            "Bucketed lock should remain unchanged after failed over-unlock"
+        );
     }
 
     function test_SeizeAsset_RecipientMustEqualOperator() public {
@@ -440,7 +460,8 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.reserveCommittedOrderMargin(aliceId, 31, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 31;
-        (uint256 seizedUsdc, uint256 shortfallUsdc) = clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
+        (uint256 seizedUsdc, uint256 shortfallUsdc) =
+            clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);

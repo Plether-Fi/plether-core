@@ -131,7 +131,8 @@ library MarginClearinghouseAccountingLib {
 
         plan.mutation.settlementDebitUsdc = plan.seizedUsdc;
         plan.mutation.positionMarginUnlockedUsdc = buckets.activePositionMarginUsdc;
-        plan.mutation.otherLockedMarginUnlockedUsdc = plan.seizedUsdc > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc
+        plan.mutation.otherLockedMarginUnlockedUsdc = plan.seizedUsdc
+            > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc
             ? plan.seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc
             : 0;
     }

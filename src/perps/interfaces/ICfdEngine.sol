@@ -177,9 +177,13 @@ interface ICfdEngine {
     /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
     function getMaxLiability() external view returns (uint256);
     /// @notice Compact per-account ledger view spanning clearinghouse, router escrow, and deferred trader payout state.
-    function getAccountLedgerView(bytes32 accountId) external view returns (AccountLedgerView memory viewData);
+    function getAccountLedgerView(
+        bytes32 accountId
+    ) external view returns (AccountLedgerView memory viewData);
     /// @notice Expanded per-account ledger snapshot for debugging account health and settlement reachability across protocol components.
-    function getAccountLedgerSnapshot(bytes32 accountId) external view returns (AccountLedgerSnapshot memory snapshot);
+    function getAccountLedgerSnapshot(
+        bytes32 accountId
+    ) external view returns (AccountLedgerSnapshot memory snapshot);
     /// @notice Canonical protocol-wide accounting snapshot across physical assets, liabilities, fees, bad debt, and deferred obligations.
     function getProtocolAccountingSnapshot() external view returns (ProtocolAccountingSnapshot memory snapshot);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)

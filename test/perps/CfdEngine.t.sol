@@ -20,6 +20,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract LiquidationAccountingLibHarness {
+
     function build(
         uint256 size,
         uint256 oraclePrice,
@@ -43,6 +44,7 @@ contract LiquidationAccountingLibHarness {
             tokenScale
         );
     }
+
 }
 
 contract CfdEngineTest is BasePerpTest {
@@ -570,12 +572,15 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engine.getProtocolAccountingSnapshot();
         CfdEngine.ProtocolAccountingView memory viewData = engine.getProtocolAccountingView();
-        ICfdEngine.HousePoolInputSnapshot memory housePoolSnapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolInputSnapshot memory housePoolSnapshot =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc : 0
+            snapshot.vaultAssetsUsdc > snapshot.accumulatedFeesUsdc
+                ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc
+                : 0
         );
         assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability());
         assertEq(snapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
@@ -617,8 +622,7 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            clearinghouse.getAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
         assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc);
@@ -848,7 +852,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(residualBearTrader, 100_000e6);
 
         _open(bearId, CfdTypes.Side.BEAR, 900_000e18, 45_000e6, 1e8);
-        _open(residualBearId, CfdTypes.Side.BEAR, 100_000e18, 5_000e6, 1e8);
+        _open(residualBearId, CfdTypes.Side.BEAR, 100_000e18, 5000e6, 1e8);
         _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
         _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
@@ -998,22 +1002,21 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
-        LiquidationAccountingLib.LiquidationState memory state = harness.build(
-            10_000e18,
-            100_000_000,
-            125e6,
-            0,
-            -145e6,
-            100,
-            1e6,
-            900,
-            1e20
-        );
+        LiquidationAccountingLib.LiquidationState memory state =
+            harness.build(10_000e18, 100_000_000, 125e6, 0, -145e6, 100, 1e6, 900, 1e20);
 
         assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
         assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
-        assertGt(state.keeperBountyUsdc, 5e6, "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable");
-        assertLe(state.keeperBountyUsdc, state.reachableCollateralUsdc, "Keeper bounty should still cap at reachable collateral");
+        assertGt(
+            state.keeperBountyUsdc,
+            5e6,
+            "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable"
+        );
+        assertLe(
+            state.keeperBountyUsdc,
+            state.reachableCollateralUsdc,
+            "Keeper bounty should still cap at reachable collateral"
+        );
     }
 
     function test_LiquidationPreviewAndPositionView_UseCurrentNotionalThreshold() public {
@@ -1170,7 +1173,8 @@ contract CfdEngineTest is BasePerpTest {
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview =
+            engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
         ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
 
         assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
@@ -1184,7 +1188,11 @@ contract CfdEngineTest is BasePerpTest {
             clearinghouse.balanceUsdc(accountId) + escrow.executionBountyUsdc,
             "Liquidation preview must exclude router execution escrow from reachable collateral"
         );
-        assertEq(snapshot.executionEscrowUsdc, escrow.executionBountyUsdc, "Expanded account ledger must continue to report execution escrow outside liquidation reachability");
+        assertEq(
+            snapshot.executionEscrowUsdc,
+            escrow.executionBountyUsdc,
+            "Expanded account ledger must continue to report execution escrow outside liquidation reachability"
+        );
     }
 
     function test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation() public {

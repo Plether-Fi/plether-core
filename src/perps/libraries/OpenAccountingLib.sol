@@ -40,7 +40,8 @@ library OpenAccountingLib {
     function buildOpenState(
         OpenInputs memory inputs
     ) internal pure returns (OpenState memory state) {
-        state.addedMaxProfitUsdc = CfdMath.calculateMaxProfit(inputs.sizeDelta, inputs.price, inputs.side, inputs.capPrice);
+        state.addedMaxProfitUsdc =
+            CfdMath.calculateMaxProfit(inputs.sizeDelta, inputs.price, inputs.side, inputs.capPrice);
         state.oldEntryNotional = inputs.currentSize * inputs.currentEntryPrice;
 
         if (inputs.currentSize == 0) {
@@ -61,8 +62,8 @@ library OpenAccountingLib {
         state.notionalUsdc = (inputs.sizeDelta * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.executionFeeUsdc = (state.notionalUsdc * inputs.executionFeeBps) / 10_000;
         state.tradeCostUsdc = state.vpiUsdc + int256(state.executionFeeUsdc);
-        state.maintenanceMarginUsdc = (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE)
-            * inputs.riskParams.maintMarginBps) / 10_000;
+        state.maintenanceMarginUsdc =
+            (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE) * inputs.riskParams.maintMarginBps) / 10_000;
         state.initialMarginRequirementUsdc = (state.maintenanceMarginUsdc * 150) / 100;
         if (state.initialMarginRequirementUsdc < inputs.riskParams.minBountyUsdc) {
             state.initialMarginRequirementUsdc = inputs.riskParams.minBountyUsdc;

@@ -42,7 +42,9 @@ contract PerpOracleHandler is Test {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
     }
 
-    function actorAt(uint256 index) external view returns (address) {
+    function actorAt(
+        uint256 index
+    ) external view returns (address) {
         return actors[index];
     }
 
@@ -50,30 +52,46 @@ contract PerpOracleHandler is Test {
         return 2;
     }
 
-    function warpToOracleBoundary(uint256 modeFuzz) external {
+    function warpToOracleBoundary(
+        uint256 modeFuzz
+    ) external {
         uint256 mode = modeFuzz % 7;
         uint256 target;
-        if (mode == 0) target = 1_709_607_599; // Fri 20:59:59 UTC
-        else if (mode == 1) target = 1_709_611_199; // Fri 21:59:59 UTC
-        else if (mode == 2) target = 1_709_611_200; // Fri 22:00:00 UTC
-        else if (mode == 3) target = 1_709_697_599; // Sat 21:59:59 UTC
-        else if (mode == 4) target = 1_709_694_000; // Sun 21:00:00 UTC
-        else if (mode == 5) target = 1_709_697_599; // Sun 21:59:59 UTC
-        else target = 1_709_701_200; // Sun 23:00:00 UTC
+        if (mode == 0) {
+            target = 1_709_607_599; // Fri 20:59:59 UTC
+        } else if (mode == 1) {
+            target = 1_709_611_199; // Fri 21:59:59 UTC
+        } else if (mode == 2) {
+            target = 1_709_611_200; // Fri 22:00:00 UTC
+        } else if (mode == 3) {
+            target = 1_709_697_599; // Sat 21:59:59 UTC
+        } else if (mode == 4) {
+            target = 1_709_694_000; // Sun 21:00:00 UTC
+        } else if (mode == 5) {
+            target = 1_709_697_599; // Sun 21:59:59 UTC
+        } else {
+            target = 1_709_701_200; // Sun 23:00:00 UTC
+        }
         vm.warp(target);
     }
 
-    function warpForward(uint256 secondsFuzz) external {
+    function warpForward(
+        uint256 secondsFuzz
+    ) external {
         vm.warp(block.timestamp + bound(secondsFuzz, 1, 10 days));
     }
 
-    function syncMarkNow(uint256 priceFuzz) external {
+    function syncMarkNow(
+        uint256 priceFuzz
+    ) external {
         uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
         vm.prank(address(router));
         engine.updateMarkPrice(price, uint64(block.timestamp));
     }
 
-    function configureFadDayTomorrow(uint256 runwayFuzz) external {
+    function configureFadDayTomorrow(
+        uint256 runwayFuzz
+    ) external {
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = ((block.timestamp / 86_400) + 1) * 86_400;
 
@@ -87,7 +105,9 @@ contract PerpOracleHandler is Test {
         vm.stopPrank();
     }
 
-    function configureFadMaxStaleness(uint256 secondsFuzz) external {
+    function configureFadMaxStaleness(
+        uint256 secondsFuzz
+    ) external {
         uint256 seconds_ = bound(secondsFuzz, 1 hours, 7 days);
         vm.startPrank(owner);
         engine.proposeFadMaxStaleness(seconds_);
@@ -96,11 +116,15 @@ contract PerpOracleHandler is Test {
         vm.stopPrank();
     }
 
-    function ensureActorPosition(uint256 actorIndex) external {
+    function ensureActorPosition(
+        uint256 actorIndex
+    ) external {
         _ensureOpenPosition(actors[actorIndex % actors.length]);
     }
 
-    function _ensureOpenPosition(address actor) internal {
+    function _ensureOpenPosition(
+        address actor
+    ) internal {
         bytes32 accountId = bytes32(uint256(uint160(actor)));
         (uint256 size,,,,,,,) = engine.positions(accountId);
         if (size > 0) {
@@ -118,4 +142,5 @@ contract PerpOracleHandler is Test {
         bytes[] memory empty;
         router.executeOrder(orderId, empty);
     }
+
 }

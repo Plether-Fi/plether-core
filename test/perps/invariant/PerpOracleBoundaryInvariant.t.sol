@@ -29,7 +29,11 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_OracleFrozenMatchesBoundaryFormula() public view {
-        assertEq(engine.isOracleFrozen(), _expectedOracleFrozen(block.timestamp), "Oracle frozen flag must match boundary formula");
+        assertEq(
+            engine.isOracleFrozen(),
+            _expectedOracleFrozen(block.timestamp),
+            "Oracle frozen flag must match boundary formula"
+        );
     }
 
     function invariant_FadWindowMatchesMaintenanceMarginMode() public view {
@@ -74,7 +78,9 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function _expectedOracleFrozen(uint256 timestamp) internal view returns (bool) {
+    function _expectedOracleFrozen(
+        uint256 timestamp
+    ) internal view returns (bool) {
         uint256 dayOfWeek = ((timestamp / 86_400) + 4) % 7;
         uint256 hourOfDay = (timestamp % 86_400) / 3600;
         if (dayOfWeek == 5 && hourOfDay >= 22) {
@@ -88,4 +94,5 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         }
         return engine.fadDayOverrides(timestamp / 86_400);
     }
+
 }

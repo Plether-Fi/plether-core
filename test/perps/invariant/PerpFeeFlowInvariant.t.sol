@@ -25,7 +25,9 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_FeeModelTracksAccumulatedFeesAndWithdrawals() public view {
-        assertEq(handler.ghostTrackedFeesUsdc(), engine.accumulatedFeesUsdc(), "Ghost tracked fees must match engine fees");
+        assertEq(
+            handler.ghostTrackedFeesUsdc(), engine.accumulatedFeesUsdc(), "Ghost tracked fees must match engine fees"
+        );
         assertEq(
             handler.ghostAccruedFeesUsdc(),
             handler.ghostTrackedFeesUsdc() + handler.ghostWithdrawnFeesUsdc(),
@@ -36,10 +38,13 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     function invariant_ProtocolAccountingSnapshotIncludesFeeBucket() public view {
         ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engine.getProtocolAccountingSnapshot();
         assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol snapshot fee bucket mismatch");
-        assertEq(snapshot.accumulatedFeesUsdc, handler.ghostTrackedFeesUsdc(), "Fee model and protocol snapshot must agree");
+        assertEq(
+            snapshot.accumulatedFeesUsdc, handler.ghostTrackedFeesUsdc(), "Fee model and protocol snapshot must agree"
+        );
     }
 
     function invariant_FeeBucketRemainsVaultCustodied() public view {
         assertLe(engine.accumulatedFeesUsdc(), vault.totalAssets(), "Tracked fees must remain custodied by the vault");
     }
+
 }

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract PreviewExecutionDifferentialTest is BasePerpTest {
 
@@ -20,7 +20,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, closePrice, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview =
+            engine.previewClose(accountId, 100_000e18, closePrice, pool.totalAssets());
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -53,7 +54,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.badDebtUsdc,
             "Close preview bad debt should match live bad debt delta"
         );
-        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Close preview degraded-mode flag should match live outcome");
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Close preview degraded-mode flag should match live outcome"
+        );
     }
 
     function testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault(
@@ -70,7 +75,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, closePrice, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview =
+            engine.previewClose(accountId, 100_000e18, closePrice, pool.totalAssets());
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -87,7 +93,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Illiquid close preview remaining size should match live execution");
-        assertEq(marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution");
+        assertEq(
+            marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution"
+        );
         assertEq(
             clearinghouse.balanceUsdc(accountId) - settlementBefore,
             preview.immediatePayoutUsdc,
@@ -103,7 +111,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.badDebtUsdc,
             "Illiquid close preview bad debt should match live bad debt delta"
         );
-        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Illiquid close preview degraded-mode flag should match live outcome");
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Illiquid close preview degraded-mode flag should match live outcome"
+        );
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
@@ -137,7 +149,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Liquidation should fully clear the position");
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore) + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
+                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
             preview.keeperBountyUsdc,
             "Liquidation preview keeper bounty should match live execution or deferred bounty"
         );
@@ -156,7 +169,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.badDebtUsdc,
             "Liquidation preview bad debt should match live bad debt delta"
         );
-        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Liquidation preview degraded-mode flag should match live outcome");
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Liquidation preview degraded-mode flag should match live outcome"
+        );
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault(
@@ -194,7 +211,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore) + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
+                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
             preview.keeperBountyUsdc,
             "Illiquid liquidation preview keeper bounty should match live execution or deferred bounty"
         );
@@ -213,7 +231,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.badDebtUsdc,
             "Illiquid liquidation preview bad debt should match live bad debt delta"
         );
-        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Illiquid liquidation preview degraded-mode flag should match live outcome");
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Illiquid liquidation preview degraded-mode flag should match live outcome"
+        );
     }
 
     function test_PreviewLiquidation_MatchesLiveExecution_WithQueuedExecutionEscrowOutsideReachability() public {
@@ -232,7 +254,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, liquidationPrice, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview =
+            engine.previewLiquidation(accountId, liquidationPrice, pool.totalAssets());
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
         uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
@@ -244,15 +267,37 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
-        assertEq(preview.reachableCollateralUsdc, snapshotBefore.liquidationReachableUsdc, "Liquidation preview must exclude router execution escrow from reachable collateral");
         assertEq(
-            (usdc.balanceOf(KEEPER) - keeperWalletBefore) + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
+            preview.reachableCollateralUsdc,
+            snapshotBefore.liquidationReachableUsdc,
+            "Liquidation preview must exclude router execution escrow from reachable collateral"
+        );
+        assertEq(
+            (usdc.balanceOf(KEEPER) - keeperWalletBefore)
+                + (engine.deferredClearerBountyUsdc(KEEPER) - deferredClearerBefore),
             preview.keeperBountyUsdc,
             "Queued-escrow liquidation preview keeper bounty should match live outcome"
         );
-        assertEq(engine.deferredPayoutUsdc(accountId) - deferredBefore, preview.deferredPayoutUsdc, "Queued-escrow liquidation preview deferred payout should match live outcome");
-        assertEq(engine.accumulatedBadDebtUsdc() - badDebtBefore, preview.badDebtUsdc, "Queued-escrow liquidation preview bad debt should match live outcome");
-        assertEq(usdc.balanceOf(address(router)), 0, "Queued execution escrow should be removed from the router on liquidation");
-        assertEq(preview.triggersDegradedMode, engine.degradedMode(), "Queued-escrow liquidation preview degraded-mode flag should match live outcome");
+        assertEq(
+            engine.deferredPayoutUsdc(accountId) - deferredBefore,
+            preview.deferredPayoutUsdc,
+            "Queued-escrow liquidation preview deferred payout should match live outcome"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Queued-escrow liquidation preview bad debt should match live outcome"
+        );
+        assertEq(
+            usdc.balanceOf(address(router)),
+            0,
+            "Queued execution escrow should be removed from the router on liquidation"
+        );
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Queued-escrow liquidation preview degraded-mode flag should match live outcome"
+        );
     }
+
 }

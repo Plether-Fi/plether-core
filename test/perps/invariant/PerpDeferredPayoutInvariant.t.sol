@@ -61,9 +61,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             uint256 liveDeferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
 
             assertEq(
-                ghostDeferredPayoutUsdc,
-                liveDeferredPayoutUsdc,
-                "Ghost deferred trader payout must match engine state"
+                ghostDeferredPayoutUsdc, liveDeferredPayoutUsdc, "Ghost deferred trader payout must match engine state"
             );
             ghostTotalDeferredPayoutUsdc += ghostDeferredPayoutUsdc;
         }
@@ -73,7 +71,9 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             ghostTotalDeferredPayoutUsdc,
             "Ghost deferred payout total must match tracked account sum"
         );
-        assertEq(engine.totalDeferredPayoutUsdc(), ghostTotalDeferredPayoutUsdc, "Engine deferred payout total mismatch");
+        assertEq(
+            engine.totalDeferredPayoutUsdc(), ghostTotalDeferredPayoutUsdc, "Engine deferred payout total mismatch"
+        );
     }
 
     function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {
@@ -97,7 +97,11 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            assertEq(preview.immediatePayoutUsdc == 0, preview.deferredPayoutUsdc > 0, "Close preview must choose immediate or deferred payout");
+            assertEq(
+                preview.immediatePayoutUsdc == 0,
+                preview.deferredPayoutUsdc > 0,
+                "Close preview must choose immediate or deferred payout"
+            );
             if (vault.totalAssets() >= totalPayoutUsdc) {
                 assertEq(preview.deferredPayoutUsdc, 0, "Close preview must not defer when vault is liquid");
             } else {
@@ -112,7 +116,8 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+            CfdEngine.LiquidationPreview memory preview =
+                engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
             uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
             if (totalPayoutUsdc == 0) {
@@ -142,4 +147,5 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
     ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(actor)));
     }
+
 }

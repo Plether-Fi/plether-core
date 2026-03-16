@@ -80,13 +80,17 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             CfdEngine.LiquidationPreview memory liquidationPreview =
                 engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
             assertFalse(liquidationPreview.liquidatable, "Empty positions must not preview as liquidatable");
-            assertEq(liquidationPreview.reachableCollateralUsdc, 0, "Empty positions must not expose reachable collateral");
+            assertEq(
+                liquidationPreview.reachableCollateralUsdc, 0, "Empty positions must not expose reachable collateral"
+            );
             assertFalse(liquidationPreview.triggersDegradedMode, "Empty positions must not trigger degraded mode");
 
             CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, 1, oraclePrice, vaultDepthUsdc);
             assertFalse(closePreview.valid, "Empty positions must not preview as valid closes");
             assertEq(closePreview.invalidCode, 1, "Empty position close preview should return invalid code 1");
-            assertFalse(closePreview.triggersDegradedMode, "Empty position close preview must not trigger degraded mode");
+            assertFalse(
+                closePreview.triggersDegradedMode, "Empty position close preview must not trigger degraded mode"
+            );
         }
     }
 
@@ -149,7 +153,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            CfdEngine.ClosePreview memory closePreview =
+                engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
             assertTrue(closePreview.valid, "Full close preview should stay valid for open positions");
 
             if (alreadyDegraded) {
@@ -176,7 +181,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            CfdEngine.ClosePreview memory closePreview =
+                engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
             if (closePreview.triggersDegradedMode) {
                 assertFalse(alreadyDegraded, "Close preview trigger flag must be transition-only");
             }
@@ -202,7 +208,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            CfdEngine.ClosePreview memory closePreview =
+                engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
             assertEq(
                 closePreview.postOpDegradedMode,
                 closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
@@ -221,4 +228,5 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(actor)));
     }
+
 }

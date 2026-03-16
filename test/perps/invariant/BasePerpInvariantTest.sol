@@ -26,7 +26,15 @@ abstract contract BasePerpInvariantTest is Test {
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         vault = new MockInvariantVault(address(usdc), address(engine));
-        router = new OrderRouter(address(engine), address(vault), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0));
+        router = new OrderRouter(
+            address(engine),
+            address(vault),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
+        );
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
@@ -58,4 +66,5 @@ abstract contract BasePerpInvariantTest is Test {
     function _initialVaultAssets() internal pure virtual returns (uint256) {
         return 1_000_000_000e6;
     }
+
 }

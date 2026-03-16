@@ -21,7 +21,9 @@ contract PerpGhostLedger {
 
     error PerpGhostLedger__Unauthorized();
 
-    constructor(address _handler) {
+    constructor(
+        address _handler
+    ) {
         handler = _handler;
     }
 
@@ -34,11 +36,8 @@ contract PerpGhostLedger {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        liquidationSnapshots[accountId] = LiquidationSnapshot({
-            liquidated: true,
-            walletUsdc: walletUsdc,
-            badDebtUsdc: badDebtUsdc
-        });
+        liquidationSnapshots[accountId] =
+            LiquidationSnapshot({liquidated: true, walletUsdc: walletUsdc, badDebtUsdc: badDebtUsdc});
     }
 
     function increaseCommittedMargin(
@@ -148,4 +147,5 @@ contract PerpGhostLedger {
     function totalDeferredClearerBountySnapshot() external view returns (uint256) {
         return totalTrackedDeferredClearerBountyUsdc;
     }
+
 }
