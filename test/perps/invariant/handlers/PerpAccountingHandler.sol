@@ -13,6 +13,13 @@ import {Test} from "forge-std/Test.sol";
 
 contract PerpAccountingHandler is Test {
 
+    uint8 internal constant GHOST_ORDER_NONE = 0;
+    uint8 internal constant GHOST_ORDER_PENDING = 1;
+    uint8 internal constant GHOST_ORDER_EXECUTED = 2;
+    uint8 internal constant GHOST_ORDER_CANCELLED = 3;
+    uint8 internal constant GHOST_ORDER_FAILED = 4;
+    uint8 internal constant GHOST_ORDER_LIQUIDATED = 5;
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -28,6 +35,7 @@ contract PerpAccountingHandler is Test {
 
     mapping(uint64 => bytes32) internal ghostOrderOwner;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
+    mapping(uint64 => uint8) internal ghostOrderState;
 
     constructor(
         MockUSDC _usdc,
@@ -123,10 +131,11 @@ contract PerpAccountingHandler is Test {
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
         uint64 orderId = router.nextCommitId();
+        bytes32 accountId = _accountId(actor);
 
         vm.prank(actor);
         try router.commitOrder(side, sizeDelta, marginDelta, targetPrice, false) {
-            _registerCommittedOrder(orderId, _accountId(actor), marginDelta);
+            _registerPendingOrder(orderId, accountId, marginDelta);
         } catch {}
     }
 
@@ -146,9 +155,12 @@ contract PerpAccountingHandler is Test {
         }
 
         uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
+        uint64 orderId = router.nextCommitId();
 
         vm.prank(actor);
-        try router.commitOrder(side, size, 0, targetPrice, true) {} catch {}
+        try router.commitOrder(side, size, 0, targetPrice, true) {
+            _registerPendingOrder(orderId, accountId, 0);
+        } catch {}
     }
 
     function cancelCloseOrder(
@@ -166,7 +178,7 @@ contract PerpAccountingHandler is Test {
 
         vm.prank(actor);
         try router.cancelOrder(orderId) {
-            _forgetOrder(orderId);
+            _finalizeGhostOrder(orderId, GHOST_ORDER_CANCELLED);
         } catch {}
     }
 
@@ -181,8 +193,9 @@ contract PerpAccountingHandler is Test {
         uint64 batchSize = uint64(bound(batchSizeFuzz, 1, 4));
         bytes[] memory empty;
         uint64 startExecuteId = nextExecuteId;
+        uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
         try router.executeOrderBatch(batchSize, empty) {
-            _clearProcessedOrders(startExecuteId, router.nextExecuteId());
+            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, startExecuteId, router.nextExecuteId());
         } catch {}
     }
 
@@ -204,13 +217,19 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
-        uint256 keeperBountyUsdc = engine.previewLiquidation(accountId, price, vaultAssetDepth()).keeperBountyUsdc;
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, price, vaultAssetDepth());
+        uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
+        uint256 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
+        uint256 committedBefore = _trackedCommittedMargin(accountId);
 
         try router.executeLiquidation(accountId, priceData) {
             ghost.recordLiquidation(accountId, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
             ghostSuccessfulLiquidations++;
-            _forgetAllOrdersForAccount(accountId);
+            _reconcileCommittedMarginAfterLiquidation(accountId, committedBefore);
+            if (deferredTraderPayoutUsdc > 0) {
+                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            }
             if (shouldDefer) {
                 ghost.increaseDeferredClearerBounty(address(this), keeperBountyUsdc);
             }
@@ -245,7 +264,7 @@ contract PerpAccountingHandler is Test {
             uint64 openOrderId = router.nextCommitId();
             vm.prank(actor);
             try router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 20_000e6, 0, false) {
-                _registerCommittedOrder(openOrderId, accountId, 20_000e6);
+                _registerPendingOrder(openOrderId, accountId, 20_000e6);
             } catch {
                 return;
             }
@@ -253,8 +272,9 @@ contract PerpAccountingHandler is Test {
             bytes[] memory openPriceData = new bytes[](1);
             openPriceData[0] = abi.encode(uint256(1e8));
             uint64 startExecuteId = router.nextExecuteId();
+            uint256[4] memory openCommittedBefore = _snapshotTrackedCommittedMargin();
             try router.executeOrderBatch(openOrderId, openPriceData) {
-                _clearProcessedOrders(startExecuteId, router.nextExecuteId());
+                _reconcileCommittedMarginAfterProcessedOrders(openCommittedBefore, startExecuteId, router.nextExecuteId());
             } catch {
                 return;
             }
@@ -266,18 +286,28 @@ contract PerpAccountingHandler is Test {
         }
 
         vault.setAssets(0);
+        uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
+
+        CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, closeOraclePrice, vault.totalAssets());
+        uint256 deferredTraderPayoutUsdc = closePreview.deferredPayoutUsdc;
 
         uint64 closeOrderId = router.nextCommitId();
         vm.prank(actor);
-        try router.commitOrder(side, size, 0, 0, true) {} catch {
+        try router.commitOrder(side, size, 0, 0, true) {
+            _registerPendingOrder(closeOrderId, accountId, 0);
+        } catch {
             return;
         }
 
         bytes[] memory closePriceData = new bytes[](1);
-        closePriceData[0] = abi.encode(side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7));
+        closePriceData[0] = abi.encode(closeOraclePrice);
         uint64 closeStartExecuteId = router.nextExecuteId();
+        uint256[4] memory closeCommittedBefore = _snapshotTrackedCommittedMargin();
         try router.executeOrderBatch(closeOrderId, closePriceData) {
-            _clearProcessedOrders(closeStartExecuteId, router.nextExecuteId());
+            _reconcileCommittedMarginAfterProcessedOrders(closeCommittedBefore, closeStartExecuteId, router.nextExecuteId());
+            if (deferredTraderPayoutUsdc > 0) {
+                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            }
         } catch {}
     }
 
@@ -286,9 +316,14 @@ contract PerpAccountingHandler is Test {
     ) external {
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
+        uint256 ghostDeferredPayout = ghost.deferredTraderPayoutSnapshot(accountId);
 
         vm.prank(actor);
-        try engine.claimDeferredPayout(accountId) {} catch {}
+        try engine.claimDeferredPayout(accountId) {
+            if (ghostDeferredPayout > 0) {
+                ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout);
+            }
+        } catch {}
     }
 
     function fundVault(
@@ -357,6 +392,55 @@ contract PerpAccountingHandler is Test {
         return ghost.deferredClearerBountySnapshot(address(this));
     }
 
+    function deferredTraderPayoutSnapshot(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return ghost.deferredTraderPayoutSnapshot(accountId);
+    }
+
+    function totalDeferredTraderPayoutSnapshot() external view returns (uint256) {
+        return ghost.totalDeferredTraderPayoutSnapshot();
+    }
+
+    function ghostOrderLifecycleState(
+        uint64 orderId
+    ) external view returns (uint8) {
+        return ghostOrderState[orderId];
+    }
+
+    function ghostOrderRemainingCommittedMargin(
+        uint64 orderId
+    ) external view returns (uint256) {
+        return ghostOrderCommittedMargin[orderId];
+    }
+
+    function lastKnownOrderId() external view returns (uint64) {
+        return router.nextCommitId() > 0 ? router.nextCommitId() - 1 : 0;
+    }
+
+    function ghostPendingOrderCount(
+        bytes32 accountId
+    ) external view returns (uint256 count) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+            if (ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
+                count++;
+            }
+        }
+    }
+
+    function ghostPendingMarginOrderCount(
+        bytes32 accountId
+    ) external view returns (uint256 count) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+            if (
+                ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING
+                    && ghostOrderCommittedMargin[orderId] > 0
+            ) {
+                count++;
+            }
+        }
+    }
+
     function totalDeferredClearerBountySnapshot() external view returns (uint256) {
         return ghost.totalDeferredClearerBountySnapshot();
     }
@@ -388,50 +472,26 @@ contract PerpAccountingHandler is Test {
         ghostTotalTraderMinted += amount;
     }
 
-    function _registerCommittedOrder(
+    function _registerPendingOrder(
         uint64 orderId,
         bytes32 accountId,
         uint256 committedMarginUsdc
     ) internal {
-        if (committedMarginUsdc == 0) {
-            return;
-        }
-
         ghostOrderOwner[orderId] = accountId;
         ghostOrderCommittedMargin[orderId] = committedMarginUsdc;
-        ghost.increaseCommittedMargin(accountId, committedMarginUsdc);
-    }
-
-    function _clearProcessedOrders(
-        uint64 startExecuteId,
-        uint64 endExecuteId
-    ) internal {
-        if (endExecuteId <= startExecuteId) {
-            return;
-        }
-
-        for (uint64 orderId = startExecuteId; orderId < endExecuteId; orderId++) {
-            _forgetOrder(orderId);
+        ghostOrderState[orderId] = GHOST_ORDER_PENDING;
+        if (committedMarginUsdc > 0) {
+            ghost.increaseCommittedMargin(accountId, committedMarginUsdc);
         }
     }
 
-    function _forgetAllOrdersForAccount(
-        bytes32 accountId
-    ) internal {
-        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (ghostOrderOwner[orderId] != accountId) {
-                continue;
-            }
-            _forgetOrder(orderId);
-        }
-    }
-
-    function _forgetOrder(
-        uint64 orderId
+    function _finalizeGhostOrder(
+        uint64 orderId,
+        uint8 terminalState
     ) internal {
         bytes32 accountId = ghostOrderOwner[orderId];
         uint256 committedMarginUsdc = ghostOrderCommittedMargin[orderId];
-        if (accountId == bytes32(0) && committedMarginUsdc == 0) {
+        if (ghostOrderState[orderId] == GHOST_ORDER_NONE) {
             return;
         }
 
@@ -439,8 +499,119 @@ contract PerpAccountingHandler is Test {
             ghost.decreaseCommittedMargin(accountId, committedMarginUsdc);
         }
 
-        delete ghostOrderOwner[orderId];
-        delete ghostOrderCommittedMargin[orderId];
+        ghostOrderCommittedMargin[orderId] = 0;
+        ghostOrderState[orderId] = terminalState;
+    }
+
+    function _consumeCommittedMarginFromAccount(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
+        uint256 remainingToConsume = amountUsdc;
+        for (uint64 orderId = 1; orderId < router.nextCommitId() && remainingToConsume > 0; orderId++) {
+            if (ghostOrderOwner[orderId] != accountId || ghostOrderState[orderId] != GHOST_ORDER_PENDING) {
+                continue;
+            }
+
+            uint256 ghostRemaining = ghostOrderCommittedMargin[orderId];
+            if (ghostRemaining == 0) {
+                continue;
+            }
+
+            uint256 consumed = ghostRemaining > remainingToConsume ? remainingToConsume : ghostRemaining;
+            ghostOrderCommittedMargin[orderId] = ghostRemaining - consumed;
+            ghost.decreaseCommittedMargin(accountId, consumed);
+            remainingToConsume -= consumed;
+        }
+
+        assertEq(remainingToConsume, 0, "Committed margin consumption exceeded tracked pending margin");
+    }
+
+    function _reconcileCommittedMarginAfterProcessedOrders(
+        uint256[4] memory committedBefore,
+        uint64 startExecuteId,
+        uint64 endExecuteId
+    ) internal {
+        uint256[4] memory releasedByProcessedOrders;
+        if (endExecuteId > startExecuteId) {
+            for (uint64 orderId = startExecuteId; orderId < endExecuteId; orderId++) {
+                bytes32 accountId = ghostOrderOwner[orderId];
+                if (accountId != bytes32(0)) {
+                    releasedByProcessedOrders[_actorIndex(accountId)] += ghostOrderCommittedMargin[orderId];
+                }
+
+                uint8 terminalState = _ghostTerminalStateForOrder(orderId);
+                _finalizeGhostOrder(orderId, terminalState);
+            }
+        }
+
+        for (uint256 i = 0; i < actors.length; i++) {
+            bytes32 accountId = _accountId(actors[i]);
+            uint256 committedAfter = _trackedCommittedMargin(accountId);
+            if (committedBefore[i] <= committedAfter) {
+                continue;
+            }
+
+            uint256 observedReduction = committedBefore[i] - committedAfter;
+            if (observedReduction > releasedByProcessedOrders[i]) {
+                _consumeCommittedMarginFromAccount(accountId, observedReduction - releasedByProcessedOrders[i]);
+            }
+        }
+    }
+
+    function _reconcileCommittedMarginAfterLiquidation(
+        bytes32 accountId,
+        uint256 committedBefore
+    ) internal {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+            if (ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
+                _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
+            }
+        }
+
+        uint256 committedAfter = _trackedCommittedMargin(accountId);
+        if (committedBefore > committedAfter) {
+            uint256 observedReduction = committedBefore - committedAfter;
+            if (observedReduction > 0 && committedAfter > 0) {
+                _consumeCommittedMarginFromAccount(accountId, observedReduction);
+            }
+        }
+    }
+
+    function _snapshotTrackedCommittedMargin() internal view returns (uint256[4] memory committedMarginByActor) {
+        for (uint256 i = 0; i < actors.length; i++) {
+            committedMarginByActor[i] = _trackedCommittedMargin(_accountId(actors[i]));
+        }
+    }
+
+    function _trackedCommittedMargin(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return router.getAccountEscrow(accountId).committedMarginUsdc;
+    }
+
+    function _ghostTerminalStateForOrder(
+        uint64 orderId
+    ) internal view returns (uint8) {
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        if (record.status == OrderRouter.OrderStatus.Executed) {
+            return GHOST_ORDER_EXECUTED;
+        }
+        if (record.status == OrderRouter.OrderStatus.Cancelled) {
+            return GHOST_ORDER_CANCELLED;
+        }
+        return GHOST_ORDER_FAILED;
+    }
+
+    function _actorIndex(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        for (uint256 i = 0; i < actors.length; i++) {
+            if (_accountId(actors[i]) == accountId) {
+                return i;
+            }
+        }
+        revert("unknown actor");
     }
 
     function vaultAssetDepth() public view returns (uint256) {

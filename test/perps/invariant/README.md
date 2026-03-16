@@ -9,6 +9,8 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies router-held execution bounty escrow reconciles with live orders
   - Verifies liquidated accounts cannot keep pending orders, live reserves, or recover value later
   - Verifies ghost-tracked committed margin and deferred clearer bounty stay aligned with protocol state
+  - Verifies a stricter per-order committed-margin state machine across commit, execution, cancellation, failure, and liquidation
+  - Verifies pending-order and margin-order FIFO queues keep consistent head/tail pointers, links, counts, and ordering
 
 - `PerpPreviewInvariant.t.sol`
   - Catches view-layer drift between previews and core engine/accounting state
@@ -20,6 +22,15 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches deferred trader payout and liquidity-gating bugs
   - Verifies deferred payout status matches engine storage and current vault liquidity
   - Verifies close and liquidation previews use all-or-nothing immediate vs deferred payout gating
+
+- `PerpEconomicConservationInvariant.t.sol`
+  - Catches protocol-wide ledger drift and conservation bugs
+  - Verifies known actor and protocol balances conserve total USDC supply
+  - Verifies clearinghouse custody matches tracked account balances
+  - Verifies per-account settlement buckets reconcile with clearinghouse storage
+  - Verifies withdrawal reserves include liabilities, fees, and deferred obligations
+  - Verifies tracked bad debt only remains after reachable tracked account value is exhausted
+  - Verifies ghost-tracked deferred trader payouts match engine storage and totals
 
 ## Harness Pieces
 
@@ -41,4 +52,5 @@ This directory contains stateful Foundry invariant suites for the perps system.
 forge test --match-contract PerpAccountingInvariantTest
 forge test --match-contract PerpPreviewInvariantTest
 forge test --match-contract PerpDeferredPayoutInvariantTest
+forge test --match-contract PerpEconomicConservationInvariantTest
 ```
