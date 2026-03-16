@@ -2009,6 +2009,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function _validateRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) internal pure {
+        if (_riskParams.maintMarginBps == 0 || _riskParams.fadMarginBps < _riskParams.maintMarginBps) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.fadMarginBps > 10_000) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {
+            revert CfdEngine__InvalidRiskParams();
+        }
         if (_riskParams.kinkSkewRatio == 0 || _riskParams.maxSkewRatio <= _riskParams.kinkSkewRatio) {
             revert CfdEngine__InvalidRiskParams();
         }

@@ -71,6 +71,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__DegradedMode();
     error HousePool__ZeroAddress();
     error HousePool__ZeroStaleness();
+    error HousePool__InvalidSeniorRate();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -146,6 +147,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function proposeSeniorRate(
         uint256 _rateBps
     ) external onlyOwner {
+        if (_rateBps > 10_000) {
+            revert HousePool__InvalidSeniorRate();
+        }
         pendingSeniorRate = _rateBps;
         seniorRateActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit SeniorRateProposed(_rateBps, seniorRateActivationTime);

@@ -298,6 +298,11 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
     }
 
+    function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
+        vm.expectRevert(HousePool.HousePool__InvalidSeniorRate.selector);
+        pool.proposeSeniorRate(10_001);
+    }
+
     // ==========================================
     // ERC4626 SHARE ACCOUNTING
     // ==========================================

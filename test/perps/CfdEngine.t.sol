@@ -1595,6 +1595,46 @@ contract CfdEngineTest is BasePerpTest {
         engine.liquidatePosition(accountId, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
+    function test_ProposeRiskParams_RevertsOnZeroMaintMargin() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.maintMarginBps = 0;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsWhenFadMarginBelowMaint() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.fadMarginBps = params.maintMarginBps - 1;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsWhenFadMarginExceeds100Percent() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.fadMarginBps = 10_001;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsOnZeroMinBounty() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.minBountyUsdc = 0;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsOnZeroBountyBps() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.bountyBps = 0;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
     function test_CloseSize_ExceedsPosition_Reverts() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
