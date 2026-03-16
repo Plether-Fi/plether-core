@@ -422,3 +422,12 @@ Review:
 - Updated `SolvencyAccountingLib.previewPostOpSolvency()` to compute both the raw post-op degraded state and the existing latch-transition flag so integrators can distinguish "would still be degraded" from "newly triggers degraded mode."
 - Added unit/invariant coverage in `test/perps/CfdEngine.t.sol` and `test/perps/invariant/PerpPreviewInvariant.t.sol`, plus docs in `src/perps/README.md` and `src/perps/ACCOUNTING_SPEC.md`.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_PreviewClose_TriggersDegradedModeMatchesLiveClose|test_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual|test_PreviewClose_ReportsPostOpDegradedStateAfterLatch|test_LiquidationPreview_InterfaceMatchesContractStructLayout|test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation|test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual"` and `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`.
+
+- [x] Clean stale USDC-only and bounty wording in IMarginClearinghouse, MarginClearinghouse, and SECURITY docs
+- [x] Verify doc text is consistent with current code paths
+
+Review:
+- Updated `src/perps/interfaces/IMarginClearinghouse.sol` to describe the clearinghouse as USDC-only settlement accounting and removed the stale LTV-haircut wording from `getAccountEquityUsdc()`.
+- Updated `src/perps/MarginClearinghouse.sol` bucket-view Natspec to describe the current USDC-only model instead of referencing non-USDC collateral.
+- Corrected the stale FIFO execution line in `src/perps/SECURITY.md` so close orders are described as zero-escrow-at-commit and vault-funded only on the documented close clearer path.
+- Verified the targeted stale phrases are gone; the remaining `non-USDC collateral` mention in `src/perps/SECURITY.md` is intentional historical context for a "not applicable in V1" note, not a live behavior description.

@@ -153,9 +153,9 @@ contract MarginClearinghouse is Ownable2Step {
         return equity > encumbered ? equity - encumbered : 0;
     }
 
-    /// @notice Returns free settlement balance after subtracting locked margin.
-    /// @dev This is the physically reachable USDC left after backing active positions.
-    ///      It differs from `getFreeBuyingPowerUsdc` by ignoring non-USDC collateral value.
+    /// @notice Returns the explicit USDC bucket split after subtracting locked margin.
+    /// @dev This is the physically reachable settlement USDC left after backing active positions.
+    ///      In the current USDC-only model it aligns with free buying power once the active bucket is chosen.
     function getAccountUsdcBuckets(
         bytes32 accountId,
         uint256 activePositionMarginUsdc

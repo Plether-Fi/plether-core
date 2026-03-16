@@ -56,7 +56,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody, while close orders reserve a flat `1.00 USDC` execution bounty the same way |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody, while close orders reserve no router escrow at commit and instead follow the vault-funded close clearer policy on successful or expired execution |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
