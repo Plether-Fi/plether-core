@@ -199,6 +199,32 @@ contract PerpAccountingHandler is Test {
         } catch {}
     }
 
+    function executeNextOrderModelled() external {
+        uint64 orderId = router.nextExecuteId();
+        if (orderId >= router.nextCommitId()) {
+            return;
+        }
+
+        (bytes32 accountId, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice,,,,, bool isClose) =
+            router.orders(orderId);
+        uint256 deferredTraderPayoutUsdc;
+        if (isClose && marginDelta == 0) {
+            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice, vaultAssetDepth());
+            if (preview.valid) {
+                deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
+            }
+        }
+
+        uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
+        bytes[] memory empty;
+        try router.executeOrder(orderId, empty) {
+            _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
+            if (deferredTraderPayoutUsdc > 0) {
+                ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            }
+        } catch {}
+    }
+
     function liquidate(
         uint256 actorIndex,
         uint256 priceFuzz

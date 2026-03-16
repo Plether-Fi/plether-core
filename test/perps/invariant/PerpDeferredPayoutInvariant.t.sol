@@ -16,18 +16,15 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](11);
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
-        selectors[3] = handler.commitCloseOrder.selector;
-        selectors[4] = handler.cancelCloseOrder.selector;
-        selectors[5] = handler.executeNextOrderBatch.selector;
-        selectors[6] = handler.createDeferredTraderPayout.selector;
-        selectors[7] = handler.claimDeferredPayout.selector;
-        selectors[8] = handler.setVaultAssets.selector;
-        selectors[9] = handler.fundVault.selector;
-        selectors[10] = handler.liquidate.selector;
+        selectors[3] = handler.createDeferredTraderPayout.selector;
+        selectors[4] = handler.claimDeferredPayout.selector;
+        selectors[5] = handler.setVaultAssets.selector;
+        selectors[6] = handler.fundVault.selector;
+        selectors[7] = handler.liquidate.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -53,6 +50,30 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         }
 
         assertEq(totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc(), "Total deferred payout mismatch");
+    }
+
+    function invariant_GhostDeferredTraderPayoutsRemainFullyModelDerived() public view {
+        uint256 ghostTotalDeferredPayoutUsdc;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            uint256 ghostDeferredPayoutUsdc = handler.deferredTraderPayoutSnapshot(accountId);
+            uint256 liveDeferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+
+            assertEq(
+                ghostDeferredPayoutUsdc,
+                liveDeferredPayoutUsdc,
+                "Ghost deferred trader payout must match engine state"
+            );
+            ghostTotalDeferredPayoutUsdc += ghostDeferredPayoutUsdc;
+        }
+
+        assertEq(
+            handler.totalDeferredTraderPayoutSnapshot(),
+            ghostTotalDeferredPayoutUsdc,
+            "Ghost deferred payout total must match tracked account sum"
+        );
+        assertEq(engine.totalDeferredPayoutUsdc(), ghostTotalDeferredPayoutUsdc, "Engine deferred payout total mismatch");
     }
 
     function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {

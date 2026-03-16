@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -22,7 +23,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
         selectors[3] = handler.cancelCloseOrder.selector;
-        selectors[4] = handler.executeNextOrderBatch.selector;
+        selectors[4] = handler.executeNextOrderModelled.selector;
         selectors[5] = handler.liquidate.selector;
         selectors[6] = handler.claimDeferredClearerBounty.selector;
         selectors[7] = handler.createDeferredTraderPayout.selector;
@@ -97,6 +98,44 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Tracked account bucket settlement must equal clearinghouse balance"
             );
         }
+    }
+
+    function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
+        ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(60 seconds);
+        uint256 vaultAssetsUsdc = vault.totalAssets();
+        uint256 feesUsdc = engine.accumulatedFeesUsdc();
+
+        assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
+        assertEq(snapshot.deferredTraderPayoutUsdc, engine.totalDeferredPayoutUsdc(), "House-pool snapshot deferred trader payout mismatch");
+        assertEq(
+            snapshot.deferredClearerBountyUsdc,
+            engine.totalDeferredClearerBountyUsdc(),
+            "House-pool snapshot deferred clearer bounty mismatch"
+        );
+        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "House-pool snapshot max liability mismatch");
+        assertEq(
+            snapshot.withdrawalFundingLiabilityUsdc,
+            engine.getLiabilityOnlyFundingPnl(),
+            "House-pool snapshot withdrawal funding liability mismatch"
+        );
+        assertEq(
+            snapshot.netPhysicalAssetsUsdc,
+            vaultAssetsUsdc > feesUsdc ? vaultAssetsUsdc - feesUsdc : 0,
+            "House-pool snapshot net physical assets must match vault assets net of fees"
+        );
+        assertEq(
+            snapshot.netPhysicalAssetsUsdc + snapshot.protocolFeesUsdc,
+            vaultAssetsUsdc > feesUsdc ? vaultAssetsUsdc : feesUsdc,
+            "House-pool snapshot physical asset decomposition mismatch"
+        );
+    }
+
+    function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
+        ICfdEngine.HousePoolStatusSnapshot memory snapshot = engine.getHousePoolStatusSnapshot();
+
+        assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "House-pool status last mark time mismatch");
+        assertEq(snapshot.oracleFrozen, engine.isOracleFrozen(), "House-pool status oracle frozen mismatch");
+        assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
     function invariant_BadDebtOnlyRemainsAfterTrackedAccountsExhaustReachableValue() public view {
