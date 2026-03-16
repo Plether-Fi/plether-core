@@ -146,6 +146,7 @@ The owner **cannot**:
 Keepers are permissionless — anyone can execute orders and liquidations:
 - **Order Execution**: Keepers push Pyth price payloads. At commit time the router seizes the reserved execution bounty from the trader's free settlement into router custody, quoting risk-increasing orders from `lastMarkPrice()` in the engine with a `$1.00` fallback before the first mark is observed
 - **Binding orders**: Traders cannot cancel queued opens or closes once committed, preventing delayed close intents from becoming a free timing option against keepers
+- **Per-account queue cap**: No account may have more than `5` pending orders at once, bounding account-local liquidation cleanup and queue-griefing surface
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` router escrow at commit so clearers are paid from user-funded escrow instead of vault subsidy
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices

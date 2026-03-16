@@ -398,6 +398,7 @@ The refactor should preserve or enforce the following:
 7. a successful close may reduce solvency, but it must never be reverted solely to preserve it
 8. terminal full closes and liquidations must not perform work proportional to total queue length
 9. terminal settlement must not eagerly cancel unrelated queued orders; stale tails may fail lazily at execution time instead
+10. each account must have a hard upper bound on simultaneously pending orders so liquidation cleanup remains bounded in practice
 8. every path that deletes a position re-checks degraded-mode containment
 
 ## Refactor Target Modules

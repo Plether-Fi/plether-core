@@ -71,6 +71,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option.
 
+**Per-Account Queue Cap**: Each account may hold at most `5` pending orders at a time. This bounds account-local cleanup work during liquidation and prevents a single trader from bloating the FIFO with unbounded queued intents.
+
 **Terminal Settlement Liveness**: Full closes and liquidations do not scan or eagerly cancel later queued orders for the same account. If stale tail orders survive after the live position is gone, they fail naturally when they reach the queue head, preserving bounded terminal settlement behavior.
 
 ### IV. CfdEngine — The Mathematical Ledger

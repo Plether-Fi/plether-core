@@ -92,6 +92,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
     uint256 internal constant CLOSE_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
+    uint256 public constant MAX_PENDING_ORDERS = 5;
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
@@ -140,6 +141,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
     error OrderRouter__OrdersAreBinding();
+    error OrderRouter__TooManyPendingOrders();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -275,6 +277,9 @@ contract OrderRouter is Ownable2Step, Pausable {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (pendingOrderCounts[accountId] >= MAX_PENDING_ORDERS) {
+            revert OrderRouter__TooManyPendingOrders();
+        }
         if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
             revert OrderRouter__NoOpenPosition();
         }
