@@ -118,6 +118,85 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
     }
 
+    function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveFundingAccrual() public {
+        address bullTrader = address(0xC103);
+        address bearTrader = address(0xC104);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundJunior(address(0xC105), 1_000_000e6);
+        _fundTrader(bullTrader, 80_000e6);
+        _fundTrader(bearTrader, 80_000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 30_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
+
+        vm.warp(block.timestamp + 180 days);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 50_000e18, 1e8, pool.totalAssets());
+        assertTrue(preview.valid, "Positive-funding partial close preview should remain valid");
+
+        uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+
+        _close(bearId, CfdTypes.Side.BEAR, 50_000e18, 1e8);
+
+        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(bearId);
+        assertEq(sizeAfter, preview.remainingSize, "Partial close preview remaining size should match live execution");
+        assertEq(
+            marginAfter, preview.remainingMargin, "Partial close preview remaining margin should match live execution"
+        );
+        assertEq(
+            engine.deferredPayoutUsdc(bearId) - deferredBefore,
+            preview.deferredPayoutUsdc,
+            "Partial close preview deferred payout should match live deferred payout delta"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Partial close preview bad debt should match live bad debt delta"
+        );
+        assertEq(
+            preview.triggersDegradedMode,
+            engine.degradedMode(),
+            "Partial close preview degraded-mode flag should match live outcome"
+        );
+        assertEq(
+            preview.postOpDegradedMode,
+            engine.degradedMode(),
+            "Partial close preview post-op degraded flag should match live outcome"
+        );
+    }
+
+    function test_PreviewClose_PartialCloseIgnoresQueuedCommittedMarginInLiveExecution() public {
+        address trader = address(0xC106);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundJunior(address(0xC107), 1_000_000e6);
+        _fundTrader(trader, 8_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
+
+        uint256 committedBefore = router.committedMargins(1);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
+        assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1.1e8));
+
+        vm.prank(KEEPER);
+        router.executeOrder(2, priceData);
+
+        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
+        assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
+        assertEq(router.committedMargins(1), committedBefore, "Queued open-order committed margin must remain untouched");
+    }
+
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
         uint256 liquidationPriceFuzz
     ) public {

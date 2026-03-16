@@ -89,7 +89,8 @@ The vault may only recognize unrealized trader profits as liabilities, never unr
 
 Definition:
 
-- compute `(PnL + funding)` per side,
+- cap each side's negative funding at collectible backing (`-totalSideMargin`),
+- compute `(PnL + cappedFunding)` per side,
 - clamp each side at zero,
 - sum the remaining positive values.
 

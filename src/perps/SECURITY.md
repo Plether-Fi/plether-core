@@ -183,12 +183,12 @@ These actors **cannot**:
 
 #### Temporary Junior NAV Dilution
 
-- **Behavior**: `getVaultMtmAdjustment()` clamps each side's unrealized (PnL + funding) at zero. When the vault has physically paid out to winning traders but losing traders haven't settled yet, the MtM returns zero instead of reflecting the owed debt as an asset.
+- **Behavior**: `getVaultMtmAdjustment()` first caps each side's negative funding at collectible side margin, then clamps each side's unrealized `(PnL + funding)` at zero. When the vault has physically paid out to winning traders but losing traders have not fully settled yet, the MtM still refuses to recognize those unrealized receivables as assets beyond collectible backing.
 - **Impact**: `_reconcile()` sees `distributable < claimedEquity` and triggers `_absorbLoss()`, writing down `juniorPrincipal`. When losers eventually settle (close or liquidation), cash flows in as revenue, but recovery goes through the waterfall (senior restoration → senior yield → junior), so junior doesn't recover dollar-for-dollar.
 - **Severity**: Proportional to unsettled funding. In testing: ~0.3% dip ($3k on $1M) after 90 days of skewed funding with one side settled. Could be larger with sustained heavy skew.
 - **Secondary effect**: New LP depositors during the dip get underpriced shares, diluting existing junior LPs.
 - **Rationale**: Accepted trade-off to eliminate phantom profit bugs (C-02/C-03). The vault can never overestimate its position, which is strictly safer than the alternative where paper MtM profits get withdrawn as real USDC. This follows the accounting conservatism principle: recognize liabilities (trader profits), don't recognize unrealized assets (trader losses) until realized through physical settlement.
-- **Why this is the best O(1) solution**: The ideal fix would be per-position capping (`Σ min(loss_i, margin_i)`), but `min()` is nonlinear — each position clips at a different threshold depending on its entry price and margin, so it cannot be decomposed into global accumulators. Any cap that references aggregate margin (e.g., `-totalSideMargin`) reintroduces the netting bug to some degree. Zero-clamping is the only O(1) approach that fully eliminates phantom profits.
+- **Why this is the chosen O(1) solution**: The ideal fix would be per-position capping (`Σ min(loss_i, margin_i)`), but `min()` is nonlinear — each position clips at a different threshold depending on its entry price and margin, so it cannot be decomposed into global accumulators. The live implementation therefore uses a conservative two-step approximation: cap negative funding by aggregate collectible side margin, then zero-clamp each side's `(PnL + funding)` total. This can still undercount assets, but it prevents phantom profits from uncollectible funding receivables while keeping the accounting O(1).
 
 ### Funding Precision
 
