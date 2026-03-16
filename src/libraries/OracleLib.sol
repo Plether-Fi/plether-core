@@ -171,4 +171,29 @@ library OracleLib {
         return uint256(rawPrice);
     }
 
+    /// @notice Non-reverting variant of getValidatedPrice for best-effort oracle reads.
+    /// @return success True if the price passed all validation checks.
+    /// @return price The validated price (0 if success is false).
+    function tryGetValidatedPrice(
+        AggregatorV3Interface oracle,
+        AggregatorV3Interface sequencerFeed,
+        uint256 gracePeriod,
+        uint256 timeout
+    ) internal view returns (bool success, uint256 price) {
+        if (address(sequencerFeed) != address(0)) {
+            (, int256 answer, uint256 startedAt,,) = sequencerFeed.latestRoundData();
+            if (answer != 0 || block.timestamp - startedAt < gracePeriod) {
+                return (false, 0);
+            }
+        }
+
+        (, int256 rawPrice,, uint256 updatedAt,) = oracle.latestRoundData();
+
+        if (updatedAt < block.timestamp - timeout || rawPrice <= 0) {
+            return (false, 0);
+        }
+
+        return (true, uint256(rawPrice));
+    }
+
 }

@@ -1692,7 +1692,7 @@ contract InvarCoinTest is Test {
         );
     }
 
-    function test_LpWithdraw_RevertsOnStaleOracleWithPendingYield() public {
+    function test_LpWithdraw_SucceedsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
@@ -1703,11 +1703,11 @@ contract InvarCoinTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        vm.expectRevert();
-        ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        assertGt(usdcOut + bearOut, 0);
     }
 
-    function test_Withdraw_RevertsOnStaleOracleWithPendingYield() public {
+    function test_Withdraw_SucceedsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
@@ -1718,8 +1718,8 @@ contract InvarCoinTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        vm.expectRevert();
-        ic.withdraw(shares, alice, 0);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+        assertGt(usdcOut, 0);
     }
 
     function test_DeployToCurve_RevertsWithStaleOracle() public {
@@ -1953,7 +1953,7 @@ contract InvarCoinTest is Test {
         ic.harvest();
     }
 
-    function test_WithdrawRevertsOnStaleOracleWithPendingYield() public {
+    function test_WithdrawSucceedsOnStaleOracleWithPendingYield() public {
         vm.prank(alice);
         uint256 aliceShares = ic.deposit(100_000e6, alice, 0);
 
@@ -1964,8 +1964,8 @@ contract InvarCoinTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        vm.expectRevert();
-        ic.withdraw(aliceShares, alice, 0);
+        uint256 usdcOut = ic.withdraw(aliceShares, alice, 0);
+        assertGt(usdcOut, 0);
     }
 
     function test_MicroHarvestPreservesCostBasis() public {
@@ -3765,7 +3765,7 @@ contract HarvestBypassTest is Test {
         usdc.approve(address(ic), type(uint256).max);
     }
 
-    function test_WithdrawRevertsWhenYieldPendingAndOracleStale() public {
+    function test_WithdrawSucceedsWhenYieldPendingAndOracleStale() public {
         vm.prank(alice);
         ic.deposit(100_000e6, alice, 0);
 
@@ -3779,11 +3779,11 @@ contract HarvestBypassTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        vm.expectRevert();
-        ic.withdraw(shares / 2, alice, 0);
+        uint256 usdcOut = ic.withdraw(shares / 2, alice, 0);
+        assertGt(usdcOut, 0);
     }
 
-    function test_LpWithdrawRevertsWhenYieldPendingAndOracleStale() public {
+    function test_LpWithdrawSucceedsWhenYieldPendingAndOracleStale() public {
         vm.prank(alice);
         ic.deposit(100_000e6, alice, 0);
 
@@ -3797,8 +3797,8 @@ contract HarvestBypassTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        vm.expectRevert();
-        ic.lpWithdraw(shares / 2, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0);
+        assertGt(usdcOut + bearOut, 0);
     }
 
 }

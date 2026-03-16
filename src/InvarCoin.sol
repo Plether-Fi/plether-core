@@ -791,9 +791,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
-    /// @dev Harvest yield before withdrawals. Skips safely when no yield is pending or Curve is down.
-    ///      When yield IS pending, harvest must succeed (oracle must be fresh) or the withdrawal reverts
-    ///      to prevent withdrawers from extracting unharvested yield meant for sINVAR stakers.
+    /// @dev Harvest yield before withdrawals. Best-effort: skips when no yield is pending, Curve is
+    ///      down, or oracle is unavailable. Withdrawals must never be blocked by oracle outages.
     function _harvestSafe() internal {
         if (address(stakedInvarCoin) == address(0)) {
             return;
@@ -815,8 +814,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             return;
         }
 
-        uint256 oraclePrice =
-            OracleLib.getValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        (bool ok, uint256 oraclePrice) =
+            OracleLib.tryGetValidatedPrice(BASKET_ORACLE, SEQUENCER_UPTIME_FEED, SEQUENCER_GRACE_PERIOD, ORACLE_TIMEOUT);
+        if (!ok) {
+            return;
+        }
 
         _harvestWithPrice(lpBal, currentVpValue, oraclePrice);
     }
