@@ -5,6 +5,7 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
@@ -118,7 +119,7 @@ contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTes
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, false);
 
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.executionBountyUsdc, 50_000, "Dust orders should escrow a nonzero minimum execution bounty");
     }
 

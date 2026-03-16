@@ -7,6 +7,48 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
+    /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
+    ///      `deferredPayoutUsdc` are trader-owned value or obligations recorded by the protocol.
+    ///      `executionEscrowUsdc` is router-custodied order bounty escrow attributed to the account.
+    ///      `committedMarginUsdc` remains trader-owned settlement reserved for queued orders inside the clearinghouse.
+    struct AccountLedgerView {
+        uint256 settlementBalanceUsdc;
+        uint256 freeSettlementUsdc;
+        uint256 activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc;
+        uint256 executionEscrowUsdc;
+        uint256 committedMarginUsdc;
+        uint256 deferredPayoutUsdc;
+        uint256 pendingOrderCount;
+    }
+
+    /// @notice Expanded per-account ledger snapshot for debugging account health, reachability, and queued-order state.
+    /// @dev Extends `AccountLedgerView` with terminal settlement reachability, equity, buying power, and live position risk.
+    struct AccountLedgerSnapshot {
+        uint256 settlementBalanceUsdc;
+        uint256 freeSettlementUsdc;
+        uint256 activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc;
+        uint256 executionEscrowUsdc;
+        uint256 committedMarginUsdc;
+        uint256 deferredPayoutUsdc;
+        uint256 pendingOrderCount;
+        uint256 closeReachableUsdc;
+        uint256 liquidationReachableUsdc;
+        uint256 accountEquityUsdc;
+        uint256 freeBuyingPowerUsdc;
+        bool hasPosition;
+        CfdTypes.Side side;
+        uint256 size;
+        uint256 margin;
+        uint256 entryPrice;
+        int256 unrealizedPnlUsdc;
+        int256 pendingFundingUsdc;
+        int256 netEquityUsdc;
+        bool liquidatable;
+    }
+
     struct ProtocolAccountingSnapshot {
         uint256 vaultAssetsUsdc;
         uint256 netPhysicalAssetsUsdc;
@@ -130,6 +172,10 @@ interface ICfdEngine {
 
     /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
     function getMaxLiability() external view returns (uint256);
+    /// @notice Compact per-account ledger view spanning clearinghouse, router escrow, and deferred trader payout state.
+    function getAccountLedgerView(bytes32 accountId) external view returns (AccountLedgerView memory viewData);
+    /// @notice Expanded per-account ledger snapshot for debugging account health and settlement reachability across protocol components.
+    function getAccountLedgerSnapshot(bytes32 accountId) external view returns (AccountLedgerSnapshot memory snapshot);
     /// @notice Canonical protocol-wide accounting snapshot across physical assets, liabilities, fees, bad debt, and deferred obligations.
     function getProtocolAccountingSnapshot() external view returns (ProtocolAccountingSnapshot memory snapshot);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)

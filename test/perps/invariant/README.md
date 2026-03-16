@@ -28,6 +28,8 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Catches protocol-wide ledger drift and conservation bugs
   - Verifies known actor and protocol balances conserve total USDC supply
   - Verifies clearinghouse custody matches tracked account balances
+  - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router escrow, deferred payouts, and pending order counts
+  - Verifies the expanded per-account ledger snapshot stays aligned with collateral, position-health, and settlement-reachability views
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
   - Verifies house-pool input/status snapshots stay aligned with vault assets, fees, deferred liabilities, and engine status

@@ -2,8 +2,11 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 import {PerpGhostLedger} from "./ghost/PerpGhostLedger.sol";
@@ -97,6 +100,80 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 clearinghouse.balanceUsdc(accountId),
                 "Tracked account bucket settlement must equal clearinghouse balance"
             );
+        }
+    }
+
+    function invariant_AccountLedgerViewMatchesUnderlyingBuckets() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            uint256 protectedMargin = size > 0 ? margin : 0;
+
+            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
+            IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+                clearinghouse.getAccountUsdcBuckets(accountId, protectedMargin);
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+
+            assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc, "Account ledger settlement mismatch");
+            assertEq(ledgerView.freeSettlementUsdc, buckets.freeSettlementUsdc, "Account ledger free settlement mismatch");
+            assertEq(
+                ledgerView.activePositionMarginUsdc,
+                buckets.activePositionMarginUsdc,
+                "Account ledger active margin mismatch"
+            );
+            assertEq(
+                ledgerView.otherLockedMarginUsdc,
+                buckets.otherLockedMarginUsdc,
+                "Account ledger other locked margin mismatch"
+            );
+            assertEq(ledgerView.executionEscrowUsdc, escrow.executionBountyUsdc, "Account ledger execution escrow mismatch");
+            assertEq(ledgerView.committedMarginUsdc, escrow.committedMarginUsdc, "Account ledger committed margin mismatch");
+            assertEq(ledgerView.deferredPayoutUsdc, engine.deferredPayoutUsdc(accountId), "Account ledger deferred payout mismatch");
+            assertEq(ledgerView.pendingOrderCount, router.pendingOrderCounts(accountId), "Account ledger pending order count mismatch");
+        }
+    }
+
+    function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
+            CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
+            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+
+            assertEq(snapshot.settlementBalanceUsdc, ledgerView.settlementBalanceUsdc, "Account snapshot settlement mismatch");
+            assertEq(snapshot.freeSettlementUsdc, ledgerView.freeSettlementUsdc, "Account snapshot free settlement mismatch");
+            assertEq(
+                snapshot.activePositionMarginUsdc,
+                ledgerView.activePositionMarginUsdc,
+                "Account snapshot active margin mismatch"
+            );
+            assertEq(
+                snapshot.otherLockedMarginUsdc,
+                ledgerView.otherLockedMarginUsdc,
+                "Account snapshot other locked margin mismatch"
+            );
+            assertEq(snapshot.executionEscrowUsdc, ledgerView.executionEscrowUsdc, "Account snapshot execution escrow mismatch");
+            assertEq(snapshot.committedMarginUsdc, ledgerView.committedMarginUsdc, "Account snapshot committed margin mismatch");
+            assertEq(snapshot.deferredPayoutUsdc, ledgerView.deferredPayoutUsdc, "Account snapshot deferred payout mismatch");
+            assertEq(snapshot.pendingOrderCount, ledgerView.pendingOrderCount, "Account snapshot pending order count mismatch");
+            assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc, "Account snapshot close reachable mismatch");
+            assertEq(
+                snapshot.liquidationReachableUsdc,
+                collateralView.liquidationReachableUsdc,
+                "Account snapshot liquidation reachable mismatch"
+            );
+            assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Account snapshot equity mismatch");
+            assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc, "Account snapshot buying power mismatch");
+            assertEq(snapshot.hasPosition, positionView.exists, "Account snapshot position flag mismatch");
+            assertEq(uint256(snapshot.side), uint256(positionView.side), "Account snapshot side mismatch");
+            assertEq(snapshot.size, positionView.size, "Account snapshot size mismatch");
+            assertEq(snapshot.margin, positionView.margin, "Account snapshot margin mismatch");
+            assertEq(snapshot.entryPrice, positionView.entryPrice, "Account snapshot entry price mismatch");
+            assertEq(snapshot.unrealizedPnlUsdc, positionView.unrealizedPnlUsdc, "Account snapshot unrealized pnl mismatch");
+            assertEq(snapshot.pendingFundingUsdc, positionView.pendingFundingUsdc, "Account snapshot pending funding mismatch");
+            assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc, "Account snapshot net equity mismatch");
+            assertEq(snapshot.liquidatable, positionView.liquidatable, "Account snapshot liquidatable mismatch");
         }
     }
 

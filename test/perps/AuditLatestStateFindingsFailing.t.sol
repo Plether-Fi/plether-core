@@ -5,6 +5,7 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTest {
@@ -40,7 +41,7 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         vm.prank(attacker);
         router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
         assertEq(
             escrow.executionBountyUsdc,

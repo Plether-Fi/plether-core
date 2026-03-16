@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {MockOracle} from "../utils/MockOracle.sol";
@@ -179,7 +180,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.committedMarginUsdc, 1000 * 1e6, "Escrow view should sum committed margin");
         assertEq(escrow.executionBountyUsdc, 1_000_000, "Only open orders should escrow execution bounties");
         assertEq(escrow.pendingOrderCount, 2, "Escrow view should count queued orders");
@@ -1065,7 +1066,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.stopPrank();
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        OrderRouter.AccountEscrow memory beforeEscrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory beforeEscrow = router.getAccountEscrow(accountId);
         assertEq(beforeEscrow.pendingOrderCount, 2, "Both orders should be queued");
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
@@ -1075,7 +1076,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, empty);
 
-        OrderRouter.AccountEscrow memory afterRevertEscrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory afterRevertEscrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
         assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
 
@@ -1084,7 +1085,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        OrderRouter.AccountEscrow memory finalEscrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory finalEscrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 3, "Honest keeper should later consume both queued orders");
         assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
     }
@@ -1106,7 +1107,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
         router.executeOrderBatch(2, empty);
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should consume only the head order");
         assertEq(escrow.pendingOrderCount, 1, "Trailing queued order should remain pending after batch break");
         assertEq(router.executionBountyReserves(2), 1e6, "Trailing order execution bounty should remain escrowed");
@@ -1150,7 +1151,7 @@ contract OrderRouterPythTest is BasePerpTest {
             "Batch executor should be paid for successful orders and failed binding open tails"
         );
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(
             escrow.pendingOrderCount, 0, "Queued orders should be fully consumed even when one close defers payout"
         );
@@ -1172,7 +1173,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, empty);
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Stale revert should preserve escrowed order state");
         assertEq(usdc.balanceOf(address(router)), 1e6, "Router custody should continue escrowing the keeper reserve");
@@ -1194,7 +1195,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
         assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
         assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out from router custody");

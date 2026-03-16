@@ -7,6 +7,7 @@ import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -18,7 +19,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is Ownable2Step, Pausable {
+contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
     using SafeERC20 for IERC20;
 
@@ -393,7 +394,7 @@ contract OrderRouter is Ownable2Step, Pausable {
     /// @notice Returns the total queued escrow state for an account across all pending orders.
     function getAccountEscrow(
         bytes32 accountId
-    ) external view returns (AccountEscrow memory escrow) {
+    ) external view returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
         escrow.committedMarginUsdc = _accountCommittedMargin(accountId);
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {

@@ -8,6 +8,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Test} from "forge-std/Test.sol";
@@ -370,7 +371,7 @@ contract PerpInvariantTest is BasePerpTest {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
-            OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
             uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
 
             if (size > 0) {
@@ -471,7 +472,7 @@ contract PerpInvariantTest is BasePerpTest {
                 rawQueuedCommitted += router.committedMargins(orderId);
             }
 
-            OrderRouter.AccountEscrow memory escrow = router.getAccountEscrow(accountId);
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
             assertEq(
                 escrow.committedMarginUsdc,
                 rawQueuedCommitted,
