@@ -198,18 +198,18 @@ Review:
 - Added `test_MarketCalendar_SundayBoundariesMatchLiveSemantics` in `test/perps/CfdEngine.t.sol` and revalidated the existing Sunday router/liquidation boundary tests.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "MarketCalendar_SundayBoundariesMatchLiveSemantics|GetHousePoolInputSnapshot_UsesFrozenOracleFreshnessLimit"`, `forge test --match-path test/perps/OrderRouter.t.sol --match-test "SundayDst_OracleUnfrozenAt21|SundayDst_MevEnforcedAt21|SundayDst_StillFadAt21|SundayDst_WinterStalenessRejects"`, and `forge test --match-path test/perps/Liquidation.t.sol --match-test "testIsFadWindow_Weekend"`.
 
-- [ ] Extract one shared post-funding close-settlement planner that both `previewClose()` and live close execution use
-- [ ] Make the shared planner simulate funding settlement first, including vault cash outflow / clearinghouse margin-credit effects for positive funding and uncovered-funding handling for negative funding
-- [ ] Rebuild clearinghouse bucket snapshots from the simulated post-funding state for partial closes instead of mutating only `otherLockedMarginUsdc`
-- [ ] Route both preview and live close loss planning through the rebuilt bucket snapshot so committed-order reservations are excluded consistently and `IncompleteReservationCoverage` cannot appear after a valid preview
-- [ ] Align preview post-close solvency modeling with live execution by rolling the remaining side exposure onto the preview funding index exactly as `_settleFunding()` does before size reduction finalization
-- [ ] Include simulated funding payout cash movement in preview solvency deltas so `valid`, `badDebtUsdc`, `effectiveAssetsAfterUsdc`, `triggersDegradedMode`, and `postOpDegradedMode` match live execution for positive-funding partial closes
-- [ ] Add focused regression tests in `test/perps/CfdEngine.t.sol` for: partial close with committed margin excluded, accrued-funding partial close parity, positive-funding vault cash outflow parity, and preview-invalid/live-revert agreement
-- [ ] Extend `test/perps/PreviewExecutionDifferential.t.sol` with partial-close cases that compare preview outputs against live execution across negative funding, positive funding, and queued committed-margin scenarios
-- [ ] Strengthen `test/perps/invariant/PerpPreviewInvariant.t.sol` so partial closes preserve preview/live parity for validity, bad debt, degraded-mode transitions, and reachable collateral accounting under funding accrual
-- [ ] Update `src/perps/ACCOUNTING_SPEC.md` Unrealized MtM Liability wording to include the collectible side-margin cap before the per-side zero clamp
-- [ ] Update `src/perps/SECURITY.md` MtM rationale so it matches the current capped-negative-funding code path and no longer describes aggregate-side-margin capping as rejected when that is what the code now does
-- [ ] Re-run targeted verification: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_|CloseLoss_|Funding"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`, `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`, and any affected audit regression slices
+- [x] Extract one shared post-funding close-settlement planner that both `previewClose()` and live close execution use
+- [x] Make the shared planner simulate funding settlement first, including vault cash outflow / clearinghouse margin-credit effects for positive funding and uncovered-funding handling for negative funding
+- [x] Rebuild clearinghouse bucket snapshots from the simulated post-funding state for partial closes instead of mutating only `otherLockedMarginUsdc`
+- [x] Route both preview and live close loss planning through the rebuilt bucket snapshot so committed-order reservations are excluded consistently and `IncompleteReservationCoverage` cannot appear after a valid preview
+- [x] Align preview post-close solvency modeling with live execution by rolling the remaining side exposure onto the preview funding index exactly as `_settleFunding()` does before size reduction finalization
+- [x] Include simulated funding payout cash movement in preview solvency deltas so `valid`, `badDebtUsdc`, `effectiveAssetsAfterUsdc`, `triggersDegradedMode`, and `postOpDegradedMode` match live execution for positive-funding partial closes
+- [x] Add focused regression tests in `test/perps/CfdEngine.t.sol` for: partial close with committed margin excluded, accrued-funding partial close parity, positive-funding vault cash outflow parity, and preview-invalid/live-revert agreement
+- [x] Extend `test/perps/PreviewExecutionDifferential.t.sol` with partial-close cases that compare preview outputs against live execution across negative funding, positive funding, and queued committed-margin scenarios
+- [x] Strengthen `test/perps/invariant/PerpPreviewInvariant.t.sol` so partial closes preserve preview/live parity for validity, bad debt, degraded-mode transitions, and reachable collateral accounting under funding accrual
+- [x] Update `src/perps/ACCOUNTING_SPEC.md` Unrealized MtM Liability wording to include the collectible side-margin cap before the per-side zero clamp
+- [x] Update `src/perps/SECURITY.md` MtM rationale so it matches the current capped-negative-funding code path and no longer describes aggregate-side-margin capping as rejected when that is what the code now does
+- [x] Re-run targeted verification: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_|CloseLoss_|Funding"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`, `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`, and any affected audit regression slices
 
 Review:
 - Goal: eliminate the last known partial-close preview/live divergence by making preview and execution consume the same post-funding close-settlement model, then align the docs that still describe the pre-cap MtM semantics.
@@ -404,11 +404,16 @@ Review:
 - Tranche senior/junior branching in `src/perps/HousePool.sol` and `src/perps/TrancheVault.sol` is mostly intentional and only worth light deduplication.
 
 - [x] Refactor liquidation preview/live into one shared transition planner in `src/perps/CfdEngine.sol`
-- [ ] Refactor close preview/live post-settlement and solvency wiring into a shared planner or builder
-- [ ] Centralize oracle freeze / market-closed calendar logic shared by `CfdEngine` and `OrderRouter`
-- [ ] Evaluate local deduplication of `OrderRouter` queue unlink helpers without obscuring invariants
-- [ ] Leave tranche senior/junior branching mostly explicit unless a tiny helper clearly improves readability
-- [ ] After each refactor slice, run the narrowest affected Forge suites plus a final `test/perps/*.t.sol` pass
+- [x] Refactor close preview/live post-settlement and solvency wiring into a shared planner or builder
+- [x] Centralize oracle freeze / market-closed calendar logic shared by `CfdEngine` and `OrderRouter`
+- [x] Evaluate local deduplication of `OrderRouter` queue unlink helpers without obscuring invariants
+- [x] Leave tranche senior/junior branching mostly explicit unless a tiny helper clearly improves readability
+- [x] After each refactor slice, run the narrowest affected Forge suites plus a final `test/perps/*.t.sol` pass
+
+Review:
+- Evaluated deduplication for `OrderRouter` queue link/unlink helpers. Due to the lack of generic pointers in Solidity, sharing the logic would require either wrapping pointers in generic `Node` arrays (which obscures memory layout) or adding branchy `if (isPendingQueue)` logic inside the helper, which hides invariants. Decided to leave `_unlinkPendingOrder` and `_unlinkMarginOrder` explicitly separated as they are small and clearly readable.
+- Left tranche senior/junior branching explicit in `HousePool` and `TrancheVault` because the logic is intentional and cleanly readable without over-abstraction.
+- Final full suite run executed across all refactor slices.
 
 Review:
 - Priority order is safety-first: preview/live parity before governance or cosmetic deduplication.
