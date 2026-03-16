@@ -181,9 +181,12 @@ The engine values LP equity using O(1) global accumulators (`globalBullEntryNoti
 
 ### Per-Side Zero Clamp
 
-The MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding` and clamps each side at zero — the vault never recognizes unrealized trader losses as assets:
+The MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding`, but first caps negative funding by collectible side margin and then clamps each side at zero — the vault never recognizes unrealized trader losses as assets or uncollectible funding receivables as offsets:
 
 ```
+if bullFunding < -bullTotalMargin: bullFunding = -bullTotalMargin
+if bearFunding < -bearTotalMargin: bearFunding = -bearTotalMargin
+
 bullTotal = bullPnl + bullFunding
 bearTotal = bearPnl + bearFunding
 
@@ -195,7 +198,7 @@ return bullTotal + bearTotal
 
 The return value represents the vault's aggregate unrealized liability to profitable traders. When traders are losing on net, MtM returns zero rather than a positive vault asset. Realized losses flow through physical USDC transfers (settlements, liquidations) which naturally increase the pool's balance.
 
-**Why not cap at `-totalSideMargin`?** Per-side netting creates phantom vault assets: a profitable position's real liability gets offset against another position's bad debt, even though margins are isolated. Clamping at zero eliminates this class of accounting error entirely.
+**Why cap negative funding by side margin first?** Uncollectible funding receivables should not offset real unrealized liabilities in LP NAV. Capping negative funding by collectible side margin prevents impossible trader debts from suppressing the vault's true liability while still keeping the per-side zero clamp conservative.
 
 **Trade-off**: The vault temporarily undercounts its assets when traders owe unrealized funding or have unrealized losses. This is conservative — junior principal may dip temporarily until traders close or are liquidated, at which point physical USDC transfers restore the balance. This is preferable to the alternative where paper profits inflate LP principal and get withdrawn as real USDC.
 

@@ -63,7 +63,7 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` computes per-side `(PnL + funding)` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
+| **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` caps negative funding by collectible side margin, then computes per-side `(PnL + funding)` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets or uncollectible funding receivables as offsets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
 | **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive funding/PnL). Illiquid receivables never reduce physical reserves |
 | **Margin Tracking** | `sides[BULL].totalMargin + sides[BEAR].totalMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
 
