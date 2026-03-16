@@ -112,10 +112,9 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 **Router Queue / Margin Escrow**
 
 - `pendingOrderCounts` must match the actual pending FIFO queue per account.
-- Margin-queue membership must match orders with positive residual committed margin.
-- `marginHeadOffsetUsdc <= marginTailOffsetUsdc` must always hold.
-- Account committed margin is the offset gap: `accountCommittedMarginUsdc = marginTailOffsetUsdc - marginHeadOffsetUsdc`.
-- Locked margin attributable to queued opens must remain consistent with the router's committed-margin accounting and only be released, consumed, or converted through explicit order lifecycle events.
+- Margin-queue membership must match orders whose clearinghouse reservation record still has positive `remainingAmountUsdc`.
+- Clearinghouse reservation records are the sole source of truth for committed order margin; the router now only maintains queue membership and execution-bounty escrow.
+- Locked margin attributable to queued opens must remain consistent with clearinghouse reservation state and only be released, consumed, or converted through explicit order lifecycle events.
 
 **Solvency / Containment**
 

@@ -17,6 +17,32 @@ interface IMarginClearinghouse {
         uint256 totalLockedMarginUsdc;
     }
 
+    enum ReservationBucket {
+        CommittedOrder,
+        ReservedSettlement
+    }
+
+    enum ReservationStatus {
+        None,
+        Active,
+        Consumed,
+        Released
+    }
+
+    struct OrderReservation {
+        bytes32 accountId;
+        ReservationBucket bucket;
+        uint256 originalAmountUsdc;
+        uint256 remainingAmountUsdc;
+        ReservationStatus status;
+    }
+
+    struct AccountReservationSummary {
+        uint256 activeCommittedOrderMarginUsdc;
+        uint256 activeReservedSettlementUsdc;
+        uint256 activeReservationCount;
+    }
+
     struct AccountUsdcBuckets {
         uint256 settlementBalanceUsdc;
         uint256 totalLockedMarginUsdc;
@@ -37,6 +63,14 @@ interface IMarginClearinghouse {
     function getLockedMarginBuckets(
         bytes32 accountId
     ) external view returns (LockedMarginBuckets memory buckets);
+    /// @notice Returns the reservation record for a specific order id.
+    function getOrderReservation(
+        uint64 orderId
+    ) external view returns (OrderReservation memory reservation);
+    /// @notice Returns the aggregate active reservation summary for an account.
+    function getAccountReservationSummary(
+        bytes32 accountId
+    ) external view returns (AccountReservationSummary memory summary);
     /// @notice Locks trader-owned settlement into the active position margin bucket.
     function lockPositionMargin(
         bytes32 accountId,
@@ -52,11 +86,31 @@ interface IMarginClearinghouse {
         bytes32 accountId,
         uint256 amountUsdc
     ) external;
+    /// @notice Reserves committed-order margin for a specific order id inside the clearinghouse reservation ledger.
+    function reserveCommittedOrderMargin(
+        bytes32 accountId,
+        uint64 orderId,
+        uint256 amountUsdc
+    ) external;
     /// @notice Unlocks committed-order margin back into free settlement when a queued open order is released.
     function unlockCommittedOrderMargin(
         bytes32 accountId,
         uint256 amountUsdc
     ) external;
+    /// @notice Releases any remaining reservation balance for an order back into free settlement.
+    function releaseOrderReservation(
+        uint64 orderId
+    ) external returns (uint256 releasedUsdc);
+    /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
+    function consumeOrderReservation(
+        uint64 orderId,
+        uint256 amountUsdc
+    ) external returns (uint256 consumedUsdc);
+    /// @notice Consumes active order reservations for an account in FIFO reservation order.
+    function consumeAccountOrderReservations(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external returns (uint256 consumedUsdc);
     /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
     function lockReservedSettlement(
         bytes32 accountId,

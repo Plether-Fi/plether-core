@@ -34,8 +34,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     struct OrderRecord {
         CfdTypes.Order core;
         OrderStatus status;
-        uint256 committedMarginUsdc;
-        uint256 committedMarginOffsetUsdc;
         uint256 executionBountyUsdc;
         uint64 nextPendingOrderId;
         uint64 prevPendingOrderId;
@@ -105,8 +103,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     mapping(bytes32 => uint64) public pendingTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
-    mapping(bytes32 => uint256) public marginHeadOffsetUsdc;
-    mapping(bytes32 => uint256) public marginTailOffsetUsdc;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -135,7 +131,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__CloseSideMismatch();
     error OrderRouter__CloseSizeExceedsPosition();
     error OrderRouter__InsufficientFreeEquity();
-    error OrderRouter__InsufficientCommittedMargin();
     error OrderRouter__MarginOrderLinkCorrupted();
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
@@ -359,7 +354,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function committedMargins(
         uint64 orderId
     ) external view returns (uint256) {
-        return _remainingCommittedMargin(orderRecords[orderId]);
+        return IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId).remainingAmountUsdc;
     }
 
     function executionBountyReserves(
@@ -384,7 +379,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
-        escrow.committedMarginUsdc = _accountCommittedMargin(accountId);
+        escrow.committedMarginUsdc = IMarginClearinghouse(engine.clearinghouse()).getAccountReservationSummary(accountId)
+            .activeCommittedOrderMarginUsdc;
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
@@ -394,18 +390,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
     }
 
-    function noteCommittedMarginConsumed(
-        bytes32 accountId,
-        uint256 amountUsdc
+    function syncMarginQueue(
+        bytes32 accountId
     ) external onlyEngine {
-        if (amountUsdc == 0) {
-            return;
-        }
-        uint256 committedMarginUsdc = _accountCommittedMargin(accountId);
-        if (amountUsdc > committedMarginUsdc) {
-            revert OrderRouter__InsufficientCommittedMargin();
-        }
-        marginHeadOffsetUsdc[accountId] += amountUsdc;
+        _pruneMarginQueue(accountId);
     }
 
     function getAccountOrderSummary(
@@ -419,7 +407,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             if (order.isClose) {
                 summary.pendingCloseSize += order.sizeDelta;
             }
-            summary.committedMarginUsdc += _remainingCommittedMargin(record);
+            summary.committedMarginUsdc += IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId).remainingAmountUsdc;
             summary.executionBountyUsdc += record.executionBountyUsdc;
             if (order.isClose) {
                 summary.hasTerminalCloseQueued = true;
@@ -446,7 +434,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 targetPrice: order.targetPrice,
                 commitTime: order.commitTime,
                 commitBlock: order.commitBlock,
-                committedMarginUsdc: _remainingCommittedMargin(record),
+                committedMarginUsdc: IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId).remainingAmountUsdc,
                 executionBountyUsdc: record.executionBountyUsdc
             });
             index++;
@@ -843,11 +831,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _releaseCommittedMargin(
         uint64 orderId
     ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint256 amount = _remainingCommittedMargin(record);
-        _consumeCommittedMarginForOrder(record);
-        if (amount > 0) {
-            IMarginClearinghouse(engine.clearinghouse()).unlockCommittedOrderMargin(record.core.accountId, amount);
+        IMarginClearinghouse.OrderReservation memory reservation =
+            IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId);
+        if (reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
+            IMarginClearinghouse(engine.clearinghouse()).releaseOrderReservation(orderId);
         }
     }
 
@@ -952,10 +939,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         record.nextMarginOrderId = 0;
         record.prevMarginOrderId = 0;
         record.inMarginQueue = false;
-        if (marginHeadOrderId[accountId] == 0) {
-            marginHeadOffsetUsdc[accountId] = 0;
-            marginTailOffsetUsdc[accountId] = 0;
-        }
     }
 
     function _reserveExecutionBounty(
@@ -984,10 +967,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         if (isClose || marginDelta == 0) {
             return;
         }
-        clearinghouse.lockCommittedOrderMargin(accountId, marginDelta);
-        orderRecords[orderId].committedMarginOffsetUsdc = marginTailOffsetUsdc[accountId];
-        orderRecords[orderId].committedMarginUsdc = marginDelta;
-        marginTailOffsetUsdc[accountId] += marginDelta;
+        clearinghouse.reserveCommittedOrderMargin(accountId, orderId, marginDelta);
         _linkMarginOrder(accountId, orderId);
     }
 
@@ -1034,9 +1014,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _clearCommittedMargin(
         uint64 orderId
     ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        if (record.committedMarginUsdc > 0) {
-            _consumeCommittedMarginForOrder(record);
+        IMarginClearinghouse.OrderReservation memory reservation =
+            IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId);
+        if (reservation.status == IMarginClearinghouse.ReservationStatus.Active && reservation.remainingAmountUsdc > 0) {
+            IMarginClearinghouse(engine.clearinghouse()).consumeOrderReservation(orderId, reservation.remainingAmountUsdc);
         }
     }
 
@@ -1222,50 +1203,21 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
-    function _accountCommittedMargin(
+    function _pruneMarginQueue(
         bytes32 accountId
-    ) internal view returns (uint256) {
-        uint256 tailOffset = marginTailOffsetUsdc[accountId];
-        uint256 headOffset = marginHeadOffsetUsdc[accountId];
-        return tailOffset > headOffset ? tailOffset - headOffset : 0;
-    }
-
-    function _remainingCommittedMargin(
-        OrderRecord storage record
-    ) internal view returns (uint256) {
-        uint256 committedMarginUsdc = record.committedMarginUsdc;
-        if (committedMarginUsdc == 0) {
-            return 0;
-        }
-
-        uint256 startOffset = record.committedMarginOffsetUsdc;
-        uint256 headOffset = marginHeadOffsetUsdc[record.core.accountId];
-        if (headOffset <= startOffset) {
-            return committedMarginUsdc;
-        }
-
-        uint256 endOffset = startOffset + committedMarginUsdc;
-        if (headOffset >= endOffset) {
-            return 0;
-        }
-        return endOffset - headOffset;
-    }
-
-    function _consumeCommittedMarginForOrder(
-        OrderRecord storage record
     ) internal {
-        if (!record.inMarginQueue) {
-            return;
-        }
+        uint64 orderId = marginHeadOrderId[accountId];
+        while (orderId != 0) {
+            uint256 remainingCommittedMarginUsdc =
+                IMarginClearinghouse(engine.clearinghouse()).getOrderReservation(orderId).remainingAmountUsdc;
+            if (remainingCommittedMarginUsdc > 0) {
+                break;
+            }
 
-        bytes32 accountId = record.core.accountId;
-        uint256 endOffset = record.committedMarginOffsetUsdc + record.committedMarginUsdc;
-        if (marginHeadOffsetUsdc[accountId] < endOffset) {
-            marginHeadOffsetUsdc[accountId] = endOffset;
+            uint64 nextOrderId = orderRecords[orderId].nextMarginOrderId;
+            _unlinkMarginOrder(accountId, orderId);
+            orderId = nextOrderId;
         }
-        _unlinkMarginOrder(accountId, record.core.orderId);
-        record.committedMarginUsdc = 0;
-        record.committedMarginOffsetUsdc = 0;
     }
 
 }

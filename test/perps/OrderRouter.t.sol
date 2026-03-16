@@ -333,9 +333,17 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(address(engine));
-        router.noteCommittedMarginConsumed(accountId, 400 * 1e6);
+        clearinghouse.consumeAccountOrderReservations(accountId, 400 * 1e6);
+
+        vm.prank(address(engine));
+        router.syncMarginQueue(accountId);
 
         assertEq(router.committedMargins(1), 600 * 1e6, "Partial consumption should leave residual committed margin");
+        assertEq(
+            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            600 * 1e6,
+            "Reservation residual should match router-side committed margin residual"
+        );
         assertEq(router.marginHeadOrderId(accountId), 1, "Partially consumed order should remain at margin-queue head");
         assertEq(router.marginTailOrderId(accountId), 1, "Single residual order should remain at margin-queue tail");
         assertTrue(router.isInMarginQueue(1), "Partially consumed order should remain linked in the margin queue");
@@ -351,7 +359,10 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(address(engine));
-        router.noteCommittedMarginConsumed(accountId, 1000 * 1e6);
+        clearinghouse.consumeAccountOrderReservations(accountId, 1000 * 1e6);
+
+        vm.prank(address(engine));
+        router.syncMarginQueue(accountId);
 
         assertEq(router.committedMargins(1), 0, "First margin-paying order should be fully drained");
         assertEq(
@@ -359,17 +370,19 @@ contract OrderRouterTest is BasePerpTest {
         );
         assertEq(
             router.marginHeadOrderId(accountId),
-            1,
-            "Account margin head stays lazy until the drained order is processed"
+            3,
+            "Account margin head should advance once zero-remaining reservations are pruned"
         );
         assertEq(
             router.marginTailOrderId(accountId),
             3,
             "Margin queue tail should still point at the trailing positive-margin order"
         );
-        assertTrue(router.isInMarginQueue(1), "Drained order stays linked until it is individually processed");
+        assertFalse(router.isInMarginQueue(1), "Drained order should be pruned from the margin queue once reservations are consumed");
         assertFalse(router.isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(router.isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
+        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0, "First reservation should be fully consumed alongside router head exposure");
+        assertEq(clearinghouse.getOrderReservation(3).remainingAmountUsdc, 250 * 1e6, "Later reservation should retain its committed margin");
     }
 
     function test_NoteCommittedMarginConsumed_ReconcilesPerOrderReleaseAfterPartialBucketConsumption() public {
@@ -391,7 +404,7 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
 
         vm.prank(address(engine));
-        router.noteCommittedMarginConsumed(accountId, 30 * 1e6);
+        router.syncMarginQueue(accountId);
 
         assertEq(router.committedMargins(1), 0, "First order should be fully consumed before release");
         assertEq(router.committedMargins(2), 20 * 1e6, "Second order should retain only the unconsumed committed margin");
@@ -401,12 +414,31 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         IMarginClearinghouse.LockedMarginBuckets memory afterBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        IMarginClearinghouse.OrderReservation memory firstReservation = clearinghouse.getOrderReservation(1);
+        IMarginClearinghouse.OrderReservation memory secondReservation = clearinghouse.getOrderReservation(2);
         assertEq(afterBuckets.committedOrderMarginUsdc, 0, "Per-order release must reconcile with partially consumed committed-order buckets");
         assertEq(router.committedMargins(1), 0, "First order committed margin should stay zero after release");
         assertEq(router.committedMargins(2), 0, "Second order committed margin should release only the residual tracked amount");
+        assertEq(uint256(firstReservation.status), uint256(IMarginClearinghouse.ReservationStatus.Consumed));
+        assertEq(uint256(secondReservation.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
     }
 
-    function test_ReleaseCommittedMargin_RevertsIfClearinghouseBucketWasConsumedWithoutRouterSync() public {
+    function test_CommitOrder_DualWritesReservationAndRouterCommittedMarginState() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 1e8, false);
+
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(1);
+        IMarginClearinghouse.AccountReservationSummary memory summary = clearinghouse.getAccountReservationSummary(accountId);
+
+        assertEq(router.committedMargins(1), 250 * 1e6, "Router should still track the per-order committed margin locally");
+        assertEq(reservation.remainingAmountUsdc, 250 * 1e6, "Clearinghouse reservation should mirror the router committed margin");
+        assertEq(summary.activeCommittedOrderMarginUsdc, 250 * 1e6, "Reservation summary should match the live committed-order bucket");
+        assertEq(summary.activeReservationCount, 1, "Exactly one active reservation should exist after a single open-order commit");
+    }
+
+    function test_ReleaseCommittedMargin_NoopsWhenReservationAlreadyConsumed() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
@@ -422,8 +454,9 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.consumeCloseLoss(accountId, 30 * 1e6, 0, address(engine));
 
         bytes[] memory empty;
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBucketMargin.selector);
         router.executeOrder(1, empty);
+
+        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0, "Consumed reservation should remain zero after execution cleanup");
     }
 
     function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {

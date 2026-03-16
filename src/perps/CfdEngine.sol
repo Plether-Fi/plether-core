@@ -1062,7 +1062,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
         result.collectedExecFeeUsdc = plannedResult.collectedExecFeeUsdc;
         result.badDebtUsdc = plannedResult.badDebtUsdc;
-        _noteCommittedMarginConsumed(accountId, plannedConsumption.otherLockedMarginConsumedUsdc);
+        _syncMarginQueue(accountId, plannedConsumption.otherLockedMarginConsumedUsdc);
 
         collectedExecFeeUsdc = result.collectedExecFeeUsdc;
         accumulatedBadDebtUsdc += result.badDebtUsdc;
@@ -1122,20 +1122,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             );
         (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) =
             clearinghouse.consumeLiquidationResidual(accountId, positionMarginUsdc, residualUsdc, address(vault));
-        _noteCommittedMarginConsumed(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
+        _syncMarginQueue(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
         if (result.payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(accountId, result.payoutUsdc);
         }
     }
 
-    function _noteCommittedMarginConsumed(
+    function _syncMarginQueue(
         bytes32 accountId,
-        uint256 amountUsdc
+        uint256 consumedCommittedReservationUsdc
     ) internal {
-        if (amountUsdc == 0 || orderRouter == address(0)) {
+        if (consumedCommittedReservationUsdc == 0 || orderRouter == address(0)) {
             return;
         }
-        IOrderRouterAccounting(orderRouter).noteCommittedMarginConsumed(accountId, amountUsdc);
+        IOrderRouterAccounting(orderRouter).syncMarginQueue(accountId);
     }
 
     function _payOrRecordDeferredTraderPayout(

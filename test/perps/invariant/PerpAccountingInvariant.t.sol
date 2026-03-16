@@ -111,8 +111,10 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             bytes32 accountId = _accountId(handler.actorAt(i));
             uint256 ghostCommittedMargin = handler.committedMarginSnapshot(accountId);
             uint256 liveCommittedMargin = router.getAccountEscrow(accountId).committedMarginUsdc;
+            uint256 reservationCommittedMargin = handler.accountActiveReservationCommittedMargin(accountId);
 
             assertEq(ghostCommittedMargin, liveCommittedMargin, "Ghost committed margin must match account escrow");
+            assertEq(liveCommittedMargin, reservationCommittedMargin, "Router account escrow must match clearinghouse reservation summary");
             ghostTotalCommittedMargin += ghostCommittedMargin;
         }
 
@@ -141,15 +143,18 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint8 ghostState = handler.ghostOrderLifecycleState(orderId);
             uint256 ghostRemaining = handler.ghostOrderRemainingCommittedMargin(orderId);
             uint256 liveRemaining = router.committedMargins(orderId);
+            uint256 reservationRemaining = handler.reservationRemainingCommittedMargin(orderId);
 
             if (ghostState == 1) {
                 assertEq(liveRemaining, ghostRemaining, "Pending ghost order margin must match router remaining margin");
+                assertEq(liveRemaining, reservationRemaining, "Pending order reservation remaining must match router remaining margin");
                 if (ghostRemaining > 0) {
                     assertTrue(router.isInMarginQueue(orderId), "Pending ghost order with margin must stay in margin queue");
                 }
             } else {
                 assertEq(ghostRemaining, 0, "Terminal ghost orders must have zero remaining committed margin");
                 assertEq(liveRemaining, 0, "Terminal ghost orders must have zero router committed margin");
+                assertEq(reservationRemaining, 0, "Terminal orders must have zero reservation remaining margin");
                 assertFalse(router.isInMarginQueue(orderId), "Terminal ghost orders must not stay in margin queue");
             }
         }

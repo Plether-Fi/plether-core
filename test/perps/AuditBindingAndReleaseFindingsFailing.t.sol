@@ -20,7 +20,10 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000e18, 500e6, 1e8, false);
 
         vm.prank(address(engine));
-        router.noteCommittedMarginConsumed(aliceId, 500e6);
+        clearinghouse.consumeAccountOrderReservations(aliceId, 500e6);
+
+        vm.prank(address(engine));
+        router.syncMarginQueue(aliceId);
 
         assertEq(
             router.committedMargins(1), 0, "Consumed committed margin should be charged to the queued order itself"

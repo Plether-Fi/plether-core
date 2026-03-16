@@ -439,6 +439,18 @@ contract PerpAccountingHandler is Test {
         return ghostOrderCommittedMargin[orderId];
     }
 
+    function reservationRemainingCommittedMargin(
+        uint64 orderId
+    ) external view returns (uint256) {
+        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+    }
+
+    function accountActiveReservationCommittedMargin(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
+    }
+
     function lastKnownOrderId() external view returns (uint64) {
         return router.nextCommitId() > 0 ? router.nextCommitId() - 1 : 0;
     }

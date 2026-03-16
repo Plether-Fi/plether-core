@@ -13,10 +13,9 @@ interface IOrderRouterAccounting {
         uint256 pendingOrderCount;
     }
 
-    /// @notice Marks committed margin as consumed so router-side queue accounting stays consistent with engine settlement.
-    function noteCommittedMarginConsumed(
-        bytes32 accountId,
-        uint256 amountUsdc
+    /// @notice Prunes any zero-remaining committed-order reservations out of the router's margin queue for an account.
+    function syncMarginQueue(
+        bytes32 accountId
     ) external;
 
     /// @notice Returns aggregate queued escrow attributed to an account across all pending orders.

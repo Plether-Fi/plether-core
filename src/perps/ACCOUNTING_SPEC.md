@@ -218,7 +218,7 @@ Each account must have conceptually distinct balances even if the current implem
 - Trader-owned domain:
   - `balance`: physical collateral deposited in the clearinghouse
   - `activePositionMargin`: collateral backing currently open positions
-  - `committedMargin`: collateral reserved for pending orders and still owned by the trader until terminal settlement or valid refund
+  - `committedMargin`: collateral reserved for pending orders in clearinghouse-owned reservation records and still owned by the trader until terminal settlement or valid refund
 - Non-trader-owned domain:
   - `keeperExecutionReserve`: USDC reserved to pay order executors and no longer economically owned by the trader once committed
 - `freeBalance = balance - activePositionMargin - committedMargin - keeperExecutionReserve`
@@ -227,7 +227,7 @@ Required properties:
 
 - `freeBalance` is the only quantity that may be withdrawn voluntarily,
 - order commits may only reserve from `freeBalance`,
-- `committedMargin` is refundable on cancel only while it remains trader-owned,
+- `committedMargin` is refundable only while its clearinghouse reservation record remains active and trader-owned,
 - `committedMargin` remains terminally reachable whenever it is still refundable to the trader,
 - `keeperExecutionReserve` must not be modeled inside `balances[accountId]` once committed,
 - liquidation and other terminal settlement paths may seize all same-account trader-owned settlement collateral except `keeperExecutionReserve`,
@@ -243,6 +243,7 @@ Operational consequence:
 - no future order-deletion path may return value that has already crossed into the non-trader-owned domain.
 - user-cancelled keeper reserves should route to explicit protocol-owned revenue rather than back to the trader.
 - once committed, keeper reserves should live in a dedicated queue-fee custody domain rather than inside trader collateral accounting.
+- committed order reservations should be owned and released by the clearinghouse reservation ledger, with the router limited to queue membership and execution ordering.
 
 ## Settlement Rules
 
