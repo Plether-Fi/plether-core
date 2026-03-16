@@ -431,3 +431,13 @@ Review:
 - Updated `src/perps/MarginClearinghouse.sol` bucket-view Natspec to describe the current USDC-only model instead of referencing non-USDC collateral.
 - Corrected the stale FIFO execution line in `src/perps/SECURITY.md` so close orders are described as zero-escrow-at-commit and vault-funded only on the documented close clearer path.
 - Verified the targeted stale phrases are gone; the remaining `non-USDC collateral` mention in `src/perps/SECURITY.md` is intentional historical context for a "not applicable in V1" note, not a live behavior description.
+
+- [x] Refactor close-order bounty flow to reserve router escrow at commit and remove vault-funded close bounty settlement path
+- [x] Update router/engine interfaces, docs, and tests for symmetric open/close escrow payout behavior
+- [x] Run targeted Foundry tests covering close execution, expiry, invalid closes, and liquidation interactions
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so close orders now reserve the flat close bounty at commit, all successful/failed/expired orders pay clearers from router-held escrow, and liquidation restores every queued order bounty back into the clearinghouse before terminal cleanup.
+- Removed the now-obsolete `settleCloseOrderExecutionBounty()` engine path from `src/perps/CfdEngine.sol` and `src/perps/interfaces/ICfdEngine.sol`, leaving deferred clearer claims as liquidation-only vault liabilities.
+- Updated docs in `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md`, plus regression coverage in `test/perps/OrderRouter.t.sol`, `test/perps/AuditRemainingCoverageFindingsFailing.t.sol`, `test/perps/AuditRemainingFindingsFailing.t.sol`, and `test/perps/AuditLatestFindingsFailing.t.sol`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseCommit_ReservesPrefundedKeeperBounty|test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty|test_ExitedAccount_InvalidCloseOrderPaysEscrowedBounty|test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition|test_CancelOrder_CloseOrdersAreBinding|test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt|test_ExecuteLiquidation_RestoresEscrowedCloseBountiesBeforeClearingOrders|test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery"`, `forge test --match-path test/perps/AuditRemainingFindingsFailing.t.sol --match-test test_M1_ExecutionFeesAreProtocolRevenue`, `forge test --match-path test/perps/AuditLatestFindingsFailing.t.sol --match-test test_M1_ExecutionFeesAccrueToProtocolNotLpEquity`, and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test "test_M2_CloseCommitRequiresPrefundedKeeperBounty|test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage"`.

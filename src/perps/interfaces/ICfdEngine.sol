@@ -196,13 +196,6 @@ interface ICfdEngine {
         bytes32 accountId
     ) external view returns (CfdTypes.Side);
 
-    /// @notice Pays or defers a close-order execution bounty and optionally books a protocol fee share.
-    function settleCloseOrderExecutionBounty(
-        address clearer,
-        uint256 clearerShareUsdc,
-        uint256 protocolShareUsdc
-    ) external;
-
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
     function degradedMode() external view returns (bool);
 
