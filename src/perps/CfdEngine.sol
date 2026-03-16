@@ -12,8 +12,8 @@ import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
-import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
+import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
@@ -142,6 +142,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 selectedSideTotalMarginAfterFundingUsdc;
         int256 selectedSideEntryFundingAfterFunding;
         uint256 fundingVaultCashOutflowUsdc;
+        uint256 fundingVaultCashInflowUsdc;
     }
 
     struct SideState {
@@ -1455,6 +1456,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             _previewFundingSettlement(accountId, pos, sizeDelta == pos.size, vaultDepthUsdc);
         pos.margin = fundingSettlement.positionMarginAfterFundingUsdc;
 
+        if (fundingSettlement.fundingVaultCashOutflowUsdc > 0) {
+            if (vault.totalAssets() < fundingSettlement.fundingVaultCashOutflowUsdc) {
+                preview.valid = false;
+                preview.invalidCode = 4;
+                return preview;
+            }
+        }
+
         (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
         uint256 selectedUsdc = (selectedState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         uint256 oppositeUsdc = (oppositeState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
@@ -1476,6 +1485,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             preview.vpiUsdc = uint256(closeState.vpiDeltaUsdc);
         }
         preview.executionFeeUsdc = closeState.executionFeeUsdc;
+
+        if (preview.remainingSize > 0 && preview.remainingMargin < riskParams.minBountyUsdc) {
+            preview.valid = false;
+            preview.invalidCode = 5;
+            return preview;
+        }
 
         uint256 protocolFeesDeltaUsdc = preview.executionFeeUsdc;
 
@@ -1515,7 +1530,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             ),
             SolvencyAccountingLib.PreviewDelta({
                 physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc)
-                    - int256(fundingSettlement.fundingVaultCashOutflowUsdc),
+                    - int256(fundingSettlement.fundingVaultCashOutflowUsdc)
+                    + int256(fundingSettlement.fundingVaultCashInflowUsdc),
                 protocolFeesDeltaUsdc: protocolFeesDeltaUsdc,
                 maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc),
                 deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
@@ -1569,6 +1585,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, loss);
 
         settlement.settlementBalanceAfterFundingUsdc -= consumption.totalConsumedUsdc;
+        settlement.fundingVaultCashInflowUsdc = consumption.totalConsumedUsdc;
         if (consumption.activeMarginConsumedUsdc > 0) {
             settlement.positionMarginAfterFundingUsdc -= consumption.activeMarginConsumedUsdc;
             settlement.selectedSideTotalMarginAfterFundingUsdc -= consumption.activeMarginConsumedUsdc;
