@@ -690,6 +690,35 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewClose_ReportsPostOpDegradedStateAfterLatch() public {
+        address bullTrader = address(0xAB130C);
+        address bearTrader = address(0xAB130D);
+        address residualBearTrader = address(0xAB130E);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 residualBearId = bytes32(uint256(uint160(residualBearTrader)));
+
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(residualBearTrader, 100_000e6);
+
+        _open(bearId, CfdTypes.Side.BEAR, 900_000e18, 45_000e6, 1e8);
+        _open(residualBearId, CfdTypes.Side.BEAR, 100_000e18, 5_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        assertTrue(engine.degradedMode(), "Setup close should latch degraded mode");
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 900_000e18, 20_000_000, pool.totalAssets());
+        assertTrue(preview.valid, "Full close should remain previewable after degraded mode latches");
+        assertFalse(preview.triggersDegradedMode, "Transition flag should stay false after degraded mode latches");
+        assertEq(
+            preview.postOpDegradedMode,
+            preview.effectiveAssetsAfterUsdc < preview.maxLiabilityAfterUsdc,
+            "Preview should expose raw post-op solvency values for integrators even after degraded mode latches"
+        );
+    }
+
     function test_PreviewClose_NegativeVpiDoesNotPanic() public {
         address trader = address(0xAB1301);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -875,6 +904,9 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.deferredPayoutUsdc, contractPreview.deferredPayoutUsdc);
         assertEq(interfacePreview.badDebtUsdc, contractPreview.badDebtUsdc);
         assertEq(interfacePreview.triggersDegradedMode, contractPreview.triggersDegradedMode);
+        assertEq(interfacePreview.postOpDegradedMode, contractPreview.postOpDegradedMode);
+        assertEq(interfacePreview.effectiveAssetsAfterUsdc, contractPreview.effectiveAssetsAfterUsdc);
+        assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
     }
 
     function test_LiquidationPreview_ProjectsFundingAccrualLikeLiveUpdate() public {

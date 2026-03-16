@@ -98,6 +98,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 remainingSize;
         uint256 remainingMargin;
         bool triggersDegradedMode;
+        bool postOpDegradedMode;
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
     }
 
     struct LiquidationPreview {
@@ -113,6 +116,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
         bool triggersDegradedMode;
+        bool postOpDegradedMode;
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
     }
 
     struct DeferredPayoutStatus {
@@ -1447,6 +1453,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             degradedMode
         );
         preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
+        preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
+        preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
+        preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
     }
 
     function _previewFundingSettlement(
@@ -1535,6 +1544,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             degradedMode
         );
         preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
+        preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
+        preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
+        preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
         vaultDepthUsdc;
     }
 
