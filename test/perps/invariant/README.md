@@ -30,6 +30,10 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies clearinghouse custody matches tracked account balances
   - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router escrow, deferred payouts, and pending order counts
   - Verifies the expanded per-account ledger snapshot stays aligned with collateral, position-health, and settlement-reachability views
+  - Verifies tracked per-account settlement, escrow, and deferred payouts aggregate cleanly into protocol custody and obligation buckets
+  - Verifies deposit/withdraw transitions preserve monotonic reachability expectations
+  - Verifies no orphaned account-risk state remains once an account has no position and no pending orders
+  - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
   - Verifies house-pool input/status snapshots stay aligned with vault assets, fees, deferred liabilities, and engine status

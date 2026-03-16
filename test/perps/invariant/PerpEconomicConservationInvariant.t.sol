@@ -133,6 +133,23 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
+    function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
+        uint256 totalSettlementUsdc;
+        uint256 totalExecutionEscrowUsdc;
+        uint256 totalDeferredPayoutUsdc;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(_accountId(handler.actorAt(i)));
+            totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
+            totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
+            totalDeferredPayoutUsdc += ledgerView.deferredPayoutUsdc;
+        }
+
+        assertEq(totalSettlementUsdc, usdc.balanceOf(address(clearinghouse)), "Tracked settlement totals must match clearinghouse custody");
+        assertEq(totalExecutionEscrowUsdc, usdc.balanceOf(address(router)), "Tracked execution escrow totals must match router custody");
+        assertEq(totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc(), "Tracked deferred payout totals must match engine obligations");
+    }
+
     function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -174,6 +191,85 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(snapshot.pendingFundingUsdc, positionView.pendingFundingUsdc, "Account snapshot pending funding mismatch");
             assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc, "Account snapshot net equity mismatch");
             assertEq(snapshot.liquidatable, positionView.liquidatable, "Account snapshot liquidatable mismatch");
+        }
+    }
+
+    function invariant_ReachabilityMonotonicityHoldsForDepositsAndWithdrawals() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            PerpAccountingHandler.ReachabilityTransition memory transition = handler.reachabilityTransition(accountId);
+
+            if (transition.action == 1) {
+                assertGe(
+                    transition.afterCloseReachableUsdc,
+                    transition.beforeCloseReachableUsdc,
+                    "Deposits must not reduce close-reachable settlement"
+                );
+                assertGe(
+                    transition.afterLiquidationReachableUsdc,
+                    transition.beforeLiquidationReachableUsdc,
+                    "Deposits must not reduce liquidation-reachable settlement"
+                );
+            } else if (transition.action == 2) {
+                assertLe(
+                    transition.afterCloseReachableUsdc,
+                    transition.beforeCloseReachableUsdc,
+                    "Withdrawals must not increase close-reachable settlement"
+                );
+                assertLe(
+                    transition.afterLiquidationReachableUsdc,
+                    transition.beforeLiquidationReachableUsdc,
+                    "Withdrawals must not increase liquidation-reachable settlement"
+                );
+            }
+        }
+    }
+
+    function invariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(_accountId(handler.actorAt(i)));
+            if (snapshot.hasPosition || snapshot.pendingOrderCount != 0) {
+                continue;
+            }
+
+            assertEq(snapshot.activePositionMarginUsdc, 0, "Orphaned accounts must not keep active margin");
+            assertEq(snapshot.otherLockedMarginUsdc, 0, "Orphaned accounts must not keep other locked margin");
+            assertEq(snapshot.executionEscrowUsdc, 0, "Orphaned accounts must not keep execution escrow");
+            assertEq(snapshot.committedMarginUsdc, 0, "Orphaned accounts must not keep committed margin");
+            assertEq(snapshot.closeReachableUsdc, snapshot.freeSettlementUsdc, "Orphaned accounts close reachability must equal free settlement");
+            assertEq(
+                snapshot.liquidationReachableUsdc,
+                snapshot.settlementBalanceUsdc,
+                "Orphaned accounts liquidation reachability must equal settlement balance"
+            );
+            assertEq(snapshot.size, 0, "Orphaned accounts must have zero size");
+            assertEq(snapshot.margin, 0, "Orphaned accounts must have zero margin");
+            assertEq(snapshot.entryPrice, 0, "Orphaned accounts must have zero entry price");
+            assertEq(snapshot.unrealizedPnlUsdc, 0, "Orphaned accounts must have zero unrealized pnl");
+            assertEq(snapshot.pendingFundingUsdc, 0, "Orphaned accounts must have zero pending funding");
+            assertEq(snapshot.netEquityUsdc, 0, "Orphaned accounts must have zero net equity");
+            assertFalse(snapshot.liquidatable, "Orphaned accounts must not be liquidatable");
+        }
+    }
+
+    function invariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerView memory compactView = engine.getAccountLedgerView(accountId);
+            CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
+            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+
+            assertEq(snapshot.settlementBalanceUsdc, compactView.settlementBalanceUsdc, "Snapshot must subsume compact settlement");
+            assertEq(snapshot.freeSettlementUsdc, compactView.freeSettlementUsdc, "Snapshot must subsume compact free settlement");
+            assertEq(snapshot.executionEscrowUsdc, compactView.executionEscrowUsdc, "Snapshot must subsume compact execution escrow");
+            assertEq(snapshot.deferredPayoutUsdc, compactView.deferredPayoutUsdc, "Snapshot must subsume compact deferred payout");
+            assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc, "Snapshot must subsume collateral close reachability");
+            assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Snapshot must subsume collateral equity");
+            assertEq(snapshot.hasPosition, positionView.exists, "Snapshot must subsume position existence");
+            assertEq(snapshot.size, positionView.size, "Snapshot must subsume position size");
+            assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc, "Snapshot must subsume position net equity");
+            assertEq(snapshot.liquidatable, positionView.liquidatable, "Snapshot must subsume liquidatable flag");
         }
     }
 

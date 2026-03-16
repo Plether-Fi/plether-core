@@ -5,6 +5,7 @@ import {CfdEngine} from "../../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
+import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
@@ -19,6 +20,17 @@ contract PerpAccountingHandler is Test {
     uint8 internal constant GHOST_ORDER_CANCELLED = 3;
     uint8 internal constant GHOST_ORDER_FAILED = 4;
     uint8 internal constant GHOST_ORDER_LIQUIDATED = 5;
+    uint8 internal constant REACHABILITY_ACTION_NONE = 0;
+    uint8 internal constant REACHABILITY_ACTION_DEPOSIT = 1;
+    uint8 internal constant REACHABILITY_ACTION_WITHDRAW = 2;
+
+    struct ReachabilityTransition {
+        uint8 action;
+        uint256 beforeCloseReachableUsdc;
+        uint256 afterCloseReachableUsdc;
+        uint256 beforeLiquidationReachableUsdc;
+        uint256 afterLiquidationReachableUsdc;
+    }
 
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
@@ -36,6 +48,7 @@ contract PerpAccountingHandler is Test {
     mapping(uint64 => bytes32) internal ghostOrderOwner;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
     mapping(uint64 => uint8) internal ghostOrderState;
+    mapping(bytes32 => ReachabilityTransition) internal reachabilityTransitions;
 
     constructor(
         MockUSDC _usdc,
@@ -87,8 +100,11 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(_accountId(actor));
         uint256 amount = bound(amountFuzz, 1e6, 250_000e6);
         _mintAndDepositTrader(actor, amount);
+        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(_accountId(actor));
+        _recordReachabilityTransition(_accountId(actor), REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
     }
 
     function withdrawCollateral(
@@ -106,9 +122,12 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(accountId);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
         vm.prank(actor);
         clearinghouse.withdraw(accountId, amount);
+        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(accountId);
+        _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
     }
 
     function commitOpenOrder(
@@ -444,6 +463,12 @@ contract PerpAccountingHandler is Test {
         return router.nextCommitId() > 0 ? router.nextCommitId() - 1 : 0;
     }
 
+    function reachabilityTransition(
+        bytes32 accountId
+    ) external view returns (ReachabilityTransition memory) {
+        return reachabilityTransitions[accountId];
+    }
+
     function ghostPendingOrderCount(
         bytes32 accountId
     ) external view returns (uint256 count) {
@@ -509,6 +534,21 @@ contract PerpAccountingHandler is Test {
         if (committedMarginUsdc > 0) {
             ghost.increaseCommittedMargin(accountId, committedMarginUsdc);
         }
+    }
+
+    function _recordReachabilityTransition(
+        bytes32 accountId,
+        uint8 action,
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot,
+        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot
+    ) internal {
+        reachabilityTransitions[accountId] = ReachabilityTransition({
+            action: action,
+            beforeCloseReachableUsdc: beforeSnapshot.closeReachableUsdc,
+            afterCloseReachableUsdc: afterSnapshot.closeReachableUsdc,
+            beforeLiquidationReachableUsdc: beforeSnapshot.liquidationReachableUsdc,
+            afterLiquidationReachableUsdc: afterSnapshot.liquidationReachableUsdc
+        });
     }
 
     function _finalizeGhostOrder(
