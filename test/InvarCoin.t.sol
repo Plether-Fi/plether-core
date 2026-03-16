@@ -2256,18 +2256,18 @@ contract InvarCoinTest is Test {
         ic.withdraw(shares, alice, minUsdcOut);
     }
 
-    function test_Withdraw_RevertsWhenLocalBearExists() public {
+    function test_Withdraw_SucceedsWithDustBear() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
         ic.deployToCurve(0);
 
         bearToken.mint(address(ic), 1e18);
-        assertEq(bearToken.balanceOf(address(ic)), 1e18, "local BEAR present");
         uint256 shares = ic.balanceOf(alice);
 
         vm.prank(alice);
-        vm.expectRevert(InvarCoin.InvarCoin__UseLpWithdraw.selector);
-        ic.withdraw(shares, alice, 0);
+        uint256 usdcOut = ic.withdraw(shares, alice, 0);
+        assertGt(usdcOut, 0, "got USDC back");
+        assertEq(ic.balanceOf(alice), 0, "shares burned");
     }
 
     // ==========================================

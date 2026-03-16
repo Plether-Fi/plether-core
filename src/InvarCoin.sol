@@ -604,7 +604,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice USDC-only withdrawal via pro-rata buffer + JIT Curve LP burn.
     /// @dev Burns the user's pro-rata share of local USDC and Curve LP (single-sided to USDC).
-    ///      Does not distribute raw BEAR balances — use lpWithdraw() if the contract holds BEAR.
+    ///      Does not distribute raw BEAR balances — if the contract holds material BEAR,
+    ///      use lpWithdraw() or set minUsdcOut to enforce fair value.
     ///      Blocked during emergencyActive since single-sided LP exit may be unavailable.
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param receiver Address that receives the withdrawn USDC.
@@ -622,9 +623,6 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
             revert InvarCoin__UseLpWithdraw();
         }
         _harvestSafe();
-        if (BEAR.balanceOf(address(this)) > 0) {
-            revert InvarCoin__UseLpWithdraw();
-        }
 
         uint256 supply = totalSupply();
         _burn(msg.sender, glUsdAmount);
