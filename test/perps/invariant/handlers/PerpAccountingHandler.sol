@@ -401,6 +401,13 @@ contract PerpAccountingHandler is Test {
         vault.setAssets(bound(amountFuzz, 0, 1_000_000_000e6));
     }
 
+    function drainVault(
+        uint256 floorFuzz
+    ) external {
+        _clearTerminalReservationSet();
+        vault.setAssets(bound(floorFuzz, 0, 100e6));
+    }
+
     function accountRouterEscrow(
         bytes32 accountId
     ) public view returns (uint256 totalEscrowUsdc) {
