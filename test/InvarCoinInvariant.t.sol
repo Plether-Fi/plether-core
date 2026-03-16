@@ -246,6 +246,7 @@ contract InvarCoinHandler is Test {
             uint256 currentPm = curve.priceMultiplier();
             uint256 newPm = currentPm + (currentPm * priceBpsDelta) / 10_000;
             curve.setPriceMultiplier(newPm);
+            oracle.updatePrice(int256(newPm / 1e10));
         }
 
         uint256 assetsAfter = ic.totalAssets();
