@@ -533,21 +533,7 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     function pendingSharesOf(
         address user
     ) external view returns (uint256) {
-        uint256 depositEpoch = userDepositEpoch[user];
-        uint256 depositAmount = userUsdcDeposits[user];
-
-        if (depositAmount == 0 || depositEpoch >= currentEpochId) {
-            return 0;
-        }
-
-        uint256 claimEpoch = depositEpoch + 1;
-        EpochDeposits storage ed = epochDeposits[claimEpoch];
-
-        if (ed.sharesMinted == 0 || ed.totalUsdc == 0) {
-            return 0;
-        }
-
-        return (depositAmount * ed.sharesMinted) / ed.totalUsdc;
+        return _calculatePendingShares(user);
     }
 
     /// @notice Returns the vault's total assets excluding pending deposits.
@@ -565,21 +551,11 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
     function _claimShares(
         address user
     ) internal {
-        uint256 depositEpoch = userDepositEpoch[user];
-        uint256 depositAmount = userUsdcDeposits[user];
-
-        if (depositAmount == 0 || depositEpoch >= currentEpochId) {
+        if (userUsdcDeposits[user] == 0 || userDepositEpoch[user] >= currentEpochId) {
             return;
         }
 
-        uint256 claimEpoch = depositEpoch + 1;
-        EpochDeposits storage ed = epochDeposits[claimEpoch];
-
-        if (ed.totalUsdc == 0) {
-            return;
-        }
-
-        uint256 shares = (depositAmount * ed.sharesMinted) / ed.totalUsdc;
+        uint256 shares = _calculatePendingShares(user);
 
         userUsdcDeposits[user] = 0;
         userDepositEpoch[user] = currentEpochId;
@@ -588,6 +564,26 @@ contract PletherDOV is ERC20, ReentrancyGuard, Ownable2Step {
             _transfer(address(this), user, shares);
             emit SharesClaimed(user, shares);
         }
+    }
+
+    function _calculatePendingShares(
+        address user
+    ) private view returns (uint256) {
+        uint256 depositEpoch = userDepositEpoch[user];
+        uint256 depositAmount = userUsdcDeposits[user];
+
+        if (depositAmount == 0 || depositEpoch >= currentEpochId) {
+            return 0;
+        }
+
+        uint256 claimEpoch = depositEpoch + 1;
+        EpochDeposits storage ed = epochDeposits[claimEpoch];
+
+        if (ed.totalUsdc == 0) {
+            return 0;
+        }
+
+        return (depositAmount * ed.sharesMinted) / ed.totalUsdc;
     }
 
     /// @dev Computes and mints aggregate shares for all depositors whose USDC was zapped.

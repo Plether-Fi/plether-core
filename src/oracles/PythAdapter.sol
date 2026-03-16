@@ -64,7 +64,12 @@ contract PythAdapter is AggregatorV3Interface {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         PythStructs.Price memory price = PYTH.getPriceUnsafe(PRICE_ID);
 
-        if (price.publishTime == 0 || block.timestamp - price.publishTime > MAX_STALENESS) {
+        if (price.publishTime == 0 || price.publishTime > block.timestamp) {
+            revert PythAdapter__StalePrice(price.publishTime, MAX_STALENESS);
+        }
+
+        uint256 age = block.timestamp - price.publishTime;
+        if (age > MAX_STALENESS) {
             revert PythAdapter__StalePrice(price.publishTime, MAX_STALENESS);
         }
 

@@ -2,6 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "forge-std/Script.sol";
 import "forge-std/console2.sol";
 
@@ -28,6 +30,11 @@ contract PoolDashboard is Script {
 
     AggregatorV3Interface constant ORACLE = AggregatorV3Interface(0xfFc35FD33C2acF241F6e46625C7571D64f8AddbD);
     ICurvePoolView constant POOL = ICurvePoolView(0x2354579380cAd0518C6518e5Ee2A66d30d0149bE);
+    IERC20 constant USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+    IERC20 constant BEAR = IERC20(0xEDE56A22771c7fDA8b80Cc1A1fa2B54420cD4A5d);
+    address constant SPLITTER = 0x81D7f6eE951f5272043de05E6EE25c58a440c2DF;
+    IERC4626 constant ADAPTER = IERC4626(0x9945E377e59ABB5B84e6bfeD240F0D3599F96c88);
+    uint256 constant CAP = 2e8;
 
     function run() external view {
         console2.log("");
@@ -117,8 +124,41 @@ contract PoolDashboard is Script {
             }
         }
 
+        _printSolvency();
+
         console2.log("");
         console2.log("===========================================");
+    }
+
+    function _printSolvency() internal view {
+        uint256 supply = BEAR.totalSupply();
+        uint256 usdcInSplitter = USDC.balanceOf(SPLITTER);
+        uint256 usdcInAdapter = ADAPTER.totalAssets();
+        uint256 totalBacking = usdcInSplitter + usdcInAdapter;
+        uint256 required = supply * CAP / 1e20;
+
+        console2.log("");
+        console2.log("--- Splitter Solvency ---");
+        console2.log(string.concat("  BEAR supply:   ", _fmtAmount(supply, 18)));
+        console2.log(string.concat("  Required USDC: ", _fmtAmount(required, 6)));
+        console2.log(string.concat("  Splitter USDC: ", _fmtAmount(usdcInSplitter, 6)));
+        console2.log(string.concat("  Adapter USDC:  ", _fmtAmount(usdcInAdapter, 6)));
+        console2.log(string.concat("  Total backing: ", _fmtAmount(totalBacking, 6)));
+
+        if (totalBacking >= required) {
+            console2.log(string.concat("  Surplus:       +", _fmtAmount(totalBacking - required, 6), " USDC"));
+            console2.log("  Status:        SOLVENT");
+        } else {
+            console2.log(string.concat("  Shortfall:     -", _fmtAmount(required - totalBacking, 6), " USDC"));
+            console2.log("  Status:        INSOLVENT");
+        }
+
+        uint256 bufferPct = usdcInSplitter * 10_000 / totalBacking;
+        console2.log(
+            string.concat(
+                "  Buffer ratio:  ", vm.toString(bufferPct / 100), ".", _padLeft(vm.toString(bufferPct % 100), 2), "%"
+            )
+        );
     }
 
     /// @dev Binary search for trade amount so post-trade marginal price matches oracle.

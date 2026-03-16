@@ -139,6 +139,14 @@ contract PythAdapterTest is Test {
         adapter.latestRoundData();
     }
 
+    function test_LatestRoundData_RevertsOnFuturePublishTime() public {
+        vm.warp(1000);
+        mockPyth.setPrice(SEK_USD_PRICE_ID, SEK_PRICE, 100_000, -8, 1005);
+
+        vm.expectRevert(abi.encodeWithSelector(PythAdapter.PythAdapter__StalePrice.selector, 1005, MAX_STALENESS));
+        adapter.latestRoundData();
+    }
+
     function test_LatestRoundData_RevertsOnZeroPrice() public {
         mockPyth.setPrice(SEK_USD_PRICE_ID, 0, 100_000, -8, block.timestamp);
 
