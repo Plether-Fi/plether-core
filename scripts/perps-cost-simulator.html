@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plether Perps — Trading Cost Simulator</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --yellow: #d29922; --dim: #484f58; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: var(--bg); color: var(--text); padding: 2rem; max-width: 100%; margin: 0 auto; line-height: 1.6; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .card h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  .field { margin-bottom: 0.85rem; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); margin-bottom: 3px; }
+  .field label span.val { color: var(--accent); font-weight: 600; }
+  .field .hint { font-size: 0.7rem; color: var(--dim); margin-top: 1px; }
+  .field .derived { font-size: 0.75rem; color: var(--accent); margin-top: 2px; }
+  .field .fixed-val { font-size: 0.8rem; color: var(--accent); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .results { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .results h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  td.right { text-align: right; }
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+  .neutral { color: var(--yellow); }
+  .section-gap { height: 6px; }
+  .row-label { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+  .row-bold td { font-weight: 700; border-top: 1px solid var(--border); }
+  .note { font-size: 0.75rem; color: var(--muted); margin-top: 1rem; line-height: 1.5; }
+  .scenario-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .scenario-bar button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .scenario-bar button:hover { border-color: var(--accent); }
+  .scenario-bar button.active { border-color: var(--accent); background: #1a2332; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+  .kpi { background: #1a1e24; border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .kpi h2 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+  .kpi .big { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .kpi .desc { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+  .decomp { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .decomp h2 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 0.5rem; font-size: 0.8rem; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-label { width: 180px; flex-shrink: 0; color: var(--muted); }
+  .bar-track { flex: 1; height: 16px; background: #21262d; border-radius: 4px; overflow: hidden; position: relative; margin: 0 10px; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+  .bar-fill.pos { background: var(--green); }
+  .bar-fill.neg { background: var(--red); }
+  .bar-val { width: 100px; flex-shrink: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .toggle-group { display: flex; gap: 0; margin-bottom: 0.85rem; }
+  .toggle-group button { flex: 1; padding: 6px 0; border: 1px solid var(--border); background: var(--card); color: var(--muted); cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: all 0.15s; }
+  .toggle-group button:first-child { border-radius: 6px 0 0 6px; }
+  .toggle-group button:last-child { border-radius: 0 6px 6px 0; }
+  .toggle-group button.bull-active { background: #0d2818; border-color: var(--green); color: var(--green); }
+  .toggle-group button.bear-active { background: #2d1215; border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+
+<h1>Plether Perps — Trading Cost Simulator</h1>
+<p class="subtitle">Simulates all trading costs (execution fees, VPI, funding) for a perpetual position from the trader's perspective.</p>
+
+<div class="scenario-bar">
+  <button onclick="loadScenario('smallRetail')">Small Retail</button>
+  <button onclick="loadScenario('whale')">Whale</button>
+  <button onclick="loadScenario('highSkew')">High Skew</button>
+  <button onclick="loadScenario('marketMaker')">Market Maker (healing)</button>
+  <button onclick="loadScenario('maxLeverage')">Max Leverage</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Position</h2>
+    <div class="toggle-group">
+      <button id="btn-bull" onclick="setSide('BULL')" class="bull-active">BULL</button>
+      <button id="btn-bear" onclick="setSide('BEAR')">BEAR</button>
+    </div>
+    <div class="field">
+      <label>Notional (USD) <span class="val" id="v-notional"></span></label>
+      <input type="range" id="notional" min="1000" max="5000000" step="1000" value="10000" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Entry price <span class="val" id="v-entry"></span></label>
+      <input type="range" id="entry" min="0.50" max="1.50" step="0.01" value="1.00" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Leverage <span class="val" id="v-leverage"></span></label>
+      <input type="range" id="leverage" min="1" max="100" step="1" value="10" oninput="calc()">
+      <div class="derived" id="d-margin"></div>
+    </div>
+    <div class="field">
+      <label>Hold duration <span class="val" id="v-hold"></span></label>
+      <input type="range" id="hold" min="0" max="100" step="1" value="50" oninput="calc()">
+      <div class="hint">Log scale: 1 hour → 365 days</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Market State</h2>
+    <div class="field">
+      <label>Pool depth (USD) <span class="val" id="v-depth"></span></label>
+      <input type="range" id="depth" min="500000" max="50000000" step="100000" value="5000000" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Bull OI (notional USD) <span class="val" id="v-bulloi"></span></label>
+      <input type="range" id="bulloi" min="0" max="25000000" step="50000" value="2000000" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Bear OI (notional USD) <span class="val" id="v-bearoi"></span></label>
+      <input type="range" id="bearoi" min="0" max="25000000" step="50000" value="2500000" oninput="calc()">
+    </div>
+    <div class="derived" id="d-skew"></div>
+  </div>
+
+  <div class="card">
+    <h2>Protocol Parameters</h2>
+    <div class="field">
+      <label>Execution fee</label>
+      <div class="fixed-val">4 bps (hardcoded on-chain)</div>
+    </div>
+    <div class="field">
+      <label>VPI Factor (k) <span class="val" id="v-vpi"></span></label>
+      <input type="range" id="vpi" min="0" max="0.2" step="0.002" value="0.02" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Maintenance margin <span class="val" id="v-mmr"></span></label>
+      <input type="range" id="mmr" min="50" max="500" step="25" value="100" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Funding at kink (baseApy) <span class="val" id="v-baseapy"></span></label>
+      <input type="range" id="baseapy" min="0" max="100" step="1" value="15" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Funding at max (maxApy) <span class="val" id="v-maxapy"></span></label>
+      <input type="range" id="maxapy" min="50" max="1000" step="10" value="300" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Kink skew ratio <span class="val" id="v-kink"></span></label>
+      <input type="range" id="kink" min="5" max="40" step="1" value="25" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>Max skew ratio <span class="val" id="v-maxskew"></span></label>
+      <input type="range" id="maxskew" min="10" max="50" step="1" value="40" oninput="calc()">
+    </div>
+    <div class="field">
+      <label>CAP price</label>
+      <div class="fixed-val">$2.00</div>
+    </div>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <h2>Total Cost</h2>
+    <div class="big" id="kpi-total">--</div>
+    <div class="desc" id="kpi-total-desc"></div>
+  </div>
+  <div class="kpi">
+    <h2>Cost as bps</h2>
+    <div class="big" id="kpi-bps">--</div>
+    <div class="desc" id="kpi-bps-desc"></div>
+  </div>
+  <div class="kpi">
+    <h2>Break-Even Price Move</h2>
+    <div class="big" id="kpi-be">--</div>
+    <div class="desc" id="kpi-be-desc"></div>
+  </div>
+  <div class="kpi">
+    <h2>Liquidation Distance</h2>
+    <div class="big" id="kpi-liq">--</div>
+    <div class="desc" id="kpi-liq-desc"></div>
+  </div>
+</div>
+
+<div class="decomp">
+  <h2>Cost Decomposition</h2>
+  <div id="bars"></div>
+</div>
+
+<div class="results">
+  <h2>Detailed Breakdown</h2>
+  <table>
+    <thead><tr><th>Fee Type</th><th>Amount (USD)</th><th>% of Notional</th></tr></thead>
+    <tbody id="tbody-detail"></tbody>
+  </table>
+</div>
+
+<div class="results">
+  <h2>Computed Intermediates</h2>
+  <table>
+    <tbody id="tbody-inter"></tbody>
+  </table>
+</div>
+
+<p class="note">Assumptions: constant skew and pool depth during hold. VPI is shown for entry only — exit VPI depends on market state at close (unknown). Funding accrues linearly. Exec fee charged at both open and close.</p>
+
+<script>
+const EXEC_FEE_BPS = 4;
+const CAP = 2.00;
+const SECONDS_PER_YEAR = 31_536_000;
+
+let currentSide = 'BULL';
+
+const scenarios = {
+  smallRetail:  { side:'BULL', notional:1000,    entry:1.00, leverage:5,   hold:30, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+  whale:        { side:'BULL', notional:2000000, entry:1.00, leverage:3,   hold:50, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+  highSkew:     { side:'BEAR', notional:50000,   entry:1.00, leverage:10,  hold:65, depth:5e6,  bulloi:1e6,   bearoi:4e6,   vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+  marketMaker:  { side:'BULL', notional:100000,  entry:1.00, leverage:2,   hold:40, depth:5e6,  bulloi:1.5e6, bearoi:3.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+  maxLeverage:  { side:'BULL', notional:10000,   entry:1.00, leverage:100, hold:20, depth:5e6,  bulloi:2e6,   bearoi:2.5e6, vpi:0.02, mmr:100, baseapy:15, maxapy:300, kink:25, maxskew:40 },
+};
+
+function loadScenario(name) {
+  const s = scenarios[name];
+  currentSide = s.side;
+  updateSideButtons();
+  for (const [k, v] of Object.entries(s)) {
+    const el = document.getElementById(k);
+    if (el) el.value = v;
+  }
+  document.querySelectorAll('.scenario-bar button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  calc();
+}
+
+function setSide(side) {
+  currentSide = side;
+  updateSideButtons();
+  calc();
+}
+
+function updateSideButtons() {
+  const bull = document.getElementById('btn-bull');
+  const bear = document.getElementById('btn-bear');
+  bull.className = currentSide === 'BULL' ? 'bull-active' : '';
+  bear.className = currentSide === 'BEAR' ? 'bear-active' : '';
+}
+
+function holdSliderToHours(v) {
+  return Math.round(Math.exp((v / 100) * Math.log(8760)));
+}
+
+function formatHold(hours) {
+  if (hours < 24) return hours + 'h';
+  const days = hours / 24;
+  if (days < 30) return days.toFixed(1) + 'd';
+  return (days / 30).toFixed(1) + 'mo';
+}
+
+function fmt(n) {
+  const a = Math.abs(n); const sign = n < 0 ? '-' : '';
+  if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return sign + '$' + (a / 1e3).toFixed(2) + 'k';
+  if (a >= 1) return sign + '$' + a.toFixed(2);
+  if (a >= 0.01) return sign + '$' + a.toFixed(4);
+  return sign + '$' + a.toFixed(6);
+}
+function pct(n) { return (n * 100).toFixed(2) + '%'; }
+function costCls(n) { return n > 0.001 ? 'negative' : n < -0.001 ? 'positive' : 'neutral'; }
+
+function row(label, val, notional) {
+  const c = costCls(val);
+  const pctOfNotional = notional > 0 ? (val / notional * 100).toFixed(4) + '%' : '—';
+  return `<tr><td>${label}</td><td class="${c}">${fmt(val)}</td><td class="${c}">${pctOfNotional}</td></tr>`;
+}
+function rowBold(label, val, notional) {
+  const c = costCls(val);
+  const pctOfNotional = notional > 0 ? (val / notional * 100).toFixed(4) + '%' : '—';
+  return `<tr class="row-bold"><td><strong>${label}</strong></td><td class="${c}"><strong>${fmt(val)}</strong></td><td class="${c}"><strong>${pctOfNotional}</strong></td></tr>`;
+}
+function sep() { return '<tr class="section-gap"><td colspan="3"></td></tr>'; }
+function intRow(label, val) {
+  return `<tr><td class="row-label">${label}</td><td class="right">${val}</td></tr>`;
+}
+
+function skewCost(skew, depth, k) {
+  if (depth === 0 || skew === 0) return 0;
+  return 0.5 * k * (skew * skew) / depth;
+}
+
+function fundingApy(skewRatio, kinkRatio, baseApy, maxSkewRatio, maxApy) {
+  if (skewRatio <= 0) return 0;
+  if (skewRatio >= maxSkewRatio) skewRatio = maxSkewRatio;
+  if (skewRatio <= kinkRatio) return baseApy * skewRatio / kinkRatio;
+  const excess = skewRatio - kinkRatio;
+  const dangerZone = maxSkewRatio - kinkRatio;
+  const t = excess / dangerZone;
+  return baseApy + (maxApy - baseApy) * t * t;
+}
+
+function bar(label, val, maxAbs) {
+  const pctW = Math.min(Math.abs(val) / maxAbs * 100, 100);
+  const isGood = val < 0;
+  const fillCls = isGood ? 'pos' : 'neg';
+  const valCls = isGood ? 'positive' : 'negative';
+  return `<div class="bar-row">
+    <span class="bar-label">${label}</span>
+    <div class="bar-track"><div class="bar-fill ${fillCls}" style="width:${pctW}%"></div></div>
+    <span class="bar-val ${Math.abs(val) < 0.001 ? 'neutral' : valCls}">${fmt(val)}</span>
+  </div>`;
+}
+
+function calc() {
+  const notional     = +document.getElementById('notional').value;
+  const entryPrice   = +document.getElementById('entry').value;
+  const leverage     = +document.getElementById('leverage').value;
+  const holdSlider   = +document.getElementById('hold').value;
+  const depth        = +document.getElementById('depth').value;
+  const bullOi       = +document.getElementById('bulloi').value;
+  const bearOi       = +document.getElementById('bearoi').value;
+  const k            = +document.getElementById('vpi').value;
+  const mmrBps       = +document.getElementById('mmr').value;
+  const baseApyPct   = +document.getElementById('baseapy').value;
+  const maxApyPct    = +document.getElementById('maxapy').value;
+  const kinkPct      = +document.getElementById('kink').value;
+  const maxSkewPct   = +document.getElementById('maxskew').value;
+
+  const holdHours = holdSliderToHours(holdSlider);
+  const holdSeconds = holdHours * 3600;
+  const margin = notional / leverage;
+
+  // Display slider values
+  document.getElementById('v-notional').textContent = fmt(notional);
+  document.getElementById('v-entry').textContent = '$' + entryPrice.toFixed(2);
+  document.getElementById('v-leverage').textContent = leverage + 'x';
+  document.getElementById('d-margin').textContent = 'Margin: ' + fmt(margin);
+  document.getElementById('v-hold').textContent = formatHold(holdHours);
+  document.getElementById('v-depth').textContent = fmt(depth);
+  document.getElementById('v-bulloi').textContent = fmt(bullOi);
+  document.getElementById('v-bearoi').textContent = fmt(bearOi);
+  document.getElementById('v-vpi').textContent = k.toFixed(3);
+  document.getElementById('v-mmr').textContent = mmrBps + ' bps (' + (mmrBps/100).toFixed(1) + '%)';
+  document.getElementById('v-baseapy').textContent = baseApyPct + '% APY';
+  document.getElementById('v-maxapy').textContent = maxApyPct + '% APY';
+  document.getElementById('v-kink').textContent = kinkPct + '%';
+  document.getElementById('v-maxskew').textContent = maxSkewPct + '%';
+
+  // Skew calculations (pre-trade)
+  const preSkew = Math.abs(bullOi - bearOi);
+  const preSkewRatio = depth > 0 ? preSkew / depth : 0;
+  const majoritySide = bullOi > bearOi ? 'BULL' : bearOi > bullOi ? 'BEAR' : 'BALANCED';
+
+  // Post-trade skew
+  let postBullOi = bullOi;
+  let postBearOi = bearOi;
+  if (currentSide === 'BULL') postBullOi += notional;
+  else postBearOi += notional;
+  const postSkew = Math.abs(postBullOi - postBearOi);
+  const postSkewRatio = depth > 0 ? postSkew / depth : 0;
+
+  document.getElementById('d-skew').innerHTML =
+    `<div style="font-size:0.75rem; color:var(--accent); margin-top:4px;">` +
+    `Skew: ${fmt(preSkew)} | Ratio: ${pct(preSkewRatio)} | Majority: ${majoritySide}` +
+    `</div>`;
+
+  // === 1. Execution Fees (charged at open and close) ===
+  const execFeeOpen = notional * EXEC_FEE_BPS / 10000;
+  const execFeeClose = notional * EXEC_FEE_BPS / 10000;
+
+  // === 2. VPI (entry cost — close VPI depends on unknown future skew) ===
+  const vpiOpen = skewCost(postSkew, depth, k) - skewCost(preSkew, depth, k);
+
+  // === 3. Funding ===
+  const kinkRatio = kinkPct / 100;
+  const maxSkewRatio = maxSkewPct / 100;
+  const baseApy = baseApyPct / 100;
+  const maxApy = maxApyPct / 100;
+
+  const fundingSkewRatio = depth > 0 ? postSkew / depth : 0;
+  const annualizedRate = fundingApy(fundingSkewRatio, kinkRatio, baseApy, maxSkewRatio, maxApy);
+
+  const postMajority = postBullOi > postBearOi ? 'BULL' : postBearOi > postBullOi ? 'BEAR' : 'BALANCED';
+  const paysOrReceives = (postMajority === 'BALANCED') ? 0 :
+    (currentSide === postMajority ? 1 : -1);
+
+  const fundingCost = paysOrReceives * annualizedRate * notional * holdSeconds / SECONDS_PER_YEAR;
+
+  // === Total cost (positive = cost to trader) ===
+  const totalCost = execFeeOpen + execFeeClose + vpiOpen + fundingCost;
+  const totalBps = notional > 0 ? totalCost / notional * 10000 : 0;
+  const breakEvenPct = notional > 0 ? totalCost / notional : 0;
+
+  // === Liquidation distance ===
+  const maintMarginUsd = notional * mmrBps / 10000;
+  const maxLossBeforeLiq = Math.max(margin - maintMarginUsd, 0);
+  const liqMovePct = notional > 0 ? maxLossBeforeLiq / notional : 0;
+
+  // === Max profit ===
+  let maxProfit;
+  if (currentSide === 'BULL') {
+    maxProfit = notional; // price → 0
+  } else {
+    maxProfit = entryPrice > 0 ? notional * (CAP - entryPrice) / entryPrice : 0;
+  }
+
+  // === KPI cards ===
+  const kpiTotalEl = document.getElementById('kpi-total');
+  kpiTotalEl.textContent = fmt(totalCost);
+  kpiTotalEl.className = 'big ' + costCls(totalCost);
+  document.getElementById('kpi-total-desc').textContent = totalCost < 0 ? 'Net rebate to trader' : 'Net cost to trader';
+
+  const kpiBpsEl = document.getElementById('kpi-bps');
+  kpiBpsEl.textContent = totalBps.toFixed(1) + ' bps';
+  kpiBpsEl.className = 'big ' + costCls(totalCost);
+  document.getElementById('kpi-bps-desc').textContent = 'Of ' + fmt(notional) + ' notional';
+
+  const kpiBeEl = document.getElementById('kpi-be');
+  kpiBeEl.textContent = pct(Math.abs(breakEvenPct));
+  kpiBeEl.className = 'big ' + (Math.abs(breakEvenPct) < 0.01 ? 'positive' : Math.abs(breakEvenPct) < 0.05 ? 'neutral' : 'negative');
+  document.getElementById('kpi-be-desc').textContent = 'Price must move ' + pct(Math.abs(breakEvenPct)) + ' in your favor';
+
+  const kpiLiqEl = document.getElementById('kpi-liq');
+  kpiLiqEl.textContent = pct(liqMovePct);
+  kpiLiqEl.className = 'big ' + (liqMovePct > 0.05 ? 'positive' : liqMovePct > 0.02 ? 'neutral' : 'negative');
+  document.getElementById('kpi-liq-desc').textContent = leverage + 'x leverage, ' + mmrBps + ' bps maint margin';
+
+  // === Bar chart ===
+  const costs = [execFeeOpen, execFeeClose, vpiOpen, fundingCost];
+  const maxAbs = Math.max(...costs.map(Math.abs), 0.01);
+
+  let bars = '';
+  bars += bar('Exec fee (open)', execFeeOpen, maxAbs);
+  bars += bar('Exec fee (close)', execFeeClose, maxAbs);
+  bars += bar('VPI (entry)', vpiOpen, maxAbs);
+  bars += bar('Funding (' + formatHold(holdHours) + ')', fundingCost, maxAbs);
+  bars += `<div class="bar-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
+    <span class="bar-label"><strong>Total</strong></span>
+    <div class="bar-track"><div class="bar-fill ${totalCost <= 0 ? 'pos' : 'neg'}" style="width:${Math.min(Math.abs(totalCost)/maxAbs*100,100)}%"></div></div>
+    <span class="bar-val ${Math.abs(totalCost) < 0.001 ? 'neutral' : (totalCost <= 0 ? 'positive' : 'negative')}"><strong>${fmt(totalCost)}</strong></span>
+  </div>`;
+  document.getElementById('bars').innerHTML = bars;
+
+  // === Detailed breakdown table ===
+  let detail = '';
+  detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>One-time costs</strong></td></tr>`;
+  detail += row('Execution fee (open)', execFeeOpen, notional);
+  detail += row('Execution fee (close)', execFeeClose, notional);
+  detail += row('VPI (entry)', vpiOpen, notional);
+  detail += rowBold('Subtotal (one-time)', execFeeOpen + execFeeClose + vpiOpen, notional);
+  detail += sep();
+  detail += `<tr><td colspan="3" style="color:var(--muted);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding-top:8px"><strong>Recurring costs</strong></td></tr>`;
+  detail += row('Funding over ' + formatHold(holdHours), fundingCost, notional);
+  detail += sep();
+  detail += rowBold('Total', totalCost, notional);
+  document.getElementById('tbody-detail').innerHTML = detail;
+
+  // === Intermediates table ===
+  let inter = '';
+  inter += intRow('Notional', fmt(notional));
+  inter += intRow('Margin (collateral)', fmt(margin));
+  inter += intRow('Effective leverage', leverage + 'x');
+  inter += intRow('Entry price', '$' + entryPrice.toFixed(2));
+  inter += intRow('Side', currentSide);
+  inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Pre-trade skew', fmt(preSkew));
+  inter += intRow('Post-trade skew', fmt(postSkew));
+  inter += intRow('Pre-trade skew ratio', pct(preSkewRatio));
+  inter += intRow('Post-trade skew ratio', pct(postSkewRatio));
+  inter += intRow('Majority side (post-trade)', postMajority);
+  inter += intRow('Trader is', paysOrReceives > 0 ? 'paying funding' : paysOrReceives < 0 ? 'receiving funding' : 'neutral (balanced)');
+  inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Funding rate (annualized)', pct(annualizedRate));
+  inter += intRow('Funding for hold period', fmt(fundingCost));
+  inter += intRow('Hold duration', formatHold(holdHours) + ' (' + holdHours.toLocaleString() + ' hours)');
+  inter += `<tr><td colspan="2" style="height:6px"></td></tr>`;
+  inter += intRow('Maintenance margin', fmt(maintMarginUsd) + ' (' + mmrBps + ' bps)');
+  inter += intRow('Max loss before liquidation', fmt(maxLossBeforeLiq));
+  inter += intRow('Liquidation distance', pct(liqMovePct));
+  inter += intRow('Max profit', fmt(maxProfit));
+  inter += intRow('Max profit / margin', maxProfit > 0 && margin > 0 ? (maxProfit / margin).toFixed(1) + 'x' : '—');
+  document.getElementById('tbody-inter').innerHTML = inter;
+}
+
+calc();
+</script>
+
+</body>
+</html>
