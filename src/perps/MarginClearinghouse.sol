@@ -25,6 +25,7 @@ contract MarginClearinghouse is Ownable2Step {
     mapping(bytes32 => uint256) internal reservedSettlementUsdc;
     mapping(uint64 => IMarginClearinghouse.OrderReservation) internal orderReservations;
     mapping(bytes32 => uint64[]) internal reservationIdsByAccount;
+    mapping(bytes32 => uint256) internal reservationHeadIndexByAccount;
     mapping(bytes32 => uint256) internal activeCommittedOrderReservationUsdc;
     mapping(bytes32 => uint256) internal activeReservedSettlementReservationUsdc;
     mapping(bytes32 => uint256) internal activeReservationCount;
@@ -384,7 +385,7 @@ contract MarginClearinghouse is Ownable2Step {
 
         uint64[] storage reservationIds = reservationIdsByAccount[accountId];
         uint256 remainingUsdc = amountUsdc;
-        for (uint256 i = 0; i < reservationIds.length && remainingUsdc > 0; i++) {
+        for (uint256 i = reservationHeadIndexByAccount[accountId]; i < reservationIds.length && remainingUsdc > 0; i++) {
             IMarginClearinghouse.OrderReservation storage reservation = orderReservations[reservationIds[i]];
             if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
                 continue;
@@ -415,6 +416,8 @@ contract MarginClearinghouse is Ownable2Step {
             consumedUsdc += reservationConsumedUsdc;
             emit ReservationConsumed(reservationIds[i], accountId, reservationConsumedUsdc, reservation.remainingAmountUsdc);
         }
+
+        _advanceReservationHead(accountId);
     }
 
     function lockReservedSettlement(
@@ -728,6 +731,21 @@ contract MarginClearinghouse is Ownable2Step {
         reservation.status = terminalStatus;
         reservation.remainingAmountUsdc = 0;
         activeReservationCount[reservation.accountId] -= 1;
+        _advanceReservationHead(reservation.accountId);
+    }
+
+    function _advanceReservationHead(
+        bytes32 accountId
+    ) internal {
+        uint64[] storage reservationIds = reservationIdsByAccount[accountId];
+        uint256 headIndex = reservationHeadIndexByAccount[accountId];
+        while (headIndex < reservationIds.length) {
+            if (orderReservations[reservationIds[headIndex]].status == IMarginClearinghouse.ReservationStatus.Active) {
+                break;
+            }
+            headIndex++;
+        }
+        reservationHeadIndexByAccount[accountId] = headIndex;
     }
 
     function _consumeLockedMargin(
@@ -844,6 +862,12 @@ contract MarginClearinghouse is Ownable2Step {
         summary.activeCommittedOrderMarginUsdc = activeCommittedOrderReservationUsdc[accountId];
         summary.activeReservedSettlementUsdc = activeReservedSettlementReservationUsdc[accountId];
         summary.activeReservationCount = activeReservationCount[accountId];
+    }
+
+    function reservationHeadIndex(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return reservationHeadIndexByAccount[accountId];
     }
 
 }

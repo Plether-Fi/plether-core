@@ -268,6 +268,7 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.committedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeCommittedOrderMarginUsdc, 70 * 1e6);
         assertEq(summary.activeReservationCount, 1);
+        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past terminal reservation prefix");
     }
 
     function test_ConsumeOrderReservationsById_UsesSuppliedReservationOrder() public {
@@ -291,6 +292,25 @@ contract MarginClearinghouseTest is Test {
         assertEq(second.remainingAmountUsdc, 0);
         assertEq(uint256(first.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
         assertEq(first.remainingAmountUsdc, 70 * 1e6);
+        assertEq(clearinghouse.reservationHeadIndex(aliceId), 0, "Out-of-order explicit consumption must not advance the FIFO head index past an active prefix");
+    }
+
+    function test_ReleaseOrderReservation_AdvancesHeadIndexAcrossTerminalPrefix() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.startPrank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 71, 100 * 1e6);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 72, 120 * 1e6);
+        clearinghouse.releaseOrderReservation(71);
+        vm.stopPrank();
+
+        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should skip released prefix reservations");
+
+        vm.prank(engine);
+        clearinghouse.releaseOrderReservation(72);
+
+        assertEq(clearinghouse.reservationHeadIndex(aliceId), 2, "Head index should advance to array end once all reservations are terminal");
     }
 
     function test_Withdraw_WrongOwner_Reverts() public {
