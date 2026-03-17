@@ -32,9 +32,9 @@ interface IMarginClearinghouse {
     struct OrderReservation {
         bytes32 accountId;
         ReservationBucket bucket;
-        uint256 originalAmountUsdc;
-        uint256 remainingAmountUsdc;
         ReservationStatus status;
+        uint96 originalAmountUsdc;
+        uint96 remainingAmountUsdc;
     }
 
     struct AccountReservationSummary {

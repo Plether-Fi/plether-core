@@ -48,6 +48,7 @@ contract MarginClearinghouse is Ownable2Step {
     error MarginClearinghouse__EngineAlreadySet();
     error MarginClearinghouse__ZeroAddress();
     error MarginClearinghouse__InsufficientBucketMargin();
+    error MarginClearinghouse__AmountOverflow();
 
     event Deposit(bytes32 indexed accountId, address indexed asset, uint256 amount);
     event Withdraw(bytes32 indexed accountId, address indexed asset, uint256 amount);
@@ -263,12 +264,13 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         _lockMargin(accountId, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
+        uint96 amount96 = _toUint96(amountUsdc);
         orderReservations[orderId] = IMarginClearinghouse.OrderReservation({
             accountId: accountId,
             bucket: IMarginClearinghouse.ReservationBucket.CommittedOrder,
-            originalAmountUsdc: amountUsdc,
-            remainingAmountUsdc: amountUsdc,
-            status: IMarginClearinghouse.ReservationStatus.Active
+            status: IMarginClearinghouse.ReservationStatus.Active,
+            originalAmountUsdc: amount96,
+            remainingAmountUsdc: amount96
         });
         reservationIdsByAccount[accountId].push(orderId);
         activeCommittedOrderReservationUsdc[accountId] += amountUsdc;
@@ -314,7 +316,7 @@ contract MarginClearinghouse is Ownable2Step {
             return 0;
         }
 
-        reservation.remainingAmountUsdc -= consumedUsdc;
+        reservation.remainingAmountUsdc -= _toUint96(consumedUsdc);
         _consumeReservationBucket(reservation.accountId, reservation.bucket, consumedUsdc);
         if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
             activeCommittedOrderReservationUsdc[reservation.accountId] -= consumedUsdc;
@@ -364,7 +366,7 @@ contract MarginClearinghouse is Ownable2Step {
                 continue;
             }
 
-            reservation.remainingAmountUsdc -= reservationConsumedUsdc;
+            reservation.remainingAmountUsdc -= _toUint96(reservationConsumedUsdc);
             _consumeReservationBucket(reservation.accountId, reservation.bucket, reservationConsumedUsdc);
             if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
                 activeCommittedOrderReservationUsdc[reservation.accountId] -= reservationConsumedUsdc;
@@ -407,7 +409,7 @@ contract MarginClearinghouse is Ownable2Step {
                 continue;
             }
 
-            reservation.remainingAmountUsdc -= reservationConsumedUsdc;
+            reservation.remainingAmountUsdc -= _toUint96(reservationConsumedUsdc);
             if (consumeBuckets) {
                 _consumeReservationBucket(accountId, reservation.bucket, reservationConsumedUsdc);
             }
@@ -887,6 +889,15 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId
     ) external view returns (uint256) {
         return reservationHeadIndexByAccount[accountId];
+    }
+
+    function _toUint96(
+        uint256 value
+    ) internal pure returns (uint96) {
+        if (value > type(uint96).max) {
+            revert MarginClearinghouse__AmountOverflow();
+        }
+        return uint96(value);
     }
 
 }
