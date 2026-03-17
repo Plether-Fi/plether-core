@@ -1063,10 +1063,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         }
 
         CfdEngineSettlementLib.CloseSettlementResult memory result;
-        uint64[] memory reservationOrderIds;
-        if (remainingPosMarginUsdc == 0) {
-            reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
-        }
+        uint64[] memory reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
         (result.seizedUsdc, result.shortfallUsdc) = clearinghouse.consumeCloseLoss(
             accountId, reservationOrderIds, uint256(-netSettlement), remainingPosMarginUsdc, address(vault)
         );
@@ -1158,10 +1155,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
         uint256 remainingPosMarginUsdc
     ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalanceUsdc,
-            positionMarginUsdc,
-            remainingPosMarginUsdc > 0 ? 0 : committedOrderMarginUsdc,
-            reservedSettlementUsdc
+            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
         );
     }
 
