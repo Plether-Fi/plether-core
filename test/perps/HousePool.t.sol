@@ -447,7 +447,11 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 50_000 * 1e6);
 
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), carol, 500_000 * 1e6, 0
+            )
+        );
         vm.prank(carol);
         juniorVault.withdraw(500_000 * 1e6, carol, carol);
     }
@@ -536,7 +540,11 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(alice, 100_000 * 1e6);
 
         // Alice deposits and tries to withdraw in the same block
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), alice, 100_000 * 1e6, 0
+            )
+        );
         vm.prank(alice);
         juniorVault.withdraw(100_000 * 1e6, alice, alice);
 
@@ -842,7 +850,11 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 121);
 
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC4626ExceededMaxWithdraw(address,uint256,uint256)")), bob, 1e6, 0
+            )
+        );
         vm.prank(bob);
         juniorVault.withdraw(1e6, bob, bob);
     }

@@ -20,6 +20,10 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 - `MarginClearinghouse` now exposes clearer balance semantics for free settlement USDC and liquidation-reachable USDC, reducing dependence on raw balance reads in settlement logic.
 - Close, liquidation, solvency, and withdrawal views in `CfdEngine` now route through dedicated accounting libraries instead of re-embedding those kernels inline.
 - Oracle and mark freshness policy is now centralized around action-specific helpers, and the invariant suite now checks accounting-boundary properties such as reserve backing, liability signaling, and withdrawal-reserve consistency.
+- `CfdEngine.syncFunding()` materializes accrued funding into storage. All vault-balance-mutating paths (HousePool deposits/withdrawals/reconcile, CfdEngine fee withdrawals, deferred claims, bad debt clearing, degraded mode clearing) and `MarginClearinghouse.withdraw()` now sync funding first to prevent stale funding reads and retroactive depth manipulation.
+- `OrderRouter.commitOrder()` now rejects risk-increasing opens during degraded mode and close-only windows (FAD/frozen oracle). Protocol-state execution failures refund the execution bounty to the trader instead of paying the clearer.
+- `TrancheVault.maxWithdraw()`/`maxRedeem()` now return 0 during deposit cooldown, degraded mode, and stale mark — matching ERC-4626 semantics where `maxX` must not exceed what `X` will accept.
+- Partial close positive funding settlement is fail-soft: if the vault is temporarily illiquid, funding is recorded as a deferred payout instead of reverting.
 
 ### Accounting Domains
 
@@ -69,7 +73,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
-**Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option.
+**Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option. Open commits are rejected during degraded mode and close-only windows to prevent deterministic bounty loss from impossible orders.
 
 **Per-Account Queue Cap**: Each account may hold at most `5` pending orders at a time. This bounds account-local cleanup work during liquidation and prevents a single trader from bloating the FIFO with unbounded queued intents.
 

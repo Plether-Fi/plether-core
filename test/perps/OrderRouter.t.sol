@@ -86,6 +86,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_WithdrawalFirewall() public {
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -1798,20 +1799,24 @@ contract FadStalenessTest is BasePerpTest {
         vm.deal(alice, 10 ether);
         vm.stopPrank();
 
-        vm.warp(FRIDAY_18UTC);
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 6);
+        uint256 WEDNESDAY_BEFORE = FRIDAY_18UTC - 2 days;
+        vm.warp(WEDNESDAY_BEFORE);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), uint64(WEDNESDAY_BEFORE + 6));
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
 
-        vm.warp(FRIDAY_18UTC + 50);
-        bytes[] memory empty = _pythUpdateData();
+        vm.warp(WEDNESDAY_BEFORE + 50);
+        bytes[] memory setupPyth = _pythUpdateData();
         vm.roll(block.number + 1);
-        router.executeOrder(1, empty);
+        router.executeOrder(1, setupPyth);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         require(size == 10_000 * 1e18, "setUp: position not opened");
+
+        vm.warp(FRIDAY_18UTC);
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 6);
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
@@ -1877,15 +1882,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
-
-        vm.warp(SATURDAY_NOON + 50);
-        bytes[] memory empty = _pythUpdateData();
-        uint64 execBefore = router.nextExecuteId();
-        vm.roll(block.number + 1);
-        router.executeOrder(2, empty);
-        uint64 execAfter = router.nextExecuteId();
-        assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during frozen");
     }
 
     function test_FadWindow_MevCheckMoot_CloseAllowedDuringFrozen() public {
@@ -2072,20 +2070,11 @@ contract FadStalenessTest is BasePerpTest {
         timestamps[0] = MONDAY_NOON;
         _addFadDays(timestamps);
 
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), MONDAY_NOON - 14 hours);
-
         vm.warp(MONDAY_NOON);
 
         vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
-
-        vm.warp(MONDAY_NOON + 50);
-        bytes[] memory empty = _pythUpdateData();
-        uint64 execBefore = router.nextExecuteId();
-        vm.roll(block.number + 1);
-        router.executeOrder(2, empty);
-        uint64 execAfter = router.nextExecuteId();
-        assertGt(execAfter, execBefore, "Open order soft-failed and queue advanced during admin FAD");
     }
 
     function test_FridayGap_MevCheckStillActive() public {
@@ -2128,20 +2117,12 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FridayGap_OpenStillBlocked() public {
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_20UTC + 1);
 
         vm.warp(FRIDAY_20UTC);
 
         vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
-
-        vm.warp(FRIDAY_20UTC + 50);
-        bytes[] memory empty = _pythUpdateData();
-        vm.roll(block.number + 1);
-        router.executeOrder(2, empty);
-
-        assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
     }
 
     function test_FridayGap_StalenessStill60s() public {
@@ -2211,20 +2192,11 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_StillFadAt21() public {
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 1);
-
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
-
-        vm.warp(SUNDAY_21UTC + 50);
-        bytes[] memory empty = _pythUpdateData();
-        vm.roll(block.number + 1);
-        router.executeOrder(2, empty);
-
-        assertEq(router.nextExecuteId(), 3);
-        assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
     }
 
     function test_SundayDst_WinterStalenessRejects() public {
@@ -2272,23 +2244,18 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(wednesdayMidnight - 3 hours);
         assertTrue(engine.isFadWindow());
 
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__CloseOnlyMode.selector);
+        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 6);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(wednesdayMidnight - 3 hours + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
-        assertEq(router.claimableEth(alice), 0, "Failed order fee goes to keeper, not user");
-
-        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), wednesdayMidnight - 3 hours + 56);
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
-
-        vm.warp(wednesdayMidnight - 3 hours + 100);
-        vm.roll(10);
-        router.executeOrder(3, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
@@ -2953,6 +2920,7 @@ contract VpiImrBypassTest is Test {
     }
 
     function setUp() public {
+        vm.warp(1_709_532_000);
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({

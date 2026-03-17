@@ -394,7 +394,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     /// @notice Applies proposed risk parameters after timelock expires; settles funding first
     function finalizeRiskParams() external onlyOwner {
         _requireTimelockReady(riskParamsActivationTime);
-        _updateFunding(lastMarkPrice, vault.totalAssets());
+        _syncFunding();
         riskParams = pendingRiskParams;
         delete pendingRiskParams;
         riskParamsActivationTime = 0;
@@ -529,6 +529,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function withdrawFees(
         address recipient
     ) external onlyOwner {
+        _syncFunding();
         uint256 fees = accumulatedFeesUsdc;
         if (fees == 0) {
             revert CfdEngine__NoFeesToWithdraw();
@@ -582,6 +583,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function claimDeferredPayout(
         bytes32 accountId
     ) external nonReentrant {
+        _syncFunding();
         if (bytes32(uint256(uint160(msg.sender))) != accountId) {
             revert CfdEngine__NotAccountOwner();
         }
@@ -604,6 +606,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
 
     /// @notice Claims a previously deferred clearer bounty when the vault has replenished cash.
     function claimDeferredClearerBounty() external nonReentrant {
+        _syncFunding();
         uint256 amount = deferredClearerBountyUsdc[msg.sender];
         if (amount == 0) {
             revert CfdEngine__NoDeferredClearerBounty();
@@ -637,6 +640,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     function clearBadDebt(
         uint256 amount
     ) external onlyOwner {
+        _syncFunding();
         uint256 badDebt = accumulatedBadDebtUsdc;
         if (amount > badDebt) {
             revert CfdEngine__BadDebtTooLarge();
@@ -649,6 +653,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     }
 
     function clearDegradedMode() external onlyOwner {
+        _syncFunding();
         if (!degradedMode) {
             revert CfdEngine__NotDegraded();
         }
@@ -707,14 +712,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
     // 1. CONTINUOUS FUNDING SYSTEM
     // ==========================================
 
+    /// @notice Materializes accrued funding into storage so subsequent reads reflect current state.
+    ///         O(1) gas, idempotent (no-op if called twice in the same block).
+    function syncFunding() external {
+        _syncFunding();
+    }
+
+    /// @dev Canonical internal funding sync. Every function that changes vault cash or reads
+    ///      funding-dependent state must call this first. Using a dedicated helper instead of
+    ///      inline `_updateFunding(lastMarkPrice, vault.totalAssets())` ensures new call sites
+    ///      cannot silently skip the sync.
+    function _syncFunding() internal {
+        _updateFunding(lastMarkPrice, vault.totalAssets());
+    }
+
     function _updateFunding(
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
     ) internal {
-        uint256 timeDelta = block.timestamp - lastFundingTime;
-        if (timeDelta == 0) {
+        if (block.timestamp <= lastFundingTime) {
             return;
         }
+        uint256 timeDelta = block.timestamp - lastFundingTime;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
@@ -815,10 +834,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
                 uint256 gain = uint256(pendingFunding);
                 if (order.isClose && order.sizeDelta == pos.size) {
                     closeFundingSettlementUsdc = int256(gain);
-                } else {
+                } else if (vault.totalAssets() >= gain) {
                     pos.margin += gain;
                     vault.payOut(address(clearinghouse), gain);
                     clearinghouse.creditSettlementAndLockMargin(order.accountId, gain);
+                } else {
+                    _payOrRecordDeferredTraderPayout(order.accountId, gain);
                 }
             } else {
                 uint256 loss = uint256(-pendingFunding);
@@ -2126,7 +2147,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuard {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
-        _updateFunding(lastMarkPrice, vault.totalAssets());
+        _syncFunding();
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
     }

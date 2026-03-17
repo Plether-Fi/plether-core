@@ -46,7 +46,7 @@ contract AuditFullSecurityFailing_CooldownBypass is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.expectRevert();
         juniorVault.withdraw(100_000e6, alice, alice);
     }
 

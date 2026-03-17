@@ -136,6 +136,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__PendingOrderLinkCorrupted();
     error OrderRouter__Unauthorized();
     error OrderRouter__TooManyPendingOrders();
+    error OrderRouter__DegradedMode();
+    error OrderRouter__CloseOnlyMode();
 
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
@@ -143,7 +145,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
     enum FailedOrderBountyPolicy {
         None,
-        ClearerFull
+        ClearerFull,
+        RefundUser
     }
 
     modifier onlyEngine() {
@@ -262,6 +265,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ) external {
         if (!isClose) {
             _requireNotPaused();
+            if (engine.degradedMode()) {
+                revert OrderRouter__DegradedMode();
+            }
+            if (_isCloseOnlyWindow()) {
+                revert OrderRouter__CloseOnlyMode();
+            }
         }
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
@@ -507,7 +516,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
+                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.RefundUser);
                 return;
             }
 
@@ -613,7 +622,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
                 );
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
+                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.RefundUser);
                 continue;
             }
 
@@ -843,6 +852,18 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
     }
 
+    function _refundExecutionBounty(
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        uint256 bounty = record.executionBountyUsdc;
+        if (bounty > 0) {
+            record.executionBountyUsdc = 0;
+            address trader = address(uint160(uint256(record.core.accountId)));
+            USDC.safeTransfer(trader, bounty);
+        }
+    }
+
     function _commitReferencePrice() internal view returns (uint256 price) {
         price = engine.lastMarkPrice();
         if (price == 0) {
@@ -1008,6 +1029,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             _releaseCommittedMargin(orderId);
             if (failedPolicy == FailedOrderBountyPolicy.ClearerFull) {
                 _collectExecutionBounty(orderId);
+            } else if (failedPolicy == FailedOrderBountyPolicy.RefundUser) {
+                _refundExecutionBounty(orderId);
             }
         }
         return 0;
@@ -1117,6 +1140,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ///      Uses Friday 22:00 UTC (conservative vs 21:00 EDT summer) to guarantee zero latency arbitrage.
     function _isOracleFrozen() internal view returns (bool) {
         return MarketCalendarLib.isOracleFrozen(block.timestamp, engine.fadDayOverrides(block.timestamp / 86_400));
+    }
+
+    function _isCloseOnlyWindow() internal view returns (bool) {
+        return _isOracleFrozen() || engine.isFadWindow();
     }
 
     /// @dev Inverts a Pyth price (e.g. USD/JPY → JPY/USD) and returns 8-decimal output.

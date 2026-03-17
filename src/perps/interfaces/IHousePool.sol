@@ -33,4 +33,7 @@ interface IHousePool {
     /// @notice Settles revenue/loss waterfall between tranches
     function reconcile() external;
 
+    /// @notice Whether withdrawals are currently possible (not degraded, mark is fresh)
+    function isWithdrawalLive() external view returns (bool);
+
 }

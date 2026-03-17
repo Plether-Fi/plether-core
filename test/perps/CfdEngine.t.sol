@@ -744,9 +744,9 @@ contract CfdEngineTest is BasePerpTest {
     }
 
     function test_MarketCalendar_SundayBoundariesMatchLiveSemantics() public {
-        uint256 sundayTwentyFiftyNine = 1_709_693_999;
-        uint256 sundayTwentyOne = 1_709_694_000;
-        uint256 sundayTwentyTwo = 1_709_697_600;
+        uint256 sundayTwentyFiftyNine = 1_709_499_599;
+        uint256 sundayTwentyOne = 1_709_499_600;
+        uint256 sundayTwentyTwo = 1_709_503_200;
 
         vm.warp(sundayTwentyFiftyNine);
         assertTrue(engine.isOracleFrozen(), "Sunday 20:59:59 should still be oracle frozen");
@@ -2305,7 +2305,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         (uint256 sizeAfterOpen,,,,,,,) = engine.positions(accountId);
 
-        vm.warp(block.timestamp + 180 days);
+        vm.warp(block.timestamp + 182 days);
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 500 * 1e6, 1e8, false);
@@ -2336,7 +2336,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 sizeBefore,,,,,,,) = engine.positions(carolAccount);
 
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(block.timestamp + 91 days);
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -2391,7 +2391,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(carol, 200_000 * 1e6);
 
-        uint256 T0 = 1_710_000_000;
+        uint256 T0 = 1_709_740_800;
         uint256 T_PROPOSE = T0 + 30 days;
         uint256 T_FINALIZE = T0 + 30 days + 48 hours + 1;
         uint256 T_ORDER2 = T0 + 33 days;
@@ -3096,6 +3096,16 @@ contract VpiChunkingTest is Test {
             uint64(block.timestamp)
         );
     }
+
+    function getMarginReservationIds(
+        bytes32
+    ) external pure returns (uint64[] memory) {
+        return new uint64[](0);
+    }
+
+    function syncMarginQueue(
+        bytes32
+    ) external pure {}
 
     function _close(
         bytes32 accountId,

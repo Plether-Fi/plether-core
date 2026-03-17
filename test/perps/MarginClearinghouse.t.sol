@@ -54,6 +54,8 @@ contract MockClearinghouseEngine {
         bytes32
     ) external pure {}
 
+    function syncFunding() external {}
+
 }
 
 contract MarginClearinghouseTest is Test {

@@ -43,10 +43,12 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(escrow.pendingOrderCount, 2, "Async close intent should be queueable behind a pending open");
+        uint256 openBounty = router.quoteOpenOrderExecutionBountyUsdc(1);
+        uint256 closeBounty = router.quoteCloseOrderExecutionBountyUsdc();
         assertEq(
             escrow.executionBountyUsdc,
-            50_000,
-            "Only the open intent should escrow a bounty; close intents should use protocol/vault-funded execution"
+            openBounty + closeBounty,
+            "Both open and close intents should escrow execution bounties"
         );
     }
 

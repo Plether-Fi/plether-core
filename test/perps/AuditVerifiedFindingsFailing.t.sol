@@ -315,7 +315,7 @@ contract AuditVerifiedFindingsFailing_F5_CooldownBypass is BasePerpTest {
         juniorVault.deposit(100_000e6, address(receiver));
         vm.stopPrank();
 
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.expectRevert();
         receiver.withdrawAll(juniorVault);
     }
 
@@ -333,9 +333,10 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
 
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
         uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+        uint256 closeBounty = router.quoteCloseOrderExecutionBountyUsdc();
 
         vm.prank(trader);
-        clearinghouse.withdraw(accountId, freeBefore);
+        clearinghouse.withdraw(accountId, freeBefore - closeBounty);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);

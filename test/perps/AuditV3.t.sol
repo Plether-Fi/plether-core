@@ -120,15 +120,15 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(SATURDAY_NOON);
-        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
-
-        // Bob commits an OPEN order → queue head (order 1)
+        // Bob commits an OPEN order on Thursday (before FAD window)
         address bob = address(0xB0B);
         _fundTrader(bob, 50_000e6);
         vm.deal(bob, 1 ether);
         vm.prank(bob);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+
+        vm.warp(SATURDAY_NOON);
+        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
 
         // Alice commits a CLOSE order → behind Bob (order 2)
         vm.prank(alice);

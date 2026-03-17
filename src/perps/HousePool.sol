@@ -259,6 +259,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function depositSenior(
         uint256 amount
     ) external onlyVault whenNotPaused {
+        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -288,6 +289,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount == 0) {
             return;
         }
+        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -310,6 +312,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function depositJunior(
         uint256 amount
     ) external onlyVault whenNotPaused {
+        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -327,6 +330,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount,
         address receiver
     ) external onlyVault {
+        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -366,6 +370,23 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
     }
 
+    function isWithdrawalLive() external view returns (bool) {
+        ICfdEngine.HousePoolStatusSnapshot memory status = _getHousePoolStatusSnapshot();
+        if (status.degradedMode) {
+            return false;
+        }
+        ICfdEngine.HousePoolInputSnapshot memory accounting = _getHousePoolInputSnapshot();
+        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
+            HousePoolAccountingLib.getMarkFreshnessPolicy(accounting);
+        if (
+            policy.required
+                && !HousePoolAccountingLib.isMarkFresh(status.lastMarkTime, policy.maxStaleness, block.timestamp)
+        ) {
+            return false;
+        }
+        return true;
+    }
+
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
     /// @return viewData Struct containing balances, reserves, and status flags
     function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
@@ -396,6 +417,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @notice Distributes revenue (senior yield first, junior gets surplus) or absorbs losses
     ///         (junior first-loss, senior last-loss). Called before any deposit/withdrawal.
     function reconcile() external onlyVault {
+        ENGINE.syncFunding();
         _reconcile(_getHousePoolInputSnapshot());
     }
 

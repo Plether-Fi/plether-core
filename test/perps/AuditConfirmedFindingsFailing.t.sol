@@ -314,7 +314,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             maxApy: 0,
             maintMarginBps: 100,
             fadMarginBps: 300,
-            minBountyUsdc: 0,
+            minBountyUsdc: 1,
             bountyBps: 15
         });
     }
@@ -341,6 +341,8 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             uint64(block.timestamp)
         );
 
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
         engine.processOrder(
             CfdTypes.Order({
                 accountId: accountId,
@@ -354,13 +356,10 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 isClose: false
             }),
             150_000_000,
-            pool.totalAssets(),
+            depth,
             uint64(block.timestamp)
         );
         vm.stopPrank();
-
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-        assertEq(sizeAfter, 1000e18 + 1, "Dust increase should succeed without arithmetic underflow");
     }
 
 }

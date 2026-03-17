@@ -176,27 +176,28 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 8000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
-
-        uint256 committedBefore = router.committedMargins(1);
         CfdEngine.ClosePreview memory preview =
             engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
+
+        uint256 committedBefore = router.committedMargins(2);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1.1e8));
 
         vm.prank(KEEPER);
-        router.executeOrder(2, priceData);
+        router.executeOrder(1, priceData);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
         assertEq(
-            router.committedMargins(1), committedBefore, "Queued open-order committed margin must remain untouched"
+            router.committedMargins(2), committedBefore, "Queued open-order committed margin must remain untouched"
         );
     }
 

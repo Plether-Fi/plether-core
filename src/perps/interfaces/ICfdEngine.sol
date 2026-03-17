@@ -234,6 +234,9 @@ interface ICfdEngine {
     /// @notice Returns true when the engine currently has open bounded liability that depends on mark freshness.
     function hasLiveLiability() external view returns (bool);
 
+    /// @notice Materializes accrued funding into storage so subsequent reads reflect current state.
+    function syncFunding() external;
+
     /// @notice Push a fresh mark price without processing an order
     /// @param price       New mark price (8 decimals)
     /// @param publishTime Oracle publish timestamp for the price update

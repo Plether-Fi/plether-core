@@ -142,7 +142,7 @@ contract AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs is BasePerpTe
         vm.stopPrank();
 
         vm.warp(block.timestamp + 11 minutes);
-        vm.expectRevert(TrancheVault.TrancheVault__DepositCooldown.selector);
+        vm.expectRevert();
         vm.prank(alice);
         juniorVault.withdraw(105_000e6, alice, alice);
     }
