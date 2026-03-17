@@ -43,6 +43,16 @@ These properties must always hold. Violation indicates a critical bug.
 | **Router Statelessness** | Routers hold zero tokens after any operation completes |
 | **Self-Reference Prevention** | Treasury and staking addresses are never the Splitter itself |
 
+### InvarCoin Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| **LP Tracking** | `trackedLpBalance <= _lpBalance()` — donated LP inflates actual balance, never tracked balance |
+| **Gauge Consistency** | `gaugeStakedLp == gauge.balanceOf(address(this))` when gauge is healthy (no bricking) |
+| **Harvest Isolation** | Only VP growth on `trackedLpBalance` produces harvestable yield; donated LP cannot inflate harvest |
+| **Dual Pricing** | Deposits use optimistic NAV (max of EMA, oracle); withdrawals/harvest use pessimistic NAV (min of EMA, oracle) |
+| **Emergency Exit** | `lpWithdraw()` is always callable (no `whenNotPaused`), providing guaranteed balanced exit |
+
 ## Trust Assumptions
 
 ### External Protocol Dependencies
@@ -62,10 +72,35 @@ These properties must always hold. Violation indicates a critical bug.
 - **Risk (Single Feed)**: Unlike Chainlink's decentralized network, Pyth SEK/USD has different trust assumptions. A Pyth compromise affects only SEK (4.2% basket weight).
 - **Mitigation (Update)**: RewardDistributor provides `distributeRewardsWithPriceUpdate()` that accepts Pyth update data, allowing atomic price refresh + distribution.
 
-#### Curve Finance
+#### Curve Finance (Router Swaps)
 - **Assumption**: Curve pool for USDC/plDXY-BEAR operates correctly and provides fair exchange rates
 - **Mitigation**: `price_oracle()` deviation check (2% max) prevents price manipulation attacks
 - **Risk**: Curve pool manipulation could affect ZapRouter and LeverageRouter swap outcomes; user-provided slippage protects against this
+
+#### Curve Twocrypto Pool (InvarCoin)
+- **Assumption**: Curve twocrypto-ng pool for USDC/plDXY-BEAR correctly implements `add_liquidity`, `remove_liquidity`, `remove_liquidity_one_coin`, `get_virtual_price`, and `lp_price`
+- **LP Pricing**: `lp_price()` returns the EMA-smoothed LP price (flash-loan resistant); `get_virtual_price()` returns monotonically increasing virtual price used for fee yield isolation
+- **Oracle-Derived LP Price**: `2 * virtualPrice * sqrt(bearPrice)` mirrors the twocrypto-ng formula; used alongside `lp_price()` for dual pricing (pessimistic = min, optimistic = max)
+- **Risk (Pool Manipulation)**: Spot-vs-EMA deviation guard (0.5%) blocks `deployToCurve`, `replenishBuffer`, and `lpDeposit` during pool manipulation. `withdraw` uses EMA-based slippage floor via try/catch on `lp_price()`.
+- **Risk (Pool Bricking)**: If `remove_liquidity` reverts permanently, `lpWithdraw` and `emergencyWithdrawFromCurve` are blocked. Users must wait for `setEmergencyMode()` + `forceRemoveGauge()` to write off stuck LP, then exit with remaining local USDC and BEAR.
+- **Risk (Virtual Price Regression)**: If `get_virtual_price()` decreases (Curve bug or exploit), `_harvest` produces no yield (safe), but `curveLpCostVp` retains the old higher value, suppressing future harvests until VP recovers.
+
+#### Curve Gauge (InvarCoin)
+- **Assumption**: Curve gauge correctly stakes/unstakes LP tokens and distributes CRV + extra rewards via `claim_rewards()`
+- **Mitigation**: Gauge must be in the `approvedGauges` allowlist and pass `_validateGaugeAddress` (has code, `lp_token()` matches). Gauge changes require 7-day timelock.
+- **Internal Tracking**: `gaugeStakedLp` tracks staked LP internally rather than calling `gauge.balanceOf()`, preventing a bricked gauge from DOSing `_lpBalance()` → `totalAssets()` → all operations.
+- **Risk (Bricked Gauge)**: If `gauge.withdraw()` permanently reverts, staked LP is inaccessible. Recovery: `setEmergencyMode()` → `forceRemoveGauge()` writes off stuck LP proportionally from `trackedLpBalance` and `curveLpCostVp`. Remaining local LP is still redeemable via `lpWithdraw`.
+- **Risk (Reward Token Theft)**: CRV and other reward tokens land in the InvarCoin contract after `claimGaugeRewards()`. Protected reward tokens can only be swept to the timelocked `gaugeRewardsReceiver`; unprotected tokens can be rescued via `rescueToken()`.
+
+#### CRV Minter (L1 Only)
+- **Assumption**: Curve Minter correctly mints CRV to the gauge when `mint(gauge)` is called
+- **Note**: On L2, CRV is distributed via `gauge.claim_rewards()` instead; `CRV_MINTER` is `address(0)`
+
+#### L2 Sequencer Uptime Feed (InvarCoin)
+- **Assumption**: Chainlink sequencer uptime feed accurately reports L2 sequencer status
+- **Mitigation**: 1-hour grace period after sequencer restart before oracle reads are trusted; `address(0)` on L1 (check skipped)
+- **Affected Operations**: `deposit`, `lpDeposit`, `harvest`, `deployToCurve`, `replenishBuffer`, `redeployToCurve`, `donateUsdc` — all revert during sequencer downtime or grace period
+- **Unaffected Operations**: `withdraw`, `lpWithdraw` — use `_harvestSafe()` which silently skips on oracle failure, preserving withdrawal liveness
 
 #### Morpho Blue (Lending)
 - **Assumption**: Morpho Blue lending protocol correctly handles collateral, borrows, liquidations, and flash loans
@@ -108,11 +143,24 @@ The protocol owner can:
 - Rescue stuck tokens (non-core assets only)
 - Transfer ownership (via Ownable2Step two-step pattern)
 
+InvarCoin owner can additionally:
+- Propose/finalize sINVAR staking contract (one-time, 7-day timelock)
+- Propose/finalize Curve gauge changes (7-day timelock, must be in approved allowlist)
+- Manage gauge allowlist (`setGaugeApproval`)
+- Propose/finalize gauge rewards receiver (7-day timelock)
+- Protect reward tokens (irreversible) and sweep them to the receiver
+- Activate emergency mode, force-remove bricked gauges, emergency-withdraw from Curve, redeploy to Curve
+- Stake/unstake LP to gauge, claim gauge rewards
+
 The owner **cannot**:
 - Freeze user funds permanently (burn works even when paused, provided the protocol remains solvent; if insolvent and paused, burns are blocked to prevent a race-to-exit)
 - Modify the CAP after deployment
 - Change oracle addresses after deployment
 - Mint or burn tokens directly
+- Change the sINVAR staking contract once set (one-time setter)
+- Bypass timelocks on gauge, staking, or rewards receiver changes
+- Rescue protected reward tokens via `rescueToken()` (must use `sweepGaugeRewards`)
+- Un-protect a reward token once marked
 
 #### Permissionless Operations
 Anyone can call:
@@ -120,6 +168,11 @@ Anyone can call:
 - `harvestYield()` - collects and distributes yield from adapter
 - `deployToAdapter()` - pushes excess USDC to yield adapter (10% buffer retained)
 - `distributeRewards()` - converts RewardDistributor's USDC into staker rewards (1-hour cooldown)
+- InvarCoin `deposit()` / `withdraw()` / `lpWithdraw()` / `lpDeposit()` - user vault operations
+- InvarCoin `harvest()` - mints INVAR from Curve fee yield and donates to sINVAR (reverts if no yield)
+- InvarCoin `deployToCurve()` - deploys excess USDC buffer to Curve ($1000 minimum)
+- InvarCoin `replenishBuffer()` - burns Curve LP to restore USDC buffer
+- InvarCoin `donateUsdc()` - accepts USDC donations, mints proportional INVAR to sINVAR
 
 #### Timelock Protection
 Critical operations require a 7-day timelock:
@@ -127,6 +180,9 @@ Critical operations require a 7-day timelock:
 - Treasury address change
 - Staking address change
 - BasketOracle Curve pool change (initial setup is immediate)
+- InvarCoin sINVAR staking contract (one-time propose/finalize)
+- InvarCoin Curve gauge changes (propose/finalize)
+- InvarCoin gauge rewards receiver (propose/finalize)
 
 This provides users time to exit if they disagree with proposed changes.
 
@@ -355,6 +411,86 @@ newDuration = remainingTime + (STREAM_DURATION × amount) / (remaining + amount)
 
 This makes griefing economically useless: an attacker calling `donateYield(0)` has zero effect on the vesting schedule.
 
+### InvarCoin Security
+
+InvarCoin is a vault token backed by Curve USDC/plDXY-BEAR LP tokens. Users deposit USDC, which is single-sided deployed to Curve. Fee yield (virtual price growth) is harvested and donated to sINVAR stakers.
+
+#### Oracle Model
+
+InvarCoin uses two oracle modes for different contexts:
+
+| Mode | Function | Behavior on Stale Oracle | Used By |
+|------|----------|--------------------------|---------|
+| **Permissive** | `totalAssets()` | Returns best-effort value (no revert) | `getBufferMetrics()`, view functions |
+| **Strict** | `totalAssetsValidated()` | Reverts with `OracleLib__StalePrice` | N/A (external callers only) |
+| **Validated** | `_validatedOraclePrice()` | Reverts | `deposit`, `lpDeposit`, `harvest`, `deployToCurve`, `replenishBuffer`, `donateUsdc` |
+| **Safe** | `_harvestSafe()` | Silently skips harvest | `withdraw`, `lpWithdraw` |
+
+Staleness timeout is 24 hours (`ORACLE_TIMEOUT`). L2 sequencer uptime is checked with a 1-hour grace period.
+
+#### Dual LP Pricing
+
+LP tokens are valued using both Curve's `lp_price()` (EMA) and an oracle-derived price (`2 * vp * sqrt(bearPrice)`):
+
+| Context | Pricing | Rationale |
+|---------|---------|-----------|
+| `totalAssets()`, `harvest` | Pessimistic (min of EMA, oracle) | Conservative NAV prevents overpaying yield |
+| `deposit()`, `lpDeposit()` NAV | Optimistic (max of EMA, oracle) | Prevents new depositors from diluting existing holders |
+| `lpDeposit()` LP valuation | Pessimistic | Prevents depositors extracting value from stale-high EMA |
+| `withdraw()`, `lpWithdraw()` | Pro-rata (no pricing needed) | Fair share distribution regardless of price |
+
+#### Buffer Management
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| `BUFFER_TARGET_BPS` | 200 (2%) | Target USDC held locally for gas-efficient withdrawals |
+| `DEPLOY_THRESHOLD` | $1,000 | Minimum excess before `deployToCurve` activates |
+| `MAX_SPOT_DEVIATION_BPS` | 50 (0.5%) | Circuit breaker for pool manipulation |
+
+The spot deviation guard compares `calc_token_amount` (spot) against EMA-derived expected LP. It blocks `deployToCurve`, `replenishBuffer`, `lpDeposit`, and `redeployToCurve` when the pool is being manipulated.
+
+`deployToCurve` checks only downward deviation (getting less LP than expected). Upward deviation (getting more LP) is favorable to the vault and not blocked.
+
+#### Gauge Integration
+
+LP tokens are auto-staked to the Curve gauge on deployment for CRV reward accrual. Key design choices:
+
+| Design Choice | Rationale |
+|---------------|-----------|
+| Internal `gaugeStakedLp` tracking | Prevents bricked gauge from DOSing `_lpBalance()` → `totalAssets()` |
+| Gauge allowlist (`approvedGauges`) | Prevents setting arbitrary contracts as gauges |
+| `_validateGaugeAddress` checks code + `lp_token()` | Validates gauge is a real Curve gauge for the correct LP |
+| No try/catch on `gauge.deposit()` | Bricked gauge reverts entire deploy — prevents LP going untracked |
+| Per-operation approve (not `type(uint256).max`) | Limits gauge's spending authority to the exact deposit amount |
+
+#### Protected Reward Tokens
+
+Gauge reward tokens (CRV, etc.) use a separate flow from `rescueToken()`:
+
+1. Owner calls `protectRewardToken(token)` — irreversible, blocks `rescueToken` for that token
+2. Owner proposes gauge rewards receiver (7-day timelock)
+3. After timelock, `sweepGaugeRewards(token)` sends balance to the receiver
+
+This prevents the owner from instantly draining reward tokens via `rescueToken()` while still allowing legitimate reward collection.
+
+**Limitation:** `protectRewardToken` is irreversible. A mistakenly protected token can only be recovered via `sweepGaugeRewards` (requires receiver to be set). Unprotected reward tokens remain rescuable via `rescueToken()`.
+
+#### Donation Resistance
+
+| Donation Type | Effect | Safety |
+|---------------|--------|--------|
+| USDC sent directly | Inflates `totalAssets()`, benefits existing holders | Harmless — new depositors get fewer shares (optimistic pricing) |
+| BEAR sent directly | Inflates `totalAssets()`, benefits existing holders | Harmless — same as USDC |
+| LP tokens sent directly | Inflates `_lpBalance()` but NOT `trackedLpBalance` | Safe — harvest only measures VP growth on tracked LP |
+| First-depositor inflation | Virtual shares (1e18 INVAR / 1e6 USDC offset) | 1e12 virtual ratio makes attack economically infeasible |
+
+#### Known Limitations
+
+- **`withdraw()` ignores loose BEAR**: Single-sided withdrawal only returns USDC (buffer + Curve LP burn). If the contract holds material BEAR (e.g., after emergency recovery), users should use `lpWithdraw()` or set `minUsdcOut` to enforce fair value.
+- **`lpWithdraw()` during emergency with bricked Curve**: If both the gauge and Curve pool are bricked, `lpWithdraw` reverts on `remove_liquidity`. Users must wait for `forceRemoveGauge()` to write off gauge LP, then `lpWithdraw` succeeds with remaining local USDC + BEAR only.
+- **No keeper incentive**: `harvest()`, `deployToCurve()`, and `replenishBuffer()` have no on-chain caller reward. Keepers must be incentivized externally (Gelato, Keep3r, etc.). This is intentional — paying rewards from principal in fungible-share vaults enables small-loop MEV extraction.
+- **Harvest frequency**: If `harvest()` is not called regularly, `curveLpCostVp` becomes stale and the next harvest mints a larger-than-normal INVAR batch. This is not exploitable — the yield is real VP growth — but creates lumpy reward distribution to sINVAR stakers.
+
 ### Curve Pool Configuration
 
 Router contracts assume specific Curve pool structure:
@@ -477,6 +613,31 @@ If yield adapter is compromised:
 
 **Note:** During the 7-day period, users can continue to redeem existing tokens.
 
+### InvarCoin Emergency Procedures
+
+#### Curve Pool Operational (Standard Recovery)
+
+1. Call `emergencyWithdrawFromCurve()` — sets `emergencyActive`, pauses, unstakes from gauge, calls `remove_liquidity` to recover USDC + BEAR, zeros LP accounting
+2. Users exit via `lpWithdraw()` (works when paused) — receives pro-rata USDC + BEAR
+3. Once resolved, owner calls `redeployToCurve(minLpOut)` — re-deploys BEAR + excess USDC to Curve, clears `emergencyActive`
+4. Call `unpause()`
+
+#### Curve Pool Bricked (remove_liquidity Reverts)
+
+1. Call `setEmergencyMode()` — sets `emergencyActive`, pauses. LP accounting is preserved (not zeroed).
+2. If gauge is also bricked, call `forceRemoveGauge()` — writes off stuck gauge LP proportionally from `trackedLpBalance` and `curveLpCostVp`, zeros `gaugeStakedLp`
+3. Users exit via `lpWithdraw()` — receives pro-rata share of local USDC + BEAR only (no Curve LP burn since `_lpBalance()` is now only local LP)
+4. If Curve recovers later, call `emergencyWithdrawFromCurve()` to recover remaining LP
+
+#### Bricked Gauge Only (Curve Pool Fine)
+
+1. Call `setEmergencyMode()` — pauses, sets `emergencyActive`
+2. Call `forceRemoveGauge()` — writes off gauge-staked LP
+3. Call `emergencyWithdrawFromCurve()` — recovers remaining local LP from Curve
+4. Users exit via `lpWithdraw()`, or owner calls `redeployToCurve()` + `unpause()` to resume normal operation
+
+**Key property:** `lpWithdraw()` intentionally lacks `whenNotPaused`, ensuring users can always exit even during emergencies. `withdraw()` (single-sided) and `deposit()` / `lpDeposit()` are blocked during emergency mode.
+
 ### Adapter Migration (Tight Liquidity)
 
 If adapter withdrawal fails due to constrained Morpho Vault vault liquidity:
@@ -538,6 +699,7 @@ contact@plether.com
 | SyntheticSplitter | Audited (Cantina, Jan 2026) |
 | SyntheticToken | Audited (Cantina, Jan 2026) |
 | BasketOracle | Audited (Cantina, Jan 2026) |
+| InvarCoin | Not yet audited |
 | ZapRouter | Not yet audited |
 | LeverageRouter | Not yet audited |
 | BullLeverageRouter | Not yet audited |
@@ -551,6 +713,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-03-17 | Added InvarCoin security documentation: trust assumptions (Curve twocrypto, gauge, CRV minter, L2 sequencer), invariants, dual pricing model, buffer management, gauge integration, protected reward tokens, donation resistance, emergency procedures; updated owner capabilities, permissionless operations, and timelock list; added to coverage gaps |
 | 2026-02-24 | Acknowledged BasketOracle deviation check freezing Morpho liquidations as intentional circuit breaker |
 | 2026-02-13 | Added Cantina audit results (8 findings: 0 critical, 0 high, 2 medium, 5 low, 1 informational; 7 fixed, 1 acknowledged); added coverage gaps table |
 | 2026-02-11 | Added VaultAdapter.claimRewards() security model, EIP-2612 permit support documentation, deployToAdapter()/distributeRewards() as permissionless operations; clarified Chainlink+Pyth dependency |
