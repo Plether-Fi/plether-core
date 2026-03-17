@@ -136,6 +136,9 @@ contract TrancheVault is ERC4626 {
             POOL.depositJunior(assets);
         }
         _mint(receiver, shares);
+        // Only reset the withdrawal cooldown for meaningful deposits. A third party can reset a
+        // victim's cooldown by depositing >=5% of their balance to the victim's address, but this
+        // requires permanently donating that USDC — economically irrational griefing.
         uint256 previousBalance = balanceOf(receiver) - shares;
         uint256 meaningfulTopUpThreshold = previousBalance / 20;
         if (meaningfulTopUpThreshold == 0 && previousBalance > 0) {

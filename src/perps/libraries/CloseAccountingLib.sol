@@ -55,6 +55,10 @@ library CloseAccountingLib {
 
         state.vpiDeltaUsdc = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, vaultDepthUsdc, vpiFactor);
         state.proportionalAccrualUsdc = (vpiAccrued * int256(sizeDelta)) / int256(positionSize);
+        // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
+        // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
+        // net-negative VPI rebate. Trade-off: market makers who heal skew on both open and close
+        // receive $0 net VPI rebate — they must profit from directional price movement instead.
         if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
             state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;
         }
