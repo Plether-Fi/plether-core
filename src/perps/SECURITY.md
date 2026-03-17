@@ -56,7 +56,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody, while close orders reserve a flat `1.00 USDC` execution bounty the same way |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders reserve a flat `1.00 USDC` bounty — seized upfront when free settlement is available, or deferred until execution when the trader is fully utilized (bounty is paid from freed position margin on success, forfeited on expiry/failure) |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -325,8 +325,9 @@ When a position goes underwater (equity < 0):
 
 #### Deposit Cooldown
 
-- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal. Self-deposits reset the receiver cooldown, and meaningful third-party top-ups also reset the receiver cooldown.
+- **Behavior**: 1-hour cooldown after depositing prevents same-block or near-block withdrawal. Self-deposits reset the receiver cooldown, and meaningful third-party top-ups (≥5% of receiver's balance) also reset the receiver cooldown.
 - **Impact**: Users cannot deposit and immediately withdraw, even if the vault's share price has not changed.
+- **Griefing surface**: A third party can reset a victim's cooldown by depositing ≥5% of the victim's balance to their address. This requires permanently donating that USDC (it becomes the victim's LP shares), making the attack economically irrational. Integrators should be aware of this if building time-sensitive withdrawal flows.
 - **Rationale**: Prevents share price manipulation via flash loans or MEV sandwich attacks on LP deposits.
 
 ### Emergency Pause

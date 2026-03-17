@@ -41,6 +41,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 nextMarginOrderId;
         uint64 prevMarginOrderId;
         bool inMarginQueue;
+        bool bountyDeferred;
     }
 
     struct AccountEscrow {
@@ -307,7 +308,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
         uint64 orderId = nextCommitId++;
 
-        _reserveExecutionBounty(accountId, orderId, executionBountyUsdc);
+        _reserveExecutionBounty(accountId, orderId, executionBountyUsdc, isClose);
         _reserveCommittedMargin(accountId, orderId, isClose, marginDelta);
 
         OrderRecord storage record = orderRecords[orderId];
@@ -373,7 +374,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function executionBountyReserves(
         uint64 orderId
     ) external view returns (uint256) {
-        return orderRecords[orderId].executionBountyUsdc;
+        OrderRecord storage record = orderRecords[orderId];
+        return record.bountyDeferred ? 0 : record.executionBountyUsdc;
     }
 
     function isInMarginQueue(
@@ -397,7 +399,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
-            escrow.executionBountyUsdc += record.executionBountyUsdc;
+            if (!record.bountyDeferred) {
+                escrow.executionBountyUsdc += record.executionBountyUsdc;
+            }
             escrow.pendingOrderCount++;
             orderId = record.nextPendingOrderId;
         }
@@ -794,8 +798,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             if (record.executionBountyUsdc > 0) {
-                forfeitedUsdc += record.executionBountyUsdc;
+                if (!record.bountyDeferred) {
+                    forfeitedUsdc += record.executionBountyUsdc;
+                }
                 record.executionBountyUsdc = 0;
+                record.bountyDeferred = false;
             }
             orderId = record.nextPendingOrderId;
         }
@@ -843,8 +850,20 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ) internal returns (uint256 executionBountyUsdc) {
         OrderRecord storage record = _orderRecord(orderId);
         executionBountyUsdc = record.executionBountyUsdc;
-        if (executionBountyUsdc > 0) {
-            record.executionBountyUsdc = 0;
+        if (executionBountyUsdc == 0) {
+            return 0;
+        }
+        record.executionBountyUsdc = 0;
+        if (record.bountyDeferred) {
+            record.bountyDeferred = false;
+            IMarginClearinghouse ch = IMarginClearinghouse(engine.clearinghouse());
+            if (ch.getFreeSettlementBalanceUsdc(record.core.accountId) >= executionBountyUsdc) {
+                ch.seizeUsdc(record.core.accountId, executionBountyUsdc, address(this));
+                USDC.safeTransfer(msg.sender, executionBountyUsdc);
+            } else {
+                executionBountyUsdc = 0;
+            }
+        } else {
             USDC.safeTransfer(msg.sender, executionBountyUsdc);
         }
     }
@@ -986,16 +1005,21 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _reserveExecutionBounty(
         bytes32 accountId,
         uint64 orderId,
-        uint256 executionBountyUsdc
+        uint256 executionBountyUsdc,
+        bool isClose
     ) internal {
         if (executionBountyUsdc == 0) {
             return;
         }
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) >= executionBountyUsdc) {
+            clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
+            orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
+        } else if (isClose) {
+            orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
+            orderRecords[orderId].bountyDeferred = true;
+        } else {
             revert OrderRouter__InsufficientFreeEquity();
         }
-        clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
-        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
 
     function _reserveCommittedMargin(
