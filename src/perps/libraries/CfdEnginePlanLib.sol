@@ -522,10 +522,12 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.SideSnapshot memory bear
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         if (delta.side == CfdTypes.Side.BULL) {
+            bull.openInterest -= delta.sideOiDecrease;
             bull.totalMargin = delta.totalMarginAfterClose;
             bull.entryFunding =
                 bull.entryFunding + delta.funding.sideEntryFundingDelta - delta.sideEntryFundingReduction;
         } else {
+            bear.openInterest -= delta.sideOiDecrease;
             bear.totalMargin = delta.totalMarginAfterClose;
             bear.entryFunding =
                 bear.entryFunding + delta.funding.sideEntryFundingDelta - delta.sideEntryFundingReduction;
@@ -675,6 +677,16 @@ library CfdEnginePlanLib {
             delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;
             delta.payoutIsImmediate = snap.vaultCashUsdc >= delta.traderPayoutUsdc;
             delta.payoutIsDeferred = !delta.payoutIsImmediate;
+        }
+
+        if (pos.side == CfdTypes.Side.BULL) {
+            bull.openInterest -= pos.size;
+            bull.entryFunding -= delta.sideEntryFundingReduction;
+            bull.totalMargin -= pos.margin;
+        } else {
+            bear.openInterest -= pos.size;
+            bear.entryFunding -= delta.sideEntryFundingReduction;
+            bear.totalMargin -= pos.margin;
         }
 
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
