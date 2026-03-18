@@ -75,6 +75,15 @@ library CfdEnginePlanTypes {
         LOSS_UNCOVERED_CLOSE
     }
 
+    struct GlobalFundingDelta {
+        int256 bullFundingIndexDelta;
+        int256 bearFundingIndexDelta;
+        uint256 fundingAbsSkewUsdc;
+        uint64 newLastFundingTime;
+        uint256 newLastMarkPrice;
+        uint64 newLastMarkTime;
+    }
+
     struct FundingDelta {
         int256 bullFundingIndexDelta;
         int256 bearFundingIndexDelta;
@@ -100,6 +109,13 @@ library CfdEnginePlanTypes {
 
         int256 sideEntryFundingDelta;
         int256 newPosEntryFundingIndex;
+    }
+
+    struct SolvencyPreview {
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
+        bool triggersDegradedMode;
+        bool postOpDegradedMode;
     }
 
     // ──────────────────────────────────────────────
@@ -211,7 +227,7 @@ library CfdEnginePlanTypes {
         uint256 totalMarginAfterFunding;
         uint256 totalMarginAfterClose;
 
-        bool triggersDegradedMode;
+        SolvencyPreview solvency;
 
         bytes32 accountId;
         uint256 sizeDelta;
@@ -226,7 +242,7 @@ library CfdEnginePlanTypes {
     struct LiquidationDelta {
         bool liquidatable;
 
-        FundingDelta funding;
+        GlobalFundingDelta funding;
 
         PositionRiskAccountingLib.PositionRiskState riskState;
         LiquidationAccountingLib.LiquidationState liquidationState;
@@ -257,7 +273,7 @@ library CfdEnginePlanTypes {
 
         uint256 badDebtUsdc;
 
-        bool triggersDegradedMode;
+        SolvencyPreview solvency;
 
         bytes32 accountId;
         uint256 price;
