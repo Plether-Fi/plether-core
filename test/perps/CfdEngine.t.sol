@@ -3216,14 +3216,12 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         });
     }
 
-    function _liveEffectiveAssetsAfterPayout(
-        uint256 pendingPayoutUsdc,
-        uint256 vaultInflowUsdc
+    function _liveEffectiveAssets(
+        uint256 pendingPayoutUsdc
     ) internal view returns (uint256) {
-        uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc - vaultInflowUsdc;
+        uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc;
         uint256 fees = engine.accumulatedFeesUsdc();
         int256 funding = engine.getCappedFundingPnl();
-
         uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
         uint256 effective;
         if (funding > 0) {
@@ -3237,7 +3235,8 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
     }
 
     /// @dev Regression: planLiquidation used stale side snapshots (OI, entryFunding, totalMargin)
-    ///      for solvency computation, causing preview to undercount post-liquidation funding liability.
+    ///      for solvency computation. Now also uses previewPostOpSolvency with physicalAssetsDelta
+    ///      to account for seized collateral flowing into the vault.
     function test_PreviewLiquidation_SolvencyUsesPostLiquidationFundingState() public {
         address bullTrader = address(0xDD01);
         address bearTrader = address(0xDD02);
@@ -3252,8 +3251,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
         vm.warp(block.timestamp + 180 days);
 
-        uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, vaultDepth);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
         assertTrue(preview.liquidatable, "BULL majority must be liquidatable after funding drain");
 
         address keeper = address(0x999);
@@ -3261,8 +3259,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         bytes[] memory empty;
         router.executeLiquidation(bullId, empty);
 
-        uint256 liveEffective = _liveEffectiveAssetsAfterPayout(preview.keeperBountyUsdc, preview.seizedCollateralUsdc);
-
+        uint256 liveEffective = _liveEffectiveAssets(preview.keeperBountyUsdc);
         assertEq(
             preview.effectiveAssetsAfterUsdc,
             liveEffective,
@@ -3272,7 +3269,6 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
     /// @dev Regression: _computeCloseSolvency did not reduce openInterest before computing
     ///      capped funding PnL, overstating the OI*fundingIndex term.
-    ///      Verifies the preview's degraded mode flag matches live execution after vault drain.
     function test_PreviewClose_SolvencyUsesPostCloseOiForFunding() public {
         address bullTraderA = address(0xDD03);
         address bullTraderB = address(0xDD04);

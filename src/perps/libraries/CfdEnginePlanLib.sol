@@ -693,21 +693,35 @@ library CfdEnginePlanLib {
             bull.maxProfitUsdc, bear.maxProfitUsdc, pos.side, pos.maxProfitUsdc
         );
 
-        SolvencyAccountingLib.SolvencyState memory solvency = SolvencyAccountingLib.buildSolvencyState(
+        SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.vaultAssetsUsdc,
             snap.accumulatedFeesUsdc,
-            postMaxLiability,
+            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             _solvencyCappedFundingPnl(bull, bear),
-            snap.totalDeferredPayoutUsdc + (delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0),
+            snap.totalDeferredPayoutUsdc,
             snap.totalDeferredClearerBountyUsdc
         );
-        uint256 effectiveAssetsAfter =
-            SolvencyAccountingLib.effectiveAssetsAfterPendingPayout(solvency, delta.keeperBountyUsdc);
 
-        delta.solvency.effectiveAssetsAfterUsdc = effectiveAssetsAfter;
-        delta.solvency.maxLiabilityAfterUsdc = postMaxLiability;
-        delta.solvency.triggersDegradedMode = !snap.degradedMode && effectiveAssetsAfter < postMaxLiability;
-        delta.solvency.postOpDegradedMode = snap.degradedMode || effectiveAssetsAfter < postMaxLiability;
+        int256 physicalAssetsDelta =
+            int256(delta.residualPlan.seizedUsdc) - int256(delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0);
+
+        SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
+            currentState,
+            SolvencyAccountingLib.PreviewDelta({
+                physicalAssetsDeltaUsdc: physicalAssetsDelta,
+                protocolFeesDeltaUsdc: 0,
+                maxLiabilityAfterUsdc: postMaxLiability,
+                deferredTraderPayoutDeltaUsdc: delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0,
+                deferredLiquidationBountyDeltaUsdc: 0,
+                pendingVaultPayoutUsdc: delta.keeperBountyUsdc
+            }),
+            snap.degradedMode
+        );
+
+        delta.solvency.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
+        delta.solvency.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        delta.solvency.triggersDegradedMode = result.triggersDegradedMode;
+        delta.solvency.postOpDegradedMode = result.postOpDegradedMode;
     }
 
 }
