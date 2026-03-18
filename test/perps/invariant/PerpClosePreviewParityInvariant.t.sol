@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
@@ -196,10 +197,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            CfdEngine.PreviewFundingSettlement memory partialFs =
-                harness.exposed_previewFundingSettlement(accountId, false, vaultDepthUsdc);
-            CfdEngine.PreviewFundingSettlement memory fullFs =
-                harness.exposed_previewFundingSettlement(accountId, true, vaultDepthUsdc);
+            CfdEnginePlanTypes.FundingDelta memory partialFs =
+                harness.exposed_planFunding(accountId, true, false, vaultDepthUsdc);
+            CfdEnginePlanTypes.FundingDelta memory fullFs =
+                harness.exposed_planFunding(accountId, true, true, vaultDepthUsdc);
 
             assertEq(
                 partialFs.pendingFundingUsdc,
@@ -209,18 +210,24 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
             if (partialFs.pendingFundingUsdc >= 0) {
                 assertEq(
-                    partialFs.fundingVaultCashInflowUsdc, 0, "Non-negative partial funding must not produce inflow"
+                    partialFs.fundingLossConsumedFromMargin + partialFs.fundingLossConsumedFromFree,
+                    0,
+                    "Non-negative partial funding must not produce inflow"
                 );
-                assertEq(fullFs.fundingVaultCashInflowUsdc, 0, "Non-negative full funding must not produce inflow");
+                assertEq(
+                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
+                    0,
+                    "Non-negative full funding must not produce inflow"
+                );
             } else {
                 assertEq(
-                    fullFs.fundingVaultCashInflowUsdc,
+                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
                     0,
                     "Full close negative funding uses closeFundingSettlement, not vault transfer"
                 );
             }
 
-            assertEq(fullFs.fundingVaultCashOutflowUsdc, 0, "Full close never produces vault funding outflow");
+            assertEq(fullFs.fundingVaultPayoutUsdc, 0, "Full close never produces vault funding outflow");
         }
     }
 
@@ -265,9 +272,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
             return;
         }
 
-        CfdEngine.PreviewFundingSettlement memory fs =
-            harness.exposed_previewFundingSettlement(accountId, isFullClose, vaultDepthUsdc);
-        uint256 adjustedCash = vault.totalAssets() + fs.fundingVaultCashInflowUsdc - fs.fundingVaultCashOutflowUsdc;
+        CfdEnginePlanTypes.FundingDelta memory fs =
+            harness.exposed_planFunding(accountId, true, isFullClose, vaultDepthUsdc);
+        uint256 adjustedCash = vault.totalAssets() + fs.fundingLossConsumedFromMargin + fs.fundingLossConsumedFromFree
+            - fs.fundingVaultPayoutUsdc;
         uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {

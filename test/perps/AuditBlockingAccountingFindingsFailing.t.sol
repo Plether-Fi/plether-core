@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -10,6 +11,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
@@ -71,7 +73,20 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         uint256 marginBefore = pos.margin;
         CfdTypes.Side marginSide = pos.side;
 
-        _settleFunding(order, pos);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(order.accountId, lastMarkPrice, vault.totalAssets(), 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.FundingDelta memory fd =
+            CfdEnginePlanLib.planFunding(snap, lastMarkPrice, 0, order.isClose, order.sizeDelta == pos.size);
+        _applyFundingAndMark(
+            fd.bullFundingIndexDelta,
+            fd.bearFundingIndexDelta,
+            fd.fundingAbsSkewUsdc,
+            fd.newLastFundingTime,
+            fd.newLastMarkPrice,
+            fd.newLastMarkTime
+        );
+        _applyFundingSettlement(fd, order.accountId, pos);
 
         uint256 marginAfter = pos.margin;
         uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
