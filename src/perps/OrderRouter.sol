@@ -141,9 +141,19 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__DegradedMode();
     error OrderRouter__CloseOnlyMode();
 
+    enum OrderFailReason {
+        Expired,
+        CloseOnlyOracleFrozen,
+        CloseOnlyFad,
+        SlippageExceeded,
+        EnginePanic,
+        AccountLiquidated,
+        EngineRevert
+    }
+
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
-    event OrderFailed(uint64 indexed orderId, string reason);
+    event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
 
     enum FailedOrderBountyPolicy {
         None,
@@ -498,7 +508,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-            emit OrderFailed(orderId, "Order expired");
+            emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeExecution(orderId, 0, false, FailedOrderBountyPolicy.ClearerFull);
             return;
         }
@@ -515,7 +525,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             );
             if (policy.closeOnly && !order.isClose) {
                 emit OrderFailed(
-                    orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
+                    orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
                 _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.RefundUser);
                 return;
@@ -540,7 +550,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         if (!_checkSlippage(order, executionPrice)) {
-            emit OrderFailed(orderId, "Slippage tolerance exceeded");
+            emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
             _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         }
@@ -556,12 +566,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
         try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
-        } catch Error(string memory reason) {
-            emit OrderFailed(orderId, reason);
+        } catch Error(string memory) {
+            emit OrderFailed(orderId, OrderFailReason.EngineRevert);
             _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         } catch {
-            emit OrderFailed(orderId, "Engine Math Panic");
+            emit OrderFailed(orderId, OrderFailReason.EnginePanic);
             _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
             return;
         }
@@ -614,14 +624,14 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-                emit OrderFailed(orderId, "Order expired");
+                emit OrderFailed(orderId, OrderFailReason.Expired);
                 _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
                 continue;
             }
 
             if (policy.closeOnly && !order.isClose) {
                 emit OrderFailed(
-                    orderId, policy.oracleFrozen ? "Oracle frozen: close-only mode" : "FAD: close-only mode"
+                    orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
                 _cleanupOrder(orderId, false, FailedOrderBountyPolicy.RefundUser);
                 continue;
@@ -637,7 +647,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             }
 
             if (!_checkSlippage(order, clampedPrice)) {
-                emit OrderFailed(orderId, "Slippage tolerance exceeded");
+                emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
                 _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
                 continue;
             }
@@ -654,11 +664,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
-            } catch Error(string memory reason) {
-                emit OrderFailed(orderId, reason);
+            } catch Error(string memory) {
+                emit OrderFailed(orderId, OrderFailReason.EngineRevert);
                 _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
             } catch {
-                emit OrderFailed(orderId, "Engine Math Panic");
+                emit OrderFailed(orderId, OrderFailReason.EnginePanic);
                 _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
             }
         }
@@ -688,7 +698,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             if (block.timestamp - order.commitTime <= age) {
                 break;
             }
-            emit OrderFailed(headId, "Order expired");
+            emit OrderFailed(headId, OrderFailReason.Expired);
             _cleanupOrder(headId, false, FailedOrderBountyPolicy.ClearerFull);
         }
     }
@@ -821,7 +831,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         while (orderId != 0) {
             uint64 nextOrderId = orderRecords[orderId].nextPendingOrderId;
             _releaseCommittedMargin(orderId);
-            emit OrderFailed(orderId, "Account liquidated");
+            emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
             _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Failed);
             orderId = nextOrderId;
         }

@@ -67,7 +67,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
         int256 cappedFundingPnlUsdc;
-        int256 liabilityOnlyFundingPnlUsdc;
+        uint256 liabilityOnlyFundingPnlUsdc;
         uint256 totalDeferredPayoutUsdc;
         uint256 totalDeferredClearerBountyUsdc;
         bool degradedMode;
@@ -76,7 +76,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     struct ClosePreview {
         bool valid;
-        uint8 invalidCode;
+        CfdTypes.CloseInvalidReason invalidReason;
         uint256 executionPrice;
         uint256 sizeDelta;
         int256 realizedPnlUsdc;
@@ -1458,11 +1458,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
         if (pos.size == 0) {
-            preview.invalidCode = 1;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.NoPosition;
             return preview;
         }
         if (sizeDelta == 0 || sizeDelta > pos.size) {
-            preview.invalidCode = 2;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.BadSize;
             return preview;
         }
 
@@ -1474,7 +1474,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (fundingSettlement.fundingVaultCashOutflowUsdc > 0) {
             if (vault.totalAssets() < fundingSettlement.fundingVaultCashOutflowUsdc) {
                 preview.valid = false;
-                preview.invalidCode = 4;
+                preview.invalidReason = CfdTypes.CloseInvalidReason.InsufficientVaultLiquidity;
                 return preview;
             }
         }
@@ -1503,7 +1503,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         if (preview.remainingSize > 0 && preview.remainingMargin < riskParams.minBountyUsdc) {
             preview.valid = false;
-            preview.invalidCode = 5;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.DustPosition;
             return preview;
         }
 
@@ -1529,7 +1529,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             protocolFeesDeltaUsdc = result.collectedExecFeeUsdc;
             if (result.shortfallUsdc > 0 && preview.remainingMargin > 0) {
                 preview.valid = false;
-                preview.invalidCode = 3;
+                preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnderwater;
             }
         }
 
@@ -2060,7 +2060,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return _buildFundingSnapshot().solvencyFunding;
     }
 
-    function _getLiabilityOnlyFundingPnl() internal view returns (int256) {
+    function _getLiabilityOnlyFundingPnl() internal view returns (uint256) {
         return _buildFundingSnapshot().withdrawalFundingLiability;
     }
 
@@ -2106,7 +2106,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     /// @notice Aggregate unsettled funding liabilities only, ignoring trader debts owed to the vault.
     /// @return Funding liabilities the vault should conservatively reserve for withdrawals (6 decimals)
-    function getLiabilityOnlyFundingPnl() external view returns (int256) {
+    function getLiabilityOnlyFundingPnl() external view returns (uint256) {
         return _getLiabilityOnlyFundingPnl();
     }
 
@@ -2183,16 +2183,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
     }
 
-    /// @notice Combined MtM: per-side (PnL + funding), clamped at zero.
+    /// @notice Combined MtM: per-side (PnL + funding), clamped at zero per side then summed.
     ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
-    ///         The vault never counts unrealized trader losses as assets — realized losses flow
-    ///         through physical USDC transfers (settlements, liquidations).
-    /// @return Net MtM adjustment the vault must reserve (always >= 0), in USDC (6 decimals)
-    function getVaultMtmAdjustment() external view returns (int256) {
+    /// @return Net MtM liability the vault must reserve, in USDC (6 decimals). Non-negative by construction.
+    function getVaultMtmAdjustment() external view returns (uint256) {
         return _getVaultMtmLiability();
     }
 
-    function _getVaultMtmLiability() internal view returns (int256) {
+    function _getVaultMtmLiability() internal view returns (uint256) {
         uint256 price = lastMarkPrice;
 
         int256 bullPnl;
@@ -2224,7 +2222,30 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             bearTotal = 0;
         }
 
-        return bullTotal + bearTotal;
+        return uint256(bullTotal) + uint256(bearTotal);
+    }
+
+    function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
+        if (address(vault) == address(0) || orderRouter == address(0)) {
+            return ICfdEngine.ProtocolPhase.Configuring;
+        }
+        if (degradedMode) {
+            return ICfdEngine.ProtocolPhase.Degraded;
+        }
+        return ICfdEngine.ProtocolPhase.Active;
+    }
+
+    function getProtocolPhase() external view returns (ICfdEngine.ProtocolPhase) {
+        return _getProtocolPhase();
+    }
+
+    function getProtocolStatus() external view returns (ICfdEngine.ProtocolStatus memory status) {
+        status.phase = _getProtocolPhase();
+        status.lastMarkTime = lastMarkTime;
+        status.lastMarkPrice = lastMarkPrice;
+        status.oracleFrozen = isOracleFrozen();
+        status.fadWindow = isFadWindow();
+        status.fadMaxStaleness = fadMaxStaleness;
     }
 
 }

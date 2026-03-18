@@ -87,7 +87,11 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, 1, oraclePrice, vaultDepthUsdc);
             assertFalse(closePreview.valid, "Empty positions must not preview as valid closes");
-            assertEq(closePreview.invalidCode, 1, "Empty position close preview should return invalid code 1");
+            assertEq(
+                uint8(closePreview.invalidReason),
+                uint8(CfdTypes.CloseInvalidReason.NoPosition),
+                "Empty position close preview should return NoPosition"
+            );
             assertFalse(
                 closePreview.triggersDegradedMode, "Empty position close preview must not trigger degraded mode"
             );

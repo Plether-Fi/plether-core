@@ -935,7 +935,11 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,,) = engine.positions(accountId);
 
         assertFalse(preview.valid, "Preview should reject an underwater partial close that invades residual backing");
-        assertEq(preview.invalidCode, 3, "Preview should use the underwater partial-close invalid code");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
+            "Preview should use the underwater partial-close invalid reason"
+        );
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(0.8e8));
@@ -2226,7 +2230,7 @@ contract CfdEngineFundingTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
-        int256 mtm = engine.getVaultMtmAdjustment();
+        uint256 mtm = engine.getVaultMtmAdjustment();
         assertEq(
             mtm,
             5000e6,
@@ -2246,8 +2250,6 @@ contract CfdEngineFundingTest is BasePerpTest {
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
-
-        assertGe(engine.getVaultMtmAdjustment(), 0, "Fix: MtM clamped at 0, vault never sees paper profit");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2587,15 +2589,10 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = engine.getUnrealizedTraderPnl();
-        int256 cappedMtm = engine.getVaultMtmAdjustment();
+        uint256 cappedMtm = engine.getVaultMtmAdjustment();
 
         assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
-        assertGe(
-            cappedMtm,
-            -int256(_sideTotalMargin(CfdTypes.Side.BEAR) + _sideTotalMargin(CfdTypes.Side.BULL)),
-            "Capped MtM bounded"
-        );
-        assertGt(cappedMtm, uncappedPnl, "Capped MtM is less aggressive than uncapped");
+        assertGt(int256(cappedMtm), uncappedPnl, "Capped MtM is less aggressive than uncapped");
     }
 
     // Regression: C-02
@@ -2645,7 +2642,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
         router.executeOrder(2, priceData);
 
-        int256 mtm = engine.getVaultMtmAdjustment();
+        uint256 mtm = engine.getVaultMtmAdjustment();
         assertGt(mtm, 0, "Positive MtM = vault liability when traders are winning (no cap needed)");
     }
 
@@ -2890,6 +2887,75 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.prank(address(juniorVault));
         vm.expectRevert(HousePool.HousePool__DegradedMode.selector);
         pool.withdrawJunior(1e6, address(this));
+    }
+
+}
+
+// ==========================================
+// ProtocolPhaseTest: Configuring → Active → Degraded → Active
+// ==========================================
+
+contract ProtocolPhaseTest is BasePerpTest {
+
+    address bullTrader = address(0xD001);
+    address bearTrader = address(0xD002);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_PhaseTransitions() public {
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Active),
+            "Fully configured engine should be Active"
+        );
+
+        ICfdEngine.ProtocolStatus memory status = engine.getProtocolStatus();
+        assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
+        assertEq(status.lastMarkPrice, 0);
+
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Degraded),
+            "Insolvency-revealing close should latch Degraded"
+        );
+
+        _fundJunior(address(this), 500_000e6);
+        engine.clearDegradedMode();
+
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Active),
+            "Recapitalization should restore Active"
+        );
+    }
+
+    function test_ConfiguringPhase() public {
+        CfdEngine unconfigured = new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams());
+        assertEq(
+            uint8(unconfigured.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Configuring),
+            "Engine without vault/router should be Configuring"
+        );
     }
 
 }
