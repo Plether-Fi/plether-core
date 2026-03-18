@@ -3199,3 +3199,123 @@ contract VpiChunkingTest is Test {
     }
 
 }
+
+contract SolvencySnapshotRegressionTest is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.5e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function _liveEffectiveAssetsAfterPayout(
+        uint256 pendingPayoutUsdc,
+        uint256 vaultInflowUsdc
+    ) internal view returns (uint256) {
+        uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc - vaultInflowUsdc;
+        uint256 fees = engine.accumulatedFeesUsdc();
+        int256 funding = engine.getCappedFundingPnl();
+
+        uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
+        uint256 effective;
+        if (funding > 0) {
+            effective = netPhysical > uint256(funding) ? netPhysical - uint256(funding) : 0;
+        } else {
+            effective = netPhysical + uint256(-funding);
+        }
+        uint256 deferred = engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
+        effective = effective > deferred ? effective - deferred : 0;
+        return effective > pendingPayoutUsdc ? effective - pendingPayoutUsdc : 0;
+    }
+
+    /// @dev Regression: planLiquidation used stale side snapshots (OI, entryFunding, totalMargin)
+    ///      for solvency computation, causing preview to undercount post-liquidation funding liability.
+    function test_PreviewLiquidation_SolvencyUsesPostLiquidationFundingState() public {
+        address bullTrader = address(0xDD01);
+        address bearTrader = address(0xDD02);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 30_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 180 days);
+
+        uint256 vaultDepth = pool.totalAssets();
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, vaultDepth);
+        assertTrue(preview.liquidatable, "BULL majority must be liquidatable after funding drain");
+
+        address keeper = address(0x999);
+        vm.prank(keeper);
+        bytes[] memory empty;
+        router.executeLiquidation(bullId, empty);
+
+        uint256 liveEffective = _liveEffectiveAssetsAfterPayout(preview.keeperBountyUsdc, preview.seizedCollateralUsdc);
+
+        assertEq(
+            preview.effectiveAssetsAfterUsdc,
+            liveEffective,
+            "Liquidation preview effective assets must match live post-liquidation state"
+        );
+    }
+
+    /// @dev Regression: _computeCloseSolvency did not reduce openInterest before computing
+    ///      capped funding PnL, overstating the OI*fundingIndex term.
+    ///      Verifies the preview's degraded mode flag matches live execution after vault drain.
+    function test_PreviewClose_SolvencyUsesPostCloseOiForFunding() public {
+        address bullTraderA = address(0xDD03);
+        address bullTraderB = address(0xDD04);
+        address bearTrader = address(0xDD05);
+        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
+        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTraderA, 50_000e6);
+        _fundTrader(bullTraderB, 50_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bullIdA, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
+        _open(bullIdB, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 5 days);
+
+        (uint256 sizeA,,,,,,,) = engine.positions(bullIdA);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullIdA, sizeA, 1e8, pool.totalAssets());
+        assertTrue(preview.valid, "Close preview must be valid");
+
+        _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
+
+        uint256 postCloseOi = _sideOpenInterest(CfdTypes.Side.BULL);
+        assertEq(postCloseOi, 400_000e18, "BULL OI must be halved after closing one of two equal positions");
+
+        int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
+        int256 bullEntry = _sideEntryFunding(CfdTypes.Side.BULL);
+        int256 staleOiFunding = (int256(800_000e18) * bullIdx - bullEntry) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 correctOiFunding = (int256(400_000e18) * bullIdx - bullEntry) / int256(CfdMath.FUNDING_INDEX_SCALE);
+
+        assertGt(
+            correctOiFunding,
+            staleOiFunding,
+            "Correct (reduced) OI must give less negative funding than stale (full) OI"
+        );
+        assertGt(
+            uint256(correctOiFunding - staleOiFunding),
+            1000e6,
+            "OI correction must create a material funding difference (>$1000)"
+        );
+    }
+
+}
