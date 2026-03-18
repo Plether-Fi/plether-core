@@ -113,6 +113,7 @@ interface ICfdEngine {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking

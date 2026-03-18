@@ -411,9 +411,6 @@ library CfdEnginePlanLib {
 
         (CfdEnginePlanTypes.SideSnapshot memory selected, CfdEnginePlanTypes.SideSnapshot memory opposite) =
             _selectedAndOpposite(snap, pos.side);
-        selected.fundingIndex += pos.side == CfdTypes.Side.BULL
-            ? delta.funding.bullFundingIndexDelta
-            : delta.funding.bearFundingIndexDelta;
 
         delta.totalMarginBefore = selected.totalMargin;
         delta.totalMarginAfterFunding =
@@ -571,6 +568,7 @@ library CfdEnginePlanLib {
         );
         sp.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
         sp.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        sp.solvencyFundingPnlUsdc = solvencyFunding;
         sp.triggersDegradedMode = result.triggersDegradedMode;
         sp.postOpDegradedMode = result.postOpDegradedMode;
     }
@@ -693,11 +691,13 @@ library CfdEnginePlanLib {
             bull.maxProfitUsdc, bear.maxProfitUsdc, pos.side, pos.maxProfitUsdc
         );
 
+        int256 solvencyFunding = _solvencyCappedFundingPnl(bull, bear);
+
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.vaultAssetsUsdc,
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
-            _solvencyCappedFundingPnl(bull, bear),
+            solvencyFunding,
             snap.totalDeferredPayoutUsdc,
             snap.totalDeferredClearerBountyUsdc
         );
@@ -720,6 +720,7 @@ library CfdEnginePlanLib {
 
         delta.solvency.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
         delta.solvency.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        delta.solvency.solvencyFundingPnlUsdc = solvencyFunding;
         delta.solvency.triggersDegradedMode = result.triggersDegradedMode;
         delta.solvency.postOpDegradedMode = result.postOpDegradedMode;
     }

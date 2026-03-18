@@ -114,6 +114,7 @@ library CfdEnginePlanTypes {
     struct SolvencyPreview {
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
     }

@@ -3294,23 +3294,11 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
         _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
 
-        uint256 postCloseOi = _sideOpenInterest(CfdTypes.Side.BULL);
-        assertEq(postCloseOi, 400_000e18, "BULL OI must be halved after closing one of two equal positions");
-
-        int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
-        int256 bullEntry = _sideEntryFunding(CfdTypes.Side.BULL);
-        int256 staleOiFunding = (int256(800_000e18) * bullIdx - bullEntry) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 correctOiFunding = (int256(400_000e18) * bullIdx - bullEntry) / int256(CfdMath.FUNDING_INDEX_SCALE);
-
-        assertGt(
-            correctOiFunding,
-            staleOiFunding,
-            "Correct (reduced) OI must give less negative funding than stale (full) OI"
-        );
-        assertGt(
-            uint256(correctOiFunding - staleOiFunding),
-            1000e6,
-            "OI correction must create a material funding difference (>$1000)"
+        int256 liveFunding = engine.getCappedFundingPnl();
+        assertEq(
+            preview.solvencyFundingPnlUsdc,
+            liveFunding,
+            "Close preview solvency funding must match live post-close capped funding"
         );
     }
 

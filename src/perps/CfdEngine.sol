@@ -96,6 +96,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     struct LiquidationPreview {
@@ -114,6 +115,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     struct DeferredPayoutStatus {
@@ -1118,6 +1120,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
     function previewLiquidation(
@@ -1153,6 +1156,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
     function viewDataMaxLiabilityAfterClose(
