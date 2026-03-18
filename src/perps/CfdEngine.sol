@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
@@ -8,6 +9,7 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
+import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
@@ -1454,9 +1456,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc
     ) external view returns (ClosePreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
-        CfdTypes.Position memory pos = positions[accountId];
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
+
+        CfdTypes.Position memory pos = positions[accountId];
         if (pos.size == 0) {
             preview.invalidCode = 1;
             return preview;
@@ -1466,100 +1469,122 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return preview;
         }
 
-        preview.valid = true;
-        PreviewFundingSettlement memory fundingSettlement =
-            _previewFundingSettlement(accountId, pos, sizeDelta == pos.size, vaultDepthUsdc);
-        pos.margin = fundingSettlement.positionMarginAfterFundingUsdc;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: pos.side,
+            isClose: true
+        });
+        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, oraclePrice, 0);
 
-        if (fundingSettlement.fundingVaultCashOutflowUsdc > 0) {
-            if (vault.totalAssets() < fundingSettlement.fundingVaultCashOutflowUsdc) {
-                preview.valid = false;
-                preview.invalidCode = 4;
-                return preview;
-            }
+        preview.fundingUsdc = delta.funding.pendingFundingUsdc;
+        preview.realizedPnlUsdc = delta.realizedPnlUsdc;
+        preview.remainingMargin = delta.posMarginAfter;
+        preview.remainingSize = pos.size - sizeDelta;
+        preview.vpiDeltaUsdc = delta.closeState.vpiDeltaUsdc;
+        if (delta.closeState.vpiDeltaUsdc > 0) {
+            preview.vpiUsdc = uint256(delta.closeState.vpiDeltaUsdc);
         }
+        preview.executionFeeUsdc = delta.executionFeeUsdc;
 
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        uint256 selectedUsdc = (selectedState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 oppositeUsdc = (oppositeState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 preBullUsdc = pos.side == CfdTypes.Side.BULL ? selectedUsdc : oppositeUsdc;
-        uint256 preBearUsdc = pos.side == CfdTypes.Side.BEAR ? selectedUsdc : oppositeUsdc;
-        uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
-        CloseExecutionPlan memory closePlan = _buildCloseExecutionPlan(
-            pos, sizeDelta, price, preSkewUsdc, vaultDepthUsdc, fundingSettlement.closeFundingSettlementUsdc
-        );
-        CloseAccountingLib.CloseState memory closeState = closePlan.closeState;
-
-        preview.realizedPnlUsdc = closeState.realizedPnlUsdc;
-        preview.remainingMargin = closeState.remainingMarginUsdc;
-        preview.remainingSize = closeState.remainingSize;
-        preview.fundingUsdc = fundingSettlement.pendingFundingUsdc;
-
-        preview.vpiDeltaUsdc = closeState.vpiDeltaUsdc;
-        if (closeState.vpiDeltaUsdc > 0) {
-            preview.vpiUsdc = uint256(closeState.vpiDeltaUsdc);
-        }
-        preview.executionFeeUsdc = closeState.executionFeeUsdc;
-
-        if (preview.remainingSize > 0 && preview.remainingMargin < riskParams.minBountyUsdc) {
-            preview.valid = false;
+        if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
             preview.invalidCode = 5;
             return preview;
         }
 
-        uint256 protocolFeesDeltaUsdc = preview.executionFeeUsdc;
+        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
 
-        if (closeState.netSettlementUsdc > 0) {
-            uint256 settlementGain = uint256(closeState.netSettlementUsdc);
-            uint256 availableCash = vault.totalAssets() + fundingSettlement.fundingVaultCashInflowUsdc
-                - fundingSettlement.fundingVaultCashOutflowUsdc;
-            preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
-            preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
-        } else if (closeState.netSettlementUsdc < 0) {
-            (CfdEngineSettlementLib.CloseSettlementResult memory result,) = _planPreviewCloseLossSettlement(
-                accountId,
-                uint256(-closeState.netSettlementUsdc),
-                preview.executionFeeUsdc,
-                preview.remainingMargin,
-                closeState.marginToFreeUsdc,
-                fundingSettlement
-            );
-            preview.seizedCollateralUsdc = result.seizedUsdc;
-            preview.badDebtUsdc = result.badDebtUsdc;
-            protocolFeesDeltaUsdc = result.collectedExecFeeUsdc;
-            if (result.shortfallUsdc > 0 && preview.remainingMargin > 0) {
-                preview.valid = false;
-                preview.invalidCode = 3;
-            }
+        if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
+            preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
+            preview.badDebtUsdc = delta.badDebtUsdc;
         }
 
-        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewCloseSolvencyState(
-                pos,
-                sizeDelta,
-                closePlan.postBullOi,
-                closePlan.postBearOi,
-                closeState.remainingMarginUsdc,
-                vaultDepthUsdc,
-                fundingSettlement.selectedSideTotalMarginAfterFundingUsdc,
-                fundingSettlement.selectedSideEntryFundingAfterFunding
-            ),
-            SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc)
-                    - int256(fundingSettlement.fundingVaultCashOutflowUsdc)
-                    + int256(fundingSettlement.fundingVaultCashInflowUsdc),
-                protocolFeesDeltaUsdc: protocolFeesDeltaUsdc,
-                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc),
-                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
-                deferredLiquidationBountyDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
-            }),
-            degradedMode
-        );
+        if (
+            delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER
+                || delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.FUNDING_PARTIAL_CLOSE_UNDERWATER
+        ) {
+            preview.invalidCode = 3;
+            return preview;
+        }
+
+        preview.valid = delta.valid;
+
+        SolvencyAccountingLib.PreviewResult memory solvencyPreview = _previewCloseSolvency(snap, delta);
         preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
         preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
+    }
+
+    function _previewCloseSolvency(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) internal pure returns (SolvencyAccountingLib.PreviewResult memory) {
+        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
+        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        bull.fundingIndex += delta.funding.bullFundingIndexDelta;
+        bear.fundingIndex += delta.funding.bearFundingIndexDelta;
+
+        if (delta.side == CfdTypes.Side.BULL) {
+            bull.totalMargin = delta.totalMarginAfterClose;
+            bull.entryFunding =
+                bull.entryFunding + delta.funding.sideEntryFundingDelta - delta.sideEntryFundingReduction;
+        } else {
+            bear.totalMargin = delta.totalMarginAfterClose;
+            bear.entryFunding =
+                bear.entryFunding + delta.funding.sideEntryFundingDelta - delta.sideEntryFundingReduction;
+        }
+
+        int256 bullFunding =
+            (int256(bull.openInterest) * bull.fundingIndex - bull.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFunding =
+            (int256(bear.openInterest) * bear.fundingIndex - bear.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 solvencyFunding =
+            CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, bull.totalMargin, bear.totalMargin)
+        .solvencyFunding;
+
+        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
+            snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
+        );
+
+        int256 physicalAssetsDelta = int256(delta.lossResult.seizedUsdc)
+            - int256(delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0)
+            - int256(delta.funding.fundingVaultPayoutUsdc);
+        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+            physicalAssetsDelta += int256(
+                delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree
+            );
+        }
+
+        SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
+            snap.vaultAssetsUsdc,
+            snap.accumulatedFeesUsdc,
+            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            solvencyFunding,
+            snap.totalDeferredPayoutUsdc,
+            snap.totalDeferredClearerBountyUsdc
+        );
+
+        return SolvencyAccountingLib.previewPostOpSolvency(
+            currentState,
+            SolvencyAccountingLib.PreviewDelta({
+                physicalAssetsDeltaUsdc: physicalAssetsDelta,
+                protocolFeesDeltaUsdc: delta.executionFeeUsdc,
+                maxLiabilityAfterUsdc: postMaxLiability,
+                deferredTraderPayoutDeltaUsdc: delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0,
+                deferredLiquidationBountyDeltaUsdc: 0,
+                pendingVaultPayoutUsdc: 0
+            }),
+            snap.degradedMode
+        );
     }
 
     function _previewFundingSettlement(
@@ -1673,46 +1698,80 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
-        CfdTypes.Position memory pos = positions[accountId];
         preview.oraclePrice = price;
+
+        CfdTypes.Position memory pos = positions[accountId];
         if (pos.size == 0) {
             return preview;
         }
 
-        LiquidationComputation memory computation =
-            _buildLiquidationComputation(accountId, pos, price, _previewPendingFunding(pos, vaultDepthUsdc));
-        preview.reachableCollateralUsdc = computation.reachableCollateralUsdc;
-        preview.pnlUsdc = computation.riskState.unrealizedPnlUsdc;
-        preview.fundingUsdc = computation.riskState.pendingFundingUsdc;
-        preview.equityUsdc = computation.riskState.equityUsdc;
-        preview.liquidatable = computation.riskState.liquidatable;
-        preview.keeperBountyUsdc = computation.liquidationState.keeperBountyUsdc;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.LiquidationDelta memory delta = CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
 
-        preview.seizedCollateralUsdc = computation.settlement.seizedUsdc;
-        uint256 availableCash = vault.totalAssets();
-        preview.immediatePayoutUsdc =
-            availableCash >= computation.settlement.payoutUsdc ? computation.settlement.payoutUsdc : 0;
-        preview.deferredPayoutUsdc =
-            availableCash >= computation.settlement.payoutUsdc ? 0 : computation.settlement.payoutUsdc;
-        preview.badDebtUsdc = computation.settlement.badDebtUsdc;
+        preview.liquidatable = delta.liquidatable;
+        preview.reachableCollateralUsdc = delta.riskState.equityUsdc >= 0
+            ? MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(snap.accountBuckets)
+            : MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(snap.accountBuckets);
+        preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
+        preview.fundingUsdc = delta.riskState.pendingFundingUsdc;
+        preview.equityUsdc = delta.riskState.equityUsdc;
+        preview.keeperBountyUsdc = delta.keeperBountyUsdc;
 
-        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewLiquidationSolvencyState(pos, vaultDepthUsdc),
-            SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
-                protocolFeesDeltaUsdc: 0,
-                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc),
-                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
-                deferredLiquidationBountyDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: preview.keeperBountyUsdc
-            }),
-            degradedMode
+        preview.seizedCollateralUsdc = delta.residualPlan.seizedUsdc;
+        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        preview.badDebtUsdc = delta.badDebtUsdc;
+
+        preview.triggersDegradedMode = delta.triggersDegradedMode;
+        preview.postOpDegradedMode = delta.triggersDegradedMode || snap.degradedMode;
+        preview.effectiveAssetsAfterUsdc = 0;
+        preview.maxLiabilityAfterUsdc = 0;
+
+        if (delta.liquidatable) {
+            uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
+                snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc, pos.side, pos.maxProfitUsdc
+            );
+            SolvencyAccountingLib.SolvencyState memory currentState = _buildSolvencyFromSnapshot(snap);
+            SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
+                currentState,
+                SolvencyAccountingLib.PreviewDelta({
+                    physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
+                    protocolFeesDeltaUsdc: 0,
+                    maxLiabilityAfterUsdc: postMaxLiability,
+                    deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
+                    deferredLiquidationBountyDeltaUsdc: 0,
+                    pendingVaultPayoutUsdc: preview.keeperBountyUsdc
+                }),
+                snap.degradedMode
+            );
+            preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
+            preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
+            preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
+            preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
+        }
+    }
+
+    function _buildSolvencyFromSnapshot(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) internal pure returns (SolvencyAccountingLib.SolvencyState memory) {
+        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
+        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        int256 bullFunding =
+            (int256(bull.openInterest) * bull.fundingIndex - bull.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 bearFunding =
+            (int256(bear.openInterest) * bear.fundingIndex - bear.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        int256 solvencyFunding =
+            CfdEngineSnapshotsLib.buildFundingSnapshot(bullFunding, bearFunding, bull.totalMargin, bear.totalMargin)
+        .solvencyFunding;
+        return SolvencyAccountingLib.buildSolvencyState(
+            snap.vaultAssetsUsdc,
+            snap.accumulatedFeesUsdc,
+            SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc),
+            solvencyFunding,
+            snap.totalDeferredPayoutUsdc,
+            snap.totalDeferredClearerBountyUsdc
         );
-        preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
-        preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
-        preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
-        preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
-        vaultDepthUsdc;
     }
 
     function viewDataMaxLiabilityAfterClose(
@@ -2022,6 +2081,61 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.maxLiability = state.maxLiabilityUsdc;
         snapshot.solvencyFunding = state.solvencyFundingPnlUsdc;
         snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
+    }
+
+    // ==========================================
+    // PLAN-APPLY: RAW SNAPSHOT BUILDER
+    // ==========================================
+
+    function _buildRawSnapshot(
+        bytes32 accountId,
+        uint256 executionPrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        snap.accountId = accountId;
+        snap.position = positions[accountId];
+
+        snap.currentTimestamp = block.timestamp;
+        snap.lastFundingTime = lastFundingTime;
+        snap.lastMarkPrice = lastMarkPrice;
+        snap.lastMarkTime = lastMarkTime;
+
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        snap.bullSide = _copySideSnapshot(bullState);
+        snap.bearSide = _copySideSnapshot(bearState);
+
+        snap.vaultAssetsUsdc = vaultDepthUsdc;
+        snap.vaultCashUsdc = vaultDepthUsdc;
+
+        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(accountId);
+        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+
+        if (orderRouter != address(0)) {
+            snap.marginReservationIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
+        }
+
+        snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
+        snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
+        snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        snap.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
+        snap.deferredPayoutForAccount = deferredPayoutUsdc[accountId];
+        snap.degradedMode = degradedMode;
+
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = riskParams;
+        snap.isFadWindow = isFadWindow();
+    }
+
+    function _copySideSnapshot(
+        SideState storage state
+    ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
+        snap.maxProfitUsdc = state.maxProfitUsdc;
+        snap.openInterest = state.openInterest;
+        snap.entryNotional = state.entryNotional;
+        snap.totalMargin = state.totalMargin;
+        snap.fundingIndex = state.fundingIndex;
+        snap.entryFunding = state.entryFunding;
     }
 
     function _enterDegradedModeIfInsolvent(
