@@ -288,14 +288,27 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        uint256 postSideMaxProfit;
-        uint256 postSideOi;
-        if (order.side == CfdTypes.Side.BULL) {
-            postSideMaxProfit = bull.maxProfitUsdc + openState.addedMaxProfitUsdc;
-            postSideOi = bull.openInterest + order.sizeDelta;
-        } else {
-            postSideMaxProfit = bear.maxProfitUsdc + openState.addedMaxProfitUsdc;
-            postSideOi = bear.openInterest + order.sizeDelta;
+        {
+            uint256 bullMax = bull.maxProfitUsdc;
+            uint256 bearMax = bear.maxProfitUsdc;
+            if (order.side == CfdTypes.Side.BULL) {
+                bullMax += openState.addedMaxProfitUsdc;
+            } else {
+                bearMax += openState.addedMaxProfitUsdc;
+            }
+            uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bullMax, bearMax);
+            SolvencyAccountingLib.SolvencyState memory solvency = SolvencyAccountingLib.buildSolvencyState(
+                snap.vaultCashUsdc,
+                snap.accumulatedFeesUsdc,
+                postMaxLiability,
+                _solvencyCappedFundingPnl(bull, bear),
+                snap.totalDeferredPayoutUsdc,
+                snap.totalDeferredClearerBountyUsdc
+            );
+            if (SolvencyAccountingLib.isInsolvent(solvency)) {
+                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
+                return delta;
+            }
         }
 
         if (
@@ -353,31 +366,6 @@ library CfdEnginePlanLib {
         delta.totalMarginAfterOpen = delta.totalMarginAfterFunding
             + (computedMarginAfter > posMarginAfterFunding ? computedMarginAfter - posMarginAfterFunding : 0)
             - (posMarginAfterFunding > computedMarginAfter ? posMarginAfterFunding - computedMarginAfter : 0);
-
-        uint256 postMaxLiability;
-        {
-            uint256 bullMax = bull.maxProfitUsdc;
-            uint256 bearMax = bear.maxProfitUsdc;
-            if (order.side == CfdTypes.Side.BULL) {
-                bullMax += openState.addedMaxProfitUsdc;
-            } else {
-                bearMax += openState.addedMaxProfitUsdc;
-            }
-            postMaxLiability = SolvencyAccountingLib.getMaxLiability(bullMax, bearMax);
-        }
-
-        SolvencyAccountingLib.SolvencyState memory solvency = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
-            snap.accumulatedFeesUsdc + openState.executionFeeUsdc,
-            postMaxLiability,
-            _solvencyCappedFundingPnl(bull, bear),
-            snap.totalDeferredPayoutUsdc,
-            snap.totalDeferredClearerBountyUsdc
-        );
-        if (SolvencyAccountingLib.isInsolvent(solvency)) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
-            return delta;
-        }
 
         delta.valid = true;
     }
@@ -469,7 +457,7 @@ library CfdEnginePlanLib {
 
         delta.sideOiDecrease = order.sizeDelta;
         delta.sideEntryNotionalReduction = order.sizeDelta * pos.entryPrice;
-        delta.sideEntryFundingReduction = int256(order.sizeDelta) * pos.entryFundingIndex;
+        delta.sideEntryFundingReduction = int256(order.sizeDelta) * delta.funding.newPosEntryFundingIndex;
         delta.sideMaxProfitReduction = cs.maxProfitReductionUsdc;
 
         delta.unlockMarginUsdc = cs.marginToFreeUsdc;
