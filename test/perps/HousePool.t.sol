@@ -386,8 +386,16 @@ contract HousePoolTest is BasePerpTest {
 
         HousePool.VaultLiquidityView memory afterAccount = pool.getVaultLiquidityView();
         assertEq(pool.excessAssets(), 0, "Accounting excess should clear the quarantine bucket");
-        assertEq(pool.totalAssets(), accountedBefore + 100_000e6, "Canonical assets should increase only after explicit accounting");
-        assertEq(afterAccount.totalAssetsUsdc, accountedBefore + 100_000e6, "Liquidity view should reflect explicit accounting");
+        assertEq(
+            pool.totalAssets(),
+            accountedBefore + 100_000e6,
+            "Canonical assets should increase only after explicit accounting"
+        );
+        assertEq(
+            afterAccount.totalAssetsUsdc,
+            accountedBefore + 100_000e6,
+            "Liquidity view should reflect explicit accounting"
+        );
     }
 
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
@@ -402,6 +410,38 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.totalAssets(), accountedBefore, "Sweeping raw excess must not change canonical assets");
         assertEq(pool.excessAssets(), 0, "Swept donation should no longer remain as excess");
         assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
+    }
+
+    function test_RecordProtocolInflow_OnlyEngineCanAccountRawExcess() public {
+        _fundJunior(bob, 500_000e6);
+        usdc.mint(address(pool), 25_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(HousePool.HousePool__Unauthorized.selector);
+        pool.recordProtocolInflow(25_000e6);
+
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(25_000e6);
+
+        assertEq(pool.totalAssets(), 525_000e6, "Engine-accounted inflow should become canonical immediately");
+        assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
+    }
+
+    function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
+        _fundJunior(bob, 500_000e6);
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 100_000e6);
+        usdc.mint(address(pool), 10_000e6);
+
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(10_000e6);
+
+        assertEq(
+            pool.totalAssets(),
+            410_000e6,
+            "Engine-accounted inflow should restore canonical assets even after a raw shortfall"
+        );
+        assertEq(pool.excessAssets(), 0, "Shortfall recovery inflow should not remain quarantined as excess");
     }
 
     function test_SetOrderRouter_Twice_Reverts() public {

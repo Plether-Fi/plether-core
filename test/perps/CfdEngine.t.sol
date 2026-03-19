@@ -271,6 +271,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint64 fundingBefore = engine.lastFundingTime();
         uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 vaultAssetsBefore = pool.totalAssets();
         vm.warp(block.timestamp + 1 days);
 
         usdc.mint(address(router), 25e6);
@@ -287,6 +288,27 @@ contract CfdEngineTest is BasePerpTest {
             25e6,
             "Absorbed cancellation fee should be booked as incremental protocol revenue"
         );
+        assertEq(
+            pool.totalAssets(),
+            vaultAssetsBefore + 25e6,
+            "Absorbed cancellation fee should raise canonical vault assets"
+        );
+        assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
+    }
+
+    function test_OpenTradeCost_AccountsVaultInflowCanonically() public {
+        bytes32 firstBullId = bytes32(uint256(uint160(address(0xABC2))));
+        bytes32 secondBullId = bytes32(uint256(uint160(address(0xABC3))));
+        _fundTrader(address(uint160(uint256(firstBullId))), 100_000e6);
+        _fundTrader(address(uint160(uint256(secondBullId))), 100_000e6);
+
+        _open(firstBullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        uint256 vaultAssetsBefore = pool.totalAssets();
+        _open(secondBullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        assertGt(pool.totalAssets(), vaultAssetsBefore, "Positive trade cost should increase canonical vault assets");
+        assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
     }
 
     function test_ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid() public {
@@ -698,21 +720,37 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), 100_000e6);
 
         ICfdEngine.ProtocolAccountingSnapshot memory beforeAccount = engine.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseBefore = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw pool balance should include the donation");
-        assertEq(pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted");
+        assertEq(
+            pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted"
+        );
         assertEq(beforeAccount.vaultAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
-        assertEq(houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations");
+        assertEq(
+            houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations"
+        );
 
         pool.accountExcess();
 
         ICfdEngine.ProtocolAccountingSnapshot memory afterAccount = engine.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseAfter = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolInputSnapshot memory houseAfter =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        assertEq(pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets");
-        assertEq(afterAccount.vaultAssetsUsdc, accountedBefore + 100_000e6, "Protocol snapshot should reflect explicit accounting");
-        assertEq(houseAfter.netPhysicalAssetsUsdc, accountedBefore + 100_000e6, "HousePool snapshot should reflect explicit accounting");
+        assertEq(
+            pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets"
+        );
+        assertEq(
+            afterAccount.vaultAssetsUsdc,
+            accountedBefore + 100_000e6,
+            "Protocol snapshot should reflect explicit accounting"
+        );
+        assertEq(
+            houseAfter.netPhysicalAssetsUsdc,
+            accountedBefore + 100_000e6,
+            "HousePool snapshot should reflect explicit accounting"
+        );
     }
 
     function test_GetAccountLedgerView_ReflectsCompactCrossContractState() public {
@@ -2263,10 +2301,17 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
 
         uint256 clearAmount = badDebt / 2;
+        uint256 vaultAssetsBefore = pool.totalAssets();
         usdc.mint(address(this), clearAmount);
         usdc.approve(address(engine), clearAmount);
         engine.clearBadDebt(clearAmount);
         assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
+        assertEq(
+            pool.totalAssets(),
+            vaultAssetsBefore + clearAmount,
+            "Bad-debt recapitalization should raise canonical vault assets"
+        );
+        assertEq(pool.excessAssets(), 0, "Bad-debt recapitalization should not strand excess assets");
 
         vm.expectRevert(CfdEngine.CfdEngine__BadDebtTooLarge.selector);
         engine.clearBadDebt(badDebt + 1);

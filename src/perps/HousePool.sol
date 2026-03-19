@@ -85,6 +85,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     event MarkStalenessLimitFinalized();
     event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
+    event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -296,6 +297,21 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
         accountedAssets -= amount;
         USDC.safeTransfer(recipient, amount);
+    }
+
+    /// @notice Accounts a legitimate protocol inflow that already arrived as raw USDC this transaction.
+    /// @dev Only the engine may convert raw excess into canonical assets through this path.
+    function recordProtocolInflow(
+        uint256 amount
+    ) external {
+        if (msg.sender != address(ENGINE)) {
+            revert HousePool__Unauthorized();
+        }
+        if (amount == 0) {
+            return;
+        }
+        accountedAssets += amount;
+        emit ProtocolInflowAccounted(msg.sender, amount, accountedAssets);
     }
 
     // ==========================================

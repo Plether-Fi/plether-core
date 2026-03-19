@@ -571,7 +571,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             emit OrderExecuted(orderId, executionPrice);
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
-            OrderFailReason reason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
+            OrderFailReason reason =
+                selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             emit OrderFailed(orderId, reason);
             _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order, revertData));
             return;
@@ -667,7 +668,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch (bytes memory revertData) {
                 bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
-                OrderFailReason reason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
+                OrderFailReason reason =
+                    selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
                 emit OrderFailed(orderId, reason);
                 _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order, revertData));
             }

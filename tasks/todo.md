@@ -1,3 +1,14 @@
+- [x] Add explicit HousePool protocol inflow accounting restricted to the engine
+- [x] Wire endogenous vault inflows into canonical accounting across engine settlement paths
+- [x] Add regression tests for protocol inflows vs unsolicited excess
+- [x] Run targeted forge verification and record results
+
+Review:
+- Added `recordProtocolInflow(uint256)` to `src/perps/interfaces/ICfdVault.sol` and `src/perps/HousePool.sol` so canonical vault assets can be advanced explicitly for endogenous inflows while unsolicited donations still flow through `accountExcess()` / `sweepExcess()`.
+- Updated `src/perps/CfdEngine.sol` to account every protocol-owned positive vault inflow immediately after it lands: router cancellation fees, bad-debt recapitalization, positive trade-cost transfers, funding-loss seizures, close-loss seizures, and liquidation seizures.
+- Added focused regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/HousePool.t.sol` to prove endogenous inflows raise canonical assets without being stranded as excess and that only the engine can use the new inflow path.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol` (102 passed), `forge test --match-path test/perps/OrderRouter.t.sol` (117 passed), `forge test --match-path test/perps/invariant/PerpEconomicConservationInvariant.t.sol` (14 passed), and focused HousePool inflow tests (4 passed). The full `test/perps/HousePool.t.sol` suite still has a pre-existing unrelated failure in `test_SeniorHWMResetPreventsRestoration()`.
+
 - [x] Record a cleanup plan for stale perps preview/accounting surfaces
 - [x] Remove dead enum/struct/helper code and simplify liquidation reachability API
 - [x] Update affected tests for the API cleanup

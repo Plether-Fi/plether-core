@@ -961,7 +961,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitDegradedModeRefundsUserBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
         _setDegradedModeForTest();
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
@@ -976,13 +976,17 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once degraded mode latches");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on protocol-state failure");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Keeper should not receive bounty on protocol-state failure"
+        );
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
     }
 
     function test_PostCommitSkewInvalidationRefundsUserBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
@@ -997,7 +1001,9 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation"
+        );
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on skew invalidation");
     }
 
@@ -1025,13 +1031,15 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on solvency invalidation");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on solvency invalidation"
+        );
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on solvency invalidation");
     }
 
     function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
@@ -1046,7 +1054,11 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Batch execution should leave invalidated order unopened");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Batch clearer should not receive bounty on skew invalidation");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Batch clearer should not receive bounty on skew invalidation"
+        );
         assertEq(usdc.balanceOf(alice), 1e6, "Batch execution should refund trader bounty on skew invalidation");
     }
 

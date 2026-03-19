@@ -525,6 +525,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         _syncFunding();
         USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
+        vault.recordProtocolInflow(amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
     }
 
@@ -624,6 +625,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         if (amount > 0) {
             USDC.safeTransferFrom(msg.sender, address(vault), amount);
+            vault.recordProtocolInflow(amount);
         }
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -1415,12 +1417,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        ICfdEngine.OrderExecutionFailureClass failureClass =
-            code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
-                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-                ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
-                : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
+        ICfdEngine.OrderExecutionFailureClass failureClass = code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
+            || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
+            || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+            ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
+            : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
 
         revert ICfdEngine.CfdEngine__TypedOrderFailure(failureClass, uint8(code), false);
     }
@@ -1492,7 +1493,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
                 || fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_UNCOVERED_CLOSE
         ) {
             uint256 loss = uint256(-fd.pendingFundingUsdc);
-            clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
+            (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc,) =
+                clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
+            vault.recordProtocolInflow(marginConsumedUsdc + freeSettlementConsumedUsdc);
             pos.margin -= fd.posMarginDecrease;
         }
 
@@ -1548,6 +1551,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         int256 netMarginChange =
             clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
+        if (delta.tradeCostUsdc > 0) {
+            vault.recordProtocolInflow(uint256(delta.tradeCostUsdc));
+        }
 
         if (netMarginChange > 0) {
             pos.margin += uint256(netMarginChange);
@@ -1602,13 +1608,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
                 IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
-            clearinghouse.consumeCloseLoss(
+            (uint256 seizedUsdc,) = clearinghouse.consumeCloseLoss(
                 delta.accountId,
                 reservationOrderIds,
                 uint256(-delta.closeState.netSettlementUsdc),
                 delta.posMarginAfter,
                 address(vault)
             );
+            vault.recordProtocolInflow(seizedUsdc);
             _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
             accumulatedBadDebtUsdc += delta.badDebtUsdc;
         }
@@ -1649,9 +1656,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         keeperBountyUsdc = delta.keeperBountyUsdc;
         uint64[] memory reservationOrderIds =
             IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
-        (, uint256 payoutUsdc, uint256 badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
+        (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
             delta.accountId, reservationOrderIds, delta.posMargin, delta.residualUsdc, address(vault)
         );
+        vault.recordProtocolInflow(seizedUsdc);
         _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
         if (payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(delta.accountId, payoutUsdc);

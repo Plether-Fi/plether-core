@@ -16,6 +16,12 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
+    /// @notice Converts a same-transaction endogenous protocol inflow into canonical vault assets.
+    ///         Reverts if the caller is unauthorized or if raw excess is insufficient.
+    function recordProtocolInflow(
+        uint256 amount
+    ) external;
+
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
     function markStalenessLimit() external view returns (uint256);
 
