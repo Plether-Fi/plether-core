@@ -548,6 +548,25 @@ contract MarginClearinghouseTest is Test {
         assertEq(buckets.freeSettlementUsdc, 1700 * 1e6);
     }
 
+    function test_ApplyOpenCost_UnlocksPositionMarginBeforeDebitingTradeCost() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 100 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 100 * 1e6);
+
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 0, "setup must start with zero free settlement");
+
+        vm.prank(engine);
+        int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, 0, int256(20 * 1e6), engine);
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
+        assertEq(netMarginChangeUsdc, -int256(20 * 1e6));
+        assertEq(buckets.settlementBalanceUsdc, 80 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 80 * 1e6);
+        assertEq(buckets.freeSettlementUsdc, 0);
+    }
+
     function test_Deposit_ZeroAmount_Reverts() public {
         vm.prank(alice);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ZeroAmount.selector);

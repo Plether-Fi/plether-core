@@ -110,6 +110,43 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
     }
 
+    function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {
+        address trader = address(0xC444);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 sizeDelta = 3334e18;
+        uint256 marginDelta = 110e6;
+        uint256 executionBountyUsdc = router.quoteOpenOrderExecutionBountyUsdc(sizeDelta);
+
+        _fundTrader(trader, marginDelta + executionBountyUsdc);
+        _open(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            executionBountyUsdc,
+            "setup must leave only the future execution bounty as free settlement"
+        );
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "commit should move the only free settlement into bounty escrow"
+        );
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            executionBountyUsdc,
+            "keeper should receive the reserved execution bounty after successful execution"
+        );
+    }
+
     function test_ZeroSizeCommit_Reverts() public {
         vm.prank(alice);
         vm.expectRevert(OrderRouter.OrderRouter__ZeroSize.selector);

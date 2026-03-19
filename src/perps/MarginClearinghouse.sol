@@ -481,6 +481,15 @@ contract MarginClearinghouse is Ownable2Step {
         int256 tradeCostUsdc,
         address recipient
     ) external onlyOperator returns (int256 netMarginChangeUsdc) {
+        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
+        if (tradeCostUsdc < 0) {
+            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
+        }
+
+        if (netMarginChangeUsdc < 0) {
+            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
+        }
+
         if (tradeCostUsdc > 0) {
             uint256 costUsdc = uint256(tradeCostUsdc);
             if (costUsdc > getFreeSettlementBalanceUsdc(accountId)) {
@@ -489,15 +498,10 @@ contract MarginClearinghouse is Ownable2Step {
             settlementBalances[accountId] -= costUsdc;
             IERC20(settlementAsset).safeTransfer(recipient, costUsdc);
             emit AssetSeized(accountId, settlementAsset, costUsdc, recipient);
-        } else if (tradeCostUsdc < 0) {
-            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
         }
 
-        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
         if (netMarginChangeUsdc > 0) {
             _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(netMarginChangeUsdc));
-        } else if (netMarginChangeUsdc < 0) {
-            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
         }
     }
 

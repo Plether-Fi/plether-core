@@ -411,6 +411,19 @@ Review:
 
 Review:
 - Added `src/perps/libraries/HousePoolWaterfallAccountingLib.sol` to own senior-yield accrual, reconcile planning, senior-withdraw scaling, revenue distribution, and loss absorption.
+
+## Margin Unlock Sequencing Fix (Mar 19 2026)
+
+- [x] Reproduce and document the valid-open / zero-free-settlement failure path
+- [x] Reorder `applyOpenCost()` so negative net margin changes unlock before fee debit checks
+- [x] Add regression coverage for execution success and keeper-bounty preservation
+- [x] Run targeted perps verification and record results
+
+Review:
+- Updated `src/perps/MarginClearinghouse.sol` so `applyOpenCost()` now computes `netMarginChangeUsdc` first, credits rebates, unlocks negative position-margin deltas before checking free settlement, then debits positive trade costs and locks any positive residual margin.
+- Added a direct primitive regression in `test/perps/MarginClearinghouse.t.sol` proving a zero-free-settlement account can still pay open trade costs out of unlocked active position margin.
+- Added an end-to-end router regression in `test/perps/OrderRouter.t.sol` proving a valid increase order with zero free settlement at execution still fills and still pays the reserved execution bounty to the keeper.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_ApplyOpenCost_"` and `forge test --match-path test/perps/OrderRouter.t.sol --match-contract OrderRouterTest --match-test "test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost"`.
 - Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
