@@ -18,7 +18,7 @@ library HousePoolAccountingLib {
         uint256 protocolFees;
         uint256 deferredLiabilities;
         uint256 cashMinusFees;
-        int256 mtm;
+        uint256 mtm;
         uint256 distributable;
     }
 
@@ -34,10 +34,8 @@ library HousePoolAccountingLib {
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
-            + engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredClearerBountyUsdc;
-        if (engineSnapshot.withdrawalFundingLiabilityUsdc > 0) {
-            snapshot.reserved += uint256(engineSnapshot.withdrawalFundingLiabilityUsdc);
-        }
+            + engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredClearerBountyUsdc
+            + engineSnapshot.withdrawalFundingLiabilityUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
@@ -53,12 +51,7 @@ library HousePoolAccountingLib {
             ? engineSnapshot.netPhysicalAssetsUsdc - snapshot.deferredLiabilities
             : 0;
         snapshot.mtm = engineSnapshot.unrealizedMtmLiabilityUsdc;
-        if (snapshot.mtm >= 0) {
-            snapshot.distributable =
-                snapshot.cashMinusFees > uint256(snapshot.mtm) ? snapshot.cashMinusFees - uint256(snapshot.mtm) : 0;
-        } else {
-            snapshot.distributable = snapshot.cashMinusFees + uint256(-snapshot.mtm);
-        }
+        snapshot.distributable = snapshot.cashMinusFees > snapshot.mtm ? snapshot.cashMinusFees - snapshot.mtm : 0;
     }
 
     function getMarkFreshnessPolicy(

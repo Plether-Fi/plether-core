@@ -38,6 +38,15 @@ library CfdTypes {
         bool isClose; // [bool] True if strictly closing/reducing
     }
 
+    enum CloseInvalidReason {
+        None,
+        NoPosition,
+        BadSize,
+        PartialCloseUnderwater,
+        InsufficientVaultLiquidity,
+        DustPosition
+    }
+
     /// @notice Global configuration parameters for the VPI and Funding engines
     struct RiskParams {
         uint256 vpiFactor; // [18 dec WAD] Impact severity 'k'

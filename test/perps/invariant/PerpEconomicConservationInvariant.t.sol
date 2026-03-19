@@ -63,10 +63,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
-        if (fundingLiability > 0) {
-            expectedReserved += uint256(fundingLiability);
-        }
+        expectedReserved += engine.getLiabilityOnlyFundingPnl();
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),

@@ -93,10 +93,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
                 if (!preview.valid) {
-                    if (preview.invalidCode == 5) {
+                    if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
                         assertTrue(
                             preview.remainingSize > 0 && preview.remainingMargin < minBountyUsdc,
-                            "invalidCode 5 must imply dust residual"
+                            "DustPosition must imply dust residual"
                         );
                     }
                     continue;
@@ -142,9 +142,9 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     );
                 }
 
-                if (preview.invalidCode == 4) {
-                    assertFalse(preview.valid, "invalidCode 4 must mark preview as invalid");
-                    assertGt(preview.fundingUsdc, 0, "invalidCode 4 requires positive pending funding");
+                if (preview.invalidReason == CfdTypes.CloseInvalidReason.InsufficientVaultLiquidity) {
+                    assertFalse(preview.valid, "InsufficientVaultLiquidity must mark preview as invalid");
+                    assertGt(preview.fundingUsdc, 0, "InsufficientVaultLiquidity requires positive pending funding");
                 }
             }
         }
@@ -178,9 +178,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
                 if (!preview.valid) {
+                    CfdTypes.CloseInvalidReason r = preview.invalidReason;
                     assertTrue(
-                        preview.invalidCode == 3 || preview.invalidCode == 4 || preview.invalidCode == 5,
-                        "Partial close of valid-full-close position can only fail for shortfall (3), vault cash (4), or dust (5)"
+                        r == CfdTypes.CloseInvalidReason.PartialCloseUnderwater
+                            || r == CfdTypes.CloseInvalidReason.InsufficientVaultLiquidity
+                            || r == CfdTypes.CloseInvalidReason.DustPosition,
+                        "Partial close of valid-full-close position can only fail for shortfall, vault cash, or dust"
                     );
                 }
             }
