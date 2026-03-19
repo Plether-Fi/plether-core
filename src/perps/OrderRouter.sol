@@ -482,7 +482,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     // ==========================================
 
     /// @notice Keeper executes the next order in strict FIFO sequence.
-    ///         Validates oracle freshness (publishTime > commitTime, age ≤ 60s),
+    ///         Validates oracle freshness and publish-time ordering against the order commit,
     ///         checks slippage, then delegates to CfdEngine. The executor is paid from the
     ///         order's router-custodied execution bounty whether the order fills or is invalid/expired,
     ///         so the queue remains economically serviceable as well as un-brickable.

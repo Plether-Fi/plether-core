@@ -28,7 +28,7 @@ library OrderOraclePolicyLib {
 
         if (action == OracleAction.OrderExecution) {
             policy.closeOnly = oracleFrozen || isFad;
-            policy.mevChecks = !oracleFrozen;
+            policy.mevChecks = true;
             policy.maxStaleness = oracleFrozen ? fadMaxStaleness : 60;
             return policy;
         }
