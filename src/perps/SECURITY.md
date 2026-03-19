@@ -3,6 +3,7 @@
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether Perpetuals Engine.
 
 For the repo's intended semantic model for solvency, withdrawals, liquidation equity, pending-order escrow, and oracle-policy separation, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md).
+For a concise definition of the accounting terms used here (`raw assets`, `accounted assets`, `effective solvency assets`, etc.), see the Accounting Glossary in [`README.md`](README.md).
 
 ## Upgradeability
 

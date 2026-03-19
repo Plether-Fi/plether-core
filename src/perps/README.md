@@ -34,6 +34,15 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 
 These domains intentionally answer different questions and should not silently share assumptions.
 
+### Accounting Glossary
+
+- `raw assets`: the literal USDC token balance currently sitting in `HousePool`.
+- `accounted assets`: canonical protocol-owned USDC recognized by `HousePool` accounting; unsolicited positive transfers do not enter here until explicitly accounted.
+- `excess assets`: raw USDC held above `accountedAssets`; quarantined surplus that can be swept or explicitly admitted into protocol economics later.
+- `net physical assets`: the physically backed vault depth after applying the canonical accounting boundary, i.e. `min(rawAssets, accountedAssets)` before any higher-level solvency adjustments.
+- `effective solvency assets`: the conservative asset figure used by solvency checks after applying protocol-specific adjustments such as unpaid liabilities, withdrawal-reserve treatment, and "do not count unrealized trader losses as assets" policy.
+- `terminal reachable collateral`: the maximum collateral the protocol can actually seize and realize from a trader by following the close or liquidation path to completion, after applying margin-bucket access rules and free-settlement reachability constraints.
+
 ### I. MarginClearinghouse — The Prime Broker
 
 [`MarginClearinghouse.sol`](MarginClearinghouse.sol)
