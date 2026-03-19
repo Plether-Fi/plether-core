@@ -1862,13 +1862,16 @@ contract FadStalenessTest is BasePerpTest {
         engine.finalizeFadRunway();
     }
 
-    function test_FadWindow_CloseOrder_AllowedDuringFrozen() public {
-        vm.warp(SATURDAY_NOON);
+    function test_FadWindow_CloseOrder_AllowedDuringFrozenWithPreFreezeCommit() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(fridayClose - 6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(SATURDAY_NOON + 50);
+        vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
@@ -1886,7 +1889,10 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FadWindow_MevCheckMoot_CloseAllowedDuringFrozen() public {
+    function test_FadWindow_MevCheckStillActiveDuringFrozen() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -1895,11 +1901,8 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(2, empty);
-
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Close order should execute with stale price during frozen oracle");
     }
 
     function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
@@ -1945,13 +1948,16 @@ contract FadStalenessTest is BasePerpTest {
         router.executeLiquidation(aliceId, empty);
     }
 
-    function test_FadBatch_CloseAllowedDuringFrozen() public {
-        vm.warp(SATURDAY_NOON);
+    function test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(fridayClose - 6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
-        vm.warp(SATURDAY_NOON + 50);
+        vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
@@ -3250,8 +3256,7 @@ contract WeekendArbitrageTest is Test {
         clearinghouse.setEngine(address(engine));
     }
 
-    // C-03 fix: close orders execute during frozen oracle with stale Friday price
-    function test_CloseOrderExecutesAtStaleFridayPrice() public {
+    function test_CloseOrderCommittedDuringFrozenCannotUseStaleFridayPrice() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
@@ -3288,10 +3293,11 @@ contract WeekendArbitrageTest is Test {
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
 
         vm.roll(10);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(2, updateData);
 
         (size,,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 0, "Close order should execute during frozen oracle");
+        assertGt(size, 0, "Frozen-window close should stay open when only stale Friday price exists");
     }
 
 }
