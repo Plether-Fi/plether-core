@@ -305,6 +305,34 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(preview.deferredPayoutUsdc, 0, "Preview should surface deferred payout from positive funding credit");
     }
 
+    function test_PreviewClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(1));
+        bytes32 bearId = bytes32(uint256(2));
+        _fundTrader(address(uint160(uint256(bullId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000 * 1e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 5000e18, 1e8, vaultDepth);
+        assertTrue(preview.valid, "Partial close preview should remain valid under illiquid positive funding");
+        assertEq(preview.immediatePayoutUsdc, 0, "Illiquid positive-funding partial close should not promise cash");
+        assertGt(preview.deferredPayoutUsdc, 0, "Preview should include deferred funding payout on partial close");
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+
+        assertEq(engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Execution should match previewed deferment");
+        (uint256 remainingSize,,,,,,,) = engine.positions(bearId);
+        assertEq(remainingSize, preview.remainingSize, "Partial close should preserve the residual position");
+    }
+
     function test_ClaimDeferredPayout_CreditsClearinghouseWhenLiquidityReturns() public {
         address trader = address(0xD302);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

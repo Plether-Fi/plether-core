@@ -1097,6 +1097,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
         preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
+            preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
+        }
 
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
@@ -1508,6 +1511,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         accumulatedFeesUsdc += delta.executionFeeUsdc;
         _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
         pos.lastUpdateTime = uint64(block.timestamp);
+        _assertPostSolvency();
 
         emit PositionOpened(delta.accountId, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
     }

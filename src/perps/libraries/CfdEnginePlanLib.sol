@@ -288,37 +288,6 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        {
-            uint256 bullMax = bull.maxProfitUsdc;
-            uint256 bearMax = bear.maxProfitUsdc;
-            if (order.side == CfdTypes.Side.BULL) {
-                bullMax += openState.addedMaxProfitUsdc;
-            } else {
-                bearMax += openState.addedMaxProfitUsdc;
-            }
-            uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bullMax, bearMax);
-            SolvencyAccountingLib.SolvencyState memory solvency = SolvencyAccountingLib.buildSolvencyState(
-                snap.vaultCashUsdc,
-                snap.accumulatedFeesUsdc,
-                postMaxLiability,
-                _solvencyCappedFundingPnl(bull, bear),
-                snap.totalDeferredPayoutUsdc,
-                snap.totalDeferredClearerBountyUsdc
-            );
-            if (SolvencyAccountingLib.isInsolvent(solvency)) {
-                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
-                return delta;
-            }
-        }
-
-        if (
-            snap.vaultAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / snap.vaultAssetsUsdc) > snap.riskParams.maxSkewRatio
-        ) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
-            return delta;
-        }
-
         delta.tradeCostUsdc = openState.tradeCostUsdc;
         delta.marginDeltaUsdc = order.marginDelta;
         delta.netMarginChange = int256(order.marginDelta) - openState.tradeCostUsdc;
@@ -337,14 +306,6 @@ library CfdEnginePlanLib {
                 return delta;
             }
             computedMarginAfter = snap.position.margin - deficit;
-        }
-
-        if (
-            OpenAccountingLib.effectiveMarginAfterTradeCost(computedMarginAfter, openState.tradeCostUsdc)
-                < openState.initialMarginRequirementUsdc
-        ) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
-            return delta;
         }
 
         delta.newPosSize = openState.newSize;
@@ -367,7 +328,81 @@ library CfdEnginePlanLib {
             + (computedMarginAfter > posMarginAfterFunding ? computedMarginAfter - posMarginAfterFunding : 0)
             - (posMarginAfterFunding > computedMarginAfter ? posMarginAfterFunding - computedMarginAfter : 0);
 
+        if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
+            return delta;
+        }
+
+        if (
+            OpenAccountingLib.effectiveMarginAfterTradeCost(computedMarginAfter, openState.tradeCostUsdc)
+                < openState.initialMarginRequirementUsdc
+        ) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
+            return delta;
+        }
+
+        if (
+            snap.vaultAssetsUsdc > 0
+                && ((postSkewUsdc * CfdMath.WAD) / snap.vaultAssetsUsdc) > snap.riskParams.maxSkewRatio
+        ) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
+            return delta;
+        }
+
         delta.valid = true;
+    }
+
+    function _isOpenInsolventAfterPlan(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Side side,
+        CfdEnginePlanTypes.OpenDelta memory delta,
+        CfdEnginePlanTypes.SideSnapshot memory bull,
+        CfdEnginePlanTypes.SideSnapshot memory bear
+    ) private pure returns (bool) {
+        if (side == CfdTypes.Side.BULL) {
+            bull.openInterest += delta.sideOiIncrease;
+            bull.maxProfitUsdc += delta.sideMaxProfitIncrease;
+            bull.totalMargin = delta.totalMarginAfterOpen;
+            bull.entryFunding += delta.funding.sideEntryFundingDelta + delta.sideEntryFundingContribution;
+        } else {
+            bear.openInterest += delta.sideOiIncrease;
+            bear.maxProfitUsdc += delta.sideMaxProfitIncrease;
+            bear.totalMargin = delta.totalMarginAfterOpen;
+            bear.entryFunding += delta.funding.sideEntryFundingDelta + delta.sideEntryFundingContribution;
+        }
+
+        int256 solvencyFunding = _solvencyCappedFundingPnl(bull, bear);
+        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
+
+        int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.funding.fundingVaultPayoutUsdc);
+        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+            physicalAssetsDeltaUsdc +=
+                int256(delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree);
+        }
+
+        SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
+            snap.vaultAssetsUsdc,
+            snap.accumulatedFeesUsdc,
+            SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
+            solvencyFunding,
+            snap.totalDeferredPayoutUsdc,
+            snap.totalDeferredClearerBountyUsdc
+        );
+        SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
+            currentState,
+            SolvencyAccountingLib.PreviewDelta({
+                physicalAssetsDeltaUsdc: physicalAssetsDeltaUsdc,
+                protocolFeesDeltaUsdc: delta.executionFeeUsdc,
+                maxLiabilityAfterUsdc: postMaxLiability,
+                deferredTraderPayoutDeltaUsdc: delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
+                    ? uint256(delta.funding.pendingFundingUsdc)
+                    : 0,
+                deferredLiquidationBountyDeltaUsdc: 0,
+                pendingVaultPayoutUsdc: 0
+            }),
+            snap.degradedMode
+        );
+        return result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
     }
 
     // ──────────────────────────────────────────────

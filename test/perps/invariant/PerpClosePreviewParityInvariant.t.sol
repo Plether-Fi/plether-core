@@ -134,17 +134,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 CfdEngine.ClosePreview memory preview =
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
-                if (preview.valid && preview.fundingUsdc > 0) {
+                if (preview.valid && preview.fundingUsdc > 0 && preview.deferredPayoutUsdc == 0) {
                     assertGe(
                         vault.totalAssets(),
                         uint256(preview.fundingUsdc),
-                        "Valid partial close with positive funding requires vault to cover the outflow"
+                        "Immediate-only positive funding requires vault to cover the outflow"
                     );
-                }
-
-                if (preview.invalidReason == CfdTypes.CloseInvalidReason.InsufficientVaultLiquidity) {
-                    assertFalse(preview.valid, "InsufficientVaultLiquidity must mark preview as invalid");
-                    assertGt(preview.fundingUsdc, 0, "InsufficientVaultLiquidity requires positive pending funding");
                 }
             }
         }
