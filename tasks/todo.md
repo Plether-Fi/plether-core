@@ -1,3 +1,13 @@
+- [x] Fix uncovered full-close funding-loss accounting in planner close buckets/solvency preview
+- [x] Fix fresh-account open planning to use global side margin baseline
+- [x] Add regression coverage for both plan/apply mismatches and run targeted Forge tests
+
+Review:
+- Updated `src/perps/libraries/CfdEnginePlanLib.sol` so planner-side funding-loss accounting treats `LOSS_UNCOVERED_CLOSE` the same as `LOSS_CONSUMED` everywhere physical USDC was already seized during apply: close settlement bucket construction, immediate-vs-deferred payout cash checks, and close solvency preview deltas.
+- Fixed `planOpen(...)` to seed `delta.totalMarginBefore` from the live side snapshot even for fresh accounts, so open-path solvency checks no longer wipe the side's global margin down to the new order's isolated margin.
+- Added `test/perps/CfdEnginePlanRegression.t.sol` with two regressions: one proving uncovered-funding full-close preview fees/effective-assets match live post-close state, and one proving fresh-account open planning inherits the current side margin and remains executable.
+- Verified green: `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol`, `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_SolvencyUsesPostCloseOiForFunding|PreviewLiquidation_SolvencyUsesPostLiquidationFundingState"`.
+
 - [x] Fix partial-close settlement reachability so queued committed/reserved collateral stays excluded from both preview and live loss consumption
 - [x] Add/adjust regressions proving partial closes cannot implicitly spend queued collateral
 - [x] Run targeted Forge coverage for clearinghouse + close preview/live parity
@@ -402,6 +412,17 @@ Review:
 - Confirmed one still-live issue: `src/perps/MarginClearinghouse.sol` `_lockMargin()` still omits `reservedSettlementUsdc[accountId]` from its physical-USDC backing check, so the reviewer's double-encumbrance claim remains valid.
 - Confirmed intentional UX tradeoff: close commits still require the flat reserved bounty up front, and `test_CloseCommit_RequiresFlatKeeperBountyReserve` passes.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_UnbrickableQueue_OnEngineRevert|test_CancelOrder_HeadAdvancesNextExecuteId|test_CloseCommit_RequiresFlatKeeperBountyReserve"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_CloseLoss_DoesNotConsumeQueuedCommittedMargin|test_OpenTradeCostCannotSeizeReservedSettlementEscrow|test_C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable|test_Liquidation_PreservesReservedSettlementEscrow"`, `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_LockMargin_RequiresPhysicalUsdcBacking_WhenBuyingPowerComesFromOtherCollateral|test_LockMargin_AcceptsNonUsdcEquity|test_ConsumeCloseLoss_PreservesProtectedBuckets"`, and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test "test_H1_LiquidationMustPreserveQueuedCollateralBuckets|test_C1_FullCloseMustPreserveQueuedCommittedMarginBuckets"`.
+
+- [x] Verify HousePool / TrancheVault audit claims for zero-principal capture, empty-tranche revenue, stale-window accrual, projected-funding views, and withdrawal-cap getters
+
+Review:
+- Verified by code inspection plus targeted Forge checks.
+- Valid: zero-principal unassigned cash is still capturable by the next junior depositor because `HousePool._reconcile()` / `_previewReconciledWaterfallState()` short-circuit at zero claimed equity while `TrancheVault.totalAssets()` still prices the tranche from `getPendingTrancheState()` as zero.
+- Valid: junior revenue can still accrue while junior share supply is zero, creating a positive-principal / zero-supply tranche that later deposits enter at distorted ERC4626 pricing.
+- Valid: stale-mark `reconcile()` still leaves `lastReconcileTime` unchanged (`test_M2_StaleReconcileMustNotAdvanceClock` passes), so a later fresh reconcile can backfill elapsed time; the existing stale-yield test only proves no immediate principal mint without revenue.
+- Valid: `getPositionView()` / `getAccountLedgerSnapshot()` use stored funding via `getPendingFunding(pos)`, while liquidation preview/live paths first project funding indices in `CfdEnginePlanLib.planGlobalFunding(...)`.
+- Valid: `HousePool.getMaxSeniorWithdraw()` / `getMaxJuniorWithdraw()` remain accounting-only and ungated by stale marks or degraded mode, while `TrancheVault.maxWithdraw()` / `maxRedeem()` apply the safer liveness gate.
+- Verified green support checks: `forge test --match-path test/perps/CfdEngine.t.sol --match-test test_ClearBadDebt_ReducesOutstandingDebt`, `forge test --match-path test/perps/AuditValidFindingsFailing.t.sol --match-test test_M2_StaleReconcileMustNotAdvanceClock`, and `forge test --match-path test/perps/AuditTightenedFindingsFailing.t.sol --match-test test_L1_StaleIntervalsMustNotAccrueSeniorYield`.
 
 - [x] Extract first-class solvency and withdrawal accounting modules and reroute engine views through them
 

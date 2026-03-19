@@ -82,6 +82,13 @@ library CfdEnginePlanLib {
             (int256(bear.openInterest) * bear.fundingIndex - bear.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
     }
 
+    function _isCollectedFundingLoss(
+        CfdEnginePlanTypes.FundingPayoutType payoutType
+    ) private pure returns (bool) {
+        return payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED
+            || payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_UNCOVERED_CLOSE;
+    }
+
     function _solvencyCappedFundingPnl(
         CfdEnginePlanTypes.SideSnapshot memory bull,
         CfdEnginePlanTypes.SideSnapshot memory bear
@@ -257,8 +264,7 @@ library CfdEnginePlanLib {
 
         uint256 posMarginAfterFunding =
             snap.position.margin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
-        delta.totalMarginBefore =
-            snap.position.size > 0 ? (order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin) : 0;
+        delta.totalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
         delta.totalMarginAfterFunding =
             delta.totalMarginBefore + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
 
@@ -375,7 +381,7 @@ library CfdEnginePlanLib {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(bull.maxProfitUsdc, bear.maxProfitUsdc);
 
         int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.funding.fundingVaultPayoutUsdc);
-        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+        if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             physicalAssetsDeltaUsdc += int256(
                 delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree
             );
@@ -506,7 +512,7 @@ library CfdEnginePlanLib {
         if (delta.funding.fundingVaultPayoutUsdc > 0) {
             effectiveVaultCash -= delta.funding.fundingVaultPayoutUsdc;
         }
-        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+        if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             effectiveVaultCash += delta.funding.fundingLossConsumedFromMargin
             + delta.funding.fundingLossConsumedFromFree;
         }
@@ -524,10 +530,9 @@ library CfdEnginePlanLib {
             uint256 lossUsdc = uint256(-cs.netSettlementUsdc);
             bool includeOtherLockedMargin = remainingSize == 0;
 
-            IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
-                _buildCloseSettlementBuckets(
-                    snap, cs.marginToFreeUsdc, delta.funding, cs.remainingMarginUsdc, includeOtherLockedMargin
-                );
+            IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets = _buildCloseSettlementBuckets(
+                snap, cs.marginToFreeUsdc, delta.funding, cs.remainingMarginUsdc, includeOtherLockedMargin
+            );
             delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
                 closeBuckets, cs.remainingMarginUsdc, lossUsdc
             );
@@ -579,7 +584,7 @@ library CfdEnginePlanLib {
         int256 physicalAssetsDelta = int256(delta.lossResult.seizedUsdc)
             - int256(delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0)
             - int256(delta.funding.fundingVaultPayoutUsdc);
-        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+        if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             physicalAssetsDelta += int256(
                 delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree
             );
@@ -629,7 +634,7 @@ library CfdEnginePlanLib {
         if (fd.fundingClearinghouseCreditUsdc > 0) {
             settlementBalance += fd.fundingClearinghouseCreditUsdc;
         }
-        if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
+        if (_isCollectedFundingLoss(fd.payoutType)) {
             settlementBalance -= fd.fundingLossConsumedFromMargin + fd.fundingLossConsumedFromFree;
         }
         if (includeOtherLockedMargin) {
