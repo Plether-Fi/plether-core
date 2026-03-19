@@ -424,6 +424,19 @@ Review:
 - Added a direct primitive regression in `test/perps/MarginClearinghouse.t.sol` proving a zero-free-settlement account can still pay open trade costs out of unlocked active position margin.
 - Added an end-to-end router regression in `test/perps/OrderRouter.t.sol` proving a valid increase order with zero free settlement at execution still fills and still pays the reserved execution bounty to the keeper.
 - Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_ApplyOpenCost_"` and `forge test --match-path test/perps/OrderRouter.t.sol --match-contract OrderRouterTest --match-test "test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost"`.
+
+## TrancheVault Preview Parity Fix (Mar 19 2026)
+
+- [x] Add read-only HousePool helpers that simulate reconciled tranche principals and withdrawal caps
+- [x] Update `TrancheVault` preview/max paths to consume reconciled view state instead of stale stored principals
+- [x] Add regressions covering previewDeposit/maxWithdraw parity against live reconcile-first execution
+- [x] Run targeted HousePool/TrancheVault verification and record results
+
+Review:
+- Added `IHousePool.getPendingTrancheState()` plus a `HousePool` view-only reconcile preview that simulates pending senior/junior principals and tranche withdrawal caps without mutating storage.
+- Updated `src/perps/TrancheVault.sol` so `totalAssets()`, `maxWithdraw()`, and `maxRedeem()` all consume the simulated reconcile-first tranche state, aligning ERC4626 preview/max behavior with the live deposit/withdraw paths that call `POOL.reconcile()` first.
+- Added regressions in `test/perps/HousePool.t.sol` proving `previewDeposit()` matches reconcile-first share minting for senior deposits and that `maxWithdraw()` remains executable after junior loss reconciliation.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw"`.
 - Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.

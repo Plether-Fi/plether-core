@@ -441,6 +441,35 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
     }
 
+    /// @notice Returns tranche principals and withdrawal caps as if reconcile ran right now.
+    /// @dev Read-only preview for ERC4626 consumers that need same-tx parity with reconcile-first vault flows.
+    function getPendingTrancheState()
+        external
+        view
+        returns (
+            uint256 seniorPrincipalUsdc,
+            uint256 juniorPrincipalUsdc,
+            uint256 maxSeniorWithdrawUsdc,
+            uint256 maxJuniorWithdrawUsdc
+        )
+    {
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+        HousePoolWaterfallAccountingLib.WaterfallState memory state =
+            _previewReconciledWaterfallState(accountingSnapshot, statusSnapshot);
+        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
+            HousePoolAccountingLib.buildWithdrawalSnapshot(accountingSnapshot);
+
+        seniorPrincipalUsdc = state.seniorPrincipal;
+        juniorPrincipalUsdc = state.juniorPrincipal;
+
+        uint256 free = withdrawalSnapshot.freeUsdc;
+        maxSeniorWithdrawUsdc = free < seniorPrincipalUsdc ? free : seniorPrincipalUsdc;
+
+        uint256 subordinated = free > seniorPrincipalUsdc ? free - seniorPrincipalUsdc : 0;
+        maxJuniorWithdrawUsdc = subordinated < juniorPrincipalUsdc ? subordinated : juniorPrincipalUsdc;
+    }
+
     function isWithdrawalLive() external view returns (bool) {
         ICfdEngine.HousePoolStatusSnapshot memory status = _getHousePoolStatusSnapshot();
         if (status.degradedMode) {
@@ -543,6 +572,37 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot)
     {
         return HousePoolAccountingLib.buildWithdrawalSnapshot(_getHousePoolInputSnapshot());
+    }
+
+    function _previewReconciledWaterfallState(
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal view returns (HousePoolWaterfallAccountingLib.WaterfallState memory state) {
+        state = _getWaterfallState();
+
+        if (state.seniorPrincipal + state.juniorPrincipal == 0) {
+            return state;
+        }
+
+        if (!_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
+            return state;
+        }
+
+        uint256 elapsed = block.timestamp - lastReconcileTime;
+        HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
+            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
+        HousePoolWaterfallAccountingLib.ReconcilePlan memory plan = HousePoolWaterfallAccountingLib.planReconcile(
+            state.seniorPrincipal, state.juniorPrincipal, snapshot.distributable, seniorRateBps, elapsed
+        );
+        state.unpaidSeniorYield += plan.yieldAccrued;
+
+        if (plan.isRevenue) {
+            return HousePoolWaterfallAccountingLib.distributeRevenue(state, plan.deltaUsdc);
+        }
+        if (plan.deltaUsdc > 0) {
+            return HousePoolWaterfallAccountingLib.absorbLoss(state, plan.deltaUsdc);
+        }
+        return state;
     }
 
     function _markIsFreshForReconcile(

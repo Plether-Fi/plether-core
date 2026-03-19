@@ -30,6 +30,21 @@ interface IHousePool {
     /// @notice Max withdrawable by junior, subordinated behind senior
     function getMaxJuniorWithdraw() external view returns (uint256);
 
+    /// @notice Read-only tranche state as if `reconcile()` ran immediately with current inputs.
+    /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
+    /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
+    /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile (6 decimals)
+    /// @return maxJuniorWithdrawUsdc Simulated junior withdrawal cap after reconcile (6 decimals)
+    function getPendingTrancheState()
+        external
+        view
+        returns (
+            uint256 seniorPrincipalUsdc,
+            uint256 juniorPrincipalUsdc,
+            uint256 maxSeniorWithdrawUsdc,
+            uint256 maxJuniorWithdrawUsdc
+        );
+
     /// @notice Settles revenue/loss waterfall between tranches
     function reconcile() external;
 

@@ -93,6 +93,26 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.juniorPrincipal(), 500_000 * 1e6, "Junior gets nothing when revenue < senior yield");
     }
 
+    function test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit() public {
+        _fundSenior(alice, 500_000 * 1e6);
+        _fundJunior(bob, 500_000 * 1e6);
+        _mintAndAccountPoolExcess(100_000 * 1e6);
+
+        vm.warp(block.timestamp + 365 days);
+
+        address dave = address(0x4444);
+        uint256 assets = 100_000 * 1e6;
+        usdc.mint(dave, assets);
+
+        vm.startPrank(dave);
+        usdc.approve(address(seniorVault), assets);
+        uint256 previewedShares = seniorVault.previewDeposit(assets);
+        uint256 mintedShares = seniorVault.deposit(assets, dave);
+        vm.stopPrank();
+
+        assertEq(mintedShares, previewedShares, "previewDeposit should match reconcile-first deposit shares");
+    }
+
     // ==========================================
     // LOSS WATERFALL
     // ==========================================
@@ -196,6 +216,30 @@ contract HousePoolTest is BasePerpTest {
         assertGt(seniorMax, 0, "Senior can withdraw");
         assertLe(seniorMax, 200_000 * 1e6, "Senior cannot exceed principal when junior is fully subordinated");
         assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior fully subordinated");
+    }
+
+    function test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw() public {
+        bytes32 carolId = bytes32(uint256(uint160(carol)));
+
+        _fundSenior(alice, 500_000 * 1e6);
+        _fundJunior(bob, 300_000 * 1e6);
+        _fundTrader(carol, 50_000 * 1e6);
+
+        _open(carolId, CfdTypes.Side.BULL, 200_000 * 1e18, 20_000 * 1e6, 1e8);
+        _close(carolId, CfdTypes.Side.BULL, 200_000 * 1e18, 0.5e8);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        uint256 quotedAssets = juniorVault.maxWithdraw(bob);
+        uint256 sharesBefore = juniorVault.balanceOf(bob);
+
+        assertLt(quotedAssets, 300_000 * 1e6, "reconciled losses should reduce junior withdraw capacity");
+
+        vm.prank(bob);
+        juniorVault.withdraw(quotedAssets, bob, bob);
+
+        assertEq(usdc.balanceOf(bob), quotedAssets, "maxWithdraw quote should remain executable after reconcile");
+        assertLt(juniorVault.balanceOf(bob), sharesBefore, "withdraw should burn shares using the quoted max");
     }
 
     // ==========================================
