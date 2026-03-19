@@ -234,6 +234,33 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(bullFunding < 0, "Retail BULL should owe massive funding");
     }
 
+    function test_AbsorbRouterCancellationFee_SyncsFundingBeforeVaultCashMutation() public {
+        address trader = address(0xABC1);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+
+        uint64 fundingBefore = engine.lastFundingTime();
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        vm.warp(block.timestamp + 1 days);
+
+        usdc.mint(address(router), 25e6);
+        vm.prank(address(router));
+        usdc.approve(address(engine), 25e6);
+
+        vm.prank(address(router));
+        engine.absorbRouterCancellationFee(25e6);
+
+        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "Absorbing router fees must sync funding first");
+        assertGt(engine.lastFundingTime(), fundingBefore, "Funding timestamp should advance before fee absorption");
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            25e6,
+            "Absorbed cancellation fee should be booked as incremental protocol revenue"
+        );
+    }
+
     function test_ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xD301))));
         _fundTrader(address(0xD301), 11_000e6);
@@ -634,6 +661,30 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.totalDeferredPayoutUsdc, housePoolSnapshot.deferredTraderPayoutUsdc);
         assertEq(snapshot.totalDeferredClearerBountyUsdc, housePoolSnapshot.deferredClearerBountyUsdc);
         assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
+    }
+
+    function test_ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted() public {
+        _fundJunior(address(0xB0B), 500_000e6);
+        uint256 accountedBefore = pool.totalAssets();
+
+        usdc.mint(address(pool), 100_000e6);
+
+        ICfdEngine.ProtocolAccountingSnapshot memory beforeAccount = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory houseBefore = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw pool balance should include the donation");
+        assertEq(pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted");
+        assertEq(beforeAccount.vaultAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
+        assertEq(houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations");
+
+        pool.accountExcess();
+
+        ICfdEngine.ProtocolAccountingSnapshot memory afterAccount = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory houseAfter = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets");
+        assertEq(afterAccount.vaultAssetsUsdc, accountedBefore + 100_000e6, "Protocol snapshot should reflect explicit accounting");
+        assertEq(houseAfter.netPhysicalAssetsUsdc, accountedBefore + 100_000e6, "HousePool snapshot should reflect explicit accounting");
     }
 
     function test_GetAccountLedgerView_ReflectsCompactCrossContractState() public {

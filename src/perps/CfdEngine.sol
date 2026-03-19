@@ -523,6 +523,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
+        _syncFunding();
         USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
     }

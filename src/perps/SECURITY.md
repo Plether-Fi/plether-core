@@ -90,11 +90,11 @@ These properties must always hold. Violation indicates a critical bug.
 
 - **Assumption**: Pyth provides accurate, timely price data for all basket FX pairs (EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD)
 - **Architecture**: OrderRouter aggregates multiple Pyth feeds into a weighted basket price replicating the spot BasketOracle formula
-- **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage
+- **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage while the oracle is live. During genuine frozen-oracle windows this ordering check is intentionally bypassed for close execution so traders can still reduce risk against the last valid oracle price.
 - **Mitigation (Staleness)**: 60s max age for order execution, 15s for liquidations. Relaxed to `fadMaxStaleness` (default 3 days) during frozen oracle windows
 - **Mitigation (Mark Freshness)**: `lastMarkTime` is set from the Pyth VAA `publishTime` (not `block.timestamp`) across all engine paths (`processOrder`, `liquidatePosition`, `updateMarkPrice`). This prevents stale VAAs from appearing fresh to the HousePool's mark staleness checks
 - **Mitigation (Negative/Zero)**: `_normalizePythPrice` reverts on non-positive prices; `_computeBasketPrice` reverts if basket sum is zero
-- **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly
+- **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly, but the frozen-oracle policy is liveness-first: voluntary closes can execute at the last valid Friday price until the oracle resumes publishing.
 - **Risk (Feed Compromise)**: If any single Pyth feed is compromised, the basket price is affected proportionally to that feed's weight. The weakest-link `minPublishTime` prevents selective staleness attacks
 - **Risk (Exponent Variation)**: Different Pyth feeds may use different exponents. `_normalizePythPrice` normalizes all to 8 decimals but truncates on scale-down
 
@@ -149,7 +149,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Per-account queue cap**: No account may have more than `5` pending orders at once, bounding account-local liquidation cleanup and queue-griefing surface
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` router escrow at commit so clearers are paid from user-funded escrow instead of vault subsidy
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
-- **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
+- **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices in live markets. Frozen-oracle windows are an intentional exception: no fresh oracle publish exists, so the protocol preserves close liveness at the last valid oracle price instead of enforcing an impossible publish-time ordering check.
 - **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
 
 #### Engine / Router Trust Boundary

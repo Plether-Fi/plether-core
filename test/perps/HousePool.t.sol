@@ -20,6 +20,13 @@ contract HousePoolTest is BasePerpTest {
         return 0;
     }
 
+    function _mintAndAccountPoolExcess(
+        uint256 amount
+    ) internal {
+        usdc.mint(address(pool), amount);
+        pool.accountExcess();
+    }
+
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -57,8 +64,8 @@ contract HousePoolTest is BasePerpTest {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        // Simulate trader loss: mint USDC directly to pool (trader margin seized)
-        usdc.mint(address(pool), 100_000 * 1e6);
+        // Simulate realized revenue entering the pool, then account it explicitly.
+        _mintAndAccountPoolExcess(100_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
         vm.prank(address(juniorVault));
@@ -75,7 +82,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 500_000 * 1e6);
 
         // Small revenue: only 10k
-        usdc.mint(address(pool), 10_000 * 1e6);
+        _mintAndAccountPoolExcess(10_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days);
         vm.prank(address(juniorVault));
@@ -258,7 +265,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
 
         // Generate some revenue
-        usdc.mint(address(pool), 200_000 * 1e6);
+        _mintAndAccountPoolExcess(200_000 * 1e6);
 
         vm.warp(block.timestamp + 365 days - 48 hours - 1);
 
@@ -298,6 +305,24 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
     }
 
+    function test_FinalizeSeniorRate_SyncsFundingBeforeReconcile() public {
+        address trader = address(0x4444);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 800_000e6);
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+
+        uint64 fundingBefore = engine.lastFundingTime();
+        pool.proposeSeniorRate(1600);
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        pool.finalizeSeniorRate();
+
+        assertGt(engine.lastFundingTime(), fundingBefore, "Finalizing senior rate must sync funding before accounting");
+    }
+
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
         vm.expectRevert(HousePool.HousePool__InvalidSeniorRate.selector);
         pool.proposeSeniorRate(10_001);
@@ -314,7 +339,7 @@ contract HousePoolTest is BasePerpTest {
         uint256 seniorPriceBefore = seniorVault.convertToAssets(1e9);
         uint256 juniorPriceBefore = juniorVault.convertToAssets(1e9);
 
-        usdc.mint(address(pool), 20_000 * 1e6);
+        _mintAndAccountPoolExcess(20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -330,7 +355,7 @@ contract HousePoolTest is BasePerpTest {
         _fundJunior(alice, 100_000 * 1e6);
         uint256 aliceShares = juniorVault.balanceOf(alice);
 
-        usdc.mint(address(pool), 20_000 * 1e6);
+        _mintAndAccountPoolExcess(20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -343,6 +368,40 @@ contract HousePoolTest is BasePerpTest {
         uint256 aliceAssets = juniorVault.convertToAssets(aliceShares);
         uint256 bobAssets = juniorVault.convertToAssets(bobShares);
         assertGt(aliceAssets, bobAssets, "Early depositor's shares should be worth more");
+    }
+
+    function test_UnaccountedDonation_IgnoredUntilExplicitlyAccounted() public {
+        _fundJunior(bob, 500_000e6);
+
+        uint256 accountedBefore = pool.totalAssets();
+        usdc.mint(address(pool), 100_000e6);
+
+        HousePool.VaultLiquidityView memory beforeAccount = pool.getVaultLiquidityView();
+        assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw balance should include unsolicited donation");
+        assertEq(pool.excessAssets(), 100_000e6, "Donation should remain quarantined as excess");
+        assertEq(pool.totalAssets(), accountedBefore, "Canonical assets must ignore raw donation until accounted");
+        assertEq(beforeAccount.totalAssetsUsdc, accountedBefore, "Liquidity view must use canonical assets");
+
+        pool.accountExcess();
+
+        HousePool.VaultLiquidityView memory afterAccount = pool.getVaultLiquidityView();
+        assertEq(pool.excessAssets(), 0, "Accounting excess should clear the quarantine bucket");
+        assertEq(pool.totalAssets(), accountedBefore + 100_000e6, "Canonical assets should increase only after explicit accounting");
+        assertEq(afterAccount.totalAssetsUsdc, accountedBefore + 100_000e6, "Liquidity view should reflect explicit accounting");
+    }
+
+    function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
+        _fundJunior(bob, 500_000e6);
+
+        address treasury = address(0xBEEF);
+        usdc.mint(address(pool), 25_000e6);
+
+        uint256 accountedBefore = pool.totalAssets();
+        pool.sweepExcess(treasury, 25_000e6);
+
+        assertEq(pool.totalAssets(), accountedBefore, "Sweeping raw excess must not change canonical assets");
+        assertEq(pool.excessAssets(), 0, "Swept donation should no longer remain as excess");
+        assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
     }
 
     function test_SetOrderRouter_Twice_Reverts() public {
@@ -372,7 +431,7 @@ contract HousePoolTest is BasePerpTest {
         _fundSenior(alice, 500_000 * 1e6);
         _fundJunior(bob, 500_000 * 1e6);
 
-        usdc.mint(address(pool), 100_000 * 1e6);
+        _mintAndAccountPoolExcess(100_000 * 1e6);
 
         // Use absolute timestamps to avoid block.timestamp caching in test call frame
         uint256 t0 = block.timestamp;
@@ -389,7 +448,7 @@ contract HousePoolTest is BasePerpTest {
         assertGe(totalSeniorClaim, 540_000 * 1e6 - 1e6, "Senior total claim must reflect 8% APY");
 
         // Inject fresh revenue to pay unpaid yield
-        usdc.mint(address(pool), 50_000 * 1e6);
+        _mintAndAccountPoolExcess(50_000 * 1e6);
         vm.warp(t0 + 366 days);
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -414,7 +473,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty escrow");
 
         uint256 freeUSDC = pool.getFreeUSDC();
-        uint256 vaultBal = usdc.balanceOf(address(pool));
+        uint256 vaultBal = pool.totalAssets();
         uint256 expectedReserved = 100_000 * 1e6 + fees;
 
         assertEq(
@@ -445,7 +504,7 @@ contract HousePoolTest is BasePerpTest {
 
         _fundJunior(carol, 500_000 * 1e6);
 
-        usdc.mint(address(pool), 50_000 * 1e6);
+        _mintAndAccountPoolExcess(50_000 * 1e6);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -739,12 +798,19 @@ contract HousePoolAuditTest is BasePerpTest {
         return 0;
     }
 
+    function _mintAndAccountPoolExcess(
+        uint256 amount
+    ) internal {
+        usdc.mint(address(pool), amount);
+        pool.accountExcess();
+    }
+
     // Regression: Finding-2 — stale totalAssets on deposit
     function test_StaleSharePriceOnDeposit() public {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(bob, 100_000 * 1e6);
 
-        usdc.mint(address(pool), 20_000 * 1e6);
+        _mintAndAccountPoolExcess(20_000 * 1e6);
         vm.warp(block.timestamp + 365 days);
 
         uint256 carolDeposit = 100_000 * 1e6;
@@ -862,7 +928,7 @@ contract HousePoolAuditTest is BasePerpTest {
     function test_Reconcile_AllowsStaleMarkWithoutLiveLiability() public {
         _fundJunior(bob, 500_000e6);
 
-        usdc.mint(address(pool), 10_000e6);
+        _mintAndAccountPoolExcess(10_000e6);
         vm.warp(block.timestamp + 121);
 
         uint256 juniorBefore = pool.juniorPrincipal();

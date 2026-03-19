@@ -126,7 +126,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
         vm.roll(10);
-        router.executeOrder(2, empty);
+        router.executeOrder(1, empty);
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
@@ -952,6 +952,102 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(
             engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue"
         );
+    }
+
+    function _setDegradedModeForTest() internal {
+        bytes32 slotValue = vm.load(address(engine), bytes32(uint256(19)));
+        vm.store(address(engine), bytes32(uint256(19)), slotValue | bytes32(uint256(1)));
+    }
+
+    function test_PostCommitDegradedModeRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1_000e6, 1e8, false);
+
+        _setDegradedModeForTest();
+        assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once degraded mode latches");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on protocol-state failure");
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
+    }
+
+    function test_PostCommitSkewInvalidationRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 800_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation");
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on skew invalidation");
+    }
+
+    function test_PostCommitSolvencyInvalidationRefundsUserBounty() public {
+        address bearTrader = address(0xC333);
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bearTrader, 50_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _fundTrader(alice, 40_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 700_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on solvency invalidation");
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on solvency invalidation");
+    }
+
+    function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 800_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp));
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Batch execution should leave invalidated order unopened");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Batch clearer should not receive bounty on skew invalidation");
+        assertEq(usdc.balanceOf(alice), 1e6, "Batch execution should refund trader bounty on skew invalidation");
     }
 
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
@@ -1889,7 +1985,7 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FadWindow_MevCheckStillActiveDuringFrozen() public {
+    function test_FadWindow_MevCheckDisabledDuringFrozen() public {
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
 
@@ -1901,8 +1997,11 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(2, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Frozen-window close should execute without MEV rejection");
     }
 
     function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
@@ -3256,7 +3355,7 @@ contract WeekendArbitrageTest is Test {
         clearinghouse.setEngine(address(engine));
     }
 
-    function test_CloseOrderCommittedDuringFrozenCannotUseStaleFridayPrice() public {
+    function test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
@@ -3293,11 +3392,10 @@ contract WeekendArbitrageTest is Test {
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
 
         vm.roll(10);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(2, updateData);
 
         (size,,,,,,,) = engine.positions(aliceAccount);
-        assertGt(size, 0, "Frozen-window close should stay open when only stale Friday price exists");
+        assertEq(size, 0, "Frozen-window close should execute when only stale Friday price exists");
     }
 
 }

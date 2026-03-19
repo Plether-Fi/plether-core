@@ -24,6 +24,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
     using SafeERC20 for IERC20;
 
+    bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
+    bytes4 internal constant ENGINE_DEGRADED_MODE_SELECTOR = bytes4(keccak256("CfdEngine__DegradedMode()"));
+    bytes4 internal constant ENGINE_SKEW_TOO_HIGH_SELECTOR = bytes4(keccak256("CfdEngine__SkewTooHigh()"));
+    bytes4 internal constant ENGINE_VAULT_SOLVENCY_EXCEEDED_SELECTOR =
+        bytes4(keccak256("CfdEngine__VaultSolvencyExceeded()"));
+
     enum OrderStatus {
         None,
         Pending,
@@ -566,13 +572,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
         try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
-        } catch Error(string memory) {
-            emit OrderFailed(orderId, OrderFailReason.EngineRevert);
-            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
-            return;
-        } catch {
-            emit OrderFailed(orderId, OrderFailReason.EnginePanic);
-            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
+        } catch (bytes memory revertData) {
+            bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
+            OrderFailReason reason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
+            emit OrderFailed(orderId, reason);
+            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order, revertData));
             return;
         }
 
@@ -664,12 +668,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
-            } catch Error(string memory) {
-                emit OrderFailed(orderId, OrderFailReason.EngineRevert);
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
-            } catch {
-                emit OrderFailed(orderId, OrderFailReason.EnginePanic);
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
+            } catch (bytes memory revertData) {
+                bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
+                OrderFailReason reason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
+                emit OrderFailed(orderId, reason);
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order, revertData));
             }
         }
 
@@ -765,6 +768,29 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     ) internal pure returns (FailedOrderBountyPolicy) {
         order;
         return FailedOrderBountyPolicy.ClearerFull;
+    }
+
+    function _failedOrderBountyPolicy(
+        CfdTypes.Order memory order,
+        bytes memory revertData
+    ) internal pure returns (FailedOrderBountyPolicy) {
+        if (_isRefundableProtocolStateFailure(order, revertData)) {
+            return FailedOrderBountyPolicy.RefundUser;
+        }
+        return _failedOrderBountyPolicy(order);
+    }
+
+    function _isRefundableProtocolStateFailure(
+        CfdTypes.Order memory order,
+        bytes memory revertData
+    ) internal pure returns (bool) {
+        if (order.isClose || revertData.length < 4) {
+            return false;
+        }
+
+        bytes4 selector = bytes4(revertData);
+        return selector == ENGINE_DEGRADED_MODE_SELECTOR || selector == ENGINE_SKEW_TOO_HIGH_SELECTOR
+            || selector == ENGINE_VAULT_SOLVENCY_EXCEEDED_SELECTOR;
     }
 
     function _cleanupOrder(

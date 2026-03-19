@@ -4,7 +4,9 @@ pragma solidity 0.8.33;
 /// @notice Vault that custodies USDC backing the CFD trading system.
 interface ICfdVault {
 
-    /// @notice Total USDC held by the vault (6 decimals)
+    /// @notice Canonical economic USDC backing recognized by the vault (6 decimals).
+    ///         Ignores unsolicited positive token transfers until explicitly accounted, but
+    ///         still reflects raw-balance shortfalls if assets leave the vault unexpectedly.
     function totalAssets() external view returns (uint256);
     /// @notice Transfers USDC from the vault to a recipient
     /// @param recipient Address to receive USDC

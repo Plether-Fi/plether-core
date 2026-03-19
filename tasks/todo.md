@@ -537,3 +537,73 @@ Review:
 - Updated queue-related docs in `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` to describe the bounded per-account queue model.
 - Reworked the queue-stress regressions in `test/perps/OrderRouter.t.sol` and `test/perps/AuditRemainingCoverageFindingsFailing.t.sol` around the new bounded model, and added an explicit cap-revert test.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitOrder_RevertsWhenPendingOrderCountHitsCap|test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive|test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt|test_ExecuteLiquidation_RestoresEscrowedCloseBountiesBeforeClearingOrders"` and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue`.
+- [x] Fix frozen-window close liveness in `OrderRouter` / `OrderOraclePolicyLib`
+- [x] Introduce canonical accounted depth in `HousePool` and route `CfdEngine` funding/accounting reads through it
+- [x] Add typed failure classification and bounty routing in `OrderRouter`
+- [x] Sweep remaining funding-sync gaps and add regression coverage
+
+## Perps Architecture Remediation Plan (Mar 19 2026)
+
+### Phase 1 - Frozen-window close liveness
+
+- [x] Inspect `OrderOraclePolicyLib.getOracleExecutionPolicy()` and `OrderRouter` MEV enforcement call sites
+- [x] Disable publish-time MEV ordering checks when execution is allowed under frozen-oracle close-only policy
+- [x] Add/update targeted regressions proving frozen-window close orders execute while opens remain blocked
+- [x] Verify with focused Forge runs for frozen-oracle and Sunday boundary execution paths
+
+Review:
+- Updated `src/perps/libraries/OrderOraclePolicyLib.sol` so `OrderExecution` keeps MEV checks active in live/FAD execution but disables them during `oracleFrozen` close-only windows, preserving relaxed frozen-window close liveness without changing staleness bounds.
+- Updated `test/perps/OrderRouter.t.sol` frozen-window regressions so close orders committed during the freeze now execute successfully instead of expecting `OrderRouter__MevDetected`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_FadWindow_(CloseOrder_AllowedDuringFrozenWithPreFreezeCommit|OpenOrder_BlockedDuringFrozen|MevCheckDisabledDuringFrozen|ExcessStaleness_CloseGracefullyCancelled)|test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice|test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit|test_FadBatch_ExcessStaleness_FrozenReverts|test_SundayDst_(OracleUnfrozenAt21|MevEnforcedAt21|StillFadAt21|WinterStalenessRejects)"`.
+- Verified green: `forge test --match-path test/perps/AuditV2.t.sol --match-test test_C03_CloseOrderBlockedDuringOracleFrozen`, `forge test --match-path test/perps/AuditV3.t.sol --match-test test_C01_CloseOrderBlockedByOpenInFrozenQueue`, and `forge test --match-path test/perps/AuditV3.t.sol --match-test test_C01_OpenOrderHardRevertsInsteadOfSoftFailing`.
+
+### Phase 2 - Canonical accounted depth
+
+- [x] Design a canonical accounted-depth source in `HousePool` that is not rewritten by raw `USDC.balanceOf(address(this))`
+- [x] Decide and document unsolicited-transfer handling semantics (`quarantine`, `sweep`, or explicit accounting path)
+- [x] Route `CfdEngine` funding depth, house-pool snapshots, and reconcile/withdraw accounting through the canonical depth source
+- [x] Add regressions proving unsolicited USDC transfers do not retroactively rewrite elapsed funding economics or LP distributable accounting
+- [ ] Update any affected docs/spec text describing vault assets, funding depth, or pool accounting boundaries
+
+Review:
+- Added canonical accounted-depth tracking in `src/perps/HousePool.sol` via `accountedAssets` and changed `totalAssets()` to return `min(accountedAssets, rawBalance)`, so unsolicited positive transfers no longer rewrite economic depth while real raw-balance shortfalls still reduce backing.
+- Added explicit unsolicited-transfer handling in `src/perps/HousePool.sol`: `accountExcess()` converts quarantined excess into accounted protocol assets after `ENGINE.syncFunding()`, and `sweepExcess()` removes quarantined donations without changing economics.
+- Because `ICfdVault.totalAssets()` now represents canonical economic backing, `CfdEngine` and `OrderRouter` automatically consume accounted depth for funding, solvency snapshots, and house-pool accounting while preserving the raw-balance shortfall signal.
+- Added regressions in `test/perps/HousePool.t.sol` and `test/perps/CfdEngine.t.sol` proving raw donations stay quarantined until explicitly accounted and that engine protocol snapshots follow canonical assets rather than raw pool balance.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(RevenueDistribution|RevenueDistribution_SeniorCapped|SeniorRateChange|ShareAccounting_AfterRevenue|SharePrice_NoFreeDilution|UnaccountedDonation_IgnoredUntilExplicitlyAccounted|SweepExcess_RemovesDonationWithoutChangingAccountedAssets|M10_JitLP_BlockedByCooldown|M12_GetFreeUSDC_ReservesFees|SeniorPrincipal_RestoredBeforeJuniorSurplus|Reconcile_AllowsStaleMarkWithoutLiveLiability|FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals|StaleSharePriceOnDeposit)"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(GetProtocolAccountingView_ReflectsDeferredLiabilities|GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState|ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted)"`.
+
+### Phase 3 - Typed execution failure and bounty routing
+
+- [x] Enumerate router-visible execution failure classes: user/order fault, oracle/policy fault, and protocol-state-changed-after-commit
+- [x] Add typed engine/router signaling so post-commit protocol-state invalidations are distinguishable from clearer-earned failures
+- [x] Update `OrderRouter` failed-order bounty policy to refund user bounty for protocol-state invalidations while preserving clearer payout where appropriate
+- [x] Add regressions for degraded-mode, skew, and solvency invalidations that arise after a valid commit
+- [x] Re-verify batch and single-order execution behavior for the new failure typing
+
+Review:
+- Updated `src/perps/OrderRouter.sol` to decode low-level engine revert selectors instead of treating every caught execution failure the same. The router now refunds the user bounty for post-commit protocol-state invalidations on open orders (`CfdEngine__DegradedMode`, `CfdEngine__SkewTooHigh`, `CfdEngine__VaultSolvencyExceeded`) while preserving clearer-paid behavior for ordinary user/order failures.
+- Kept the engine execution flow unchanged; the router-side selector classifier is the typed boundary for bounty routing, so no preview/live plan logic changed in `src/perps/CfdEngine.sol`.
+- Added focused regressions in `test/perps/OrderRouter.t.sol` covering degraded-mode, skew, and solvency invalidations after a valid commit, plus a batch execution case proving the same refund path is used in `executeOrderBatch()`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(PostCommitDegradedModeRefundsUserBounty|PostCommitSkewInvalidationRefundsUserBounty|PostCommitSolvencyInvalidationRefundsUserBounty|BatchPostCommitSkewInvalidationRefundsUserBounty|Slippage_CancelsGracefully|ExitedAccount_ExpiredCloseOrderPaysClearerBounty|ExitedAccount_InvalidCloseOrderPaysEscrowedBounty)"`.
+
+### Phase 4 - Funding-sync completion and hardening
+
+- [x] Audit every vault-cash mutation path and funding-dependent accounting mutation across `HousePool`, `CfdEngine`, and related helpers
+- [x] Add missing `syncFunding()` calls to remaining protocol paths such as `HousePool.finalizeSeniorRate()` and `CfdEngine.absorbRouterCancellationFee()`
+- [x] Add targeted regressions asserting funding is synced before admin/internal cash mutations and reconcile paths
+- [x] Run focused perps suites covering `HousePool`, `CfdEngine`, `OrderRouter`, and audit regression files
+
+Review:
+- Added the remaining missing funding syncs in `src/perps/HousePool.sol` and `src/perps/CfdEngine.sol`: `finalizeSeniorRate()` now calls `ENGINE.syncFunding()` before snapshot/reconcile logic, and `absorbRouterCancellationFee()` now calls `_syncFunding()` before moving router-held USDC into the vault.
+- Re-swept the main vault-cash mutation and funding-sensitive accounting paths in `HousePool`, `CfdEngine`, and `MarginClearinghouse`; no additional unsynced protocol cash-mutation path in the reviewed scope remains beyond the two fixed entrypoints.
+- Added targeted regressions in `test/perps/HousePool.t.sol` and `test/perps/CfdEngine.t.sol` proving these paths advance `lastFundingTime` before doing their accounting/cash mutation.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(FinalizeSeniorRate_SyncsFundingBeforeReconcile|FinalizeSeniorRate_StaleMarkAccruesCheckpointedYield|SeniorRateChange)"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(AbsorbRouterCancellationFee_SyncsFundingBeforeVaultCashMutation|FundingAccumulation)"`.
+
+### Verification / exit criteria
+
+- [ ] `forge test --match-path test/perps/OrderRouter.t.sol --match-test "Frozen|Sunday|Mev|CloseOrderCommittedDuringFrozen"`
+- [ ] `forge test --match-path test/perps/HousePool.t.sol`
+- [ ] `forge test --match-path test/perps/CfdEngine.t.sol --match-test "Funding|HousePoolInputSnapshot|Withdrawal|Absorb|Sync"`
+- [ ] `forge test --match-path test/perps/AuditLatest*.t.sol`
+- [ ] `forge test --match-path test/perps/AuditRemaining*.t.sol`
+- [ ] Update `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` for any behavior/accounting boundary changes

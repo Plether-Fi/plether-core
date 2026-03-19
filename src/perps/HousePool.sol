@@ -44,6 +44,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     uint256 public juniorPrincipal;
     uint256 public unpaidSeniorYield;
     uint256 public seniorHighWaterMark;
+    uint256 public accountedAssets;
 
     uint256 public lastReconcileTime;
     uint256 public seniorRateBps;
@@ -72,6 +73,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__ZeroAddress();
     error HousePool__ZeroStaleness();
     error HousePool__InvalidSeniorRate();
+    error HousePool__NoExcessAssets();
+    error HousePool__ExcessAmountTooHigh();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -80,6 +83,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     event SeniorRateFinalized();
     event MarkStalenessLimitProposed(uint256 newLimit, uint256 activationTime);
     event MarkStalenessLimitFinalized();
+    event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
+    event ExcessSwept(address indexed recipient, uint256 amountUsdc);
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -163,6 +168,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (block.timestamp < seniorRateActivationTime) {
             revert HousePool__TimelockNotReady();
         }
+        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -232,9 +238,50 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     // ICfdVault INTERFACE
     // ==========================================
 
-    /// @notice Total USDC held by the pool, backing all open positions
-    function totalAssets() external view returns (uint256) {
+    /// @notice Canonical economic USDC backing recognized by the pool.
+    ///         Unsolicited positive transfers are ignored until explicitly accounted,
+    ///         while raw-balance shortfalls still reduce the effective backing.
+    function totalAssets() public view returns (uint256) {
+        uint256 raw = USDC.balanceOf(address(this));
+        return raw < accountedAssets ? raw : accountedAssets;
+    }
+
+    /// @notice Raw USDC balance currently held by the pool, including unsolicited transfers.
+    function rawAssets() public view returns (uint256) {
         return USDC.balanceOf(address(this));
+    }
+
+    /// @notice Raw USDC held above canonical accounted assets.
+    function excessAssets() public view returns (uint256) {
+        uint256 raw = rawAssets();
+        return raw > accountedAssets ? raw - accountedAssets : 0;
+    }
+
+    /// @notice Explicitly converts unsolicited USDC into accounted protocol assets.
+    ///         Syncs funding first so the added depth applies only going forward.
+    function accountExcess() external onlyOwner {
+        uint256 amount = excessAssets();
+        if (amount == 0) {
+            revert HousePool__NoExcessAssets();
+        }
+        ENGINE.syncFunding();
+        accountedAssets += amount;
+        emit ExcessAccounted(amount, accountedAssets);
+    }
+
+    /// @notice Sweeps unsolicited USDC that has not been accounted into protocol economics.
+    function sweepExcess(
+        address recipient,
+        uint256 amount
+    ) external onlyOwner {
+        if (recipient == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
+        if (amount > excessAssets()) {
+            revert HousePool__ExcessAmountTooHigh();
+        }
+        USDC.safeTransfer(recipient, amount);
+        emit ExcessSwept(recipient, amount);
     }
 
     /// @notice Transfers USDC from the pool. Callable by CfdEngine (PnL/funding) or OrderRouter (keeper bounties).
@@ -247,6 +294,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (msg.sender != address(ENGINE) && msg.sender != orderRouter) {
             revert HousePool__Unauthorized();
         }
+        accountedAssets -= amount;
         USDC.safeTransfer(recipient, amount);
     }
 
@@ -270,6 +318,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__SeniorImpaired();
         }
         USDC.safeTransferFrom(msg.sender, address(this), amount);
+        accountedAssets += amount;
         if (seniorPrincipal == 0) {
             seniorHighWaterMark = amount;
             seniorPrincipal = amount;
@@ -304,6 +353,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
             HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(state, amount);
         _setWaterfallState(nextState);
+        accountedAssets -= amount;
         USDC.safeTransfer(receiver, amount);
     }
 
@@ -320,6 +370,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         _reconcile(accountingSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
         USDC.safeTransferFrom(msg.sender, address(this), amount);
+        accountedAssets += amount;
         juniorPrincipal += amount;
     }
 
@@ -342,6 +393,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__ExceedsMaxJuniorWithdraw();
         }
         juniorPrincipal -= amount;
+        accountedAssets -= amount;
         USDC.safeTransfer(receiver, amount);
     }
 
@@ -397,7 +449,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
             HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
 
-        viewData.totalAssetsUsdc = USDC.balanceOf(address(this));
+        viewData.totalAssetsUsdc = totalAssets();
         viewData.freeUsdc = withdrawalSnapshot.freeUsdc;
         viewData.withdrawalReservedUsdc = withdrawalSnapshot.reserved;
         viewData.seniorPrincipalUsdc = seniorPrincipal;
