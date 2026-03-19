@@ -300,11 +300,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     /// @notice Accounts a legitimate protocol inflow that already arrived as raw USDC this transaction.
-    /// @dev Only the engine may convert raw excess into canonical assets through this path.
+    /// @dev Only the engine or order router may convert raw excess into canonical assets through this path.
     function recordProtocolInflow(
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE)) {
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {

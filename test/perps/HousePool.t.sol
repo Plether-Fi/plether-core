@@ -427,6 +427,17 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
 
+    function test_RecordProtocolInflow_OrderRouterCanAccountRawExcess() public {
+        _fundJunior(bob, 500_000e6);
+        usdc.mint(address(pool), 25_000e6);
+
+        vm.prank(address(router));
+        pool.recordProtocolInflow(25_000e6);
+
+        assertEq(pool.totalAssets(), 525_000e6, "Router-accounted inflow should become canonical immediately");
+        assertEq(pool.excessAssets(), 0, "Router-accounted inflow should not remain quarantined as excess");
+    }
+
     function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
         _fundJunior(bob, 500_000e6);
         vm.prank(address(pool));

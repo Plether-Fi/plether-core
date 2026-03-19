@@ -855,6 +855,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         USDC.safeTransfer(address(vault), forfeitedUsdc);
+        vault.recordProtocolInflow(forfeitedUsdc);
     }
 
     function _clearLiquidatedAccountOrders(

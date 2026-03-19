@@ -1719,6 +1719,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        uint256 vaultAssetsBefore = pool.totalAssets();
         CfdEngine.LiquidationPreview memory preview =
             engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
 
@@ -1756,6 +1757,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation"
         );
+        assertEq(pool.excessAssets(), 0, "Forfeited open-order bounty escrow should not remain quarantined as excess");
+        assertGe(
+            pool.totalAssets(),
+            vaultAssetsBefore + queuedOrderCount * 1e6,
+            "Forfeited open-order bounty escrow should contribute to canonical vault assets"
+        );
     }
 
     function test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders() public {
@@ -1773,6 +1780,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        uint256 vaultAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -1791,6 +1799,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation"
+        );
+        assertEq(pool.excessAssets(), 0, "Forfeited close-order bounty escrow should not remain quarantined as excess");
+        assertGe(
+            pool.totalAssets(),
+            vaultAssetsBefore + 2e6,
+            "Forfeited close-order bounty escrow should contribute to canonical vault assets"
         );
     }
 
