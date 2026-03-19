@@ -16,8 +16,12 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
-    /// @notice Converts a same-transaction endogenous protocol inflow into canonical vault assets.
-    ///         Reverts if the caller is unauthorized or if raw excess is insufficient.
+    /// @notice Increases canonical vault assets to recognize a legitimate protocol-owned inflow.
+    /// @dev This is the controlled accounting path for endogenous protocol gains that should
+    ///      increase economic vault depth. It does not require raw excess to be present and may
+    ///      also be used to restore canonical accounting after a raw-balance shortfall has already
+    ///      reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
+    ///      Reverts if the caller is unauthorized.
     function recordProtocolInflow(
         uint256 amount
     ) external;

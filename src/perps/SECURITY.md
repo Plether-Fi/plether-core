@@ -42,7 +42,7 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
+| **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens, where `vault.totalAssets()` is canonical physical backing (`min(rawAssets, accountedAssets)`) rather than raw token balance. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
 | **Degraded Containment** | If a close realizes cash outflow that pushes `effectiveAssets` below the remaining liability bound, `degradedMode` latches: new opens and risky withdrawals are blocked until recapitalization restores solvency and the owner clears the mode |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
 | **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees - fundingWithdrawalReserve - deferredPayoutLiabilities` — LPs cannot withdraw encumbered capital |
@@ -150,7 +150,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` router escrow at commit so clearers are paid from user-funded escrow instead of vault subsidy
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices in live markets. Frozen-oracle windows are an intentional exception: no fresh oracle publish exists, so the protocol preserves close liveness at the last valid oracle price instead of enforcing an impossible publish-time ordering check.
-- **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
+- **Failed Orders**: Failed or expired orders generally pay their reserved execution bounty to the executor from router escrow. The explicit exception is post-commit protocol-state invalidation on risk-increasing opens (for example degraded mode or a newly invalid solvency/skew state), which refunds the trader bounty instead of paying the clearer. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
 
 #### Engine / Router Trust Boundary
 
@@ -163,6 +163,8 @@ The MarginClearinghouse authorizes only the configured `engine` and the router r
 These actors **cannot**:
 - Use `seizeUsdc()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
 - Create negative balances (seizure reverts if balance insufficient)
+
+`OrderRouter` now uses the typed `processOrderTyped()` boundary and `CfdEngine__TypedOrderFailure(...)` to classify expected execution failures into router-visible categories instead of matching raw engine revert selectors. This keeps bounty routing policy explicit at the engine/router boundary.
 
 ## Known Limitations
 

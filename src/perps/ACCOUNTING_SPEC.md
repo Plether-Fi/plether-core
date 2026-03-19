@@ -37,9 +37,20 @@ All values below are denominated in 6-decimal USDC unless stated otherwise.
 
 ### Physical Assets
 
-- `physicalAssets`: the actual USDC controlled by `HousePool`
+Use the following vocabulary consistently:
+
+- `rawAssets`: the actual USDC token balance currently sitting in `HousePool`
+- `accountedAssets`: the canonical protocol-owned asset ledger maintained by controlled protocol paths
+- `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance sitting in the pool
+- `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: the effective economic vault backing recognized by funding, solvency, reconciliation, and withdrawal logic
 - `protocolFees`: `accumulatedFeesUsdc`, which are owned by the protocol and not LP equity
 - `netPhysicalAssets = physicalAssets - protocolFees`
+
+Operational consequences:
+
+- unsolicited positive transfers do not increase economic depth until explicitly accounted,
+- raw-balance shortfalls reduce `physicalAssets` immediately via the `min(rawAssets, accountedAssets)` boundary,
+- all core accounting paths must consume canonical `physicalAssets` / `totalAssets()` rather than raw token balance.
 
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 

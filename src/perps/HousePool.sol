@@ -299,8 +299,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC.safeTransfer(recipient, amount);
     }
 
-    /// @notice Accounts a legitimate protocol inflow that already arrived as raw USDC this transaction.
-    /// @dev Only the engine or order router may convert raw excess into canonical assets through this path.
+    /// @notice Accounts a legitimate protocol-owned inflow into canonical vault assets.
+    /// @dev Only the engine or order router may use this path. Unlike `accountExcess()`, this does
+    ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
+    ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
+    ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.
     function recordProtocolInflow(
         uint256 amount
     ) external {
