@@ -43,7 +43,6 @@ library CfdTypes {
         NoPosition,
         BadSize,
         PartialCloseUnderwater,
-        InsufficientVaultLiquidity,
         DustPosition
     }
 

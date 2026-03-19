@@ -1741,6 +1741,44 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
+    function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(11));
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+
+        engine.proposeRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0.0005e18,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 0.15e18,
+                maxApy: 3.0e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 500_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.prank(address(router));
+        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+    }
+
     function test_C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));

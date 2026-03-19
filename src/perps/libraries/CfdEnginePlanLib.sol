@@ -381,7 +381,7 @@ library CfdEnginePlanLib {
         }
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.vaultAssetsUsdc,
+            snap.vaultCashUsdc,
             snap.accumulatedFeesUsdc,
             SolvencyAccountingLib.getMaxLiability(snap.bullSide.maxProfitUsdc, snap.bearSide.maxProfitUsdc),
             solvencyFunding,

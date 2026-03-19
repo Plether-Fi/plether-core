@@ -176,9 +176,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
                     assertTrue(
                         r == CfdTypes.CloseInvalidReason.PartialCloseUnderwater
-                            || r == CfdTypes.CloseInvalidReason.InsufficientVaultLiquidity
                             || r == CfdTypes.CloseInvalidReason.DustPosition,
-                        "Partial close of valid-full-close position can only fail for shortfall, vault cash, or dust"
+                        "Partial close of valid-full-close position can only fail for shortfall or dust"
                     );
                 }
             }
