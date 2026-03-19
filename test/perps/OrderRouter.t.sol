@@ -1181,6 +1181,15 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
+    function test_CloseCommit_RevertsWithoutLivePositionEvenIfPendingOrderExists() public {
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.expectRevert(OrderRouter.OrderRouter__NoOpenPosition.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        vm.stopPrank();
+    }
+
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
         vm.warp(1000);
 

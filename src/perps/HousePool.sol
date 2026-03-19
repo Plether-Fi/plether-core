@@ -177,6 +177,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ) = _getHousePoolSnapshots();
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             _reconcile(accountingSnapshot);
+        } else {
+            lastReconcileTime = block.timestamp;
         }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;

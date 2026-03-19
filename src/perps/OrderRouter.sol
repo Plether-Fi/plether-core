@@ -299,10 +299,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         if (pendingOrderCounts[accountId] >= MAX_PENDING_ORDERS) {
             revert OrderRouter__TooManyPendingOrders();
         }
-        if (isClose && !engine.hasOpenPosition(accountId) && pendingOrderCounts[accountId] == 0) {
-            revert OrderRouter__NoOpenPosition();
-        }
-        if (isClose && engine.hasOpenPosition(accountId)) {
+        if (isClose) {
+            if (!engine.hasOpenPosition(accountId)) {
+                revert OrderRouter__NoOpenPosition();
+            }
             if (engine.getPositionSide(accountId) != side) {
                 revert OrderRouter__CloseSideMismatch();
             }
