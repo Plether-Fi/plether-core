@@ -458,6 +458,19 @@ Review:
 - Updated `src/perps/TrancheVault.sol` so `totalAssets()`, `maxWithdraw()`, and `maxRedeem()` all consume the simulated reconcile-first tranche state, aligning ERC4626 preview/max behavior with the live deposit/withdraw paths that call `POOL.reconcile()` first.
 - Added regressions in `test/perps/HousePool.t.sol` proving `previewDeposit()` matches reconcile-first share minting for senior deposits and that `maxWithdraw()` remains executable after junior loss reconciliation.
 - Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw"`.
+
+## TrancheVault Funding Snapshot Parity Fix (Mar 19 2026)
+
+- [x] Project pending funding in `CfdEngine` house-pool view snapshots
+- [x] Route `HousePool`/`TrancheVault` max-withdraw previews through projected funding liabilities
+- [x] Add regressions for `maxWithdraw()` / `maxRedeem()` under accrued funding
+- [x] Run targeted verification and record results
+
+Review:
+- Updated `src/perps/CfdEngine.sol` so house-pool view snapshots now project pending funding indices from `lastFundingTime` to `block.timestamp` using the same `PositionRiskAccountingLib.computeFundingStep()` math as plan-time previews before building withdrawal-funding and MtM liabilities.
+- This preserves the earlier `HousePool.getPendingTrancheState()`/`TrancheVault.maxWithdraw()` architecture while removing the remaining stale-funding gap that could cause `maxWithdraw()`/`maxRedeem()` to overestimate executable liquidity.
+- Added regressions in `test/perps/HousePool.t.sol` proving both `maxWithdraw()` and `maxRedeem()` remain executable during frozen-oracle windows with unsynced accrued funding.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_MaxWithdraw_RemainsExecutableWithPendingFundingAccrual|test_MaxRedeem_RemainsExecutableWithPendingFundingAccrual|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw|test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit"`.
 - Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.

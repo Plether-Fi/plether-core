@@ -1056,6 +1056,82 @@ contract HousePoolAuditTest is BasePerpTest {
         );
     }
 
+    function test_MaxWithdraw_RemainsExecutableWithPendingFundingAccrual() public {
+        uint256 saturdayFrozen = 1_710_021_600;
+        _fundJunior(bob, 1_000_000e6);
+
+        address bullTrader = address(0x444);
+        _fundTrader(bullTrader, 100_000e6);
+        vm.prank(bullTrader);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        address bearTrader = address(0x555);
+        _fundTrader(bearTrader, 100_000e6);
+        vm.prank(bearTrader);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(saturdayFrozen - 12 hours);
+        assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 12 hours));
+
+        vm.warp(saturdayFrozen);
+
+        assertLt(engine.lastFundingTime(), saturdayFrozen, "funding must still be pending when quoting maxWithdraw");
+
+        uint256 quotedAssets = juniorVault.maxWithdraw(bob);
+        uint256 bobBalanceBefore = usdc.balanceOf(bob);
+
+        vm.prank(bob);
+        juniorVault.withdraw(quotedAssets, bob, bob);
+
+        assertEq(
+            usdc.balanceOf(bob), bobBalanceBefore + quotedAssets, "maxWithdraw quote should remain executable after sync"
+        );
+    }
+
+    function test_MaxRedeem_RemainsExecutableWithPendingFundingAccrual() public {
+        uint256 saturdayFrozen = 1_710_021_600;
+        _fundJunior(bob, 1_000_000e6);
+
+        address bullTrader = address(0x444);
+        _fundTrader(bullTrader, 100_000e6);
+        vm.prank(bullTrader);
+        router.commitOrder(CfdTypes.Side.BULL, 400_000e18, 40_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        address bearTrader = address(0x555);
+        _fundTrader(bearTrader, 100_000e6);
+        vm.prank(bearTrader);
+        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8, false);
+        router.executeOrder(2, empty);
+
+        vm.warp(saturdayFrozen - 12 hours);
+        assertTrue(engine.isOracleFrozen(), "setup should enter a frozen-oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 12 hours));
+
+        vm.warp(saturdayFrozen);
+
+        uint256 quotedShares = juniorVault.maxRedeem(bob);
+        uint256 bobBalanceBefore = usdc.balanceOf(bob);
+        uint256 previewAssets = juniorVault.previewRedeem(quotedShares);
+
+        vm.prank(bob);
+        uint256 redeemedAssets = juniorVault.redeem(quotedShares, bob, bob);
+
+        assertEq(redeemedAssets, previewAssets, "maxRedeem quote should reconcile to the previewed asset amount");
+        assertEq(
+            usdc.balanceOf(bob), bobBalanceBefore + redeemedAssets, "maxRedeem quote should remain executable after sync"
+        );
+    }
+
     // Regression: C-02 — funding spread not permanently locked after positions close
     function test_FundingSpreadLockedAfterAllPositionsClose() public {
         _fundJunior(bob, 1_000_000e6);

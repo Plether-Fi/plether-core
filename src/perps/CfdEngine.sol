@@ -1703,11 +1703,36 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
+        (int256 bullFundingIndex, int256 bearFundingIndex) = _getProjectedFundingIndices();
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        bullFunding = (int256(bullState.openInterest) * bullState.fundingIndex - bullState.entryFunding)
+        bullFunding = (int256(bullState.openInterest) * bullFundingIndex - bullState.entryFunding)
             / int256(CfdMath.FUNDING_INDEX_SCALE);
-        bearFunding = (int256(bearState.openInterest) * bearState.fundingIndex - bearState.entryFunding)
+        bearFunding = (int256(bearState.openInterest) * bearFundingIndex - bearState.entryFunding)
             / int256(CfdMath.FUNDING_INDEX_SCALE);
+    }
+
+    function _getProjectedFundingIndices() internal view returns (int256 bullFundingIndex, int256 bearFundingIndex) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        bullFundingIndex = bullState.fundingIndex;
+        bearFundingIndex = bearState.fundingIndex;
+
+        if (block.timestamp <= lastFundingTime || lastMarkPrice == 0) {
+            return (bullFundingIndex, bearFundingIndex);
+        }
+
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: block.timestamp - lastFundingTime,
+                vaultDepthUsdc: vault.totalAssets(),
+                riskParams: riskParams
+            })
+        );
+
+        bullFundingIndex += step.bullFundingIndexDelta;
+        bearFundingIndex += step.bearFundingIndexDelta;
     }
 
     function _buildFundingSnapshot() internal view returns (CfdEngineSnapshotsLib.FundingSnapshot memory snapshot) {
