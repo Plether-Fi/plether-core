@@ -173,6 +173,34 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
+    function test_ProcessOrderTyped_ProtocolStateFailureUsesTypedTaxonomy() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+
+        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1_200_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated,
+                uint8(7),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+    }
+
     function test_FundingAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
@@ -1498,6 +1526,47 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(CfdEngine.CfdEngine__MustCloseOpposingPosition.selector);
         vm.prank(address(router));
         engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+    }
+
+    function test_ProcessOrderTyped_UserInvalidFailureUsesTypedTaxonomy() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
+
+        CfdTypes.Order memory bearOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        vm.prank(address(router));
+        engine.processOrder(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+
+        CfdTypes.Order memory bullOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                uint8(1),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_FundingSettlement_ExceedsMargin_Reverts() public {

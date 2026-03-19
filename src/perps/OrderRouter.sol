@@ -25,10 +25,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     using SafeERC20 for IERC20;
 
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
-    bytes4 internal constant ENGINE_DEGRADED_MODE_SELECTOR = bytes4(keccak256("CfdEngine__DegradedMode()"));
-    bytes4 internal constant ENGINE_SKEW_TOO_HIGH_SELECTOR = bytes4(keccak256("CfdEngine__SkewTooHigh()"));
-    bytes4 internal constant ENGINE_VAULT_SOLVENCY_EXCEEDED_SELECTOR =
-        bytes4(keccak256("CfdEngine__VaultSolvencyExceeded()"));
+    bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngine.CfdEngine__TypedOrderFailure.selector;
 
     enum OrderStatus {
         None,
@@ -570,7 +567,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
         _releaseCommittedMarginForExecution(orderId);
 
-        try engine.processOrder(order, executionPrice, vaultDepth, oraclePublishTime) {
+        try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
             emit OrderExecuted(orderId, executionPrice);
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
@@ -665,7 +662,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
             _releaseCommittedMarginForExecution(orderId);
 
-            try engine.processOrder(order, clampedPrice, vaultDepth, oraclePublishTime) {
+            try engine.processOrderTyped(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch (bytes memory revertData) {
@@ -774,23 +771,31 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         CfdTypes.Order memory order,
         bytes memory revertData
     ) internal pure returns (FailedOrderBountyPolicy) {
-        if (_isRefundableProtocolStateFailure(order, revertData)) {
+        if (_isRefundableProtocolStateFailure(revertData)) {
             return FailedOrderBountyPolicy.RefundUser;
         }
         return _failedOrderBountyPolicy(order);
     }
 
     function _isRefundableProtocolStateFailure(
-        CfdTypes.Order memory order,
         bytes memory revertData
     ) internal pure returns (bool) {
-        if (order.isClose || revertData.length < 4) {
+        if (revertData.length < 4 || bytes4(revertData) != TYPED_ORDER_FAILURE_SELECTOR) {
             return false;
         }
 
-        bytes4 selector = bytes4(revertData);
-        return selector == ENGINE_DEGRADED_MODE_SELECTOR || selector == ENGINE_SKEW_TOO_HIGH_SELECTOR
-            || selector == ENGINE_VAULT_SOLVENCY_EXCEEDED_SELECTOR;
+        (ICfdEngine.OrderExecutionFailureClass failureClass,, bool isClose) = _decodeTypedOrderFailure(revertData);
+        return !isClose && failureClass == ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated;
+    }
+
+    function _decodeTypedOrderFailure(
+        bytes memory revertData
+    ) internal pure returns (ICfdEngine.OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose) {
+        assembly {
+            failureClass := mload(add(revertData, 36))
+            failureCode := mload(add(revertData, 68))
+            isClose := mload(add(revertData, 100))
+        }
     }
 
     function _cleanupOrder(

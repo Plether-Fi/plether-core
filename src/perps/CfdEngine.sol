@@ -759,6 +759,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
+        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, false);
+    }
+
+    /// @notice Router-facing order execution entrypoint with typed business-rule failures.
+    function processOrderTyped(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) external onlyRouter nonReentrant {
+        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, true);
+    }
+
+    function _processOrder(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        bool typedFailures
+    ) internal {
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
@@ -770,12 +790,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory delta =
                 CfdEnginePlanLib.planClose(snap, order, currentOraclePrice, publishTime);
-            _revertIfCloseInvalid(delta.revertCode);
+            if (typedFailures) {
+                _revertIfCloseInvalidTyped(delta.revertCode);
+            } else {
+                _revertIfCloseInvalid(delta.revertCode);
+            }
             _applyClose(delta);
         } else {
             CfdEnginePlanTypes.OpenDelta memory delta =
                 CfdEnginePlanLib.planOpen(snap, order, currentOraclePrice, publishTime);
-            _revertIfOpenInvalid(delta.revertCode);
+            if (typedFailures) {
+                _revertIfOpenInvalidTyped(delta.revertCode);
+            } else {
+                _revertIfOpenInvalid(delta.revertCode);
+            }
             _applyOpen(delta);
         }
     }
@@ -1380,6 +1408,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
+    function _revertIfOpenInvalidTyped(
+        CfdEnginePlanTypes.OpenRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.OpenRevertCode.OK) {
+            return;
+        }
+
+        ICfdEngine.OrderExecutionFailureClass failureClass =
+            code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
+                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
+                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+                ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
+                : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
+
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(failureClass, uint8(code), false);
+    }
+
     function _revertIfCloseInvalid(
         CfdEnginePlanTypes.CloseRevertCode code
     ) internal pure {
@@ -1398,6 +1443,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (code == CfdEnginePlanTypes.CloseRevertCode.FUNDING_PARTIAL_CLOSE_UNDERWATER) {
             revert CfdEngine__PartialCloseUnderwaterFunding();
         }
+    }
+
+    function _revertIfCloseInvalidTyped(
+        CfdEnginePlanTypes.CloseRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.CloseRevertCode.OK) {
+            return;
+        }
+
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(
+            ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid, uint8(code), true
+        );
     }
 
     function _applyFundingAndMark(

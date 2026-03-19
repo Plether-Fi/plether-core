@@ -124,7 +124,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__FIFOViolation.selector);
         vm.roll(10);
         router.executeOrder(1, empty);
     }
@@ -1221,8 +1221,8 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            2e6,
-            "Batch executor should be paid for successful orders and failed binding open tails"
+            1e6,
+            "Batch executor should be paid only for the successful close when the failed open tail refunds the user"
         );
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);

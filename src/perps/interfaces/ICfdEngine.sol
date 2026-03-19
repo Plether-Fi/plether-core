@@ -7,6 +7,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    enum OrderExecutionFailureClass {
+        UserOrderInvalid,
+        ProtocolStateInvalidated
+    }
+
+    error CfdEngine__TypedOrderFailure(OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose);
+
     /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
     /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
     ///      `deferredPayoutUsdc` are trader-owned value or obligations recorded by the protocol.
@@ -134,6 +141,16 @@ interface ICfdEngine {
     /// @param vaultDepthUsdc     Available vault liquidity, used for open-interest caps (6 decimals)
     /// @param publishTime        Oracle publish timestamp, used for funding rate accrual
     function processOrder(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) external;
+
+    /// @notice Router-facing order execution entrypoint with typed business-rule failures.
+    /// @dev Reverts with `CfdEngine__TypedOrderFailure` for expected order invalidations so the
+    ///      router can apply deterministic failed-order bounty policy without selector matching.
+    function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
