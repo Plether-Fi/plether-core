@@ -124,6 +124,99 @@ The engine should continue to maintain separate kernels for the following four d
 
 Any shared helper across domains is acceptable only when the assumptions are intentionally identical.
 
+## Snapshot Interfaces
+
+The engine exposes several snapshot structs as boundary objects between core accounting and downstream consumers. These snapshots are not just convenience getters; they define which assumptions are safe for LP accounting, UI previews, and operator tooling to consume.
+
+### A. `HousePoolInputSnapshot`
+
+Produced by:
+
+- `CfdEngine.getHousePoolInputSnapshot()`
+
+Consumed by:
+
+- `HousePoolAccountingLib.buildWithdrawalSnapshot()`
+- `HousePoolAccountingLib.buildReconcileSnapshot()`
+- `HousePool.isWithdrawalLive()` and `HousePool.getVaultLiquidityView()`
+
+Purpose:
+
+- canonical accounting payload for LP withdrawals and tranche reconciliation
+
+Field semantics:
+
+- `netPhysicalAssetsUsdc`: vault cash net of protocol-owned fees; starting point for LP-facing accounting
+- `maxLiabilityUsdc`: bounded directional payout ceiling from live positions; the main withdrawal reserve component
+- `withdrawalFundingLiabilityUsdc`: funding liabilities only, with trader debts ignored until collected; conservative LP withdrawal reserve input
+- `unrealizedMtmLiabilityUsdc`: conservative unrealized mark-to-market liability used for tranche reconciliation, not risk-increasing solvency
+- `deferredTraderPayoutUsdc`: profitable-close payouts already owed to traders but not yet paid; senior claim on vault cash
+- `deferredClearerBountyUsdc`: unpaid liquidation bounties; also a senior claim on vault cash
+- `protocolFeesUsdc`: protocol-owned fees excluded from LP equity
+- `markFreshnessRequired`: true when live bounded liability depends on a fresh mark, so stale-mark LP actions must be blocked or deferred
+- `maxMarkStaleness`: action-specific staleness threshold chosen by the engine for the current oracle regime
+
+Design rule:
+
+- this snapshot is conservative by construction and should be sufficient for LP accounting without re-reading raw engine state
+
+### B. `HousePoolStatusSnapshot`
+
+Produced by:
+
+- `CfdEngine.getHousePoolStatusSnapshot()`
+
+Consumed by:
+
+- `HousePool.isWithdrawalLive()`
+- `HousePool._requireWithdrawalsLive()`
+- `HousePool.getVaultLiquidityView()`
+
+Purpose:
+
+- canonical non-accounting status payload for LP liveness gates
+
+Field semantics:
+
+- `lastMarkTime`: timestamp of the most recent accepted mark update; paired with `maxMarkStaleness` from the input snapshot
+- `oracleFrozen`: indicates the protocol is in a frozen-oracle regime, so the engine may relax staleness policy for LP and close-path actions
+- `degradedMode`: containment latch that blocks LP withdrawals depending on position-backed equity
+
+Design rule:
+
+- status flags should stay separate from accounting quantities so downstream consumers can explain whether an action is blocked by state gating or by insufficient free cash
+
+### C. Preview Solvency Outputs
+
+Produced by:
+
+- close and liquidation preview APIs in `CfdEngine`
+
+Consumed by:
+
+- frontends, keeper tooling, and operator review flows
+
+Purpose:
+
+- explain not only whether an action is legal, but whether it would newly degrade the protocol or leave it degraded afterward
+
+Field semantics:
+
+- `effectiveAssetsAfterUsdc`: post-action solvency assets after applying the previewed transition
+- `maxLiabilityAfterUsdc`: post-action bounded liability after applying the same transition
+- `postOpDegradedMode`: whether the protocol would be degraded after the action
+- `triggersDegradedMode`: whether the action newly crosses into degraded mode from a previously healthy state
+
+Design rule:
+
+- preview callers should use these fields to distinguish "this action is allowed but containment will latch" from "the protocol is already degraded"
+
+### D. Snapshot Consumer Graph
+
+- `CfdEngine -> HousePoolInputSnapshot -> HousePoolAccountingLib -> withdrawal limits / reconciliation`
+- `CfdEngine -> HousePoolStatusSnapshot -> withdrawal liveness gates / status views`
+- `CfdEngine preview APIs -> solvency outputs -> frontend and keeper decisioning`
+
 ### A. Risk-Increasing Solvency View
 
 Question answered:
@@ -222,6 +315,8 @@ Rules:
 - escrowed funds are not free buying power,
 - escrowed funds must not silently disappear from liquidation or settlement accounting,
 - releasing or consuming escrow must happen exactly once per order lifecycle.
+
+![Reservation lifecycle](../../assets/diagrams/perps-reservation-lifecycle.svg)
 
 ## Trader Balance Semantics
 
@@ -401,6 +496,8 @@ Current bounty policy notes:
 - Successful, expired, and otherwise invalid close executions pay the clearer from that router escrow according to the same terminal bounty policy used by other orders.
 - Close-order execution bounty flow does not create protocol-fee revenue or deferred vault liabilities.
 - The deferred bounty liability bucket is reserved for liquidation bounties when immediate vault payment is unavailable. Order-execution bounties are user-funded router escrow and should never enter this liability bucket.
+
+![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 
 ## Required Invariants for the Refactor
 

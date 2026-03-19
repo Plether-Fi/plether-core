@@ -86,6 +86,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
+![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
+
 **Binding User Intents**: Once committed, both open and close orders are binding. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without traders buying a free execution option. Open commits are rejected during degraded mode and close-only windows to prevent deterministic bounty loss from impossible orders.
 
 **Per-Account Queue Cap**: Each account may hold at most `5` pending orders at a time. This bounds account-local cleanup work during liquidation and prevents a single trader from bloating the FIFO with unbounded queued intents.
@@ -266,6 +268,8 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 
 This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
 
+![Oracle regimes](../../assets/diagrams/perps-oracle-regimes.svg)
+
 **Admin FAD Days**: The protocol owner can designate additional FAD days via `proposeAddFadDays()` / `proposeRemoveFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed for the same reason: close liveness is preserved at the last valid oracle price while the oracle is intentionally offline.
 
 **Deleverage Runway**: Admin holidays lack the natural 3-hour runway that weekends get (Friday 19:00→22:00). To compensate, `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable via `proposeFadRunway()`) triggers `isFadWindow()` N seconds before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins are enforced while the oracle remains live with normal staleness and MEV checks — giving keepers time to liquidate over-leveraged positions before the oracle freezes at midnight.
@@ -336,3 +340,9 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
 | `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |
+
+## LP Withdrawal Availability
+
+LP withdrawal limits are a gated accounting flow, not just a boolean switch. `TrancheVault.maxWithdraw()` and `maxRedeem()` first enforce holder cooldown and protocol-state gates, then `HousePool` computes reserved capital from protocol liabilities before exposing only the tranche-prioritized free USDC that can safely leave the vault.
+
+![LP withdrawal flow](../../assets/diagrams/perps-lp-withdrawal-availability.svg)

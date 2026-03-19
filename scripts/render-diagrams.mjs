@@ -190,38 +190,25 @@ const smClasses = `
     classDef action fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px`;
 
 const orderLifecycle = `graph TD
-    U([Trader]) -->|commitOrder + ETH fee| Q([Queued])
-    Q -->|age > maxOrderAge| EXP([Expired])
-    Q -->|Keeper: executeOrder + Pyth VAA| CHK{Oracle Fresh?}
-    CHK -->|FX closed or holiday| FROZEN([Frozen Revert])
-    CHK -->|publishTime ≤ commitTime| MEV([MEV Revert])
-    CHK -->|staleness > 60s| STALE([Stale])
-    CHK -->|Fresh| FAD{Open During FAD?}
-    FAD -->|Yes| FADF([Close-Only])
-    FAD -->|No| SLIP{Slippage OK?}
-    SLIP -->|Exceeded| SLIPF([Slippage])
-    SLIP -->|OK| ENG{processOrder}
-    ENG -->|Revert| ENGF([Engine Fail])
-    ENG -->|Success| EXEC([Executed])
-
-    EXP --> DONE[Queue Advances · Order Deleted]
-    STALE --> DONE
-    FADF --> DONE
-    SLIPF --> DONE
-    ENGF --> DONE
-    EXEC --> DONE
-
-    FROZEN -.- FN>Hard revert · waits for FX markets]
-    MEV -.- MN>Hard revert · keeper retries with fresh price]
-    DONE -.- DN>Un-brickable: all soft outcomes advance the queue]
+    U([Trader]) -->|commitOrder| P([Pending])
+    P -->|expires| F1([Failed: Expired])
+    P -->|FIFO head + keeper execute| O{Oracle Policy}
+    O -->|frozen market| R1([Revert: Wait])
+    O -->|MEV or stale keeper input| R2([Revert: Retry])
+    O -->|valid price| S{Slippage / Engine}
+    S -->|invalid or engine reject| F2([Failed])
+    S -->|success| E([Executed])
+    F1 --> D[Delete Order and Advance Queue]
+    F2 --> D
+    E --> D
 
     class U state
-    class Q action
-    class CHK,FAD,SLIP,ENG process
-    class EXEC success
-    class EXP,STALE,FADF,SLIPF,ENGF softfail
-    class FROZEN,MEV hardfail
-    class DONE,FN,MN,DN note
+    class P action
+    class O,S process
+    class E success
+    class F1,F2 softfail
+    class R1,R2 hardfail
+    class D note
 ${smClasses}`;
 
 const positionLifecycle = `graph TD
@@ -263,9 +250,79 @@ const trancheWaterfall = `graph TD
     class TD,RD,LD note
 ${smClasses}`;
 
+const perpsReservationLifecycle = `graph TD
+    NONE([No Reservation]) -->|OrderRouter commit open| FULL([Active: Full Amount])
+
+    FULL -->|full execution or settlement| CONSUMED([Consumed])
+    CONSUMED --> END([Closed and Not Refundable])
+
+    FULL -->|partial terminal consumption| PARTIAL([Active: Partial Amount])
+    PARTIAL -->|more terminal consumption| PARTIAL
+    PARTIAL -->|remaining amount consumed| CONSUMED2([Consumed])
+    CONSUMED2 --> END2([Closed and Not Refundable])
+
+    FULL -->|expiry or valid refund| RELEASED([Released])
+    RELEASED --> FREE([Free Settlement Restored])
+
+    PARTIAL -->|release unused remainder| RELEASED2([Released])
+    RELEASED2 --> FREE2([Free Settlement Restored])
+
+    class NONE state
+    class FULL,PARTIAL action
+    class CONSUMED,CONSUMED2 success
+    class RELEASED,RELEASED2 softfail
+    class END,END2,FREE,FREE2 note
+${smClasses}`;
+
+const perpsOracleRegimes = `graph TD
+    N([Normal]) -->|Fri 19:00 UTC or admin runway| F([FAD Close-Only])
+    F -->|Fri 22:00 UTC or admin holiday| Z([Frozen Oracle])
+    Z -->|Sun 21:00 UTC or holiday end| N
+
+    N --> N1[opens allowed]
+    N1 --> N2[staleness: normal]
+    N2 --> N3[MEV checks on]
+    N3 --> N4[maint margin]
+
+    F --> F1[close-only]
+    F1 --> F2[staleness: normal]
+    F2 --> F3[MEV checks on]
+    F3 --> F4[fad margin]
+
+    Z --> Z1[close-only]
+    Z1 --> Z2[staleness: fadMaxStaleness]
+    Z2 --> Z3[MEV bypassed]
+    Z3 --> Z4[fad margin]
+
+    class N,F,Z state
+    class N1,N2,N3,N4,F1,F2,F3,F4,Z1,Z2,Z3,Z4 action
+${smClasses}`;
+
+const perpsLpWithdrawalAvailability = `graph TD
+    U([LP Holder]) -->|maxWithdraw / maxRedeem| G1{Past deposit cooldown?}
+    G1 -->|No| B1([Blocked: cooldown])
+    G1 -->|Yes| G2{degradedMode off?}
+    G2 -->|No| B2([Blocked: degraded mode])
+    G2 -->|Yes| G3{Fresh mark required and available?}
+    G3 -->|No| B3([Blocked: stale mark])
+    G3 -->|Yes| SNAP[Build withdrawal snapshot]
+    SNAP --> RES[Reserved USDC]
+    RES --> RES2[max liability + funding reserve + deferred liabilities + protocol fees]
+    RES2 --> FREE[Free USDC]
+    FREE --> FREE2[net physical assets minus reserved USDC]
+    FREE2 --> CAP[Cap by tranche priority]
+    CAP --> CAP2[senior first, junior subordinated]
+    CAP2 --> OUT([Withdrawable Amount])
+
+    class U state
+    class SNAP,RES,RES2,FREE,FREE2,CAP,CAP2 action
+    class OUT success
+    class B1,B2,B3 hardfail
+${smClasses}`;
+
 mkdirSync(outDir, { recursive: true });
 
-const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12, svg13, svg14] = await Promise.all([
+const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12, svg13, svg14, svg15, svg16, svg17] = await Promise.all([
   renderMermaid(howItWorks, theme),
   renderMermaid(tokenFlow, theme),
   renderMermaid(bearLeverage, theme),
@@ -280,6 +337,9 @@ const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12
   renderMermaid(orderLifecycle, theme),
   renderMermaid(positionLifecycle, theme),
   renderMermaid(trancheWaterfall, theme),
+  renderMermaid(perpsReservationLifecycle, theme),
+  renderMermaid(perpsOracleRegimes, theme),
+  renderMermaid(perpsLpWithdrawalAvailability, theme),
 ]);
 
 writeFileSync(`${outDir}/how-it-works.svg`, svg1);
@@ -296,5 +356,8 @@ writeFileSync(`${outDir}/invar-withdraw.svg`, svg11);
 writeFileSync(`${outDir}/perps-order-lifecycle.svg`, svg12);
 writeFileSync(`${outDir}/perps-position-lifecycle.svg`, svg13);
 writeFileSync(`${outDir}/perps-tranche-waterfall.svg`, svg14);
+writeFileSync(`${outDir}/perps-reservation-lifecycle.svg`, svg15);
+writeFileSync(`${outDir}/perps-oracle-regimes.svg`, svg16);
+writeFileSync(`${outDir}/perps-lp-withdrawal-availability.svg`, svg17);
 
-console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw, perps-order-lifecycle, perps-position-lifecycle, perps-tranche-waterfall');
+console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw, perps-order-lifecycle, perps-position-lifecycle, perps-tranche-waterfall, perps-reservation-lifecycle, perps-oracle-regimes, perps-lp-withdrawal-availability');
