@@ -645,16 +645,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
-    function _accrueSeniorYieldOnly() internal {
-        uint256 elapsed = block.timestamp - lastReconcileTime;
-        lastReconcileTime = block.timestamp;
-        if (elapsed == 0 || seniorPrincipal == 0) {
-            return;
-        }
-
-        unpaidSeniorYield += HousePoolWaterfallAccountingLib.accrueSeniorYield(seniorPrincipal, seniorRateBps, elapsed);
-    }
-
     function _distributeRevenue(
         uint256 revenue
     ) internal {
