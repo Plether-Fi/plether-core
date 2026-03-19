@@ -19,6 +19,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 contract OrderRouterTest is BasePerpTest {
 
@@ -1799,6 +1800,54 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             pool.totalAssets(),
             vaultAssetsBefore + queuedOrderCount * 1e6,
             "Forfeited open-order bounty escrow should contribute to canonical vault assets"
+        );
+    }
+
+    function test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 60 days);
+        uint64 fundingBefore = engine.lastFundingTime();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(195_000_000));
+
+        vm.recordLogs();
+        router.executeLiquidation(accountId, priceData);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 fundingUpdatedSig = keccak256("FundingUpdated(int256,int256,uint256)");
+        bytes32 protocolInflowSig = keccak256("ProtocolInflowAccounted(address,uint256,uint256)");
+        uint256 fundingLogIndex = type(uint256).max;
+        uint256 inflowLogIndex = type(uint256).max;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == fundingUpdatedSig && fundingLogIndex == type(uint256).max) {
+                fundingLogIndex = i;
+            }
+            if (logs[i].topics[0] == protocolInflowSig && logs[i].emitter == address(pool) && inflowLogIndex == type(uint256).max)
+            {
+                inflowLogIndex = i;
+            }
+        }
+
+        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "liquidation path should sync funding for the elapsed interval");
+        assertGt(engine.lastFundingTime(), fundingBefore, "liquidation must materialize pending funding before fee booking");
+        assertLt(
+            fundingLogIndex,
+            inflowLogIndex,
+            "funding must sync before forfeited escrow is recognized as canonical vault inflow"
         );
     }
 

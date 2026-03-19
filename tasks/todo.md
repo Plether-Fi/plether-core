@@ -1,3 +1,13 @@
+- [x] Sweep remaining perps docs for stale deferred-close-bounty language and numbering drift
+- [x] Remove dead `bountyDeferred` compatibility state from `OrderRouter`
+- [x] Re-run focused perps verification for close-bounty accounting
+
+Review:
+- Updated `src/perps/SECURITY.md` and `src/perps/ACCOUNTING_SPEC.md` so the audit packet now matches the current close-order semantics and the refactor invariant list is renumbered cleanly through item 11.
+- Removed the now-unreachable `bountyDeferred` branch from `src/perps/OrderRouter.sol`, simplifying escrow views, liquidation forfeiture, and keeper payout flow to the single remaining upfront-reserve model.
+- Updated `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` to assert full close-bounty escrow directly instead of checking a dead deferred-state flag.
+- Verified clean grep for stale deferred close-bounty language / `bountyDeferred`, plus focused green Forge coverage: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "OrderRecord_UnifiesPendingState|GetAccountEscrow_ReturnsCommittedMarginAndExecutionBounties|CloseOrderCommitsRequireUpfrontExecutionBounty|H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit"`.
+
 - [x] Inspect the verified audit regressions and identify the implementation paths to change
 - [x] Fix close-order bounty escrow, partial-close loss reachability, stale senior-rate finalization, and forfeited-bounty fee booking
 - [x] Re-run targeted Forge coverage for the new regressions and adjacent suites
@@ -471,6 +481,19 @@ Review:
 - This preserves the earlier `HousePool.getPendingTrancheState()`/`TrancheVault.maxWithdraw()` architecture while removing the remaining stale-funding gap that could cause `maxWithdraw()`/`maxRedeem()` to overestimate executable liquidity.
 - Added regressions in `test/perps/HousePool.t.sol` proving both `maxWithdraw()` and `maxRedeem()` remain executable during frozen-oracle windows with unsynced accrued funding.
 - Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_MaxWithdraw_RemainsExecutableWithPendingFundingAccrual|test_MaxRedeem_RemainsExecutableWithPendingFundingAccrual|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw|test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit"`.
+
+## Liquidation Escrow Funding Ordering Fix (Mar 19 2026)
+
+- [x] Sync funding before router-forfeited escrow mutates vault assets during liquidation
+- [x] Keep router protocol-fee bookkeeping side-effect free after cash transfer
+- [x] Add regression proving forfeited escrow cannot retroactively soften elapsed funding
+- [x] Run targeted liquidation/funding verification and record results
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so liquidation forfeiture now calls `engine.syncFunding()` before transferring escrowed bounty USDC into the vault and recognizing it as canonical inflow.
+- Updated `src/perps/CfdEngine.sol` so `recordRouterProtocolFee()` is now pure post-transfer bookkeeping and no longer re-syncs funding against already-mutated vault depth.
+- Added a liquidation regression in `test/perps/OrderRouter.t.sol` that records logs and proves `FundingUpdated` fires before `ProtocolInflowAccounted` when queued execution escrow is forfeited during liquidation, preventing retroactive depth softening for the elapsed funding interval.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement|test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding|test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders"`.
 - Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
@@ -499,7 +522,7 @@ Review:
 Review:
 - Re-verified the six findings in the latest “Plether Perpetuals Engine” audit draft against current `src/perps` code and focused Forge coverage.
 - Confirmed one live bug: frozen-oracle order execution still disables MEV publish-time checks in `src/perps/libraries/OrderOraclePolicyLib.sol`, and `test_CloseOrderExecutesAtStaleFridayPrice` still passes in `test/perps/OrderRouter.t.sol`.
-- Confirmed two formerly valid blocker findings are fixed on this branch: partial-close committed-margin accounting now routes through shared bucket planning, and fully utilized close commits use deferred bounties instead of reverting for zero free settlement.
+- Confirmed two formerly valid blocker findings are fixed on this branch: partial-close committed-margin accounting now routes through shared bucket planning, and close commits now require upfront bounty backing instead of relying on deferred close-bounty behavior.
 - Confirmed the senior-tranche dust deadlock remains live in `src/perps/HousePool.sol` because only exact-zero principal resets the high-water mark; any `0 < seniorPrincipal < seniorHighWaterMark` still reverts deposits.
 - Informational notes are accurate and already documented/tested: the VPI zero-floor tradeoff is explicit in `src/perps/libraries/CloseAccountingLib.sol`, and `src/perps/TrancheVault.sol` still lets a third party reset cooldown with a meaningful top-up.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseOrderExecutesAtStaleFridayPrice|test_SundayDst_MevEnforcedAt21"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "test_H1_PartialCloseWithPendingOrderDoesNotRevert|test_H1_PartialCloseLossConsumesCommittedMarginReservation|test_H2_FullyUtilizedTraderCanSubmitAndExecuteCloseOrder"`.

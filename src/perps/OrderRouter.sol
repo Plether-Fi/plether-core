@@ -44,7 +44,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 nextMarginOrderId;
         uint64 prevMarginOrderId;
         bool inMarginQueue;
-        bool bountyDeferred;
     }
 
     struct AccountEscrow {
@@ -387,8 +386,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function executionBountyReserves(
         uint64 orderId
     ) external view returns (uint256) {
-        OrderRecord storage record = orderRecords[orderId];
-        return record.bountyDeferred ? 0 : record.executionBountyUsdc;
+        return orderRecords[orderId].executionBountyUsdc;
     }
 
     function isInMarginQueue(
@@ -412,9 +410,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
-            if (!record.bountyDeferred) {
-                escrow.executionBountyUsdc += record.executionBountyUsdc;
-            }
+            escrow.executionBountyUsdc += record.executionBountyUsdc;
             escrow.pendingOrderCount++;
             orderId = record.nextPendingOrderId;
         }
@@ -841,11 +837,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             if (record.executionBountyUsdc > 0) {
-                if (!record.bountyDeferred) {
-                    forfeitedUsdc += record.executionBountyUsdc;
-                }
+                forfeitedUsdc += record.executionBountyUsdc;
                 record.executionBountyUsdc = 0;
-                record.bountyDeferred = false;
             }
             orderId = record.nextPendingOrderId;
         }
@@ -854,6 +847,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             return;
         }
 
+        engine.syncFunding();
         USDC.safeTransfer(address(vault), forfeitedUsdc);
         vault.recordProtocolInflow(forfeitedUsdc);
         engine.recordRouterProtocolFee(forfeitedUsdc);
@@ -899,18 +893,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
-        if (record.bountyDeferred) {
-            record.bountyDeferred = false;
-            IMarginClearinghouse ch = IMarginClearinghouse(engine.clearinghouse());
-            if (ch.getFreeSettlementBalanceUsdc(record.core.accountId) >= executionBountyUsdc) {
-                ch.seizeUsdc(record.core.accountId, executionBountyUsdc, address(this));
-                USDC.safeTransfer(msg.sender, executionBountyUsdc);
-            } else {
-                executionBountyUsdc = 0;
-            }
-        } else {
-            USDC.safeTransfer(msg.sender, executionBountyUsdc);
-        }
+        USDC.safeTransfer(msg.sender, executionBountyUsdc);
     }
 
     function _refundExecutionBounty(

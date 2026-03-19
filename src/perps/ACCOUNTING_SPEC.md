@@ -416,7 +416,7 @@ The refactor should preserve or enforce the following:
 8. terminal full closes and liquidations must not perform work proportional to total queue length
 9. full closes must not eagerly cancel unrelated queued orders, while liquidations may perform bounded account-local eager cleanup under the per-account pending-order cap
 10. each account must have a hard upper bound on simultaneously pending orders so liquidation cleanup remains bounded in practice
-8. every path that deletes a position re-checks degraded-mode containment
+11. every path that deletes a position re-checks degraded-mode containment
 
 ## Refactor Target Modules
 

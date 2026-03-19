@@ -390,7 +390,11 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             router.quoteCloseOrderExecutionBountyUsdc(),
             "Head close order should be economically backed the moment it enters FIFO"
         );
-        assertEq(router.getOrderRecord(headOrderId).bountyDeferred, false, "Close orders should not rely on deferred bounty state");
+        assertEq(
+            router.getOrderRecord(headOrderId).executionBountyUsdc,
+            router.quoteCloseOrderExecutionBountyUsdc(),
+            "Close orders should escrow the full bounty in router custody"
+        );
     }
 
     function test_H2_SlippageFailedHeadCloseMustStillPayKeeper() public {

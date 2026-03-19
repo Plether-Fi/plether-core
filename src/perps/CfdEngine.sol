@@ -529,7 +529,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already synced funding and funded the vault.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -537,7 +537,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        _syncFunding();
         accumulatedFeesUsdc += amountUsdc;
     }
 
