@@ -280,27 +280,4 @@ library CfdEnginePlanTypes {
         uint256 price;
     }
 
-    // ──────────────────────────────────────────────
-    //  OPEN PREVIEW (new — did not exist before)
-    // ──────────────────────────────────────────────
-
-    struct OpenPreview {
-        bool valid;
-        uint8 invalidCode;
-        uint256 executionPrice;
-        uint256 sizeDelta;
-        int256 fundingUsdc;
-        int256 vpiUsdc;
-        uint256 executionFeeUsdc;
-        int256 tradeCostUsdc;
-        uint256 newSize;
-        uint256 newEntryPrice;
-        uint256 marginAfter;
-        uint256 addedMaxProfitUsdc;
-        bool triggersDegradedMode;
-        bool postOpDegradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
-    }
-
 }

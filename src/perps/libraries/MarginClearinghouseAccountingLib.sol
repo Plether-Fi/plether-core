@@ -56,7 +56,7 @@ library MarginClearinghouseAccountingLib {
         consumption.uncoveredUsdc = remainingLossUsdc - consumption.activeMarginConsumedUsdc;
     }
 
-    function getLiquidationReachableUsdc(
+    function getTerminalReachableUsdc(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal pure returns (uint256 reachableUsdc) {
         reachableUsdc = getSettlementReachableUsdc(buckets, 0);
@@ -115,7 +115,7 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         int256 residualUsdc
     ) internal pure returns (LiquidationResidualPlan memory plan) {
-        uint256 reachableUsdc = getLiquidationReachableUsdc(buckets);
+        uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
 
         if (residualUsdc >= 0) {
             uint256 targetBalanceUsdc = uint256(residualUsdc);

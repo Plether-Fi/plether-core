@@ -39,7 +39,7 @@ interface ICfdEngine {
         uint256 deferredPayoutUsdc;
         uint256 pendingOrderCount;
         uint256 closeReachableUsdc;
-        uint256 liquidationReachableUsdc;
+        uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
         bool hasPosition;

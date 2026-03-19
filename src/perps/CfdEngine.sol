@@ -38,7 +38,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 freeSettlementUsdc;
         // Current UI helper only; this does not include terminally reachable queued committed margin.
         uint256 closeReachableUsdc;
-        uint256 liquidationReachableUsdc;
+        uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
         uint256 deferredPayoutUsdc;
@@ -669,7 +669,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             price,
@@ -871,7 +871,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         // This remains a free-settlement view helper, not the broader terminally reachable amount that
         // full-close settlement can consume after queued committed margin is released/consumed.
         viewData.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        viewData.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        viewData.terminalReachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         viewData.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         viewData.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
         viewData.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
@@ -918,7 +918,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
         snapshot.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        snapshot.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        snapshot.terminalReachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
 
@@ -931,7 +931,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             lastMarkPrice,
             CAP_PRICE,
             getPendingFunding(pos),
-            snapshot.liquidationReachableUsdc,
+            snapshot.terminalReachableUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
 
@@ -954,7 +954,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return viewData;
         }
 
-        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             lastMarkPrice,
@@ -1139,8 +1139,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         CfdEnginePlanTypes.LiquidationDelta memory delta = CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
 
         preview.liquidatable = delta.liquidatable;
-        preview.reachableCollateralUsdc =
-            MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(snap.accountBuckets);
+        preview.reachableCollateralUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
         preview.fundingUsdc = delta.riskState.pendingFundingUsdc;
         preview.equityUsdc = delta.riskState.equityUsdc;
@@ -1156,16 +1155,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
         preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
-    }
-
-    function viewDataMaxLiabilityAfterClose(
-        CfdTypes.Side side,
-        uint256 maxProfitReduction
-    ) internal view returns (uint256) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            bullState.maxProfitUsdc, bearState.maxProfitUsdc, side, maxProfitReduction
-        );
     }
 
     function getPositionSide(

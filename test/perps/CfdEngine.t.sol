@@ -328,7 +328,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
 
-        assertEq(engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Execution should match previewed deferment");
+        assertEq(
+            engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Execution should match previewed deferment"
+        );
         (uint256 remainingSize,,,,,,,) = engine.positions(bearId);
         assertEq(remainingSize, preview.remainingSize, "Partial close should preserve the residual position");
     }
@@ -530,16 +532,13 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
-
         assertEq(viewData.settlementBalanceUsdc, clearinghouse.balanceUsdc(accountId));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.activePositionMarginUsdc, positionMargin);
         assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(
-            viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin)
-        );
+        assertEq(viewData.terminalReachableUsdc, clearinghouse.getTerminalReachableUsdc(accountId));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
         assertEq(viewData.deferredPayoutUsdc, 0);
@@ -690,7 +689,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.deferredPayoutUsdc, collateralView.deferredPayoutUsdc);
         assertEq(snapshot.pendingOrderCount, escrow.pendingOrderCount);
         assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
-        assertEq(snapshot.liquidationReachableUsdc, collateralView.liquidationReachableUsdc);
+        assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
         assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
         assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
         assertEq(snapshot.hasPosition, positionView.exists);
@@ -1230,7 +1229,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshot.liquidationReachableUsdc,
+            snapshot.terminalReachableUsdc,
             "Liquidation preview must use the same liquidation reachability as the account ledger snapshot"
         );
         assertLt(

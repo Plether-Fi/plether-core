@@ -1633,7 +1633,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshotBefore.liquidationReachableUsdc,
+            snapshotBefore.terminalReachableUsdc,
             "Preview must exclude queued execution escrow from liquidation reachability"
         );
         assertEq(

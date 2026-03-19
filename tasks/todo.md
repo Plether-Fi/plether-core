@@ -1,3 +1,14 @@
+- [x] Record a cleanup plan for stale perps preview/accounting surfaces
+- [x] Remove dead enum/struct/helper code and simplify liquidation reachability API
+- [x] Update affected tests for the API cleanup
+- [x] Run targeted forge verification and record results
+
+Review:
+- Removed dead semantic leftovers in the perps surface: deleted the unused `OpenPreview` struct, the unused `viewDataMaxLiabilityAfterClose()` helper, and the stale close-preview enum member `InsufficientVaultLiquidity`.
+- Simplified the clearinghouse liquidation reachability API in `src/perps/interfaces/IMarginClearinghouse.sol` and `src/perps/MarginClearinghouse.sol` so `getLiquidationReachableUsdc()` now takes only `accountId`, matching its actual behavior.
+- Updated engine and invariant/unit tests to use the tightened API and kept the collateral-view assertions intact in `test/perps/CfdEngine.t.sol`, `test/perps/PerpInvariant.t.sol`, and `test/perps/invariant/PerpPreviewInvariant.t.sol`.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol` (97 passed), `forge test --match-path test/perps/PerpInvariant.t.sol` (28 passed), and `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol` (7 passed). `forge build` did not finish within a 300s timeout in this environment.
+
 - [x] Inspect current `HousePool`/`CfdEngine` accounting handoff and identify every getter the pool stitches together
 - [x] Add one canonical `HousePoolInputSnapshot` engine view and refactor `HousePool` to consume it everywhere
 - [x] Update interfaces/tests/docs as needed and run targeted perps verification
@@ -409,6 +420,18 @@ Review:
 - Extended `src/perps/libraries/MarginClearinghouseAccountingLib.sol` with shared bucket-mutation outputs for funding loss, terminal close loss, and liquidation residual application, so planning and storage-application now live in the same accounting domain.
 - Updated `src/perps/MarginClearinghouse.sol` so `consumeFundingLoss()`, `consumeCloseLoss()`, and `consumeLiquidationResidual()` all apply bucket updates, settlement debits, and unlock semantics through the shared mutation layer instead of hand-writing each mutation path inline.
 - Preserved existing behavior and event semantics while reducing the remaining planning-vs-application drift surface in the clearinghouse.
+
+- [x] Verify the new external audit report finding-by-finding against current perps code
+- [x] Run or inspect focused evidence for each claimed issue and note whether it is live, fixed, or invalid
+- [x] Record a concise verdict with supporting file references and any follow-up verification gaps
+
+Review:
+- Re-verified the six findings in the latest “Plether Perpetuals Engine” audit draft against current `src/perps` code and focused Forge coverage.
+- Confirmed one live bug: frozen-oracle order execution still disables MEV publish-time checks in `src/perps/libraries/OrderOraclePolicyLib.sol`, and `test_CloseOrderExecutesAtStaleFridayPrice` still passes in `test/perps/OrderRouter.t.sol`.
+- Confirmed two formerly valid blocker findings are fixed on this branch: partial-close committed-margin accounting now routes through shared bucket planning, and fully utilized close commits use deferred bounties instead of reverting for zero free settlement.
+- Confirmed the senior-tranche dust deadlock remains live in `src/perps/HousePool.sol` because only exact-zero principal resets the high-water mark; any `0 < seniorPrincipal < seniorHighWaterMark` still reverts deposits.
+- Informational notes are accurate and already documented/tested: the VPI zero-floor tradeoff is explicit in `src/perps/libraries/CloseAccountingLib.sol`, and `src/perps/TrancheVault.sol` still lets a third party reset cooldown with a meaningful top-up.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseOrderExecutesAtStaleFridayPrice|test_SundayDst_MevEnforcedAt21"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "test_H1_PartialCloseWithPendingOrderDoesNotRevert|test_H1_PartialCloseLossConsumesCommittedMarginReservation|test_H2_FullyUtilizedTraderCanSubmitAndExecuteCloseOrder"`.
 - Verified green: targeted clearinghouse/engine/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `451 tests passed, 0 failed, 0 skipped`.
 
 - [x] Fix remaining audit issues in router bounty custody, cancellation binding, and batch gas handling

@@ -27,8 +27,8 @@ contract PerpAccountingHandler is Test {
         uint8 action;
         uint256 beforeCloseReachableUsdc;
         uint256 afterCloseReachableUsdc;
-        uint256 beforeLiquidationReachableUsdc;
-        uint256 afterLiquidationReachableUsdc;
+        uint256 beforeTerminalReachableUsdc;
+        uint256 afterTerminalReachableUsdc;
     }
 
     MockUSDC public immutable usdc;
@@ -685,8 +685,8 @@ contract PerpAccountingHandler is Test {
             action: action,
             beforeCloseReachableUsdc: beforeSnapshot.closeReachableUsdc,
             afterCloseReachableUsdc: afterSnapshot.closeReachableUsdc,
-            beforeLiquidationReachableUsdc: beforeSnapshot.liquidationReachableUsdc,
-            afterLiquidationReachableUsdc: afterSnapshot.liquidationReachableUsdc
+            beforeTerminalReachableUsdc: beforeSnapshot.terminalReachableUsdc,
+            afterTerminalReachableUsdc: afterSnapshot.terminalReachableUsdc
         });
     }
 

@@ -442,12 +442,11 @@ contract PerpInvariantTest is BasePerpTest {
     function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
-            uint256 protectedMargin = size > 0 ? margin : 0;
+            (uint256 size,,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
-                clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
+                clearinghouse.getTerminalReachableUsdc(accountId),
                 buckets.settlementBalanceUsdc,
                 "All trader-owned settlement collateral should remain terminally reachable"
             );

@@ -195,13 +195,11 @@ contract MarginClearinghouse is Ownable2Step {
         return getAccountUsdcBuckets(accountId).freeSettlementUsdc;
     }
 
-    /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
-    function getLiquidationReachableUsdc(
-        bytes32 accountId,
-        uint256 protectedPositionMarginUsdc
+    /// @notice Returns settlement balance reachable by a terminal settlement path.
+    function getTerminalReachableUsdc(
+        bytes32 accountId
     ) public view returns (uint256) {
-        protectedPositionMarginUsdc;
-        return MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(_buildAccountUsdcBuckets(accountId));
+        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(_buildAccountUsdcBuckets(accountId));
     }
 
     /// @notice Returns settlement balance reachable after protecting only an explicitly remaining margin bucket.

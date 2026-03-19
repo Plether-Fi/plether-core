@@ -376,8 +376,9 @@ library CfdEnginePlanLib {
 
         int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.funding.fundingVaultPayoutUsdc);
         if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
-            physicalAssetsDeltaUsdc +=
-                int256(delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree);
+            physicalAssetsDeltaUsdc += int256(
+                delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree
+            );
         }
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
@@ -394,7 +395,8 @@ library CfdEnginePlanLib {
                 physicalAssetsDeltaUsdc: physicalAssetsDeltaUsdc,
                 protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
+                deferredTraderPayoutDeltaUsdc: delta.funding.payoutType
+                    == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
                     ? uint256(delta.funding.pendingFundingUsdc)
                     : 0,
                 deferredLiquidationBountyDeltaUsdc: 0,
@@ -669,8 +671,7 @@ library CfdEnginePlanLib {
         int256 pendingFunding = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
 
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
-        uint256 reachableCollateralUsdc =
-            MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(snap.accountBuckets);
+        uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos, price, snap.capPrice, pendingFunding, reachableCollateralUsdc, maintMarginBps

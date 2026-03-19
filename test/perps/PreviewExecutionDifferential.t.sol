@@ -352,7 +352,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshotBefore.liquidationReachableUsdc,
+            snapshotBefore.terminalReachableUsdc,
             "Liquidation preview must exclude router execution escrow from reachable collateral"
         );
         assertEq(

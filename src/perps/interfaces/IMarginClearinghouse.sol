@@ -190,10 +190,9 @@ interface IMarginClearinghouse {
         bytes32 accountId
     ) external view returns (uint256);
 
-    /// @notice Returns settlement-asset balance reachable during liquidation or other terminal settlement.
-    function getLiquidationReachableUsdc(
-        bytes32 accountId,
-        uint256 positionMarginUsdc
+    /// @notice Returns settlement-asset balance reachable during a terminal settlement path.
+    function getTerminalReachableUsdc(
+        bytes32 accountId
     ) external view returns (uint256);
 
     /// @notice Returns settlement-asset balance reachable for a terminal or partial settlement path.
