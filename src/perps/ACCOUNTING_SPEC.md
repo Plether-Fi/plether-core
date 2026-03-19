@@ -360,7 +360,7 @@ Oracle freshness policy must be action-specific.
 ### Reconciliation / Withdrawals
 
 - must use a freshness policy suitable for LP accounting,
-- stale marks may block or defer reconciliation depending on whether the action is allowed to proceed conservatively without a fresh mark.
+- stale marks may block reconciliation entirely, or allow only conservative admin actions that do not accrue stale-window yield or move LP value across the waterfall.
 
 Required principle:
 

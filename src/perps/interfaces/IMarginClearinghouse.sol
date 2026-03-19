@@ -156,6 +156,7 @@ interface IMarginClearinghouse {
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
+        bool includeOtherLockedMargin,
         address recipient
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.

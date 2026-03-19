@@ -856,6 +856,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
         USDC.safeTransfer(address(vault), forfeitedUsdc);
         vault.recordProtocolInflow(forfeitedUsdc);
+        engine.recordRouterProtocolFee(forfeitedUsdc);
     }
 
     function _clearLiquidatedAccountOrders(
@@ -1052,18 +1053,16 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 executionBountyUsdc,
         bool isClose
     ) internal {
+        isClose;
         if (executionBountyUsdc == 0) {
             return;
         }
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) >= executionBountyUsdc) {
-            clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
-            orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
-        } else if (isClose) {
-            orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
-            orderRecords[orderId].bountyDeferred = true;
-        } else {
+        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
             revert OrderRouter__InsufficientFreeEquity();
         }
+
+        clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
+        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
     }
 
     function _reserveCommittedMargin(

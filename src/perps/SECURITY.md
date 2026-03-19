@@ -312,8 +312,8 @@ When a position goes underwater (equity < 0):
 
 #### Stale Mark Blocks Withdrawals and Yield Accrual
 
-- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, and `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`. During genuine oracle-frozen windows, these paths use `fadMaxStaleness` instead.
-- **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
+- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`, and `finalizeSeniorRate()` updates the configured rate without accruing stale-window senior yield. During genuine oracle-frozen windows, these paths use `fadMaxStaleness` instead.
+- **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue or get backfilled via rate finalization. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
 - **Resolution**: Any keeper or user can call `router.updateMarkPrice()` with a fresh Pyth payload to unblock operations.
 
 #### Senior Yield is a Preferred Return, Not a Fixed Coupon

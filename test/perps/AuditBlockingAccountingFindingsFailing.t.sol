@@ -310,6 +310,29 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         assertLt(committedAfter, committedBefore, "Committed margin reservation should be partially consumed by loss");
     }
 
+    function test_H1_PartialCloseMustNotConsumeCommittedMarginReservation() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
+
+        uint256 committedBefore = router.committedMargins(1);
+
+        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
+
+        uint256 committedAfter = router.committedMargins(1);
+        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+
+        assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position live");
+        assertEq(committedAfter, committedBefore, "Partial close should not consume queued committed margin");
+    }
+
 }
 
 contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
@@ -332,52 +355,68 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         );
     }
 
-    function test_H2_FullyUtilizedTraderCanSubmitAndExecuteCloseOrder() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function _setupCloseBountyBacked() internal returns (bytes32 accountId, bytes32 counterId) {
+        accountId = bytes32(uint256(uint160(trader)));
+        counterId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 5001e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 1e6, "Close bounty should be prefunded");
+    }
+
+    function test_H2_FullyUtilizedTraderCannotSubmitCloseOrder() public {
+        _setupFullyUtilized();
+
+        vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+    }
+
+    function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
-        assertTrue(record.bountyDeferred, "Close order bounty should be deferred when free settlement is 0");
-        assertEq(record.executionBountyUsdc, 1e6, "Deferred bounty amount should be 1 USDC");
-        assertEq(router.executionBountyReserves(1), 0, "Router should not custody deferred bounty");
+        uint64 headOrderId = router.nextExecuteId();
+        uint256 reservedBounty = router.executionBountyReserves(headOrderId);
+        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        assertEq(escrow.executionBountyUsdc, 0, "Deferred bounty must not appear in account escrow view");
+        assertGe(
+            reservedBounty + freeSettlement,
+            router.quoteCloseOrderExecutionBountyUsdc(),
+            "Head close order should be economically backed the moment it enters FIFO"
+        );
+        assertEq(router.getOrderRecord(headOrderId).bountyDeferred, false, "Close orders should not rely on deferred bounty state");
+    }
 
-        uint256 routerBalanceBefore = usdc.balanceOf(address(router));
+    function test_H2_SlippageFailedHeadCloseMustStillPayKeeper() public {
+        _setupCloseBountyBacked();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 90_000_000, true);
+
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
+        vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-        assertEq(sizeAfter, 0, "Close should have fully closed the position");
-
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 1e6, "Keeper should receive the deferred bounty from freed margin");
-
-        assertEq(
-            usdc.balanceOf(address(router)),
-            routerBalanceBefore,
-            "Router USDC balance should be unchanged (deferred bounty bypasses router custody)"
-        );
-
-        record = router.getOrderRecord(1);
-        assertFalse(record.bountyDeferred, "Deferred flag should be cleared after collection");
-        assertEq(record.executionBountyUsdc, 0, "Bounty amount should be zeroed after collection");
+        assertEq(keeperBounty, 1e6, "Head slippage failure should still pay the keeper bounty");
+        assertEq(router.nextExecuteId(), 2, "Head failure should still advance the FIFO pointer");
     }
 
-    function test_H2_ExpiredDeferredCloseForfeitsKeeperBounty() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        assertTrue(router.getOrderRecord(1).bountyDeferred, "Should be deferred");
 
         router.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -393,22 +432,20 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 0, "Expired deferred close should forfeit keeper bounty");
+        assertEq(keeperBounty, 1e6, "Expired head close should still pay the keeper bounty");
 
         assertEq(
             clearinghouse.getFreeSettlementBalanceUsdc(accountId),
             0,
-            "Trader margin should remain untouched after expired close"
+            "Escrowed close bounty should be consumed from prefunded free settlement"
         );
     }
 
-    function test_H2_LiquidationWithDeferredCloseOrderDoesNotOverTransfer() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyEscrowedBounty() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        assertTrue(router.getOrderRecord(1).bountyDeferred, "Should be deferred");
 
         uint256 routerBalanceBefore = usdc.balanceOf(address(router));
 
@@ -423,8 +460,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         assertEq(
             usdc.balanceOf(address(router)),
-            routerBalanceBefore,
-            "Router should not transfer USDC it doesnt hold for deferred bounties"
+            routerBalanceBefore - 1e6,
+            "Router should transfer exactly the escrowed close bounty on liquidation"
         );
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
@@ -439,4 +476,28 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, type(uint256).max, false);
     }
 
+}
+
+contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest {
+
+    address seniorLp = address(0xA11CE);
+    address juniorLp = address(0xB0B);
+
+    function test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield() public {
+        address trader = address(0x3333);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundSenior(seniorLp, 200_000e6);
+        _fundJunior(juniorLp, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 unpaidBefore = pool.unpaidSeniorYield();
+
+        pool.proposeSeniorRate(1600);
+        vm.warp(block.timestamp + 48 hours + 121);
+        pool.finalizeSeniorRate();
+
+        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue senior yield");
+    }
 }

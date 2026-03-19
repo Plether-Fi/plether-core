@@ -1,3 +1,24 @@
+- [x] Inspect the verified audit regressions and identify the implementation paths to change
+- [x] Fix close-order bounty escrow, partial-close loss reachability, stale senior-rate finalization, and forfeited-bounty fee booking
+- [x] Re-run targeted Forge coverage for the new regressions and adjacent suites
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so close orders now require the same upfront execution-bounty backing as opens, and liquidation-forfeited queued order bounties now book protocol fees through `engine.recordRouterProtocolFee(...)` after the router funds the vault.
+- Updated `src/perps/libraries/CfdEnginePlanLib.sol`, `src/perps/MarginClearinghouse.sol`, and `src/perps/CfdEngine.sol` so partial closes no longer reach into queued committed/reserved order buckets; only full closes pass `includeOtherLockedMargin = true` to close-loss settlement.
+- Updated `src/perps/HousePool.sol` so stale `finalizeSeniorRate()` windows stop accruing senior yield instead of checkpointing stale-window growth.
+- Updated audit and adjacent tests in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol`, `test/perps/AuditRemainingCoverageFindingsFailing.t.sol`, `test/perps/HousePool.t.sol`, `test/perps/OrderRouter.t.sol`, and `test/perps/MarginClearinghouse.t.sol` to reflect the fixed semantics.
+- Verified green: targeted audit regressions (`8 passed`), close-bounty router tests (`3 passed`), stale senior-rate tests (`2 passed`), and clearinghouse close-loss tests (`3 passed`).
+
+- [x] Review the current audit-report findings against existing regression coverage
+- [x] Add failing regressions for head-of-queue economic clearability and related accounting mismatches
+- [x] Run targeted Forge tests and record the current failure deltas
+
+Review:
+- Added queue-liveness regressions in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` asserting that a head close order is economically backed at commit time and that head close expiry/slippage terminal paths still pay keepers.
+- Added inverse regression coverage for the partial-close reservation boundary in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol`, so partial closes now explicitly fail if they consume queued committed margin.
+- Added stale-mark / fee-ownership regressions in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` and `test/perps/AuditRemainingCoverageFindingsFailing.t.sol` asserting that stale `finalizeSeniorRate()` must not accrue senior yield and liquidation-forfeited queued order bounties must accrue protocol fees.
+- Verified current failures with targeted runs: `test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit` (`0 < 1e6`), `test_H2_SlippageFailedDeferredHeadCloseMustStillPayKeeper` (`0 != 1e6`), `test_H2_ExpiredDeferredHeadCloseMustStillPayKeeper` (`0 != 1e6`), `test_H1_PartialCloseMustNotConsumeCommittedMarginReservation` (`3_457_400_000 != 4_000_000_000`), `test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield` (`87_732_623 != 0`), and `test_L1_LiquidationForfeitedOrderBountyMustAccrueProtocolFees` (`0 != 1e6`).
+
 - [x] Add explicit HousePool protocol inflow accounting restricted to the engine
 - [x] Wire endogenous vault inflows into canonical accounting across engine settlement paths
 - [x] Add regression tests for protocol inflows vs unsolicited excess

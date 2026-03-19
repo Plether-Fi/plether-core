@@ -161,7 +161,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         emit SeniorRateProposed(_rateBps, seniorRateActivationTime);
     }
 
-    /// @notice Finalize the proposed senior rate after timelock expires
+    /// @notice Finalize the proposed senior rate after timelock expires.
+    /// @dev Syncs funding first. If the mark is stale, the new rate is applied without accruing stale-window senior yield.
     function finalizeSeniorRate() external onlyOwner {
         if (seniorRateActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -176,8 +177,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ) = _getHousePoolSnapshots();
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             _reconcile(accountingSnapshot);
-        } else {
-            _accrueSeniorYieldOnly();
         }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;

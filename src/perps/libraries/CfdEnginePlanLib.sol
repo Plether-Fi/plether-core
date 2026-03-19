@@ -522,9 +522,12 @@ library CfdEnginePlanLib {
         } else if (cs.netSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
             uint256 lossUsdc = uint256(-cs.netSettlementUsdc);
+            bool includeOtherLockedMargin = remainingSize == 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
-                _buildCloseSettlementBuckets(snap, cs.marginToFreeUsdc, delta.funding, cs.remainingMarginUsdc);
+                _buildCloseSettlementBuckets(
+                    snap, cs.marginToFreeUsdc, delta.funding, cs.remainingMarginUsdc, includeOtherLockedMargin
+                );
             delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
                 closeBuckets, cs.remainingMarginUsdc, lossUsdc
             );
@@ -614,8 +617,10 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 marginToFreeUsdc,
         CfdEnginePlanTypes.FundingDelta memory fd,
-        uint256 remainingPosMarginUsdc
+        uint256 remainingPosMarginUsdc,
+        bool includeOtherLockedMargin
     ) private pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
+        remainingPosMarginUsdc;
         uint256 posMarginAfterFunding =
             snap.lockedBuckets.positionMarginUsdc + fd.posMarginIncrease - fd.posMarginDecrease;
         uint256 adjustedPosMargin =
@@ -630,8 +635,8 @@ library CfdEnginePlanLib {
         return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
             settlementBalance,
             adjustedPosMargin,
-            snap.lockedBuckets.committedOrderMarginUsdc,
-            snap.lockedBuckets.reservedSettlementUsdc
+            includeOtherLockedMargin ? snap.lockedBuckets.committedOrderMarginUsdc : 0,
+            includeOtherLockedMargin ? snap.lockedBuckets.reservedSettlementUsdc : 0
         );
     }
 

@@ -453,7 +453,7 @@ contract OrderRouterTest is BasePerpTest {
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
 
         vm.prank(address(engine));
         router.syncMarginQueue(accountId);
@@ -531,7 +531,7 @@ contract OrderRouterTest is BasePerpTest {
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
 
         bytes[] memory empty;
         router.executeOrder(1, empty);

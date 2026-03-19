@@ -108,6 +108,42 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
 
 }
 
+contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BasePerpTest {
+
+    address trader = address(0xA202);
+    address counterparty = address(0xA203);
+    address keeper = address(0xA204);
+
+    function test_L1_LiquidationForfeitedOrderBountyMustAccrueProtocolFees() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 100_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8);
+        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+
+        uint256 forfeitedBounty = router.executionBountyReserves(1);
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(196_000_000));
+
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            forfeitedBounty,
+            "Forfeited queued order bounties should accrue to protocol fees"
+        );
+    }
+}
+
 contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTest {
 
     address trader = address(0xD057);

@@ -463,7 +463,7 @@ contract MarginClearinghouseTest is Test {
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 31;
         (uint256 seizedUsdc, uint256 shortfallUsdc) =
-            clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
+            clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, true, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
@@ -490,7 +490,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](0);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, engine);
+        clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1800 * 1e6, 0, true, engine);
         vm.stopPrank();
     }
 
@@ -503,7 +503,7 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](0);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1500 * 1e6, 0, engine);
+        clearinghouse.consumeCloseLoss(aliceId, reservationIds, 1500 * 1e6, 0, true, engine);
         vm.stopPrank();
     }
 

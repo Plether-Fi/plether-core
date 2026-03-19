@@ -552,13 +552,19 @@ contract MarginClearinghouse is Ownable2Step {
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
+        bool includeOtherLockedMargin,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc) {
         if (lossUsdc == 0) {
             return (0, 0);
         }
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+            settlementBalances[accountId],
+            positionMarginUsdc[accountId],
+            includeOtherLockedMargin ? committedOrderMarginUsdc[accountId] : 0,
+            includeOtherLockedMargin ? reservedSettlementUsdc[accountId] : 0
+        );
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
@@ -575,7 +581,7 @@ contract MarginClearinghouse is Ownable2Step {
                 accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc
             );
         }
-        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+        if (includeOtherLockedMargin && mutation.otherLockedMarginUnlockedUsdc > 0) {
             _consumeOtherLockedMarginViaReservations(
                 accountId, reservationOrderIds, mutation.otherLockedMarginUnlockedUsdc
             );
