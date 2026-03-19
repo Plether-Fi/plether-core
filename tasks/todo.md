@@ -1,3 +1,66 @@
+- [x] Fix partial-close settlement reachability so queued committed/reserved collateral stays excluded from both preview and live loss consumption
+- [x] Add/adjust regressions proving partial closes cannot implicitly spend queued collateral
+- [x] Run targeted Forge coverage for clearinghouse + close preview/live parity
+
+Review:
+- Added `buildPartialCloseUsdcBuckets(...)` in `src/perps/libraries/MarginClearinghouseAccountingLib.sol` and switched both `src/perps/libraries/CfdEnginePlanLib.sol` and `src/perps/MarginClearinghouse.sol` to use it whenever partial closes must exclude queued committed/reserved collateral from reachable settlement.
+- Added a clearinghouse regression in `test/perps/MarginClearinghouse.t.sol` proving `consumeCloseLoss(..., false, ...)` now stops at free settlement plus released live margin and leaves queued reservations untouched.
+- Tightened `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` H1 coverage around the new partial-close helper semantics without relying on stateful preview/live interleaving.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "ConsumeCloseLoss"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_UnderwaterPartialMatchesLiveRevert|PreviewClose_PartialLossUsesSettlementFreedByReleasedMargin"`, and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "H1_"`.
+
+- [x] Sweep remaining perps docs for stale deferred-close-bounty language and numbering drift
+- [x] Remove dead `bountyDeferred` compatibility state from `OrderRouter`
+- [x] Re-run focused perps verification for close-bounty accounting
+
+Review:
+- Updated `src/perps/SECURITY.md` and `src/perps/ACCOUNTING_SPEC.md` so the audit packet now matches the current close-order semantics and the refactor invariant list is renumbered cleanly through item 11.
+- Removed the now-unreachable `bountyDeferred` branch from `src/perps/OrderRouter.sol`, simplifying escrow views, liquidation forfeiture, and keeper payout flow to the single remaining upfront-reserve model.
+- Updated `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` to assert full close-bounty escrow directly instead of checking a dead deferred-state flag.
+- Verified clean grep for stale deferred close-bounty language / `bountyDeferred`, plus focused green Forge coverage: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "OrderRecord_UnifiesPendingState|GetAccountEscrow_ReturnsCommittedMarginAndExecutionBounties|CloseOrderCommitsRequireUpfrontExecutionBounty|H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit"`.
+
+- [x] Inspect the verified audit regressions and identify the implementation paths to change
+- [x] Fix close-order bounty escrow, partial-close loss reachability, stale senior-rate finalization, and forfeited-bounty fee booking
+- [x] Re-run targeted Forge coverage for the new regressions and adjacent suites
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so close orders now require the same upfront execution-bounty backing as opens, and liquidation-forfeited queued order bounties now book protocol fees through `engine.recordRouterProtocolFee(...)` after the router funds the vault.
+- Updated `src/perps/libraries/CfdEnginePlanLib.sol`, `src/perps/MarginClearinghouse.sol`, and `src/perps/CfdEngine.sol` so partial closes no longer reach into queued committed/reserved order buckets; only full closes pass `includeOtherLockedMargin = true` to close-loss settlement.
+- Updated `src/perps/HousePool.sol` so stale `finalizeSeniorRate()` windows stop accruing senior yield instead of checkpointing stale-window growth.
+- Updated audit and adjacent tests in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol`, `test/perps/AuditRemainingCoverageFindingsFailing.t.sol`, `test/perps/HousePool.t.sol`, `test/perps/OrderRouter.t.sol`, and `test/perps/MarginClearinghouse.t.sol` to reflect the fixed semantics.
+- Verified green: targeted audit regressions (`8 passed`), close-bounty router tests (`3 passed`), stale senior-rate tests (`2 passed`), and clearinghouse close-loss tests (`3 passed`).
+
+- [x] Review the current audit-report findings against existing regression coverage
+- [x] Add failing regressions for head-of-queue economic clearability and related accounting mismatches
+- [x] Run targeted Forge tests and record the current failure deltas
+
+Review:
+- Added queue-liveness regressions in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` asserting that a head close order is economically backed at commit time and that head close expiry/slippage terminal paths still pay keepers.
+- Added inverse regression coverage for the partial-close reservation boundary in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol`, so partial closes now explicitly fail if they consume queued committed margin.
+- Added stale-mark / fee-ownership regressions in `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` and `test/perps/AuditRemainingCoverageFindingsFailing.t.sol` asserting that stale `finalizeSeniorRate()` must not accrue senior yield and liquidation-forfeited queued order bounties must accrue protocol fees.
+- Verified current failures with targeted runs: `test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit` (`0 < 1e6`), `test_H2_SlippageFailedDeferredHeadCloseMustStillPayKeeper` (`0 != 1e6`), `test_H2_ExpiredDeferredHeadCloseMustStillPayKeeper` (`0 != 1e6`), `test_H1_PartialCloseMustNotConsumeCommittedMarginReservation` (`3_457_400_000 != 4_000_000_000`), `test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield` (`87_732_623 != 0`), and `test_L1_LiquidationForfeitedOrderBountyMustAccrueProtocolFees` (`0 != 1e6`).
+
+- [x] Add explicit HousePool protocol inflow accounting restricted to the engine
+- [x] Wire endogenous vault inflows into canonical accounting across engine settlement paths
+- [x] Add regression tests for protocol inflows vs unsolicited excess
+- [x] Run targeted forge verification and record results
+
+Review:
+- Added `recordProtocolInflow(uint256)` to `src/perps/interfaces/ICfdVault.sol` and `src/perps/HousePool.sol` so canonical vault assets can be advanced explicitly for endogenous inflows while unsolicited donations still flow through `accountExcess()` / `sweepExcess()`.
+- Updated `src/perps/CfdEngine.sol` to account every protocol-owned positive vault inflow immediately after it lands: router cancellation fees, bad-debt recapitalization, positive trade-cost transfers, funding-loss seizures, close-loss seizures, and liquidation seizures.
+- Added focused regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/HousePool.t.sol` to prove endogenous inflows raise canonical assets without being stranded as excess and that only the engine can use the new inflow path.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol` (102 passed), `forge test --match-path test/perps/OrderRouter.t.sol` (117 passed), `forge test --match-path test/perps/invariant/PerpEconomicConservationInvariant.t.sol` (14 passed), and focused HousePool inflow tests (4 passed). The full `test/perps/HousePool.t.sol` suite still has a pre-existing unrelated failure in `test_SeniorHWMResetPreventsRestoration()`.
+
+- [x] Record a cleanup plan for stale perps preview/accounting surfaces
+- [x] Remove dead enum/struct/helper code and simplify liquidation reachability API
+- [x] Update affected tests for the API cleanup
+- [x] Run targeted forge verification and record results
+
+Review:
+- Removed dead semantic leftovers in the perps surface: deleted the unused `OpenPreview` struct, the unused `viewDataMaxLiabilityAfterClose()` helper, and the stale close-preview enum member `InsufficientVaultLiquidity`.
+- Simplified the clearinghouse liquidation reachability API in `src/perps/interfaces/IMarginClearinghouse.sol` and `src/perps/MarginClearinghouse.sol` so `getLiquidationReachableUsdc()` now takes only `accountId`, matching its actual behavior.
+- Updated engine and invariant/unit tests to use the tightened API and kept the collateral-view assertions intact in `test/perps/CfdEngine.t.sol`, `test/perps/PerpInvariant.t.sol`, and `test/perps/invariant/PerpPreviewInvariant.t.sol`.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol` (97 passed), `forge test --match-path test/perps/PerpInvariant.t.sol` (28 passed), and `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol` (7 passed). `forge build` did not finish within a 300s timeout in this environment.
+
 - [x] Inspect current `HousePool`/`CfdEngine` accounting handoff and identify every getter the pool stitches together
 - [x] Add one canonical `HousePoolInputSnapshot` engine view and refactor `HousePool` to consume it everywhere
 - [x] Update interfaces/tests/docs as needed and run targeted perps verification
@@ -389,6 +452,58 @@ Review:
 
 Review:
 - Added `src/perps/libraries/HousePoolWaterfallAccountingLib.sol` to own senior-yield accrual, reconcile planning, senior-withdraw scaling, revenue distribution, and loss absorption.
+
+## Margin Unlock Sequencing Fix (Mar 19 2026)
+
+- [x] Reproduce and document the valid-open / zero-free-settlement failure path
+- [x] Reorder `applyOpenCost()` so negative net margin changes unlock before fee debit checks
+- [x] Add regression coverage for execution success and keeper-bounty preservation
+- [x] Run targeted perps verification and record results
+
+Review:
+- Updated `src/perps/MarginClearinghouse.sol` so `applyOpenCost()` now computes `netMarginChangeUsdc` first, credits rebates, unlocks negative position-margin deltas before checking free settlement, then debits positive trade costs and locks any positive residual margin.
+- Added a direct primitive regression in `test/perps/MarginClearinghouse.t.sol` proving a zero-free-settlement account can still pay open trade costs out of unlocked active position margin.
+- Added an end-to-end router regression in `test/perps/OrderRouter.t.sol` proving a valid increase order with zero free settlement at execution still fills and still pays the reserved execution bounty to the keeper.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "test_ApplyOpenCost_"` and `forge test --match-path test/perps/OrderRouter.t.sol --match-contract OrderRouterTest --match-test "test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost"`.
+
+## TrancheVault Preview Parity Fix (Mar 19 2026)
+
+- [x] Add read-only HousePool helpers that simulate reconciled tranche principals and withdrawal caps
+- [x] Update `TrancheVault` preview/max paths to consume reconciled view state instead of stale stored principals
+- [x] Add regressions covering previewDeposit/maxWithdraw parity against live reconcile-first execution
+- [x] Run targeted HousePool/TrancheVault verification and record results
+
+Review:
+- Added `IHousePool.getPendingTrancheState()` plus a `HousePool` view-only reconcile preview that simulates pending senior/junior principals and tranche withdrawal caps without mutating storage.
+- Updated `src/perps/TrancheVault.sol` so `totalAssets()`, `maxWithdraw()`, and `maxRedeem()` all consume the simulated reconcile-first tranche state, aligning ERC4626 preview/max behavior with the live deposit/withdraw paths that call `POOL.reconcile()` first.
+- Added regressions in `test/perps/HousePool.t.sol` proving `previewDeposit()` matches reconcile-first share minting for senior deposits and that `maxWithdraw()` remains executable after junior loss reconciliation.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw"`.
+
+## TrancheVault Funding Snapshot Parity Fix (Mar 19 2026)
+
+- [x] Project pending funding in `CfdEngine` house-pool view snapshots
+- [x] Route `HousePool`/`TrancheVault` max-withdraw previews through projected funding liabilities
+- [x] Add regressions for `maxWithdraw()` / `maxRedeem()` under accrued funding
+- [x] Run targeted verification and record results
+
+Review:
+- Updated `src/perps/CfdEngine.sol` so house-pool view snapshots now project pending funding indices from `lastFundingTime` to `block.timestamp` using the same `PositionRiskAccountingLib.computeFundingStep()` math as plan-time previews before building withdrawal-funding and MtM liabilities.
+- This preserves the earlier `HousePool.getPendingTrancheState()`/`TrancheVault.maxWithdraw()` architecture while removing the remaining stale-funding gap that could cause `maxWithdraw()`/`maxRedeem()` to overestimate executable liquidity.
+- Added regressions in `test/perps/HousePool.t.sol` proving both `maxWithdraw()` and `maxRedeem()` remain executable during frozen-oracle windows with unsynced accrued funding.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_MaxWithdraw_RemainsExecutableWithPendingFundingAccrual|test_MaxRedeem_RemainsExecutableWithPendingFundingAccrual|test_JuniorMaxWithdraw_MatchesReconcileFirstWithdraw|test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit"`.
+
+## Liquidation Escrow Funding Ordering Fix (Mar 19 2026)
+
+- [x] Sync funding before router-forfeited escrow mutates vault assets during liquidation
+- [x] Keep router protocol-fee bookkeeping side-effect free after cash transfer
+- [x] Add regression proving forfeited escrow cannot retroactively soften elapsed funding
+- [x] Run targeted liquidation/funding verification and record results
+
+Review:
+- Updated `src/perps/OrderRouter.sol` so liquidation forfeiture now calls `engine.syncFunding()` before transferring escrowed bounty USDC into the vault and recognizing it as canonical inflow.
+- Updated `src/perps/CfdEngine.sol` so `recordRouterProtocolFee()` is now pure post-transfer bookkeeping and no longer re-syncs funding against already-mutated vault depth.
+- Added a liquidation regression in `test/perps/OrderRouter.t.sol` that records logs and proves `FundingUpdated` fires before `ProtocolInflowAccounted` when queued execution escrow is forfeited during liquidation, preventing retroactive depth softening for the elapsed funding interval.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement|test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding|test_ExecuteLiquidation_ForfeitsEscrowedCloseBountiesBeforeClearingOrders"`.
 - Updated `src/perps/HousePool.sol` so `_reconcile()`, `_accrueSeniorYieldOnly()`, `withdrawSenior()`, `_distributeRevenue()`, and `_absorbLoss()` now route through the shared waterfall library instead of embedding the waterfall math inline.
 - Kept `HousePoolAccountingLib` focused on withdrawal/reconcile snapshots and mark freshness while moving tranche waterfall policy into the new dedicated domain library.
 - Existing HousePool and invariant coverage was sufficient to validate the refactor; no new test logic was needed beyond the existing waterfall/HWM/reconcile regressions.
@@ -409,6 +524,18 @@ Review:
 - Extended `src/perps/libraries/MarginClearinghouseAccountingLib.sol` with shared bucket-mutation outputs for funding loss, terminal close loss, and liquidation residual application, so planning and storage-application now live in the same accounting domain.
 - Updated `src/perps/MarginClearinghouse.sol` so `consumeFundingLoss()`, `consumeCloseLoss()`, and `consumeLiquidationResidual()` all apply bucket updates, settlement debits, and unlock semantics through the shared mutation layer instead of hand-writing each mutation path inline.
 - Preserved existing behavior and event semantics while reducing the remaining planning-vs-application drift surface in the clearinghouse.
+
+- [x] Verify the new external audit report finding-by-finding against current perps code
+- [x] Run or inspect focused evidence for each claimed issue and note whether it is live, fixed, or invalid
+- [x] Record a concise verdict with supporting file references and any follow-up verification gaps
+
+Review:
+- Re-verified the six findings in the latest “Plether Perpetuals Engine” audit draft against current `src/perps` code and focused Forge coverage.
+- Confirmed one live bug: frozen-oracle order execution still disables MEV publish-time checks in `src/perps/libraries/OrderOraclePolicyLib.sol`, and `test_CloseOrderExecutesAtStaleFridayPrice` still passes in `test/perps/OrderRouter.t.sol`.
+- Confirmed two formerly valid blocker findings are fixed on this branch: partial-close committed-margin accounting now routes through shared bucket planning, and close commits now require upfront bounty backing instead of relying on deferred close-bounty behavior.
+- Confirmed the senior-tranche dust deadlock remains live in `src/perps/HousePool.sol` because only exact-zero principal resets the high-water mark; any `0 < seniorPrincipal < seniorHighWaterMark` still reverts deposits.
+- Informational notes are accurate and already documented/tested: the VPI zero-floor tradeoff is explicit in `src/perps/libraries/CloseAccountingLib.sol`, and `src/perps/TrancheVault.sol` still lets a third party reset cooldown with a meaningful top-up.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CloseOrderExecutesAtStaleFridayPrice|test_SundayDst_MevEnforcedAt21"` and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "test_H1_PartialCloseWithPendingOrderDoesNotRevert|test_H1_PartialCloseLossConsumesCommittedMarginReservation|test_H2_FullyUtilizedTraderCanSubmitAndExecuteCloseOrder"`.
 - Verified green: targeted clearinghouse/engine/invariant runs plus full `forge test --match-path "test/perps/*.t.sol"` with `451 tests passed, 0 failed, 0 skipped`.
 
 - [x] Fix remaining audit issues in router bounty custody, cancellation binding, and batch gas handling
@@ -514,3 +641,73 @@ Review:
 - Updated queue-related docs in `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` to describe the bounded per-account queue model.
 - Reworked the queue-stress regressions in `test/perps/OrderRouter.t.sol` and `test/perps/AuditRemainingCoverageFindingsFailing.t.sol` around the new bounded model, and added an explicit cap-revert test.
 - Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitOrder_RevertsWhenPendingOrderCountHitsCap|test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive|test_ExecuteLiquidation_RestoresEscrowedOpenBountiesBeforeBadDebt|test_ExecuteLiquidation_RestoresEscrowedCloseBountiesBeforeClearingOrders"` and `forge test --match-path test/perps/AuditRemainingCoverageFindingsFailing.t.sol --match-test test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue`.
+- [x] Fix frozen-window close liveness in `OrderRouter` / `OrderOraclePolicyLib`
+- [x] Introduce canonical accounted depth in `HousePool` and route `CfdEngine` funding/accounting reads through it
+- [x] Add typed failure classification and bounty routing in `OrderRouter`
+- [x] Sweep remaining funding-sync gaps and add regression coverage
+
+## Perps Architecture Remediation Plan (Mar 19 2026)
+
+### Phase 1 - Frozen-window close liveness
+
+- [x] Inspect `OrderOraclePolicyLib.getOracleExecutionPolicy()` and `OrderRouter` MEV enforcement call sites
+- [x] Disable publish-time MEV ordering checks when execution is allowed under frozen-oracle close-only policy
+- [x] Add/update targeted regressions proving frozen-window close orders execute while opens remain blocked
+- [x] Verify with focused Forge runs for frozen-oracle and Sunday boundary execution paths
+
+Review:
+- Updated `src/perps/libraries/OrderOraclePolicyLib.sol` so `OrderExecution` keeps MEV checks active in live/FAD execution but disables them during `oracleFrozen` close-only windows, preserving relaxed frozen-window close liveness without changing staleness bounds.
+- Updated `test/perps/OrderRouter.t.sol` frozen-window regressions so close orders committed during the freeze now execute successfully instead of expecting `OrderRouter__MevDetected`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_FadWindow_(CloseOrder_AllowedDuringFrozenWithPreFreezeCommit|OpenOrder_BlockedDuringFrozen|MevCheckDisabledDuringFrozen|ExcessStaleness_CloseGracefullyCancelled)|test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice|test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit|test_FadBatch_ExcessStaleness_FrozenReverts|test_SundayDst_(OracleUnfrozenAt21|MevEnforcedAt21|StillFadAt21|WinterStalenessRejects)"`.
+- Verified green: `forge test --match-path test/perps/AuditV2.t.sol --match-test test_C03_CloseOrderBlockedDuringOracleFrozen`, `forge test --match-path test/perps/AuditV3.t.sol --match-test test_C01_CloseOrderBlockedByOpenInFrozenQueue`, and `forge test --match-path test/perps/AuditV3.t.sol --match-test test_C01_OpenOrderHardRevertsInsteadOfSoftFailing`.
+
+### Phase 2 - Canonical accounted depth
+
+- [x] Design a canonical accounted-depth source in `HousePool` that is not rewritten by raw `USDC.balanceOf(address(this))`
+- [x] Decide and document unsolicited-transfer handling semantics (`quarantine`, `sweep`, or explicit accounting path)
+- [x] Route `CfdEngine` funding depth, house-pool snapshots, and reconcile/withdraw accounting through the canonical depth source
+- [x] Add regressions proving unsolicited USDC transfers do not retroactively rewrite elapsed funding economics or LP distributable accounting
+- [ ] Update any affected docs/spec text describing vault assets, funding depth, or pool accounting boundaries
+
+Review:
+- Added canonical accounted-depth tracking in `src/perps/HousePool.sol` via `accountedAssets` and changed `totalAssets()` to return `min(accountedAssets, rawBalance)`, so unsolicited positive transfers no longer rewrite economic depth while real raw-balance shortfalls still reduce backing.
+- Added explicit unsolicited-transfer handling in `src/perps/HousePool.sol`: `accountExcess()` converts quarantined excess into accounted protocol assets after `ENGINE.syncFunding()`, and `sweepExcess()` removes quarantined donations without changing economics.
+- Because `ICfdVault.totalAssets()` now represents canonical economic backing, `CfdEngine` and `OrderRouter` automatically consume accounted depth for funding, solvency snapshots, and house-pool accounting while preserving the raw-balance shortfall signal.
+- Added regressions in `test/perps/HousePool.t.sol` and `test/perps/CfdEngine.t.sol` proving raw donations stay quarantined until explicitly accounted and that engine protocol snapshots follow canonical assets rather than raw pool balance.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(RevenueDistribution|RevenueDistribution_SeniorCapped|SeniorRateChange|ShareAccounting_AfterRevenue|SharePrice_NoFreeDilution|UnaccountedDonation_IgnoredUntilExplicitlyAccounted|SweepExcess_RemovesDonationWithoutChangingAccountedAssets|M10_JitLP_BlockedByCooldown|M12_GetFreeUSDC_ReservesFees|SeniorPrincipal_RestoredBeforeJuniorSurplus|Reconcile_AllowsStaleMarkWithoutLiveLiability|FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals|StaleSharePriceOnDeposit)"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(GetProtocolAccountingView_ReflectsDeferredLiabilities|GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState|ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted)"`.
+
+### Phase 3 - Typed execution failure and bounty routing
+
+- [x] Enumerate router-visible execution failure classes: user/order fault, oracle/policy fault, and protocol-state-changed-after-commit
+- [x] Add typed engine/router signaling so post-commit protocol-state invalidations are distinguishable from clearer-earned failures
+- [x] Update `OrderRouter` failed-order bounty policy to refund user bounty for protocol-state invalidations while preserving clearer payout where appropriate
+- [x] Add regressions for degraded-mode, skew, and solvency invalidations that arise after a valid commit
+- [x] Re-verify batch and single-order execution behavior for the new failure typing
+
+Review:
+- Updated `src/perps/OrderRouter.sol` to decode low-level engine revert selectors instead of treating every caught execution failure the same. The router now refunds the user bounty for post-commit protocol-state invalidations on open orders (`CfdEngine__DegradedMode`, `CfdEngine__SkewTooHigh`, `CfdEngine__VaultSolvencyExceeded`) while preserving clearer-paid behavior for ordinary user/order failures.
+- Kept the engine execution flow unchanged; the router-side selector classifier is the typed boundary for bounty routing, so no preview/live plan logic changed in `src/perps/CfdEngine.sol`.
+- Added focused regressions in `test/perps/OrderRouter.t.sol` covering degraded-mode, skew, and solvency invalidations after a valid commit, plus a batch execution case proving the same refund path is used in `executeOrderBatch()`.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(PostCommitDegradedModeRefundsUserBounty|PostCommitSkewInvalidationRefundsUserBounty|PostCommitSolvencyInvalidationRefundsUserBounty|BatchPostCommitSkewInvalidationRefundsUserBounty|Slippage_CancelsGracefully|ExitedAccount_ExpiredCloseOrderPaysClearerBounty|ExitedAccount_InvalidCloseOrderPaysEscrowedBounty)"`.
+
+### Phase 4 - Funding-sync completion and hardening
+
+- [x] Audit every vault-cash mutation path and funding-dependent accounting mutation across `HousePool`, `CfdEngine`, and related helpers
+- [x] Add missing `syncFunding()` calls to remaining protocol paths such as `HousePool.finalizeSeniorRate()` and `CfdEngine.absorbRouterCancellationFee()`
+- [x] Add targeted regressions asserting funding is synced before admin/internal cash mutations and reconcile paths
+- [x] Run focused perps suites covering `HousePool`, `CfdEngine`, `OrderRouter`, and audit regression files
+
+Review:
+- Added the remaining missing funding syncs in `src/perps/HousePool.sol` and `src/perps/CfdEngine.sol`: `finalizeSeniorRate()` now calls `ENGINE.syncFunding()` before snapshot/reconcile logic, and `absorbRouterCancellationFee()` now calls `_syncFunding()` before moving router-held USDC into the vault.
+- Re-swept the main vault-cash mutation and funding-sensitive accounting paths in `HousePool`, `CfdEngine`, and `MarginClearinghouse`; no additional unsynced protocol cash-mutation path in the reviewed scope remains beyond the two fixed entrypoints.
+- Added targeted regressions in `test/perps/HousePool.t.sol` and `test/perps/CfdEngine.t.sol` proving these paths advance `lastFundingTime` before doing their accounting/cash mutation.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_(FinalizeSeniorRate_SyncsFundingBeforeReconcile|FinalizeSeniorRate_StaleMarkAccruesCheckpointedYield|SeniorRateChange)"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(AbsorbRouterCancellationFee_SyncsFundingBeforeVaultCashMutation|FundingAccumulation)"`.
+
+### Verification / exit criteria
+
+- [ ] `forge test --match-path test/perps/OrderRouter.t.sol --match-test "Frozen|Sunday|Mev|CloseOrderCommittedDuringFrozen"`
+- [ ] `forge test --match-path test/perps/HousePool.t.sol`
+- [ ] `forge test --match-path test/perps/CfdEngine.t.sol --match-test "Funding|HousePoolInputSnapshot|Withdrawal|Absorb|Sync"`
+- [ ] `forge test --match-path test/perps/AuditLatest*.t.sol`
+- [ ] `forge test --match-path test/perps/AuditRemaining*.t.sol`
+- [ ] Update `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` for any behavior/accounting boundary changes

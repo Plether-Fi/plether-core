@@ -156,6 +156,7 @@ interface IMarginClearinghouse {
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
+        bool includeOtherLockedMargin,
         address recipient
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
     /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
@@ -190,10 +191,9 @@ interface IMarginClearinghouse {
         bytes32 accountId
     ) external view returns (uint256);
 
-    /// @notice Returns settlement-asset balance reachable during liquidation or other terminal settlement.
-    function getLiquidationReachableUsdc(
-        bytes32 accountId,
-        uint256 positionMarginUsdc
+    /// @notice Returns settlement-asset balance reachable during a terminal settlement path.
+    function getTerminalReachableUsdc(
+        bytes32 accountId
     ) external view returns (uint256);
 
     /// @notice Returns settlement-asset balance reachable for a terminal or partial settlement path.

@@ -230,6 +230,18 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
+    function invariant_SeniorHighWaterMarkBlocksJuniorExtractionWhileImpaired() public {
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 currentSenior = pool.seniorPrincipal();
+        uint256 highWaterMark = pool.seniorHighWaterMark();
+        if (currentSenior > 0 && currentSenior < highWaterMark) {
+            assertEq(pool.juniorPrincipal(), 0, "Junior principal must stay zero while senior is partially impaired");
+            assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior withdrawals must stay blocked while senior is impaired");
+        }
+    }
+
     function invariant_SymmetricalFunding() public {
         int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
         int256 bearIdx = _sideFundingIndex(CfdTypes.Side.BEAR);
@@ -345,6 +357,40 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), sumBearSize, "Bear OI must match sum of bear positions");
     }
 
+    function invariant_LivePositionsRemainSingleDirectionAndBounded() public {
+        uint256 capPrice = engine.CAP_PRICE();
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) =
+                engine.positions(accountId);
+
+            assertEq(positionView.exists, size > 0, "Position view existence must match stored size");
+            if (size == 0) {
+                assertEq(margin, 0, "Empty positions must not retain margin");
+                assertEq(entryPrice, 0, "Empty positions must not retain entry price");
+                assertEq(positionView.maxProfitUsdc, 0, "Empty positions must not retain bounded profit");
+                continue;
+            }
+
+            assertTrue(
+                side == CfdTypes.Side.BULL || side == CfdTypes.Side.BEAR,
+                "Live positions must encode exactly one directional side"
+            );
+
+            uint256 sideBound = side == CfdTypes.Side.BULL
+                ? (size * entryPrice) / 1e20
+                : (size * (capPrice > entryPrice ? capPrice - entryPrice : 0)) / 1e20;
+            assertLe(
+                positionView.maxProfitUsdc,
+                sideBound,
+                "Live position max profit must respect the side-specific bounded payoff"
+            );
+            assertLe(positionView.maxProfitUsdc, (size * capPrice) / 1e20, "Live positions must remain bounded by CAP");
+        }
+    }
+
     function invariant_EntryNotionalsMatchPositions() public {
         uint256 sumBullNotional;
         uint256 sumBearNotional;
@@ -415,6 +461,34 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
+    function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public {
+        (,,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        uint256 oraclePrice = engine.lastMarkPrice();
+        if (oraclePrice == 0) {
+            oraclePrice = 1e8;
+        }
+
+        for (uint256 i = 0; i < 3; i++) {
+            bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
+            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            if (!positionView.exists) {
+                continue;
+            }
+
+            uint256 notionalUsdc = (positionView.size * oraclePrice) / 1e20;
+            assertGe(
+                notionalUsdc * bountyBps,
+                minBountyUsdc * 10_000,
+                "Live positions must stay above the minimum liquidation bounty threshold"
+            );
+            assertGe(
+                positionView.margin,
+                minBountyUsdc,
+                "Live positions must not degrade into dust margin below the bounty floor"
+            );
+        }
+    }
+
     function invariant_ClearinghouseBucketsConserveTrackedState() public {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
@@ -442,12 +516,11 @@ contract PerpInvariantTest is BasePerpTest {
     function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
-            uint256 protectedMargin = size > 0 ? margin : 0;
+            (uint256 size,,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
-                clearinghouse.getLiquidationReachableUsdc(accountId, protectedMargin),
+                clearinghouse.getTerminalReachableUsdc(accountId),
                 buckets.settlementBalanceUsdc,
                 "All trader-owned settlement collateral should remain terminally reachable"
             );
@@ -508,10 +581,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
-        if (fundingLiability > 0) {
-            expectedReserved += uint256(fundingLiability);
-        }
+        expectedReserved += engine.getLiabilityOnlyFundingPnl();
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),

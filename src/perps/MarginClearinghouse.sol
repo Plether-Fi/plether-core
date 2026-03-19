@@ -195,13 +195,11 @@ contract MarginClearinghouse is Ownable2Step {
         return getAccountUsdcBuckets(accountId).freeSettlementUsdc;
     }
 
-    /// @notice Returns settlement balance reachable by a liquidation or other terminal settlement path.
-    function getLiquidationReachableUsdc(
-        bytes32 accountId,
-        uint256 protectedPositionMarginUsdc
+    /// @notice Returns settlement balance reachable by a terminal settlement path.
+    function getTerminalReachableUsdc(
+        bytes32 accountId
     ) public view returns (uint256) {
-        protectedPositionMarginUsdc;
-        return MarginClearinghouseAccountingLib.getLiquidationReachableUsdc(_buildAccountUsdcBuckets(accountId));
+        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(_buildAccountUsdcBuckets(accountId));
     }
 
     /// @notice Returns settlement balance reachable after protecting only an explicitly remaining margin bucket.
@@ -483,6 +481,15 @@ contract MarginClearinghouse is Ownable2Step {
         int256 tradeCostUsdc,
         address recipient
     ) external onlyOperator returns (int256 netMarginChangeUsdc) {
+        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
+        if (tradeCostUsdc < 0) {
+            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
+        }
+
+        if (netMarginChangeUsdc < 0) {
+            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
+        }
+
         if (tradeCostUsdc > 0) {
             uint256 costUsdc = uint256(tradeCostUsdc);
             if (costUsdc > getFreeSettlementBalanceUsdc(accountId)) {
@@ -491,15 +498,10 @@ contract MarginClearinghouse is Ownable2Step {
             settlementBalances[accountId] -= costUsdc;
             IERC20(settlementAsset).safeTransfer(recipient, costUsdc);
             emit AssetSeized(accountId, settlementAsset, costUsdc, recipient);
-        } else if (tradeCostUsdc < 0) {
-            _creditSettlementUsdc(accountId, uint256(-tradeCostUsdc));
         }
 
-        netMarginChangeUsdc = int256(marginDeltaUsdc) - tradeCostUsdc;
         if (netMarginChangeUsdc > 0) {
             _lockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(netMarginChangeUsdc));
-        } else if (netMarginChangeUsdc < 0) {
-            _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.Position, uint256(-netMarginChangeUsdc));
         }
     }
 
@@ -550,13 +552,26 @@ contract MarginClearinghouse is Ownable2Step {
         uint64[] calldata reservationOrderIds,
         uint256 lossUsdc,
         uint256 protectedLockedMarginUsdc,
+        bool includeOtherLockedMargin,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc) {
         if (lossUsdc == 0) {
             return (0, 0);
         }
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId);
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
+            ? MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+                settlementBalances[accountId],
+                positionMarginUsdc[accountId],
+                committedOrderMarginUsdc[accountId],
+                reservedSettlementUsdc[accountId]
+            )
+            : MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
+                settlementBalances[accountId],
+                positionMarginUsdc[accountId],
+                committedOrderMarginUsdc[accountId],
+                reservedSettlementUsdc[accountId]
+            );
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
@@ -573,7 +588,7 @@ contract MarginClearinghouse is Ownable2Step {
                 accountId, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc
             );
         }
-        if (mutation.otherLockedMarginUnlockedUsdc > 0) {
+        if (includeOtherLockedMargin && mutation.otherLockedMarginUnlockedUsdc > 0) {
             _consumeOtherLockedMarginViaReservations(
                 accountId, reservationOrderIds, mutation.otherLockedMarginUnlockedUsdc
             );

@@ -4,3 +4,4 @@
 - Do not report a task as completed or committed unless a new action actually happened in this turn; verify the latest tool result before answering.
 - When the user asks to reduce duplication/bloat, optimize for net LOC reduction explicitly; do not add abstraction that improves parity but still increases code size unless you call out that tradeoff first.
 - When behavior changes, update README/SECURITY/ACCOUNTING_SPEC and remove dead state-machine branches in the same pass; stale docs and unreachable enum states linger unless checked explicitly.
+- Before calling an audit packet final, do one last sweep for stale narrative claims, numbering drift, and now-unreachable compatibility branches; tiny leftovers are exactly what reviewers latch onto.

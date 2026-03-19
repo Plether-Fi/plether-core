@@ -19,6 +19,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 contract OrderRouterTest is BasePerpTest {
 
@@ -110,6 +111,43 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
     }
 
+    function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {
+        address trader = address(0xC444);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 sizeDelta = 3334e18;
+        uint256 marginDelta = 110e6;
+        uint256 executionBountyUsdc = router.quoteOpenOrderExecutionBountyUsdc(sizeDelta);
+
+        _fundTrader(trader, marginDelta + executionBountyUsdc);
+        _open(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            executionBountyUsdc,
+            "setup must leave only the future execution bounty as free settlement"
+        );
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "commit should move the only free settlement into bounty escrow"
+        );
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            executionBountyUsdc,
+            "keeper should receive the reserved execution bounty after successful execution"
+        );
+    }
+
     function test_ZeroSizeCommit_Reverts() public {
         vm.prank(alice);
         vm.expectRevert(OrderRouter.OrderRouter__ZeroSize.selector);
@@ -124,9 +162,9 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__FIFOViolation.selector);
         vm.roll(10);
-        router.executeOrder(2, empty);
+        router.executeOrder(1, empty);
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
@@ -416,7 +454,7 @@ contract OrderRouterTest is BasePerpTest {
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
 
         vm.prank(address(engine));
         router.syncMarginQueue(accountId);
@@ -494,7 +532,7 @@ contract OrderRouterTest is BasePerpTest {
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -954,6 +992,114 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
+    function _setDegradedModeForTest() internal {
+        bytes32 slotValue = vm.load(address(engine), bytes32(uint256(19)));
+        vm.store(address(engine), bytes32(uint256(19)), slotValue | bytes32(uint256(1)));
+    }
+
+    function test_PostCommitDegradedModeRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        _setDegradedModeForTest();
+        assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once degraded mode latches");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Keeper should not receive bounty on protocol-state failure"
+        );
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
+    }
+
+    function test_PostCommitSkewInvalidationRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 800_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation"
+        );
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on skew invalidation");
+    }
+
+    function test_PostCommitSolvencyInvalidationRefundsUserBounty() public {
+        address bearTrader = address(0xC333);
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bearTrader, 50_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _fundTrader(alice, 40_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 700_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on solvency invalidation"
+        );
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on solvency invalidation");
+    }
+
+    function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 800_000e6);
+        vm.warp(block.timestamp + 6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp));
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(1, empty);
+
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 0, "Batch execution should leave invalidated order unopened");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Batch clearer should not receive bounty on skew invalidation"
+        );
+        assertEq(usdc.balanceOf(alice), 1e6, "Batch execution should refund trader bounty on skew invalidation");
+    }
+
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
@@ -1033,6 +1179,15 @@ contract OrderRouterPythTest is BasePerpTest {
             6000 * 1e18,
             "Only the first queued close should count toward pending close size"
         );
+    }
+
+    function test_CloseCommit_RevertsWithoutLivePositionEvenIfPendingOrderExists() public {
+        vm.startPrank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.expectRevert(OrderRouter.OrderRouter__NoOpenPosition.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        vm.stopPrank();
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
@@ -1125,8 +1280,8 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            2e6,
-            "Batch executor should be paid for successful orders and failed binding open tails"
+            1e6,
+            "Batch executor should be paid only for the successful close when the failed open tail refunds the user"
         );
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
@@ -1611,6 +1766,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        uint256 vaultAssetsBefore = pool.totalAssets();
         CfdEngine.LiquidationPreview memory preview =
             engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
 
@@ -1633,7 +1789,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshotBefore.liquidationReachableUsdc,
+            snapshotBefore.terminalReachableUsdc,
             "Preview must exclude queued execution escrow from liquidation reachability"
         );
         assertEq(
@@ -1647,6 +1803,60 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation"
+        );
+        assertEq(pool.excessAssets(), 0, "Forfeited open-order bounty escrow should not remain quarantined as excess");
+        assertGe(
+            pool.totalAssets(),
+            vaultAssetsBefore + queuedOrderCount * 1e6,
+            "Forfeited open-order bounty escrow should contribute to canonical vault assets"
+        );
+    }
+
+    function test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 350e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 60 days);
+        uint64 fundingBefore = engine.lastFundingTime();
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(195_000_000));
+
+        vm.recordLogs();
+        router.executeLiquidation(accountId, priceData);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 fundingUpdatedSig = keccak256("FundingUpdated(int256,int256,uint256)");
+        bytes32 protocolInflowSig = keccak256("ProtocolInflowAccounted(address,uint256,uint256)");
+        uint256 fundingLogIndex = type(uint256).max;
+        uint256 inflowLogIndex = type(uint256).max;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == fundingUpdatedSig && fundingLogIndex == type(uint256).max) {
+                fundingLogIndex = i;
+            }
+            if (logs[i].topics[0] == protocolInflowSig && logs[i].emitter == address(pool) && inflowLogIndex == type(uint256).max)
+            {
+                inflowLogIndex = i;
+            }
+        }
+
+        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "liquidation path should sync funding for the elapsed interval");
+        assertGt(engine.lastFundingTime(), fundingBefore, "liquidation must materialize pending funding before fee booking");
+        assertLt(
+            fundingLogIndex,
+            inflowLogIndex,
+            "funding must sync before forfeited escrow is recognized as canonical vault inflow"
         );
     }
 
@@ -1665,6 +1875,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        uint256 vaultAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -1683,6 +1894,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation"
+        );
+        assertEq(pool.excessAssets(), 0, "Forfeited close-order bounty escrow should not remain quarantined as excess");
+        assertGe(
+            pool.totalAssets(),
+            vaultAssetsBefore + 2e6,
+            "Forfeited close-order bounty escrow should contribute to canonical vault assets"
         );
     }
 
@@ -1862,13 +2079,16 @@ contract FadStalenessTest is BasePerpTest {
         engine.finalizeFadRunway();
     }
 
-    function test_FadWindow_CloseOrder_AllowedDuringFrozen() public {
-        vm.warp(SATURDAY_NOON);
+    function test_FadWindow_CloseOrder_AllowedDuringFrozenWithPreFreezeCommit() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(fridayClose - 6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
 
-        vm.warp(SATURDAY_NOON + 50);
+        vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
@@ -1886,7 +2106,10 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
-    function test_FadWindow_MevCheckMoot_CloseAllowedDuringFrozen() public {
+    function test_FadWindow_MevCheckDisabledDuringFrozen() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -1899,7 +2122,7 @@ contract FadStalenessTest is BasePerpTest {
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Close order should execute with stale price during frozen oracle");
+        assertEq(size, 0, "Frozen-window close should execute without MEV rejection");
     }
 
     function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
@@ -1945,13 +2168,16 @@ contract FadStalenessTest is BasePerpTest {
         router.executeLiquidation(aliceId, empty);
     }
 
-    function test_FadBatch_CloseAllowedDuringFrozen() public {
-        vm.warp(SATURDAY_NOON);
+    function test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(fridayClose - 6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
 
-        vm.warp(SATURDAY_NOON + 50);
+        vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
@@ -3250,8 +3476,7 @@ contract WeekendArbitrageTest is Test {
         clearinghouse.setEngine(address(engine));
     }
 
-    // C-03 fix: close orders execute during frozen oracle with stale Friday price
-    function test_CloseOrderExecutesAtStaleFridayPrice() public {
+    function test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
@@ -3291,7 +3516,7 @@ contract WeekendArbitrageTest is Test {
         router.executeOrder(2, updateData);
 
         (size,,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 0, "Close order should execute during frozen oracle");
+        assertEq(size, 0, "Frozen-window close should execute when only stale Friday price exists");
     }
 
 }

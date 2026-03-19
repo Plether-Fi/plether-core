@@ -64,12 +64,12 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             (int256(_sideOpenInterest(CfdTypes.Side.BEAR) * price) - int256(_sideEntryNotional(CfdTypes.Side.BEAR)))
                 / int256(1e20);
 
-        int256 expectedMtm = 0;
+        uint256 expectedMtm = 0;
         if (bullPnl > 0) {
-            expectedMtm += bullPnl;
+            expectedMtm += uint256(bullPnl);
         }
         if (bearPnl > 0) {
-            expectedMtm += bearPnl;
+            expectedMtm += uint256(bearPnl);
         }
 
         assertEq(engine.getVaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
@@ -8,13 +9,10 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
-import {CfdEngineSettlementLib} from "./libraries/CfdEngineSettlementLib.sol";
+import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
-import {CloseAccountingLib} from "./libraries/CloseAccountingLib.sol";
-import {LiquidationAccountingLib} from "./libraries/LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
-import {OpenAccountingLib} from "./libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
@@ -40,7 +38,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 freeSettlementUsdc;
         // Current UI helper only; this does not include terminally reachable queued committed margin.
         uint256 closeReachableUsdc;
-        uint256 liquidationReachableUsdc;
+        uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
         uint256 deferredPayoutUsdc;
@@ -67,7 +65,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
         int256 cappedFundingPnlUsdc;
-        int256 liabilityOnlyFundingPnlUsdc;
+        uint256 liabilityOnlyFundingPnlUsdc;
         uint256 totalDeferredPayoutUsdc;
         uint256 totalDeferredClearerBountyUsdc;
         bool degradedMode;
@@ -76,7 +74,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     struct ClosePreview {
         bool valid;
-        uint8 invalidCode;
+        CfdTypes.CloseInvalidReason invalidReason;
         uint256 executionPrice;
         uint256 sizeDelta;
         int256 realizedPnlUsdc;
@@ -94,6 +92,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     struct LiquidationPreview {
@@ -112,6 +111,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     struct DeferredPayoutStatus {
@@ -119,30 +119,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool traderPayoutClaimableNow;
         uint256 deferredClearerBountyUsdc;
         bool liquidationBountyClaimableNow;
-    }
-
-    struct LiquidationComputation {
-        uint256 reachableCollateralUsdc;
-        PositionRiskAccountingLib.PositionRiskState riskState;
-        LiquidationAccountingLib.LiquidationState liquidationState;
-        CfdEngineSettlementLib.LiquidationSettlementResult settlement;
-    }
-
-    struct CloseExecutionPlan {
-        CloseAccountingLib.CloseState closeState;
-        uint256 postBullOi;
-        uint256 postBearOi;
-    }
-
-    struct PreviewFundingSettlement {
-        int256 pendingFundingUsdc;
-        int256 closeFundingSettlementUsdc;
-        uint256 settlementBalanceAfterFundingUsdc;
-        uint256 positionMarginAfterFundingUsdc;
-        uint256 selectedSideTotalMarginAfterFundingUsdc;
-        int256 selectedSideEntryFundingAfterFunding;
-        uint256 fundingVaultCashOutflowUsdc;
-        uint256 fundingVaultCashInflowUsdc;
     }
 
     struct SideState {
@@ -547,7 +523,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
+        _syncFunding();
         USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
+        vault.recordProtocolInflow(amountUsdc);
+        accumulatedFeesUsdc += amountUsdc;
+    }
+
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already synced funding and funded the vault.
+    function recordRouterProtocolFee(
+        uint256 amountUsdc
+    ) external onlyRouter {
+        if (amountUsdc == 0) {
+            return;
+        }
+
         accumulatedFeesUsdc += amountUsdc;
     }
 
@@ -647,6 +636,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         if (amount > 0) {
             USDC.safeTransferFrom(msg.sender, address(vault), amount);
+            vault.recordProtocolInflow(amount);
         }
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -693,7 +683,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             price,
@@ -782,243 +772,58 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
-        uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
-        _updateFunding(lastMarkPrice, vaultDepthUsdc);
-        _cacheMarkPriceIfNewer(price, publishTime);
+        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, false);
+    }
 
-        CfdTypes.Position storage pos = positions[order.accountId];
-        uint256 marginSnapshot = pos.margin;
-        CfdTypes.Side marginSide = pos.size > 0 ? pos.side : order.side;
+    /// @notice Router-facing order execution entrypoint with typed business-rule failures.
+    function processOrderTyped(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) external onlyRouter nonReentrant {
+        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, true);
+    }
 
-        uint256 preSkewUsdc = _getAbsSkewUsdc(price);
-
-        if (pos.size > 0 && pos.side != order.side) {
-            revert CfdEngine__MustCloseOpposingPosition();
+    function _processOrder(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime,
+        bool typedFailures
+    ) internal {
+        if (publishTime < lastMarkTime) {
+            revert CfdEngine__MarkPriceOutOfOrder();
         }
 
-        int256 closeFundingSettlementUsdc = _settleFunding(order, pos);
-        uint256 marginAfterFunding = pos.margin;
-        _syncTotalSideMargin(marginSide, marginSnapshot, marginAfterFunding);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(order.accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
+        snap.vaultCashUsdc = vault.totalAssets();
 
         if (order.isClose) {
-            accumulatedFeesUsdc += _processDecrease(
-                order, pos, price, preSkewUsdc, vaultDepthUsdc, closeFundingSettlementUsdc
-            );
-            _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
-            _enterDegradedModeIfInsolvent(order.accountId, 0);
-        } else {
-            if (degradedMode) {
-                revert CfdEngine__DegradedMode();
+            CfdEnginePlanTypes.CloseDelta memory delta =
+                CfdEnginePlanLib.planClose(snap, order, currentOraclePrice, publishTime);
+            if (typedFailures) {
+                _revertIfCloseInvalidTyped(delta.revertCode);
+            } else {
+                _revertIfCloseInvalid(delta.revertCode);
             }
-            _processIncrease(order, pos, price, preSkewUsdc, vaultDepthUsdc);
-            _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
-            _assertPostSolvency();
-        }
-
-        if (pos.size > 0) {
-            pos.lastUpdateTime = uint64(block.timestamp);
+            _applyClose(delta);
+        } else {
+            CfdEnginePlanTypes.OpenDelta memory delta =
+                CfdEnginePlanLib.planOpen(snap, order, currentOraclePrice, publishTime);
+            if (typedFailures) {
+                _revertIfOpenInvalidTyped(delta.revertCode);
+            } else {
+                _revertIfOpenInvalid(delta.revertCode);
+            }
+            _applyOpen(delta);
         }
     }
 
     // ==========================================
     // 3. INTERNAL LEDGER UPDATES
     // ==========================================
-
-    function _settleFunding(
-        CfdTypes.Order memory order,
-        CfdTypes.Position storage pos
-    ) internal returns (int256 closeFundingSettlementUsdc) {
-        int256 pendingFunding = getPendingFunding(pos);
-        if (pos.size > 0 && pendingFunding != 0) {
-            if (pendingFunding > 0) {
-                uint256 gain = uint256(pendingFunding);
-                if (order.isClose && order.sizeDelta == pos.size) {
-                    closeFundingSettlementUsdc = int256(gain);
-                } else if (vault.totalAssets() >= gain) {
-                    pos.margin += gain;
-                    vault.payOut(address(clearinghouse), gain);
-                    clearinghouse.creditSettlementAndLockMargin(order.accountId, gain);
-                } else {
-                    _payOrRecordDeferredTraderPayout(order.accountId, gain);
-                }
-            } else {
-                uint256 loss = uint256(-pendingFunding);
-                (uint256 marginConsumedUsdc,, uint256 uncoveredUsdc) =
-                    clearinghouse.consumeFundingLoss(order.accountId, pos.margin, loss, address(vault));
-                pos.margin -= marginConsumedUsdc;
-
-                if (uncoveredUsdc > 0) {
-                    if (!order.isClose) {
-                        revert CfdEngine__FundingExceedsMargin();
-                    }
-                    if (order.sizeDelta < pos.size) {
-                        revert CfdEngine__PartialCloseUnderwaterFunding();
-                    }
-                    closeFundingSettlementUsdc = -int256(uncoveredUsdc);
-                }
-            }
-        }
-        if (pos.size > 0) {
-            SideState storage sideState = _sideState(pos.side);
-            int256 newIdx = sideState.fundingIndex;
-            int256 fundingDelta = int256(pos.size) * (newIdx - pos.entryFundingIndex);
-            sideState.entryFunding += fundingDelta;
-            pos.entryFundingIndex = newIdx;
-        }
-    }
-
-    function _processIncrease(
-        CfdTypes.Order memory order,
-        CfdTypes.Position storage pos,
-        uint256 price,
-        uint256 preSkewUsdc,
-        uint256 vaultDepthUsdc
-    ) internal {
-        CfdTypes.RiskParams memory rp = riskParams;
-        OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
-            OpenAccountingLib.OpenInputs({
-                currentSize: pos.size,
-                currentEntryPrice: pos.entryPrice,
-                side: order.side,
-                sizeDelta: order.sizeDelta,
-                price: price,
-                capPrice: CAP_PRICE,
-                preSkewUsdc: preSkewUsdc,
-                postSkewUsdc: _getPostOpenSkewUsdc(order.side, order.sizeDelta, price),
-                vaultDepthUsdc: vaultDepthUsdc,
-                executionFeeBps: EXECUTION_FEE_BPS,
-                currentFundingIndex: _sideState(order.side).fundingIndex,
-                riskParams: rp
-            })
-        );
-
-        if (openState.notionalUsdc * rp.bountyBps < rp.minBountyUsdc * 10_000) {
-            revert CfdEngine__PositionTooSmall();
-        }
-
-        _addGlobalLiability(order.side, openState.addedMaxProfitUsdc, order.sizeDelta);
-        if (vaultDepthUsdc > 0 && ((openState.postSkewUsdc * CfdMath.WAD) / vaultDepthUsdc) > rp.maxSkewRatio) {
-            revert CfdEngine__SkewTooHigh();
-        }
-        pos.maxProfitUsdc += openState.addedMaxProfitUsdc;
-
-        if (pos.size == 0) {
-            pos.side = order.side;
-            pos.entryFundingIndex = _sideState(order.side).fundingIndex;
-        }
-        pos.entryPrice = openState.newEntryPrice;
-        pos.size = openState.newSize;
-        pos.vpiAccrued += openState.vpiUsdc;
-
-        SideState storage sideState = _sideState(order.side);
-        if (openState.newEntryNotional >= openState.oldEntryNotional) {
-            sideState.entryNotional += openState.newEntryNotional - openState.oldEntryNotional;
-        } else {
-            sideState.entryNotional -= openState.oldEntryNotional - openState.newEntryNotional;
-        }
-        sideState.entryFunding += openState.positionFundingContribution;
-
-        if (openState.tradeCostUsdc < 0) {
-            uint256 rebate = uint256(-openState.tradeCostUsdc);
-            vault.payOut(address(clearinghouse), rebate);
-        }
-
-        int256 netMarginChange =
-            clearinghouse.applyOpenCost(order.accountId, order.marginDelta, openState.tradeCostUsdc, address(vault));
-
-        if (netMarginChange > 0) {
-            pos.margin += uint256(netMarginChange);
-        } else if (netMarginChange < 0) {
-            uint256 deficit = uint256(-netMarginChange);
-            if (pos.margin < deficit) {
-                revert CfdEngine__MarginDrainedByFees();
-            }
-            pos.margin -= deficit;
-        }
-
-        accumulatedFeesUsdc += openState.executionFeeUsdc;
-
-        if (
-            OpenAccountingLib.effectiveMarginAfterTradeCost(pos.margin, openState.tradeCostUsdc)
-                < openState.initialMarginRequirementUsdc
-        ) {
-            revert CfdEngine__InsufficientInitialMargin();
-        }
-
-        emit PositionOpened(order.accountId, order.side, order.sizeDelta, price, order.marginDelta);
-    }
-
-    function _processDecrease(
-        CfdTypes.Order memory order,
-        CfdTypes.Position storage pos,
-        uint256 price,
-        uint256 preSkewUsdc,
-        uint256 vaultDepthUsdc,
-        int256 fundingSettlementUsdc
-    ) internal returns (uint256 collectedExecFeeUsdc) {
-        if (pos.size < order.sizeDelta) {
-            revert CfdEngine__CloseSizeExceedsPosition();
-        }
-
-        CfdTypes.Position memory positionAfterFunding = pos;
-        CloseExecutionPlan memory closePlan = _buildCloseExecutionPlan(
-            positionAfterFunding, order.sizeDelta, price, preSkewUsdc, vaultDepthUsdc, fundingSettlementUsdc
-        );
-        CloseAccountingLib.CloseState memory closeState = closePlan.closeState;
-
-        pos.margin = closeState.remainingMarginUsdc;
-
-        uint256 maxProfitReduction = closeState.maxProfitReductionUsdc;
-        pos.maxProfitUsdc -= maxProfitReduction;
-        _reduceGlobalLiability(pos.side, maxProfitReduction, order.sizeDelta);
-
-        uint256 entryNotionalReduction = order.sizeDelta * pos.entryPrice;
-        SideState storage sideState = _sideState(pos.side);
-        sideState.entryNotional -= entryNotionalReduction;
-        sideState.entryFunding -= int256(order.sizeDelta) * pos.entryFundingIndex;
-
-        pos.size -= order.sizeDelta;
-        if (pos.size > 0 && pos.margin < riskParams.minBountyUsdc) {
-            revert CfdEngine__DustPosition();
-        }
-
-        clearinghouse.unlockPositionMargin(order.accountId, closeState.marginToFreeUsdc);
-        pos.vpiAccrued -= closeState.proportionalAccrualUsdc;
-
-        collectedExecFeeUsdc = _settleCloseNetSettlement(
-            order.accountId, closeState.netSettlementUsdc, closeState.executionFeeUsdc, pos.margin
-        );
-
-        emit PositionClosed(order.accountId, pos.side, order.sizeDelta, price, closeState.realizedPnlUsdc);
-
-        if (pos.size == 0) {
-            delete positions[order.accountId];
-        }
-    }
-
-    function _getAbsSkewUsdc(
-        uint256 currentOraclePrice
-    ) internal view returns (uint256) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        uint256 bullUsdc = (bullState.openInterest * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 bearUsdc = (bearState.openInterest * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return bullUsdc > bearUsdc ? bullUsdc - bearUsdc : bearUsdc - bullUsdc;
-    }
-
-    function _getPostOpenSkewUsdc(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 price
-    ) internal view returns (uint256) {
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(side);
-        uint256 selectedOi = selectedState.openInterest + sizeDelta;
-        uint256 oppositeOi = oppositeState.openInterest;
-        uint256 postBullOi = side == CfdTypes.Side.BULL ? selectedOi : oppositeOi;
-        uint256 postBearOi = side == CfdTypes.Side.BEAR ? selectedOi : oppositeOi;
-        uint256 postBullUsdc = (postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-    }
 
     function _syncTotalSideMargin(
         CfdTypes.Side side,
@@ -1031,171 +836,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         } else if (marginBefore > marginAfter) {
             uint256 delta = marginBefore - marginAfter;
             _sideState(side).totalMargin -= delta;
-        }
-    }
-
-    function _addGlobalLiability(
-        CfdTypes.Side side,
-        uint256 maxProfitUsdc,
-        uint256 sizeDelta
-    ) internal {
-        SideState storage sideState = _sideState(side);
-        sideState.maxProfitUsdc += maxProfitUsdc;
-        sideState.openInterest += sizeDelta;
-        uint256 maxLiability = _maxLiability();
-        if (_buildAdjustedSolvencySnapshot().effectiveSolvencyAssets < maxLiability) {
-            revert CfdEngine__VaultSolvencyExceeded();
-        }
-    }
-
-    function _reduceGlobalLiability(
-        CfdTypes.Side side,
-        uint256 maxProfitUsdc,
-        uint256 sizeDelta
-    ) internal {
-        SideState storage sideState = _sideState(side);
-        sideState.maxProfitUsdc -= maxProfitUsdc;
-        sideState.openInterest -= sizeDelta;
-    }
-
-    function _settleCloseNetSettlement(
-        bytes32 accountId,
-        int256 netSettlement,
-        uint256 execFeeUsdc,
-        uint256 remainingPosMarginUsdc
-    ) internal returns (uint256 collectedExecFeeUsdc) {
-        collectedExecFeeUsdc = execFeeUsdc;
-
-        if (netSettlement > 0) {
-            _payOrRecordDeferredTraderPayout(accountId, uint256(netSettlement));
-            return collectedExecFeeUsdc;
-        }
-
-        if (netSettlement == 0) {
-            return collectedExecFeeUsdc;
-        }
-
-        (
-            CfdEngineSettlementLib.CloseSettlementResult memory plannedResult,
-            MarginClearinghouseAccountingLib.SettlementConsumption memory plannedConsumption
-        ) = _planLiveCloseLoss(accountId, uint256(-netSettlement), execFeeUsdc, remainingPosMarginUsdc);
-        if (plannedResult.shortfallUsdc > 0 && remainingPosMarginUsdc > 0) {
-            revert CfdEngine__PartialCloseUnderwaterFunding();
-        }
-
-        CfdEngineSettlementLib.CloseSettlementResult memory result;
-        uint64[] memory reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
-        (result.seizedUsdc, result.shortfallUsdc) = clearinghouse.consumeCloseLoss(
-            accountId, reservationOrderIds, uint256(-netSettlement), remainingPosMarginUsdc, address(vault)
-        );
-
-        result.collectedExecFeeUsdc = plannedResult.collectedExecFeeUsdc;
-        result.badDebtUsdc = plannedResult.badDebtUsdc;
-        _syncMarginQueue(accountId, plannedConsumption.otherLockedMarginConsumedUsdc);
-
-        collectedExecFeeUsdc = result.collectedExecFeeUsdc;
-        accumulatedBadDebtUsdc += result.badDebtUsdc;
-    }
-
-    function _planLiveCloseLoss(
-        bytes32 accountId,
-        uint256 lossUsdc,
-        uint256 execFeeUsdc,
-        uint256 remainingPosMarginUsdc
-    )
-        internal
-        view
-        returns (
-            CfdEngineSettlementLib.CloseSettlementResult memory result,
-            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption
-        )
-    {
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildCloseSettlementBuckets(
-            clearinghouse.balanceUsdc(accountId),
-            lockedBuckets.positionMarginUsdc,
-            lockedBuckets.committedOrderMarginUsdc,
-            lockedBuckets.reservedSettlementUsdc,
-            remainingPosMarginUsdc
-        );
-        return _planCloseLossFromBuckets(buckets, lossUsdc, execFeeUsdc, remainingPosMarginUsdc);
-    }
-
-    function _planPreviewCloseLossSettlement(
-        bytes32 accountId,
-        uint256 lossUsdc,
-        uint256 execFeeUsdc,
-        uint256 remainingPosMarginUsdc,
-        uint256 marginToFreeUsdc,
-        PreviewFundingSettlement memory fundingSettlement
-    )
-        internal
-        view
-        returns (
-            CfdEngineSettlementLib.CloseSettlementResult memory result,
-            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption
-        )
-    {
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
-        uint256 adjustedPosMargin = fundingSettlement.positionMarginAfterFundingUsdc > marginToFreeUsdc
-            ? fundingSettlement.positionMarginAfterFundingUsdc - marginToFreeUsdc
-            : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildCloseSettlementBuckets(
-            fundingSettlement.settlementBalanceAfterFundingUsdc,
-            adjustedPosMargin,
-            lockedBuckets.committedOrderMarginUsdc,
-            lockedBuckets.reservedSettlementUsdc,
-            remainingPosMarginUsdc
-        );
-        return _planCloseLossFromBuckets(buckets, lossUsdc, execFeeUsdc, remainingPosMarginUsdc);
-    }
-
-    function _planCloseLossFromBuckets(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 lossUsdc,
-        uint256 execFeeUsdc,
-        uint256 remainingPosMarginUsdc
-    )
-        internal
-        pure
-        returns (
-            CfdEngineSettlementLib.CloseSettlementResult memory result,
-            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption
-        )
-    {
-        consumption =
-            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, remainingPosMarginUsdc, lossUsdc);
-        result = CfdEngineSettlementLib.closeSettlementResult(consumption.totalConsumedUsdc, lossUsdc, execFeeUsdc);
-    }
-
-    function _buildCloseSettlementBuckets(
-        uint256 settlementBalanceUsdc,
-        uint256 positionMarginUsdc,
-        uint256 committedOrderMarginUsdc,
-        uint256 reservedSettlementUsdc,
-        uint256 remainingPosMarginUsdc
-    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
-        buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
-        );
-    }
-
-    function _settleLiquidationResidual(
-        bytes32 accountId,
-        uint256 positionMarginUsdc,
-        int256 residualUsdc
-    ) internal returns (CfdEngineSettlementLib.LiquidationSettlementResult memory result) {
-        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
-            MarginClearinghouseAccountingLib.planLiquidationResidual(
-                clearinghouse.getAccountUsdcBuckets(accountId), residualUsdc
-            );
-        uint64[] memory reservationOrderIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
-        (result.seizedUsdc, result.payoutUsdc, result.badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
-            accountId, reservationOrderIds, positionMarginUsdc, residualUsdc, address(vault)
-        );
-        _syncMarginQueue(accountId, plan.mutation.otherLockedMarginUnlockedUsdc);
-        if (result.payoutUsdc > 0) {
-            _payOrRecordDeferredTraderPayout(accountId, result.payoutUsdc);
         }
     }
 
@@ -1273,7 +913,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         // This remains a free-settlement view helper, not the broader terminally reachable amount that
         // full-close settlement can consume after queued committed margin is released/consumed.
         viewData.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        viewData.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        viewData.terminalReachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         viewData.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         viewData.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
         viewData.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
@@ -1320,7 +960,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.deferredPayoutUsdc = deferredPayoutUsdc[accountId];
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
         snapshot.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        snapshot.liquidationReachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        snapshot.terminalReachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
 
@@ -1333,7 +973,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             lastMarkPrice,
             CAP_PRICE,
             getPendingFunding(pos),
-            snapshot.liquidationReachableUsdc,
+            snapshot.terminalReachableUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
 
@@ -1356,7 +996,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return viewData;
         }
 
-        uint256 reachableUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
+        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             lastMarkPrice,
@@ -1454,217 +1094,74 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc
     ) external view returns (ClosePreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
-        CfdTypes.Position memory pos = positions[accountId];
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
+
+        CfdTypes.Position memory pos = positions[accountId];
         if (pos.size == 0) {
-            preview.invalidCode = 1;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.NoPosition;
             return preview;
         }
         if (sizeDelta == 0 || sizeDelta > pos.size) {
-            preview.invalidCode = 2;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.BadSize;
             return preview;
         }
 
-        preview.valid = true;
-        PreviewFundingSettlement memory fundingSettlement =
-            _previewFundingSettlement(accountId, pos, sizeDelta == pos.size, vaultDepthUsdc);
-        pos.margin = fundingSettlement.positionMarginAfterFundingUsdc;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: pos.side,
+            isClose: true
+        });
+        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, oraclePrice, 0);
 
-        if (fundingSettlement.fundingVaultCashOutflowUsdc > 0) {
-            if (vault.totalAssets() < fundingSettlement.fundingVaultCashOutflowUsdc) {
-                preview.valid = false;
-                preview.invalidCode = 4;
-                return preview;
-            }
+        preview.fundingUsdc = delta.funding.pendingFundingUsdc;
+        preview.realizedPnlUsdc = delta.realizedPnlUsdc;
+        preview.remainingMargin = delta.posMarginAfter;
+        preview.remainingSize = pos.size - sizeDelta;
+        preview.vpiDeltaUsdc = delta.closeState.vpiDeltaUsdc;
+        if (delta.closeState.vpiDeltaUsdc > 0) {
+            preview.vpiUsdc = uint256(delta.closeState.vpiDeltaUsdc);
         }
+        preview.executionFeeUsdc = delta.executionFeeUsdc;
 
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        uint256 selectedUsdc = (selectedState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 oppositeUsdc = (oppositeState.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 preBullUsdc = pos.side == CfdTypes.Side.BULL ? selectedUsdc : oppositeUsdc;
-        uint256 preBearUsdc = pos.side == CfdTypes.Side.BEAR ? selectedUsdc : oppositeUsdc;
-        uint256 preSkewUsdc = preBullUsdc > preBearUsdc ? preBullUsdc - preBearUsdc : preBearUsdc - preBullUsdc;
-        CloseExecutionPlan memory closePlan = _buildCloseExecutionPlan(
-            pos, sizeDelta, price, preSkewUsdc, vaultDepthUsdc, fundingSettlement.closeFundingSettlementUsdc
-        );
-        CloseAccountingLib.CloseState memory closeState = closePlan.closeState;
-
-        preview.realizedPnlUsdc = closeState.realizedPnlUsdc;
-        preview.remainingMargin = closeState.remainingMarginUsdc;
-        preview.remainingSize = closeState.remainingSize;
-        preview.fundingUsdc = fundingSettlement.pendingFundingUsdc;
-
-        preview.vpiDeltaUsdc = closeState.vpiDeltaUsdc;
-        if (closeState.vpiDeltaUsdc > 0) {
-            preview.vpiUsdc = uint256(closeState.vpiDeltaUsdc);
-        }
-        preview.executionFeeUsdc = closeState.executionFeeUsdc;
-
-        if (preview.remainingSize > 0 && preview.remainingMargin < riskParams.minBountyUsdc) {
-            preview.valid = false;
-            preview.invalidCode = 5;
+        if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
+            preview.invalidReason = CfdTypes.CloseInvalidReason.DustPosition;
             return preview;
         }
 
-        uint256 protocolFeesDeltaUsdc = preview.executionFeeUsdc;
-
-        if (closeState.netSettlementUsdc > 0) {
-            uint256 settlementGain = uint256(closeState.netSettlementUsdc);
-            uint256 availableCash = vault.totalAssets() + fundingSettlement.fundingVaultCashInflowUsdc
-                - fundingSettlement.fundingVaultCashOutflowUsdc;
-            preview.immediatePayoutUsdc = availableCash >= settlementGain ? settlementGain : 0;
-            preview.deferredPayoutUsdc = availableCash >= settlementGain ? 0 : settlementGain;
-        } else if (closeState.netSettlementUsdc < 0) {
-            (CfdEngineSettlementLib.CloseSettlementResult memory result,) = _planPreviewCloseLossSettlement(
-                accountId,
-                uint256(-closeState.netSettlementUsdc),
-                preview.executionFeeUsdc,
-                preview.remainingMargin,
-                closeState.marginToFreeUsdc,
-                fundingSettlement
-            );
-            preview.seizedCollateralUsdc = result.seizedUsdc;
-            preview.badDebtUsdc = result.badDebtUsdc;
-            protocolFeesDeltaUsdc = result.collectedExecFeeUsdc;
-            if (result.shortfallUsdc > 0 && preview.remainingMargin > 0) {
-                preview.valid = false;
-                preview.invalidCode = 3;
-            }
+        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
+            preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
         }
 
-        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewCloseSolvencyState(
-                pos,
-                sizeDelta,
-                closePlan.postBullOi,
-                closePlan.postBearOi,
-                closeState.remainingMarginUsdc,
-                vaultDepthUsdc,
-                fundingSettlement.selectedSideTotalMarginAfterFundingUsdc,
-                fundingSettlement.selectedSideEntryFundingAfterFunding
-            ),
-            SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc)
-                    - int256(fundingSettlement.fundingVaultCashOutflowUsdc)
-                    + int256(fundingSettlement.fundingVaultCashInflowUsdc),
-                protocolFeesDeltaUsdc: protocolFeesDeltaUsdc,
-                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, closeState.maxProfitReductionUsdc),
-                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
-                deferredLiquidationBountyDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: 0
-            }),
-            degradedMode
-        );
-        preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
-        preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
-        preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
-        preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
-    }
-
-    function _previewFundingSettlement(
-        bytes32 accountId,
-        CfdTypes.Position memory pos,
-        bool fullClose,
-        uint256 vaultDepthUsdc
-    ) internal view returns (PreviewFundingSettlement memory settlement) {
-        settlement.pendingFundingUsdc = _previewPendingFunding(pos, vaultDepthUsdc);
-
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
-        settlement.settlementBalanceAfterFundingUsdc = clearinghouse.balanceUsdc(accountId);
-        settlement.positionMarginAfterFundingUsdc = lockedBuckets.positionMarginUsdc;
-
-        (SideState storage selectedState,) = _sideAndOppositeStates(pos.side);
-        settlement.selectedSideTotalMarginAfterFundingUsdc = selectedState.totalMargin;
-
-        (int256 bullFundingIndex, int256 bearFundingIndex) = _previewFundingIndexes(vaultDepthUsdc);
-        int256 selectedFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
-        settlement.selectedSideEntryFundingAfterFunding =
-            selectedState.entryFunding + int256(pos.size) * (selectedFundingIndex - pos.entryFundingIndex);
-
-        if (settlement.pendingFundingUsdc >= 0) {
-            if (fullClose) {
-                settlement.closeFundingSettlementUsdc = settlement.pendingFundingUsdc;
-            } else {
-                uint256 gain = uint256(settlement.pendingFundingUsdc);
-                settlement.positionMarginAfterFundingUsdc += gain;
-                settlement.settlementBalanceAfterFundingUsdc += gain;
-                settlement.selectedSideTotalMarginAfterFundingUsdc += gain;
-                settlement.fundingVaultCashOutflowUsdc = gain;
-            }
-            return settlement;
+        if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
+            preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
+            preview.badDebtUsdc = delta.badDebtUsdc;
         }
 
-        uint256 loss = uint256(-settlement.pendingFundingUsdc);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planFundingLossConsumption(buckets, loss);
-
-        settlement.settlementBalanceAfterFundingUsdc -= consumption.totalConsumedUsdc;
-        settlement.fundingVaultCashInflowUsdc = consumption.totalConsumedUsdc;
-        if (consumption.activeMarginConsumedUsdc > 0) {
-            settlement.positionMarginAfterFundingUsdc -= consumption.activeMarginConsumedUsdc;
-            settlement.selectedSideTotalMarginAfterFundingUsdc -= consumption.activeMarginConsumedUsdc;
+        if (
+            delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER
+                || delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.FUNDING_PARTIAL_CLOSE_UNDERWATER
+        ) {
+            preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnderwater;
+            return preview;
         }
-        if (consumption.uncoveredUsdc > 0) {
-            settlement.closeFundingSettlementUsdc = -int256(consumption.uncoveredUsdc);
-        }
-    }
 
-    function _buildCloseExecutionPlan(
-        CfdTypes.Position memory pos,
-        uint256 sizeDelta,
-        uint256 price,
-        uint256 preSkewUsdc,
-        uint256 vaultDepthUsdc,
-        int256 fundingSettlementUsdc
-    ) internal view returns (CloseExecutionPlan memory plan) {
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        uint256 selectedOiAfter = selectedState.openInterest - sizeDelta;
-        uint256 oppositeOi = oppositeState.openInterest;
-        plan.postBullOi = pos.side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeOi;
-        plan.postBearOi = pos.side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeOi;
-
-        uint256 postBullUsdc = (plan.postBullOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postBearUsdc = (plan.postBearOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postSkewUsdc = postBullUsdc > postBearUsdc ? postBullUsdc - postBearUsdc : postBearUsdc - postBullUsdc;
-
-        plan.closeState = CloseAccountingLib.buildCloseState(
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.vpiAccrued,
-            pos.side,
-            sizeDelta,
-            price,
-            CAP_PRICE,
-            preSkewUsdc,
-            postSkewUsdc,
-            vaultDepthUsdc,
-            riskParams.vpiFactor,
-            EXECUTION_FEE_BPS,
-            fundingSettlementUsdc
-        );
-    }
-
-    function _previewPendingFunding(
-        CfdTypes.Position memory pos,
-        uint256 vaultDepthUsdc
-    ) internal view returns (int256 fundingUsdc) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        fundingUsdc = PositionRiskAccountingLib.previewPendingFunding(
-            pos,
-            bullState.fundingIndex,
-            bearState.fundingIndex,
-            lastMarkPrice,
-            bullState.openInterest,
-            bearState.openInterest,
-            lastFundingTime,
-            block.timestamp,
-            vaultDepthUsdc,
-            riskParams
-        );
+        preview.valid = delta.valid;
+        preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
+        preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
+        preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
+        preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
     function previewLiquidation(
@@ -1673,56 +1170,33 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
-        CfdTypes.Position memory pos = positions[accountId];
         preview.oraclePrice = price;
-        if (pos.size == 0) {
+
+        if (positions[accountId].size == 0) {
             return preview;
         }
 
-        LiquidationComputation memory computation =
-            _buildLiquidationComputation(accountId, pos, price, _previewPendingFunding(pos, vaultDepthUsdc));
-        preview.reachableCollateralUsdc = computation.reachableCollateralUsdc;
-        preview.pnlUsdc = computation.riskState.unrealizedPnlUsdc;
-        preview.fundingUsdc = computation.riskState.pendingFundingUsdc;
-        preview.equityUsdc = computation.riskState.equityUsdc;
-        preview.liquidatable = computation.riskState.liquidatable;
-        preview.keeperBountyUsdc = computation.liquidationState.keeperBountyUsdc;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.LiquidationDelta memory delta = CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
 
-        preview.seizedCollateralUsdc = computation.settlement.seizedUsdc;
-        uint256 availableCash = vault.totalAssets();
-        preview.immediatePayoutUsdc =
-            availableCash >= computation.settlement.payoutUsdc ? computation.settlement.payoutUsdc : 0;
-        preview.deferredPayoutUsdc =
-            availableCash >= computation.settlement.payoutUsdc ? 0 : computation.settlement.payoutUsdc;
-        preview.badDebtUsdc = computation.settlement.badDebtUsdc;
+        preview.liquidatable = delta.liquidatable;
+        preview.reachableCollateralUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
+        preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
+        preview.fundingUsdc = delta.riskState.pendingFundingUsdc;
+        preview.equityUsdc = delta.riskState.equityUsdc;
+        preview.keeperBountyUsdc = delta.keeperBountyUsdc;
 
-        SolvencyAccountingLib.PreviewResult memory solvencyPreview = SolvencyAccountingLib.previewPostOpSolvency(
-            _buildPreviewLiquidationSolvencyState(pos, vaultDepthUsdc),
-            SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: int256(preview.seizedCollateralUsdc) - int256(preview.immediatePayoutUsdc),
-                protocolFeesDeltaUsdc: 0,
-                maxLiabilityAfterUsdc: viewDataMaxLiabilityAfterClose(pos.side, pos.maxProfitUsdc),
-                deferredTraderPayoutDeltaUsdc: preview.deferredPayoutUsdc,
-                deferredLiquidationBountyDeltaUsdc: 0,
-                pendingVaultPayoutUsdc: preview.keeperBountyUsdc
-            }),
-            degradedMode
-        );
-        preview.triggersDegradedMode = solvencyPreview.triggersDegradedMode;
-        preview.postOpDegradedMode = solvencyPreview.postOpDegradedMode;
-        preview.effectiveAssetsAfterUsdc = solvencyPreview.effectiveAssetsAfterUsdc;
-        preview.maxLiabilityAfterUsdc = solvencyPreview.maxLiabilityAfterUsdc;
-        vaultDepthUsdc;
-    }
+        preview.seizedCollateralUsdc = delta.residualPlan.seizedUsdc;
+        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        preview.badDebtUsdc = delta.badDebtUsdc;
 
-    function viewDataMaxLiabilityAfterClose(
-        CfdTypes.Side side,
-        uint256 maxProfitReduction
-    ) internal view returns (uint256) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            bullState.maxProfitUsdc, bearState.maxProfitUsdc, side, maxProfitReduction
-        );
+        preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
+        preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
+        preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
+        preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
     function getPositionSide(
@@ -1758,51 +1232,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant returns (uint256 keeperBountyUsdc) {
-        return _liquidatePosition(accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
-    }
-
-    function _liquidatePosition(
-        bytes32 accountId,
-        uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
-    ) internal returns (uint256 keeperBountyUsdc) {
-        uint256 price = currentOraclePrice > CAP_PRICE ? CAP_PRICE : currentOraclePrice;
-        _updateFunding(lastMarkPrice, vaultDepthUsdc);
-        _cacheMarkPriceIfNewer(price, publishTime);
-
-        CfdTypes.Position storage pos = positions[accountId];
-        if (pos.size == 0) {
+        if (publishTime < lastMarkTime) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
+        if (positions[accountId].size == 0) {
             revert CfdEngine__NoPositionToLiquidate();
         }
 
-        _sideState(pos.side).entryFunding -= int256(pos.size) * pos.entryFundingIndex;
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, currentOraclePrice, vaultDepthUsdc, publishTime);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            CfdEnginePlanLib.planLiquidation(snap, currentOraclePrice, publishTime);
 
-        LiquidationComputation memory computation =
-            _buildLiquidationComputation(accountId, pos, price, getPendingFunding(pos));
-        int256 equityUsdc = computation.riskState.equityUsdc;
-
-        if (!computation.riskState.liquidatable) {
+        if (!delta.liquidatable) {
             revert CfdEngine__PositionIsSolvent();
         }
 
-        _reduceGlobalLiability(pos.side, pos.maxProfitUsdc, pos.size);
-
-        uint256 liqEntryNotional = pos.size * pos.entryPrice;
-        _sideState(pos.side).entryNotional -= liqEntryNotional;
-
-        uint256 posMargin = pos.margin;
-        keeperBountyUsdc = computation.liquidationState.keeperBountyUsdc;
-        int256 residual = equityUsdc - int256(keeperBountyUsdc);
-        CfdEngineSettlementLib.LiquidationSettlementResult memory settlement =
-            _settleLiquidationResidual(accountId, posMargin, residual);
-        accumulatedBadDebtUsdc += settlement.badDebtUsdc;
-
-        _sideState(pos.side).totalMargin -= posMargin;
-
-        emit PositionLiquidated(accountId, pos.side, pos.size, price, keeperBountyUsdc);
-        delete positions[accountId];
-        _enterDegradedModeIfInsolvent(accountId, keeperBountyUsdc);
+        return _applyLiquidation(delta);
     }
 
     function _assertPostSolvency() internal view {
@@ -1869,147 +1316,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         );
     }
 
-    function _buildPreviewSolvencyState(
-        uint256 bullOiAfter,
-        uint256 bearOiAfter,
-        int256 bullEntryFundingAfter,
-        int256 bearEntryFundingAfter,
-        uint256 bullMarginAfter,
-        uint256 bearMarginAfter,
-        uint256 vaultDepthUsdc
-    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        (int256 bullFundingIndex, int256 bearFundingIndex) = _previewFundingIndexes(vaultDepthUsdc);
-        int256 bullFundingAfter =
-            (int256(bullOiAfter) * bullFundingIndex - bullEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        int256 bearFundingAfter =
-            (int256(bearOiAfter) * bearFundingIndex - bearEntryFundingAfter) / int256(CfdMath.FUNDING_INDEX_SCALE);
-        CfdEngineSnapshotsLib.FundingSnapshot memory fundingSnapshot = CfdEngineSnapshotsLib.buildFundingSnapshot(
-            bullFundingAfter, bearFundingAfter, bullMarginAfter, bearMarginAfter
-        );
-
-        return SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            _maxLiability(),
-            fundingSnapshot.solvencyFunding,
-            totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc
-        );
-    }
-
-    function _buildPreviewCloseSolvencyState(
-        CfdTypes.Position memory pos,
-        uint256 sizeDelta,
-        uint256 postBullOi,
-        uint256 postBearOi,
-        uint256 remainingMarginUsdc,
-        uint256 vaultDepthUsdc,
-        uint256 selectedSideTotalMarginAfterFundingUsdc,
-        int256 selectedSideEntryFundingAfterFunding
-    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        (, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        (int256 bullFundingIndex, int256 bearFundingIndex) = _previewFundingIndexes(vaultDepthUsdc);
-        int256 selectedFundingIndex = pos.side == CfdTypes.Side.BULL ? bullFundingIndex : bearFundingIndex;
-        uint256 selectedMarginAfter = selectedSideTotalMarginAfterFundingUsdc - pos.margin + remainingMarginUsdc;
-        int256 selectedEntryFundingAfter =
-            selectedSideEntryFundingAfterFunding - int256(sizeDelta) * selectedFundingIndex;
-        uint256 bullOiAfter = pos.side == CfdTypes.Side.BULL ? postBullOi : oppositeState.openInterest;
-        uint256 bearOiAfter = pos.side == CfdTypes.Side.BEAR ? postBearOi : oppositeState.openInterest;
-        int256 bullEntryFundingAfter =
-            pos.side == CfdTypes.Side.BULL ? selectedEntryFundingAfter : oppositeState.entryFunding;
-        int256 bearEntryFundingAfter =
-            pos.side == CfdTypes.Side.BEAR ? selectedEntryFundingAfter : oppositeState.entryFunding;
-        uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
-        uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
-        return _buildPreviewSolvencyState(
-            bullOiAfter,
-            bearOiAfter,
-            bullEntryFundingAfter,
-            bearEntryFundingAfter,
-            bullMarginAfter,
-            bearMarginAfter,
-            vaultDepthUsdc
-        );
-    }
-
-    function _buildPreviewLiquidationSolvencyState(
-        CfdTypes.Position memory pos,
-        uint256 vaultDepthUsdc
-    ) internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        (SideState storage selectedState, SideState storage oppositeState) = _sideAndOppositeStates(pos.side);
-        uint256 selectedOiAfter = selectedState.openInterest - pos.size;
-        int256 selectedEntryFundingAfter = selectedState.entryFunding - int256(pos.size) * pos.entryFundingIndex;
-        uint256 selectedMarginAfter = selectedState.totalMargin - pos.margin;
-        uint256 bullOiAfter = pos.side == CfdTypes.Side.BULL ? selectedOiAfter : oppositeState.openInterest;
-        uint256 bearOiAfter = pos.side == CfdTypes.Side.BEAR ? selectedOiAfter : oppositeState.openInterest;
-        int256 bullEntryFundingAfter =
-            pos.side == CfdTypes.Side.BULL ? selectedEntryFundingAfter : oppositeState.entryFunding;
-        int256 bearEntryFundingAfter =
-            pos.side == CfdTypes.Side.BEAR ? selectedEntryFundingAfter : oppositeState.entryFunding;
-        uint256 bullMarginAfter = pos.side == CfdTypes.Side.BULL ? selectedMarginAfter : oppositeState.totalMargin;
-        uint256 bearMarginAfter = pos.side == CfdTypes.Side.BEAR ? selectedMarginAfter : oppositeState.totalMargin;
-        return _buildPreviewSolvencyState(
-            bullOiAfter,
-            bearOiAfter,
-            bullEntryFundingAfter,
-            bearEntryFundingAfter,
-            bullMarginAfter,
-            bearMarginAfter,
-            vaultDepthUsdc
-        );
-    }
-
-    function _previewFundingIndexes(
-        uint256 vaultDepthUsdc
-    ) internal view returns (int256 bullFundingIndex, int256 bearFundingIndex) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        bullFundingIndex = bullState.fundingIndex;
-        bearFundingIndex = bearState.fundingIndex;
-
-        uint256 timeDelta = block.timestamp - lastFundingTime;
-        if (timeDelta == 0 || vaultDepthUsdc == 0 || lastMarkPrice == 0) {
-            return (bullFundingIndex, bearFundingIndex);
-        }
-
-        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: lastMarkPrice,
-                bullOi: bullState.openInterest,
-                bearOi: bearState.openInterest,
-                timeDelta: timeDelta,
-                vaultDepthUsdc: vaultDepthUsdc,
-                riskParams: riskParams
-            })
-        );
-        bullFundingIndex += step.bullFundingIndexDelta;
-        bearFundingIndex += step.bearFundingIndexDelta;
-    }
-
-    function _buildLiquidationComputation(
-        bytes32 accountId,
-        CfdTypes.Position memory pos,
-        uint256 price,
-        int256 pendingFundingUsdc
-    ) internal view returns (LiquidationComputation memory computation) {
-        uint256 maintMarginBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        computation.reachableCollateralUsdc = clearinghouse.getLiquidationReachableUsdc(accountId, pos.margin);
-        computation.riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, CAP_PRICE, pendingFundingUsdc, computation.reachableCollateralUsdc, maintMarginBps
-        );
-        computation.liquidationState = LiquidationAccountingLib.buildLiquidationState(
-            pos.size,
-            price,
-            computation.reachableCollateralUsdc,
-            computation.riskState.pendingFundingUsdc,
-            computation.riskState.unrealizedPnlUsdc,
-            maintMarginBps,
-            riskParams.minBountyUsdc,
-            riskParams.bountyBps,
-            CfdMath.USDC_TO_TOKEN_SCALE
-        );
-        computation.settlement = LiquidationAccountingLib.settlementForState(computation.liquidationState);
-    }
-
     function _buildAdjustedSolvencySnapshot()
         internal
         view
@@ -2022,6 +1328,361 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.maxLiability = state.maxLiabilityUsdc;
         snapshot.solvencyFunding = state.solvencyFundingPnlUsdc;
         snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
+    }
+
+    // ==========================================
+    // PLAN-APPLY: RAW SNAPSHOT BUILDER
+    // ==========================================
+
+    function _buildRawSnapshot(
+        bytes32 accountId,
+        uint256 executionPrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        snap.accountId = accountId;
+        snap.position = positions[accountId];
+
+        snap.currentTimestamp = block.timestamp;
+        snap.lastFundingTime = lastFundingTime;
+        snap.lastMarkPrice = lastMarkPrice;
+        snap.lastMarkTime = lastMarkTime;
+
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        snap.bullSide = _copySideSnapshot(bullState);
+        snap.bearSide = _copySideSnapshot(bearState);
+
+        snap.vaultAssetsUsdc = vaultDepthUsdc;
+        snap.vaultCashUsdc = vaultDepthUsdc;
+
+        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(accountId);
+        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+
+        if (orderRouter != address(0)) {
+            snap.marginReservationIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
+        }
+
+        snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
+        snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
+        snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;
+        snap.totalDeferredClearerBountyUsdc = totalDeferredClearerBountyUsdc;
+        snap.deferredPayoutForAccount = deferredPayoutUsdc[accountId];
+        snap.degradedMode = degradedMode;
+
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = riskParams;
+        snap.isFadWindow = isFadWindow();
+    }
+
+    function _copySideSnapshot(
+        SideState storage state
+    ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
+        snap.maxProfitUsdc = state.maxProfitUsdc;
+        snap.openInterest = state.openInterest;
+        snap.entryNotional = state.entryNotional;
+        snap.totalMargin = state.totalMargin;
+        snap.fundingIndex = state.fundingIndex;
+        snap.entryFunding = state.entryFunding;
+    }
+
+    // ==========================================
+    // PLAN-APPLY: REVERT DISPATCH + APPLY
+    // ==========================================
+
+    function _revertIfOpenInvalid(
+        CfdEnginePlanTypes.OpenRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.OpenRevertCode.OK) {
+            return;
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING) {
+            revert CfdEngine__MustCloseOpposingPosition();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE) {
+            revert CfdEngine__DegradedMode();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.FUNDING_EXCEEDS_MARGIN) {
+            revert CfdEngine__FundingExceedsMargin();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL) {
+            revert CfdEngine__PositionTooSmall();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH) {
+            revert CfdEngine__SkewTooHigh();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES) {
+            revert CfdEngine__MarginDrainedByFees();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN) {
+            revert CfdEngine__InsufficientInitialMargin();
+        }
+        if (code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED) {
+            revert CfdEngine__VaultSolvencyExceeded();
+        }
+    }
+
+    function _revertIfOpenInvalidTyped(
+        CfdEnginePlanTypes.OpenRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.OpenRevertCode.OK) {
+            return;
+        }
+
+        ICfdEngine.OrderExecutionFailureClass failureClass = code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
+            || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
+            || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+            ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
+            : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
+
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(failureClass, uint8(code), false);
+    }
+
+    function _revertIfCloseInvalid(
+        CfdEnginePlanTypes.CloseRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.CloseRevertCode.OK) {
+            return;
+        }
+        if (code == CfdEnginePlanTypes.CloseRevertCode.CLOSE_SIZE_EXCEEDS) {
+            revert CfdEngine__CloseSizeExceedsPosition();
+        }
+        if (code == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
+            revert CfdEngine__DustPosition();
+        }
+        if (code == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER) {
+            revert CfdEngine__PartialCloseUnderwaterFunding();
+        }
+        if (code == CfdEnginePlanTypes.CloseRevertCode.FUNDING_PARTIAL_CLOSE_UNDERWATER) {
+            revert CfdEngine__PartialCloseUnderwaterFunding();
+        }
+    }
+
+    function _revertIfCloseInvalidTyped(
+        CfdEnginePlanTypes.CloseRevertCode code
+    ) internal pure {
+        if (code == CfdEnginePlanTypes.CloseRevertCode.OK) {
+            return;
+        }
+
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(
+            ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid, uint8(code), true
+        );
+    }
+
+    function _applyFundingAndMark(
+        int256 bullDelta,
+        int256 bearDelta,
+        uint256 absSkew,
+        uint64 newFundingTime,
+        uint256 newMarkPrice,
+        uint64 newMarkTime
+    ) internal {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        if (bullDelta != 0 || bearDelta != 0) {
+            bullState.fundingIndex += bullDelta;
+            bearState.fundingIndex += bearDelta;
+        }
+        lastFundingTime = newFundingTime;
+        emit FundingUpdated(bullState.fundingIndex, bearState.fundingIndex, absSkew);
+        lastMarkPrice = newMarkPrice;
+        lastMarkTime = newMarkTime;
+    }
+
+    function _applyFundingSettlement(
+        CfdEnginePlanTypes.FundingDelta memory fd,
+        bytes32 accountId,
+        CfdTypes.Position storage pos
+    ) internal {
+        if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT) {
+            pos.margin += fd.posMarginIncrease;
+            vault.payOut(address(clearinghouse), fd.fundingVaultPayoutUsdc);
+            clearinghouse.creditSettlementAndLockMargin(accountId, fd.fundingClearinghouseCreditUsdc);
+        } else if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
+            _payOrRecordDeferredTraderPayout(accountId, uint256(fd.pendingFundingUsdc));
+        } else if (
+            fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED
+                || fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_UNCOVERED_CLOSE
+        ) {
+            uint256 loss = uint256(-fd.pendingFundingUsdc);
+            (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc,) =
+                clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
+            vault.recordProtocolInflow(marginConsumedUsdc + freeSettlementConsumedUsdc);
+            pos.margin -= fd.posMarginDecrease;
+        }
+
+        if (pos.size > 0) {
+            _sideState(pos.side).entryFunding += fd.sideEntryFundingDelta;
+            pos.entryFundingIndex = fd.newPosEntryFundingIndex;
+        }
+    }
+
+    function _applyOpen(
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) internal {
+        CfdTypes.Position storage pos = positions[delta.accountId];
+        CfdTypes.Side marginSide = pos.size > 0 ? pos.side : delta.posSide;
+        uint256 marginSnapshot = pos.margin;
+
+        CfdEnginePlanTypes.FundingDelta memory fd = delta.funding;
+        _applyFundingAndMark(
+            fd.bullFundingIndexDelta,
+            fd.bearFundingIndexDelta,
+            fd.fundingAbsSkewUsdc,
+            fd.newLastFundingTime,
+            fd.newLastMarkPrice,
+            fd.newLastMarkTime
+        );
+        _applyFundingSettlement(fd, delta.accountId, pos);
+        uint256 marginAfterFunding = pos.margin;
+        _syncTotalSideMargin(marginSide, marginSnapshot, marginAfterFunding);
+
+        SideState storage sideState = _sideState(delta.posSide);
+        sideState.maxProfitUsdc += delta.sideMaxProfitIncrease;
+        sideState.openInterest += delta.sideOiIncrease;
+
+        pos.maxProfitUsdc += delta.posMaxProfitIncrease;
+        if (pos.size == 0) {
+            pos.side = delta.posSide;
+            pos.entryFundingIndex = sideState.fundingIndex;
+        }
+        pos.entryPrice = delta.newPosEntryPrice;
+        pos.size = delta.newPosSize;
+        pos.vpiAccrued += delta.posVpiAccruedDelta;
+
+        if (delta.sideEntryNotionalDelta >= 0) {
+            sideState.entryNotional += uint256(delta.sideEntryNotionalDelta);
+        } else {
+            sideState.entryNotional -= uint256(-delta.sideEntryNotionalDelta);
+        }
+        sideState.entryFunding += delta.sideEntryFundingContribution;
+
+        if (delta.vaultRebatePayoutUsdc > 0) {
+            vault.payOut(address(clearinghouse), delta.vaultRebatePayoutUsdc);
+        }
+
+        int256 netMarginChange =
+            clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
+        if (delta.tradeCostUsdc > 0) {
+            vault.recordProtocolInflow(uint256(delta.tradeCostUsdc));
+        }
+
+        if (netMarginChange > 0) {
+            pos.margin += uint256(netMarginChange);
+        } else if (netMarginChange < 0) {
+            pos.margin -= uint256(-netMarginChange);
+        }
+
+        accumulatedFeesUsdc += delta.executionFeeUsdc;
+        _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
+        pos.lastUpdateTime = uint64(block.timestamp);
+        _assertPostSolvency();
+
+        emit PositionOpened(delta.accountId, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
+    }
+
+    function _applyClose(
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) internal {
+        CfdTypes.Position storage pos = positions[delta.accountId];
+        CfdTypes.Side marginSide = pos.side;
+        uint256 marginSnapshot = pos.margin;
+
+        CfdEnginePlanTypes.FundingDelta memory fd = delta.funding;
+        _applyFundingAndMark(
+            fd.bullFundingIndexDelta,
+            fd.bearFundingIndexDelta,
+            fd.fundingAbsSkewUsdc,
+            fd.newLastFundingTime,
+            fd.newLastMarkPrice,
+            fd.newLastMarkTime
+        );
+        _applyFundingSettlement(fd, delta.accountId, pos);
+        uint256 marginAfterFunding = pos.margin;
+        _syncTotalSideMargin(marginSide, marginSnapshot, marginAfterFunding);
+
+        pos.margin = delta.posMarginAfter;
+        pos.maxProfitUsdc -= delta.posMaxProfitReduction;
+
+        SideState storage sideState = _sideState(marginSide);
+        sideState.maxProfitUsdc -= delta.sideMaxProfitReduction;
+        sideState.openInterest -= delta.sideOiDecrease;
+        sideState.entryNotional -= delta.sideEntryNotionalReduction;
+        sideState.entryFunding -= delta.sideEntryFundingReduction;
+
+        pos.size -= delta.posSizeDelta;
+        pos.vpiAccrued -= delta.posVpiAccruedReduction;
+
+        clearinghouse.unlockPositionMargin(delta.accountId, delta.unlockMarginUsdc);
+
+        if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
+            _payOrRecordDeferredTraderPayout(delta.accountId, delta.traderPayoutUsdc);
+        } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
+            uint64[] memory reservationOrderIds =
+                IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
+            (uint256 seizedUsdc,) = clearinghouse.consumeCloseLoss(
+                delta.accountId,
+                reservationOrderIds,
+                uint256(-delta.closeState.netSettlementUsdc),
+                delta.posMarginAfter,
+                delta.deletePosition,
+                address(vault)
+            );
+            vault.recordProtocolInflow(seizedUsdc);
+            _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
+            accumulatedBadDebtUsdc += delta.badDebtUsdc;
+        }
+
+        accumulatedFeesUsdc += delta.executionFeeUsdc;
+        _syncTotalSideMargin(marginSide, marginAfterFunding, pos.margin);
+
+        emit PositionClosed(delta.accountId, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
+
+        if (delta.deletePosition) {
+            delete positions[delta.accountId];
+        } else {
+            pos.lastUpdateTime = uint64(block.timestamp);
+        }
+
+        _enterDegradedModeIfInsolvent(delta.accountId, 0);
+    }
+
+    function _applyLiquidation(
+        CfdEnginePlanTypes.LiquidationDelta memory delta
+    ) internal returns (uint256 keeperBountyUsdc) {
+        CfdEnginePlanTypes.GlobalFundingDelta memory gfd = delta.funding;
+        _applyFundingAndMark(
+            gfd.bullFundingIndexDelta,
+            gfd.bearFundingIndexDelta,
+            gfd.fundingAbsSkewUsdc,
+            gfd.newLastFundingTime,
+            gfd.newLastMarkPrice,
+            gfd.newLastMarkTime
+        );
+
+        SideState storage sideState = _sideState(delta.side);
+        sideState.entryFunding -= delta.sideEntryFundingReduction;
+        sideState.maxProfitUsdc -= delta.sideMaxProfitDecrease;
+        sideState.openInterest -= delta.sideOiDecrease;
+        sideState.entryNotional -= delta.sideEntryNotionalReduction;
+
+        keeperBountyUsdc = delta.keeperBountyUsdc;
+        uint64[] memory reservationOrderIds =
+            IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
+        (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
+            delta.accountId, reservationOrderIds, delta.posMargin, delta.residualUsdc, address(vault)
+        );
+        vault.recordProtocolInflow(seizedUsdc);
+        _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
+        if (payoutUsdc > 0) {
+            _payOrRecordDeferredTraderPayout(delta.accountId, payoutUsdc);
+        }
+        accumulatedBadDebtUsdc += badDebtUsdc;
+
+        sideState.totalMargin -= delta.posMargin;
+
+        emit PositionLiquidated(delta.accountId, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
+        delete positions[delta.accountId];
+        _enterDegradedModeIfInsolvent(delta.accountId, keeperBountyUsdc);
     }
 
     function _enterDegradedModeIfInsolvent(
@@ -2041,11 +1702,36 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
+        (int256 bullFundingIndex, int256 bearFundingIndex) = _getProjectedFundingIndices();
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        bullFunding = (int256(bullState.openInterest) * bullState.fundingIndex - bullState.entryFunding)
+        bullFunding = (int256(bullState.openInterest) * bullFundingIndex - bullState.entryFunding)
             / int256(CfdMath.FUNDING_INDEX_SCALE);
-        bearFunding = (int256(bearState.openInterest) * bearState.fundingIndex - bearState.entryFunding)
+        bearFunding = (int256(bearState.openInterest) * bearFundingIndex - bearState.entryFunding)
             / int256(CfdMath.FUNDING_INDEX_SCALE);
+    }
+
+    function _getProjectedFundingIndices() internal view returns (int256 bullFundingIndex, int256 bearFundingIndex) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        bullFundingIndex = bullState.fundingIndex;
+        bearFundingIndex = bearState.fundingIndex;
+
+        if (block.timestamp <= lastFundingTime || lastMarkPrice == 0) {
+            return (bullFundingIndex, bearFundingIndex);
+        }
+
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: block.timestamp - lastFundingTime,
+                vaultDepthUsdc: vault.totalAssets(),
+                riskParams: riskParams
+            })
+        );
+
+        bullFundingIndex += step.bullFundingIndexDelta;
+        bearFundingIndex += step.bearFundingIndexDelta;
     }
 
     function _buildFundingSnapshot() internal view returns (CfdEngineSnapshotsLib.FundingSnapshot memory snapshot) {
@@ -2060,7 +1746,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return _buildFundingSnapshot().solvencyFunding;
     }
 
-    function _getLiabilityOnlyFundingPnl() internal view returns (int256) {
+    function _getLiabilityOnlyFundingPnl() internal view returns (uint256) {
         return _buildFundingSnapshot().withdrawalFundingLiability;
     }
 
@@ -2106,7 +1792,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     /// @notice Aggregate unsettled funding liabilities only, ignoring trader debts owed to the vault.
     /// @return Funding liabilities the vault should conservatively reserve for withdrawals (6 decimals)
-    function getLiabilityOnlyFundingPnl() external view returns (int256) {
+    function getLiabilityOnlyFundingPnl() external view returns (uint256) {
         return _getLiabilityOnlyFundingPnl();
     }
 
@@ -2146,17 +1832,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         lastMarkTime = publishTime;
     }
 
-    function _cacheMarkPriceIfNewer(
-        uint256 price,
-        uint64 publishTime
-    ) internal {
-        if (publishTime < lastMarkTime) {
-            revert CfdEngine__MarkPriceOutOfOrder();
-        }
-        lastMarkPrice = price;
-        lastMarkTime = publishTime;
-    }
-
     /// @notice Returns true when the protocol still has live bounded directional liability.
     function hasLiveLiability() external view returns (bool) {
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
@@ -2183,16 +1858,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
     }
 
-    /// @notice Combined MtM: per-side (PnL + funding), clamped at zero.
+    /// @notice Combined MtM: per-side (PnL + funding), clamped at zero per side then summed.
     ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
-    ///         The vault never counts unrealized trader losses as assets — realized losses flow
-    ///         through physical USDC transfers (settlements, liquidations).
-    /// @return Net MtM adjustment the vault must reserve (always >= 0), in USDC (6 decimals)
-    function getVaultMtmAdjustment() external view returns (int256) {
+    /// @return Net MtM liability the vault must reserve, in USDC (6 decimals). Non-negative by construction.
+    function getVaultMtmAdjustment() external view returns (uint256) {
         return _getVaultMtmLiability();
     }
 
-    function _getVaultMtmLiability() internal view returns (int256) {
+    function _getVaultMtmLiability() internal view returns (uint256) {
         uint256 price = lastMarkPrice;
 
         int256 bullPnl;
@@ -2224,7 +1897,30 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             bearTotal = 0;
         }
 
-        return bullTotal + bearTotal;
+        return uint256(bullTotal) + uint256(bearTotal);
+    }
+
+    function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
+        if (address(vault) == address(0) || orderRouter == address(0)) {
+            return ICfdEngine.ProtocolPhase.Configuring;
+        }
+        if (degradedMode) {
+            return ICfdEngine.ProtocolPhase.Degraded;
+        }
+        return ICfdEngine.ProtocolPhase.Active;
+    }
+
+    function getProtocolPhase() external view returns (ICfdEngine.ProtocolPhase) {
+        return _getProtocolPhase();
+    }
+
+    function getProtocolStatus() external view returns (ICfdEngine.ProtocolStatus memory status) {
+        status.phase = _getProtocolPhase();
+        status.lastMarkTime = lastMarkTime;
+        status.lastMarkPrice = lastMarkPrice;
+        status.oracleFrozen = isOracleFrozen();
+        status.fadWindow = isFadWindow();
+        status.fadMaxStaleness = fadMaxStaleness;
     }
 
 }

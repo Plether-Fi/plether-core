@@ -3,6 +3,7 @@
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether Perpetuals Engine.
 
 For the repo's intended semantic model for solvency, withdrawals, liquidation equity, pending-order escrow, and oracle-policy separation, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md).
+For a concise definition of the accounting terms used here (`raw assets`, `accounted assets`, `effective solvency assets`, etc.), see the Accounting Glossary in [`README.md`](README.md).
 
 ## Upgradeability
 
@@ -42,7 +43,7 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
+| **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens, where `vault.totalAssets()` is canonical physical backing (`min(rawAssets, accountedAssets)`) rather than raw token balance. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
 | **Degraded Containment** | If a close realizes cash outflow that pushes `effectiveAssets` below the remaining liability bound, `degradedMode` latches: new opens and risky withdrawals are blocked until recapitalization restores solvency and the owner clears the mode |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
 | **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees - fundingWithdrawalReserve - deferredPayoutLiabilities` — LPs cannot withdraw encumbered capital |
@@ -56,7 +57,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
-| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders reserve a flat `1.00 USDC` bounty — seized upfront when free settlement is available, or deferred until execution when the trader is fully utilized (bounty is paid from freed position margin on success, forfeited on expiry/failure) |
+| **FIFO Execution** | `orderId == nextExecuteId` — orders execute in strict commitment sequence. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders also reserve a flat `1.00 USDC` bounty upfront at commit time, so head-of-queue execution is always economically backed without relying on freed position margin at execution time |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -90,11 +91,11 @@ These properties must always hold. Violation indicates a critical bug.
 
 - **Assumption**: Pyth provides accurate, timely price data for all basket FX pairs (EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD)
 - **Architecture**: OrderRouter aggregates multiple Pyth feeds into a weighted basket price replicating the spot BasketOracle formula
-- **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage
+- **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage while the oracle is live. During genuine frozen-oracle windows this ordering check is intentionally bypassed for close execution so traders can still reduce risk against the last valid oracle price.
 - **Mitigation (Staleness)**: 60s max age for order execution, 15s for liquidations. Relaxed to `fadMaxStaleness` (default 3 days) during frozen oracle windows
 - **Mitigation (Mark Freshness)**: `lastMarkTime` is set from the Pyth VAA `publishTime` (not `block.timestamp`) across all engine paths (`processOrder`, `liquidatePosition`, `updateMarkPrice`). This prevents stale VAAs from appearing fresh to the HousePool's mark staleness checks
 - **Mitigation (Negative/Zero)**: `_normalizePythPrice` reverts on non-positive prices; `_computeBasketPrice` reverts if basket sum is zero
-- **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly
+- **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly, but the frozen-oracle policy is liveness-first: voluntary closes can execute at the last valid Friday price until the oracle resumes publishing.
 - **Risk (Feed Compromise)**: If any single Pyth feed is compromised, the basket price is affected proportionally to that feed's weight. The weakest-link `minPublishTime` prevents selective staleness attacks
 - **Risk (Exponent Variation)**: Different Pyth feeds may use different exponents. `_normalizePythPrice` normalizes all to 8 decimals but truncates on scale-down
 
@@ -149,8 +150,8 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Per-account queue cap**: No account may have more than `5` pending orders at once, bounding account-local liquidation cleanup and queue-griefing surface
 - **Execution bounty floor**: Risk-increasing orders reserve at least `0.05 USDC`, preventing dust orders from entering FIFO with zero economic incentive. Close intents reserve a flat `1.00 USDC` router escrow at commit so clearers are paid from user-funded escrow instead of vault subsidy
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
-- **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices
-- **Failed Orders**: Failed or expired orders still pay their reserved execution bounty to the executor. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
+- **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices in live markets. Frozen-oracle windows are an intentional exception: no fresh oracle publish exists, so the protocol preserves close liveness at the last valid oracle price instead of enforcing an impossible publish-time ordering check.
+- **Failed Orders**: Failed or expired orders generally pay their reserved execution bounty to the executor from router escrow. The explicit exception is post-commit protocol-state invalidation on risk-increasing opens (for example degraded mode or a newly invalid solvency/skew state), which refunds the trader bounty instead of paying the clearer. Because close orders now prefund the flat clearer bounty in router escrow, invalid and expired closes no longer tax LP equity or depend on vault liquidity.
 
 #### Engine / Router Trust Boundary
 
@@ -163,6 +164,8 @@ The MarginClearinghouse authorizes only the configured `engine` and the router r
 These actors **cannot**:
 - Use `seizeUsdc()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
 - Create negative balances (seizure reverts if balance insufficient)
+
+`OrderRouter` now uses the typed `processOrderTyped()` boundary and `CfdEngine__TypedOrderFailure(...)` to classify expected execution failures into router-visible categories instead of matching raw engine revert selectors. This keeps bounty routing policy explicit at the engine/router boundary.
 
 ## Known Limitations
 
@@ -310,8 +313,8 @@ When a position goes underwater (equity < 0):
 
 #### Stale Mark Blocks Withdrawals and Yield Accrual
 
-- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, and `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`. During genuine oracle-frozen windows, these paths use `fadMaxStaleness` instead.
-- **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
+- **Behavior**: When open positions exist and `lastMarkTime` exceeds `markStalenessLimit` (default 120s), `_reconcile()` skips yield accrual and MtM distribution entirely, `withdrawSenior`/`withdrawJunior` revert via `_requireFreshMark()`, and `finalizeSeniorRate()` updates the configured rate without accruing stale-window senior yield. During genuine oracle-frozen windows, these paths use `fadMaxStaleness` instead.
+- **Impact**: During stale oracle periods, LP withdrawals are blocked and senior yield does not accrue or get backfilled via rate finalization. This prevents withdrawals at stale NAV and ensures yield and MtM are always evaluated atomically.
 - **Resolution**: Any keeper or user can call `router.updateMarkPrice()` with a fresh Pyth payload to unblock operations.
 
 #### Senior Yield is a Preferred Return, Not a Fixed Coupon

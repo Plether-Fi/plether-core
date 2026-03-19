@@ -7,7 +7,7 @@ library CfdEngineSnapshotsLib {
         int256 bullFunding;
         int256 bearFunding;
         int256 solvencyFunding;
-        int256 withdrawalFundingLiability;
+        uint256 withdrawalFundingLiability;
     }
 
     struct SolvencySnapshot {
@@ -39,22 +39,19 @@ library CfdEngineSnapshotsLib {
 
         snapshot.solvencyFunding = cappedBullFunding + cappedBearFunding;
         if (bullFunding > 0) {
-            snapshot.withdrawalFundingLiability += bullFunding;
+            snapshot.withdrawalFundingLiability += uint256(bullFunding);
         }
         if (bearFunding > 0) {
-            snapshot.withdrawalFundingLiability += bearFunding;
+            snapshot.withdrawalFundingLiability += uint256(bearFunding);
         }
     }
 
     function getWithdrawalReservedUsdc(
         uint256 maxLiability,
         uint256 protocolFees,
-        int256 fundingLiability
+        uint256 fundingLiability
     ) internal pure returns (uint256 reservedUsdc) {
-        reservedUsdc = maxLiability + protocolFees;
-        if (fundingLiability > 0) {
-            reservedUsdc += uint256(fundingLiability);
-        }
+        reservedUsdc = maxLiability + protocolFees + fundingLiability;
     }
 
 }

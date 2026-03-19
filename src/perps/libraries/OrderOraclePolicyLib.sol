@@ -28,6 +28,9 @@ library OrderOraclePolicyLib {
 
         if (action == OracleAction.OrderExecution) {
             policy.closeOnly = oracleFrozen || isFad;
+            // During genuine frozen-oracle windows, closes must remain executable against the
+            // last valid oracle price. Commit-time MEV ordering stays enforced in live/FAD
+            // markets but is intentionally bypassed once the oracle has stopped publishing.
             policy.mevChecks = !oracleFrozen;
             policy.maxStaleness = oracleFrozen ? fadMaxStaleness : 60;
             return policy;

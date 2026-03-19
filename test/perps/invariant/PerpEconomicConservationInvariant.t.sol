@@ -63,10 +63,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        int256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
-        if (fundingLiability > 0) {
-            expectedReserved += uint256(fundingLiability);
-        }
+        expectedReserved += engine.getLiabilityOnlyFundingPnl();
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),
@@ -267,9 +264,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Account snapshot close reachable mismatch"
             );
             assertEq(
-                snapshot.liquidationReachableUsdc,
-                collateralView.liquidationReachableUsdc,
-                "Account snapshot liquidation reachable mismatch"
+                snapshot.terminalReachableUsdc,
+                collateralView.terminalReachableUsdc,
+                "Account snapshot terminal reachable mismatch"
             );
             assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Account snapshot equity mismatch");
             assertEq(
@@ -307,9 +304,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                     "Deposits must not reduce close-reachable settlement"
                 );
                 assertGe(
-                    transition.afterLiquidationReachableUsdc,
-                    transition.beforeLiquidationReachableUsdc,
-                    "Deposits must not reduce liquidation-reachable settlement"
+                    transition.afterTerminalReachableUsdc,
+                    transition.beforeTerminalReachableUsdc,
+                    "Deposits must not reduce terminal-reachable settlement"
                 );
             } else if (transition.action == 2) {
                 assertLe(
@@ -318,9 +315,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                     "Withdrawals must not increase close-reachable settlement"
                 );
                 assertLe(
-                    transition.afterLiquidationReachableUsdc,
-                    transition.beforeLiquidationReachableUsdc,
-                    "Withdrawals must not increase liquidation-reachable settlement"
+                    transition.afterTerminalReachableUsdc,
+                    transition.beforeTerminalReachableUsdc,
+                    "Withdrawals must not increase terminal-reachable settlement"
                 );
             }
         }
@@ -344,7 +341,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 "Orphaned accounts close reachability must equal free settlement"
             );
             assertEq(
-                snapshot.liquidationReachableUsdc,
+                snapshot.terminalReachableUsdc,
                 snapshot.settlementBalanceUsdc,
                 "Orphaned accounts liquidation reachability must equal settlement balance"
             );

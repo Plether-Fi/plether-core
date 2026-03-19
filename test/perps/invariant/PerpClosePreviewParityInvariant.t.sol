@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
@@ -92,10 +93,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
                 if (!preview.valid) {
-                    if (preview.invalidCode == 5) {
+                    if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
                         assertTrue(
                             preview.remainingSize > 0 && preview.remainingMargin < minBountyUsdc,
-                            "invalidCode 5 must imply dust residual"
+                            "DustPosition must imply dust residual"
                         );
                     }
                     continue;
@@ -133,17 +134,12 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 CfdEngine.ClosePreview memory preview =
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
-                if (preview.valid && preview.fundingUsdc > 0) {
+                if (preview.valid && preview.fundingUsdc > 0 && preview.deferredPayoutUsdc == 0) {
                     assertGe(
                         vault.totalAssets(),
                         uint256(preview.fundingUsdc),
-                        "Valid partial close with positive funding requires vault to cover the outflow"
+                        "Immediate-only positive funding requires vault to cover the outflow"
                     );
-                }
-
-                if (preview.invalidCode == 4) {
-                    assertFalse(preview.valid, "invalidCode 4 must mark preview as invalid");
-                    assertGt(preview.fundingUsdc, 0, "invalidCode 4 requires positive pending funding");
                 }
             }
         }
@@ -177,9 +173,11 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
 
                 if (!preview.valid) {
+                    CfdTypes.CloseInvalidReason r = preview.invalidReason;
                     assertTrue(
-                        preview.invalidCode == 3 || preview.invalidCode == 4 || preview.invalidCode == 5,
-                        "Partial close of valid-full-close position can only fail for shortfall (3), vault cash (4), or dust (5)"
+                        r == CfdTypes.CloseInvalidReason.PartialCloseUnderwater
+                            || r == CfdTypes.CloseInvalidReason.DustPosition,
+                        "Partial close of valid-full-close position can only fail for shortfall or dust"
                     );
                 }
             }
@@ -196,10 +194,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            CfdEngine.PreviewFundingSettlement memory partialFs =
-                harness.exposed_previewFundingSettlement(accountId, false, vaultDepthUsdc);
-            CfdEngine.PreviewFundingSettlement memory fullFs =
-                harness.exposed_previewFundingSettlement(accountId, true, vaultDepthUsdc);
+            CfdEnginePlanTypes.FundingDelta memory partialFs =
+                harness.exposed_planFunding(accountId, true, false, vaultDepthUsdc);
+            CfdEnginePlanTypes.FundingDelta memory fullFs =
+                harness.exposed_planFunding(accountId, true, true, vaultDepthUsdc);
 
             assertEq(
                 partialFs.pendingFundingUsdc,
@@ -209,18 +207,24 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
             if (partialFs.pendingFundingUsdc >= 0) {
                 assertEq(
-                    partialFs.fundingVaultCashInflowUsdc, 0, "Non-negative partial funding must not produce inflow"
+                    partialFs.fundingLossConsumedFromMargin + partialFs.fundingLossConsumedFromFree,
+                    0,
+                    "Non-negative partial funding must not produce inflow"
                 );
-                assertEq(fullFs.fundingVaultCashInflowUsdc, 0, "Non-negative full funding must not produce inflow");
+                assertEq(
+                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
+                    0,
+                    "Non-negative full funding must not produce inflow"
+                );
             } else {
                 assertEq(
-                    fullFs.fundingVaultCashInflowUsdc,
+                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
                     0,
                     "Full close negative funding uses closeFundingSettlement, not vault transfer"
                 );
             }
 
-            assertEq(fullFs.fundingVaultCashOutflowUsdc, 0, "Full close never produces vault funding outflow");
+            assertEq(fullFs.fundingVaultPayoutUsdc, 0, "Full close never produces vault funding outflow");
         }
     }
 
@@ -265,9 +269,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
             return;
         }
 
-        CfdEngine.PreviewFundingSettlement memory fs =
-            harness.exposed_previewFundingSettlement(accountId, isFullClose, vaultDepthUsdc);
-        uint256 adjustedCash = vault.totalAssets() + fs.fundingVaultCashInflowUsdc - fs.fundingVaultCashOutflowUsdc;
+        CfdEnginePlanTypes.FundingDelta memory fs =
+            harness.exposed_planFunding(accountId, true, isFullClose, vaultDepthUsdc);
+        uint256 adjustedCash = vault.totalAssets() + fs.fundingLossConsumedFromMargin + fs.fundingLossConsumedFromFree
+            - fs.fundingVaultPayoutUsdc;
         uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {

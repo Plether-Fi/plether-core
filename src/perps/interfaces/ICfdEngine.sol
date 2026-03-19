@@ -7,6 +7,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
+    enum OrderExecutionFailureClass {
+        UserOrderInvalid,
+        ProtocolStateInvalidated
+    }
+
+    error CfdEngine__TypedOrderFailure(OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose);
+
     /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
     /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
     ///      `deferredPayoutUsdc` are trader-owned value or obligations recorded by the protocol.
@@ -39,7 +46,7 @@ interface ICfdEngine {
         uint256 deferredPayoutUsdc;
         uint256 pendingOrderCount;
         uint256 closeReachableUsdc;
-        uint256 liquidationReachableUsdc;
+        uint256 terminalReachableUsdc;
         uint256 accountEquityUsdc;
         uint256 freeBuyingPowerUsdc;
         bool hasPosition;
@@ -63,7 +70,7 @@ interface ICfdEngine {
         uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
         int256 cappedFundingPnlUsdc;
-        int256 liabilityOnlyFundingPnlUsdc;
+        uint256 liabilityOnlyFundingPnlUsdc;
         uint256 totalDeferredPayoutUsdc;
         uint256 totalDeferredClearerBountyUsdc;
         bool degradedMode;
@@ -73,8 +80,8 @@ interface ICfdEngine {
     struct HousePoolInputSnapshot {
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
-        int256 withdrawalFundingLiabilityUsdc;
-        int256 unrealizedMtmLiabilityUsdc;
+        uint256 withdrawalFundingLiabilityUsdc;
+        uint256 unrealizedMtmLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
         uint256 deferredClearerBountyUsdc;
         uint256 protocolFeesUsdc;
@@ -113,6 +120,7 @@ interface ICfdEngine {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
+        int256 solvencyFundingPnlUsdc;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
@@ -139,6 +147,16 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
+    /// @notice Router-facing order execution entrypoint with typed business-rule failures.
+    /// @dev Reverts with `CfdEngine__TypedOrderFailure` for expected order invalidations so the
+    ///      router can apply deterministic failed-order bounty policy without selector matching.
+    function processOrderTyped(
+        CfdTypes.Order memory order,
+        uint256 currentOraclePrice,
+        uint256 vaultDepthUsdc,
+        uint64 publishTime
+    ) external;
+
     /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
     function recordDeferredClearerBounty(
         address keeper,
@@ -147,6 +165,11 @@ interface ICfdEngine {
 
     /// @notice Pulls router-custodied cancellation fees into protocol revenue.
     function absorbRouterCancellationFee(
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Books router-delivered protocol-owned inflow as accumulated fees after the router has already paid the vault.
+    function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external;
 
@@ -221,12 +244,12 @@ interface ICfdEngine {
     /// @notice Aggregate funding liabilities only, excluding any trader debts owed to the vault.
     ///         Used by withdrawal firewalls that must assume funding receivables are uncollectible
     ///         until physically seized.
-    function getLiabilityOnlyFundingPnl() external view returns (int256);
+    function getLiabilityOnlyFundingPnl() external view returns (uint256);
 
     /// @notice Combined MtM liability: per-side (PnL + funding), clamped at zero.
     ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
     ///         Unrealized trader losses are not counted as vault assets.
-    function getVaultMtmAdjustment() external view returns (int256);
+    function getVaultMtmAdjustment() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
@@ -279,5 +302,24 @@ interface ICfdEngine {
     function fadDayOverrides(
         uint256 dayNumber
     ) external view returns (bool);
+
+    enum ProtocolPhase {
+        Configuring,
+        Active,
+        Degraded
+    }
+
+    struct ProtocolStatus {
+        ProtocolPhase phase;
+        uint64 lastMarkTime;
+        uint256 lastMarkPrice;
+        bool oracleFrozen;
+        bool fadWindow;
+        uint256 fadMaxStaleness;
+    }
+
+    function getProtocolPhase() external view returns (ProtocolPhase);
+
+    function getProtocolStatus() external view returns (ProtocolStatus memory);
 
 }

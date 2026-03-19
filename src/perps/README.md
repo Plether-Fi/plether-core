@@ -34,6 +34,15 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 
 These domains intentionally answer different questions and should not silently share assumptions.
 
+### Accounting Glossary
+
+- `raw assets`: the literal USDC token balance currently sitting in `HousePool`.
+- `accounted assets`: canonical protocol-owned USDC recognized by `HousePool` accounting; unsolicited positive transfers do not enter here until explicitly accounted.
+- `excess assets`: raw USDC held above `accountedAssets`; quarantined surplus that can be swept or explicitly admitted into protocol economics later.
+- `net physical assets`: the physically backed vault depth after applying the canonical accounting boundary, i.e. `min(rawAssets, accountedAssets)` before any higher-level solvency adjustments.
+- `effective solvency assets`: the conservative asset figure used by solvency checks after applying protocol-specific adjustments such as unpaid liabilities, withdrawal-reserve treatment, and "do not count unrealized trader losses as assets" policy.
+- `terminal reachable collateral`: the maximum collateral the protocol can actually seize and realize from a trader by following the close or liquidation path to completion, after applying margin-bucket access rules and free-settlement reachability constraints.
+
 ### I. MarginClearinghouse — The Prime Broker
 
 [`MarginClearinghouse.sol`](MarginClearinghouse.sol)
@@ -50,6 +59,8 @@ The House Pool is the USDC counterparty backing all trader payouts. It implement
 
 **Withdrawal Firewall**: `maxWithdraw` / `maxRedeem` compute `freeUSDC = totalAssets() - maxSystemLiability`. LPs can only withdraw unencumbered capital. At 100% utilization, capital is temporarily locked to guarantee all active trader payouts.
 
+**Canonical Pool Depth**: `HousePool` now distinguishes `rawAssets` (actual token balance), `accountedAssets` (canonical protocol-owned depth), `excessAssets` (unaccounted positive balance), and `totalAssets()` / physical assets (`min(rawAssets, accountedAssets)`). Unsolicited positive token transfers are quarantined as excess until the owner explicitly accounts or sweeps them, while raw-balance shortfalls still reduce effective backing immediately. Funding, solvency, reconcile, and withdrawal-firewall paths therefore consume the same controlled depth source instead of letting arbitrary token transfers rewrite historical economics.
+
 **Senior High-Water Mark**: A `seniorHighWaterMark` tracks the peak senior principal. After a catastrophic loss impairs senior capital, revenue first restores `seniorPrincipal` to the high-water mark before any surplus flows to junior. This prevents junior from profiting while senior remains impaired. The mark increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and a fully wiped senior tranche can be recapitalized from zero without carrying the stale pre-wipeout mark forward. Deposits remain blocked while senior is partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`).
 
 ### III. OrderRouter — The MEV Shield & Queue
@@ -59,15 +70,17 @@ The House Pool is the USDC counterparty backing all trader payouts. It implement
 Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 1. **Commit** — User submits intent (Size, Side, Target Price) and locks margin. The router assigns a strictly sequential `orderId` and logs `block.timestamp`.
-2. **Reveal** — Keepers push Pyth price payloads. The router aggregates multiple Pyth FX feeds into a weighted basket price (replicating the spot BasketOracle formula) and verifies the weakest-link `publishTime > commitTimestamp` to defeat oracle latency arbitrage. Supports batched multi-order execution for L2 throughput.
+2. **Reveal** — Keepers push Pyth price payloads. The router aggregates multiple Pyth FX feeds into a weighted basket price (replicating the spot BasketOracle formula) and, while the oracle is live, verifies the weakest-link `publishTime > commitTimestamp` to defeat oracle latency arbitrage. During genuine frozen-oracle windows, closes remain executable against the last valid oracle price instead of being bricked behind an impossible publish-time ordering check. Supports batched multi-order execution for L2 throughput.
 
 **Basket Oracle**: The router is constructed with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to 1e18), and base prices (8-dec). `_computeBasketPrice()` loops over feeds, normalizes each to 8 decimals, and computes `Σ (price × quantity) / (basePrice × 1e10)` — identical to the spot BasketOracle. The minimum `publishTime` across all feeds is used for MEV checks, staleness validation, and as the engine's `lastMarkTime` (ensuring mark freshness reflects actual oracle data age, not transaction execution time).
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
-**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents also reserve a flat `1.00 USDC` router-custodied execution bounty at commit time. Successful, expired, and otherwise invalid order attempts therefore all compensate the clearer from user-funded escrow rather than from vault subsidy.
+**FIFO Queue Economics**: Execution enforces `orderId == nextExecuteId`. The Engine call is wrapped in `try/catch` — if a trade breaches slippage or skew caps, it gracefully cancels and advances the queue for protocol liveness. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents also reserve a flat `1.00 USDC` router-custodied execution bounty at commit time. Successful, expired, and user-invalid order attempts compensate the clearer from user-funded escrow rather than from vault subsidy, while post-commit protocol-state invalidations on opens refund the trader bounty instead of paying the clearer.
 
 **Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty from the trader's free settlement balance into router custody for both opens and closes. Failed-order rewards therefore remain independent from vault liquidity across the full order lifecycle.
+
+**Typed Engine Failure Boundary**: `OrderRouter` executes through `CfdEngine.processOrderTyped()` and receives typed business-rule failures (`CfdEngine__TypedOrderFailure`) rather than matching raw engine selectors. This lets the router distinguish user-invalid orders from post-commit protocol-state invalidations deterministically when routing reserved bounties.
 
 **Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, reserved execution bounty, and both intrusive queue link sets. Residual committed margin now lives in clearinghouse-owned reservation records keyed by `orderId`, while the router still exposes compatibility getters for legacy integrations.
 
@@ -249,11 +262,11 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 **Two-State Oracle Model**: The router separates two distinct states to avoid conflating risk management with oracle availability:
 
 1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): Enforces **close-only mode** and elevated margins. Open orders are rejected. MEV and staleness checks remain at normal thresholds (60s/15s) since Pyth FX feeds are still publishing until ~22:00 UTC.
-2. **Oracle frozen** (`isOracleFrozen()`, Friday 22:00 → Sunday 21:00 UTC): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses MEV `commitTime` check, since Pyth FX feeds have stopped and prices are genuinely frozen. Asymmetric DST-safe thresholds: Friday uses 22:00 UTC (latest possible close) to avoid freezing while markets may still be open; Sunday uses 21:00 UTC (earliest possible open) to restore MEV protection as soon as markets could resume. In winter, the 21:00 unfreeze causes a safe 1-hour liveness drop (60s staleness rejects the ~47h-old price).
+2. **Oracle frozen** (`isOracleFrozen()`, Friday 22:00 → Sunday 21:00 UTC): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses the MEV `commitTime` check for order execution, since Pyth FX feeds have stopped and prices are genuinely frozen. Close orders submitted during the freeze therefore execute at the last valid oracle price rather than being blocked behind an impossible `publishTime > commitTime` requirement. This is an explicit liveness tradeoff, not an accidental loophole: the protocol prefers letting traders de-risk at the last valid frozen price over bricking voluntary closes until Sunday re-open. Asymmetric DST-safe thresholds: Friday uses 22:00 UTC (latest possible close) to avoid freezing while markets may still be open; Sunday uses 21:00 UTC (earliest possible open) to restore MEV protection as soon as markets could resume. In winter, the 21:00 unfreeze causes a safe 1-hour liveness drop (60s staleness rejects the ~47h-old price).
 
 This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
 
-**Admin FAD Days**: The protocol owner can designate additional FAD days via `proposeAddFadDays()` / `proposeRemoveFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed.
+**Admin FAD Days**: The protocol owner can designate additional FAD days via `proposeAddFadDays()` / `proposeRemoveFadDays()` for FX market holidays (e.g., Christmas, New Year). On admin days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed for the same reason: close liveness is preserved at the last valid oracle price while the oracle is intentionally offline.
 
 **Deleverage Runway**: Admin holidays lack the natural 3-hour runway that weekends get (Friday 19:00→22:00). To compensate, `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable via `proposeFadRunway()`) triggers `isFadWindow()` N seconds before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins are enforced while the oracle remains live with normal staleness and MEV checks — giving keepers time to liquidate over-leveraged positions before the oracle freezes at midnight.
 

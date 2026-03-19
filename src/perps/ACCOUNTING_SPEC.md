@@ -37,9 +37,20 @@ All values below are denominated in 6-decimal USDC unless stated otherwise.
 
 ### Physical Assets
 
-- `physicalAssets`: the actual USDC controlled by `HousePool`
+Use the following vocabulary consistently:
+
+- `rawAssets`: the actual USDC token balance currently sitting in `HousePool`
+- `accountedAssets`: the canonical protocol-owned asset ledger maintained by controlled protocol paths
+- `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance sitting in the pool
+- `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: the effective economic vault backing recognized by funding, solvency, reconciliation, and withdrawal logic
 - `protocolFees`: `accumulatedFeesUsdc`, which are owned by the protocol and not LP equity
 - `netPhysicalAssets = physicalAssets - protocolFees`
+
+Operational consequences:
+
+- unsolicited positive transfers do not increase economic depth until explicitly accounted,
+- raw-balance shortfalls reduce `physicalAssets` immediately via the `min(rawAssets, accountedAssets)` boundary,
+- all core accounting paths must consume canonical `physicalAssets` / `totalAssets()` rather than raw token balance.
 
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 
@@ -349,7 +360,7 @@ Oracle freshness policy must be action-specific.
 ### Reconciliation / Withdrawals
 
 - must use a freshness policy suitable for LP accounting,
-- stale marks may block or defer reconciliation depending on whether the action is allowed to proceed conservatively without a fresh mark.
+- stale marks may block reconciliation entirely, or allow only conservative admin actions that do not accrue stale-window yield or move LP value across the waterfall.
 
 Required principle:
 
@@ -405,7 +416,7 @@ The refactor should preserve or enforce the following:
 8. terminal full closes and liquidations must not perform work proportional to total queue length
 9. full closes must not eagerly cancel unrelated queued orders, while liquidations may perform bounded account-local eager cleanup under the per-account pending-order cap
 10. each account must have a hard upper bound on simultaneously pending orders so liquidation cleanup remains bounded in practice
-8. every path that deletes a position re-checks degraded-mode containment
+11. every path that deletes a position re-checks degraded-mode containment
 
 ## Refactor Target Modules
 

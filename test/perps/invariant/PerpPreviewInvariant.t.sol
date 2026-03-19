@@ -87,7 +87,11 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
             CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, 1, oraclePrice, vaultDepthUsdc);
             assertFalse(closePreview.valid, "Empty positions must not preview as valid closes");
-            assertEq(closePreview.invalidCode, 1, "Empty position close preview should return invalid code 1");
+            assertEq(
+                uint8(closePreview.invalidReason),
+                uint8(CfdTypes.CloseInvalidReason.NoPosition),
+                "Empty position close preview should return NoPosition"
+            );
             assertFalse(
                 closePreview.triggersDegradedMode, "Empty position close preview must not trigger degraded mode"
             );
@@ -100,7 +104,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -109,7 +113,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                clearinghouse.getLiquidationReachableUsdc(accountId, margin),
+                clearinghouse.getTerminalReachableUsdc(accountId),
                 "Liquidation preview reachable collateral mismatch"
             );
         }
@@ -130,7 +134,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                snapshot.liquidationReachableUsdc,
+                snapshot.terminalReachableUsdc,
                 "Liquidation preview reachable collateral must match snapshot reachability"
             );
             assertLt(

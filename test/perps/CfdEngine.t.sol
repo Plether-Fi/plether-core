@@ -173,6 +173,34 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
     }
 
+    function test_ProcessOrderTyped_ProtocolStateFailureUsesTypedTaxonomy() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+
+        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 1_200_000 * 1e18,
+            marginDelta: 2000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated,
+                uint8(7),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+    }
+
     function test_FundingAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
@@ -232,6 +260,55 @@ contract CfdEngineTest is BasePerpTest {
 
         int256 bullFunding = engine.getPendingFunding(bullPos);
         assertTrue(bullFunding < 0, "Retail BULL should owe massive funding");
+    }
+
+    function test_AbsorbRouterCancellationFee_SyncsFundingBeforeVaultCashMutation() public {
+        address trader = address(0xABC1);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+
+        uint64 fundingBefore = engine.lastFundingTime();
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 vaultAssetsBefore = pool.totalAssets();
+        vm.warp(block.timestamp + 1 days);
+
+        usdc.mint(address(router), 25e6);
+        vm.prank(address(router));
+        usdc.approve(address(engine), 25e6);
+
+        vm.prank(address(router));
+        engine.absorbRouterCancellationFee(25e6);
+
+        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "Absorbing router fees must sync funding first");
+        assertGt(engine.lastFundingTime(), fundingBefore, "Funding timestamp should advance before fee absorption");
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            25e6,
+            "Absorbed cancellation fee should be booked as incremental protocol revenue"
+        );
+        assertEq(
+            pool.totalAssets(),
+            vaultAssetsBefore + 25e6,
+            "Absorbed cancellation fee should raise canonical vault assets"
+        );
+        assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
+    }
+
+    function test_OpenTradeCost_AccountsVaultInflowCanonically() public {
+        bytes32 firstBullId = bytes32(uint256(uint160(address(0xABC2))));
+        bytes32 secondBullId = bytes32(uint256(uint160(address(0xABC3))));
+        _fundTrader(address(uint160(uint256(firstBullId))), 100_000e6);
+        _fundTrader(address(uint160(uint256(secondBullId))), 100_000e6);
+
+        _open(firstBullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        uint256 vaultAssetsBefore = pool.totalAssets();
+        _open(secondBullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+
+        assertGt(pool.totalAssets(), vaultAssetsBefore, "Positive trade cost should increase canonical vault assets");
+        assertEq(pool.excessAssets(), 0, "Trade-cost inflows should not remain quarantined as excess");
     }
 
     function test_ProfitableClose_RecordsDeferredPayoutWhenVaultIlliquid() public {
@@ -303,6 +380,36 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(preview.valid, "Full close preview should remain valid under illiquid positive funding");
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid positive-funding close should not promise immediate cash");
         assertGt(preview.deferredPayoutUsdc, 0, "Preview should surface deferred payout from positive funding credit");
+    }
+
+    function test_PreviewClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(1));
+        bytes32 bearId = bytes32(uint256(2));
+        _fundTrader(address(uint160(uint256(bullId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000 * 1e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 5000e18, 1e8, vaultDepth);
+        assertTrue(preview.valid, "Partial close preview should remain valid under illiquid positive funding");
+        assertEq(preview.immediatePayoutUsdc, 0, "Illiquid positive-funding partial close should not promise cash");
+        assertGt(preview.deferredPayoutUsdc, 0, "Preview should include deferred funding payout on partial close");
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+
+        assertEq(
+            engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Execution should match previewed deferment"
+        );
+        (uint256 remainingSize,,,,,,,) = engine.positions(bearId);
+        assertEq(remainingSize, preview.remainingSize, "Partial close should preserve the residual position");
     }
 
     function test_ClaimDeferredPayout_CreditsClearinghouseWhenLiquidityReturns() public {
@@ -502,16 +609,13 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
-
         assertEq(viewData.settlementBalanceUsdc, clearinghouse.balanceUsdc(accountId));
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.activePositionMarginUsdc, positionMargin);
         assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
         assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
         assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(
-            viewData.liquidationReachableUsdc, clearinghouse.getLiquidationReachableUsdc(accountId, positionMargin)
-        );
+        assertEq(viewData.terminalReachableUsdc, clearinghouse.getTerminalReachableUsdc(accountId));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
         assertEq(viewData.deferredPayoutUsdc, 0);
@@ -609,6 +713,46 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.accumulatedFeesUsdc, housePoolSnapshot.protocolFeesUsdc);
     }
 
+    function test_ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted() public {
+        _fundJunior(address(0xB0B), 500_000e6);
+        uint256 accountedBefore = pool.totalAssets();
+
+        usdc.mint(address(pool), 100_000e6);
+
+        ICfdEngine.ProtocolAccountingSnapshot memory beforeAccount = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw pool balance should include the donation");
+        assertEq(
+            pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted"
+        );
+        assertEq(beforeAccount.vaultAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
+        assertEq(
+            houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations"
+        );
+
+        pool.accountExcess();
+
+        ICfdEngine.ProtocolAccountingSnapshot memory afterAccount = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory houseAfter =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        assertEq(
+            pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets"
+        );
+        assertEq(
+            afterAccount.vaultAssetsUsdc,
+            accountedBefore + 100_000e6,
+            "Protocol snapshot should reflect explicit accounting"
+        );
+        assertEq(
+            houseAfter.netPhysicalAssetsUsdc,
+            accountedBefore + 100_000e6,
+            "HousePool snapshot should reflect explicit accounting"
+        );
+    }
+
     function test_GetAccountLedgerView_ReflectsCompactCrossContractState() public {
         address trader = address(0xAB15);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -662,7 +806,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.deferredPayoutUsdc, collateralView.deferredPayoutUsdc);
         assertEq(snapshot.pendingOrderCount, escrow.pendingOrderCount);
         assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
-        assertEq(snapshot.liquidationReachableUsdc, collateralView.liquidationReachableUsdc);
+        assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
         assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
         assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
         assertEq(snapshot.hasPosition, positionView.exists);
@@ -935,7 +1079,11 @@ contract CfdEngineTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,,) = engine.positions(accountId);
 
         assertFalse(preview.valid, "Preview should reject an underwater partial close that invades residual backing");
-        assertEq(preview.invalidCode, 3, "Preview should use the underwater partial-close invalid code");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
+            "Preview should use the underwater partial-close invalid reason"
+        );
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(0.8e8));
@@ -1198,7 +1346,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
         assertEq(
             preview.reachableCollateralUsdc,
-            snapshot.liquidationReachableUsdc,
+            snapshot.terminalReachableUsdc,
             "Liquidation preview must use the same liquidation reachability as the account ledger snapshot"
         );
         assertLt(
@@ -1416,6 +1564,47 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(CfdEngine.CfdEngine__MustCloseOpposingPosition.selector);
         vm.prank(address(router));
         engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+    }
+
+    function test_ProcessOrderTyped_UserInvalidFailureUsesTypedTaxonomy() public {
+        bytes32 accountId = bytes32(uint256(1));
+        _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
+
+        CfdTypes.Order memory bearOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+        vm.prank(address(router));
+        engine.processOrder(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+
+        CfdTypes.Order memory bullOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 0.8e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 2,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                uint8(1),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_FundingSettlement_ExceedsMargin_Reverts() public {
@@ -1704,6 +1893,44 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.prank(address(router));
+        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+    }
+
+    function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 accountId = bytes32(uint256(11));
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+
+        engine.proposeRiskParams(
+            CfdTypes.RiskParams({
+                vpiFactor: 0.0005e18,
+                maxSkewRatio: 0.4e18,
+                kinkSkewRatio: 0.25e18,
+                baseApy: 0.15e18,
+                maxApy: 3.0e18,
+                maintMarginBps: 100,
+                fadMarginBps: 300,
+                minBountyUsdc: 5 * 1e6,
+                bountyBps: 15
+            })
+        );
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeRiskParams();
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 500_000 * 1e18,
+            marginDelta: 1000 * 1e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
         engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
@@ -2074,10 +2301,17 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(badDebt, 0, "Expected liquidation shortfall to create bad debt");
 
         uint256 clearAmount = badDebt / 2;
+        uint256 vaultAssetsBefore = pool.totalAssets();
         usdc.mint(address(this), clearAmount);
         usdc.approve(address(engine), clearAmount);
         engine.clearBadDebt(clearAmount);
         assertEq(engine.accumulatedBadDebtUsdc(), badDebt - clearAmount, "Bad debt should decrease after clearing");
+        assertEq(
+            pool.totalAssets(),
+            vaultAssetsBefore + clearAmount,
+            "Bad-debt recapitalization should raise canonical vault assets"
+        );
+        assertEq(pool.excessAssets(), 0, "Bad-debt recapitalization should not strand excess assets");
 
         vm.expectRevert(CfdEngine.CfdEngine__BadDebtTooLarge.selector);
         engine.clearBadDebt(badDebt + 1);
@@ -2226,7 +2460,7 @@ contract CfdEngineFundingTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
-        int256 mtm = engine.getVaultMtmAdjustment();
+        uint256 mtm = engine.getVaultMtmAdjustment();
         assertEq(
             mtm,
             5000e6,
@@ -2246,8 +2480,6 @@ contract CfdEngineFundingTest is BasePerpTest {
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
-
-        assertGe(engine.getVaultMtmAdjustment(), 0, "Fix: MtM clamped at 0, vault never sees paper profit");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2587,15 +2819,10 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = engine.getUnrealizedTraderPnl();
-        int256 cappedMtm = engine.getVaultMtmAdjustment();
+        uint256 cappedMtm = engine.getVaultMtmAdjustment();
 
         assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
-        assertGe(
-            cappedMtm,
-            -int256(_sideTotalMargin(CfdTypes.Side.BEAR) + _sideTotalMargin(CfdTypes.Side.BULL)),
-            "Capped MtM bounded"
-        );
-        assertGt(cappedMtm, uncappedPnl, "Capped MtM is less aggressive than uncapped");
+        assertGt(int256(cappedMtm), uncappedPnl, "Capped MtM is less aggressive than uncapped");
     }
 
     // Regression: C-02
@@ -2645,7 +2872,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
         router.executeOrder(2, priceData);
 
-        int256 mtm = engine.getVaultMtmAdjustment();
+        uint256 mtm = engine.getVaultMtmAdjustment();
         assertGt(mtm, 0, "Positive MtM = vault liability when traders are winning (no cap needed)");
     }
 
@@ -2890,6 +3117,75 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.prank(address(juniorVault));
         vm.expectRevert(HousePool.HousePool__DegradedMode.selector);
         pool.withdrawJunior(1e6, address(this));
+    }
+
+}
+
+// ==========================================
+// ProtocolPhaseTest: Configuring → Active → Degraded → Active
+// ==========================================
+
+contract ProtocolPhaseTest is BasePerpTest {
+
+    address bullTrader = address(0xD001);
+    address bearTrader = address(0xD002);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_PhaseTransitions() public {
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Active),
+            "Fully configured engine should be Active"
+        );
+
+        ICfdEngine.ProtocolStatus memory status = engine.getProtocolStatus();
+        assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
+        assertEq(status.lastMarkPrice, 0);
+
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        _fundTrader(bullTrader, 100_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Degraded),
+            "Insolvency-revealing close should latch Degraded"
+        );
+
+        _fundJunior(address(this), 500_000e6);
+        engine.clearDegradedMode();
+
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Active),
+            "Recapitalization should restore Active"
+        );
+    }
+
+    function test_ConfiguringPhase() public {
+        CfdEngine unconfigured = new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams());
+        assertEq(
+            uint8(unconfigured.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Configuring),
+            "Engine without vault/router should be Configuring"
+        );
     }
 
 }
@@ -3196,6 +3492,110 @@ contract VpiChunkingTest is Test {
         uint256 tolerance = 5 * 1e6;
 
         assertLe(uint256(diff), tolerance, "H-01: Linear chunking error must stay within bounded tolerance");
+    }
+
+}
+
+contract SolvencySnapshotRegressionTest is BasePerpTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.5e18,
+            maxApy: 3.0e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function _liveEffectiveAssets(
+        uint256 pendingPayoutUsdc
+    ) internal view returns (uint256) {
+        uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc;
+        uint256 fees = engine.accumulatedFeesUsdc();
+        int256 funding = engine.getCappedFundingPnl();
+        uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
+        uint256 effective;
+        if (funding > 0) {
+            effective = netPhysical > uint256(funding) ? netPhysical - uint256(funding) : 0;
+        } else {
+            effective = netPhysical + uint256(-funding);
+        }
+        uint256 deferred = engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
+        effective = effective > deferred ? effective - deferred : 0;
+        return effective > pendingPayoutUsdc ? effective - pendingPayoutUsdc : 0;
+    }
+
+    /// @dev Regression: planLiquidation used stale side snapshots (OI, entryFunding, totalMargin)
+    ///      for solvency computation. Now also uses previewPostOpSolvency with physicalAssetsDelta
+    ///      to account for seized collateral flowing into the vault.
+    function test_PreviewLiquidation_SolvencyUsesPostLiquidationFundingState() public {
+        address bullTrader = address(0xDD01);
+        address bearTrader = address(0xDD02);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTrader, 30_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 180 days);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        assertTrue(preview.liquidatable, "BULL majority must be liquidatable after funding drain");
+
+        address keeper = address(0x999);
+        vm.prank(keeper);
+        bytes[] memory empty;
+        router.executeLiquidation(bullId, empty);
+
+        uint256 liveEffective = _liveEffectiveAssets(preview.keeperBountyUsdc);
+        assertEq(
+            preview.effectiveAssetsAfterUsdc,
+            liveEffective,
+            "Liquidation preview effective assets must match live post-liquidation state"
+        );
+    }
+
+    /// @dev Regression: _computeCloseSolvency did not reduce openInterest before computing
+    ///      capped funding PnL, overstating the OI*fundingIndex term.
+    function test_PreviewClose_SolvencyUsesPostCloseOiForFunding() public {
+        address bullTraderA = address(0xDD03);
+        address bullTraderB = address(0xDD04);
+        address bearTrader = address(0xDD05);
+        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
+        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTraderA, 50_000e6);
+        _fundTrader(bullTraderB, 50_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+
+        _open(bullIdA, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
+        _open(bullIdB, CfdTypes.Side.BULL, 400_000e18, 20_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 5 days);
+
+        (uint256 sizeA,,,,,,,) = engine.positions(bullIdA);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullIdA, sizeA, 1e8, pool.totalAssets());
+        assertTrue(preview.valid, "Close preview must be valid");
+
+        _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
+
+        int256 liveFunding = engine.getCappedFundingPnl();
+        assertEq(
+            preview.solvencyFundingPnlUsdc,
+            liveFunding,
+            "Close preview solvency funding must match live post-close capped funding"
+        );
     }
 
 }

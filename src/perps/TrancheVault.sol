@@ -68,7 +68,8 @@ contract TrancheVault is ERC4626 {
     }
 
     function totalAssets() public view override returns (uint256) {
-        return IS_SENIOR ? POOL.seniorPrincipal() : POOL.juniorPrincipal();
+        (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc,,) = POOL.getPendingTrancheState();
+        return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
     }
 
     function deposit(
@@ -115,7 +116,8 @@ contract TrancheVault is ERC4626 {
             return 0;
         }
         uint256 ownerAssets = _convertToAssets(balanceOf(_owner), Math.Rounding.Floor);
-        uint256 poolMax = IS_SENIOR ? POOL.getMaxSeniorWithdraw() : POOL.getMaxJuniorWithdraw();
+        (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
+        uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
         return ownerAssets < poolMax ? ownerAssets : poolMax;
     }
 
@@ -129,7 +131,8 @@ contract TrancheVault is ERC4626 {
             return 0;
         }
         uint256 ownerShares = balanceOf(_owner);
-        uint256 poolMax = IS_SENIOR ? POOL.getMaxSeniorWithdraw() : POOL.getMaxJuniorWithdraw();
+        (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
+        uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
         uint256 maxShares = _convertToShares(poolMax, Math.Rounding.Floor);
         return ownerShares < maxShares ? ownerShares : maxShares;
     }

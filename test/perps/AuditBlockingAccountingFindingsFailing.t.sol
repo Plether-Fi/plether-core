@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -10,6 +11,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
@@ -23,7 +25,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
     function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 20e6, 30e6, 0);
+            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(60e6, 20e6, 30e6, 0);
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);
@@ -32,17 +34,9 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
         assertEq(plan.freeSettlementConsumedUsdc, 10e6, "Plan should consume free settlement first");
         assertEq(plan.activeMarginConsumedUsdc, 0, "Protected residual margin must not be attributed as consumed");
-        assertEq(
-            plan.otherLockedMarginConsumedUsdc,
-            30e6,
-            "Plan should consume queued committed margin after free settlement"
-        );
-        assertEq(
-            buckets.totalLockedMarginUsdc - mutation.positionMarginUnlockedUsdc
-                - mutation.otherLockedMarginUnlockedUsdc,
-            20e6,
-            "Applied locked margin should equal surviving protected residual margin"
-        );
+        assertEq(plan.otherLockedMarginConsumedUsdc, 0, "Partial-close view must keep queued committed margin unreachable");
+        assertEq(mutation.settlementDebitUsdc, 10e6, "Applied settlement debit should stop at reachable free settlement");
+        assertEq(mutation.otherLockedMarginUnlockedUsdc, 0, "Queued committed margin must remain locked in partial-close planning");
     }
 
 }
@@ -71,7 +65,20 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         uint256 marginBefore = pos.margin;
         CfdTypes.Side marginSide = pos.side;
 
-        _settleFunding(order, pos);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(order.accountId, lastMarkPrice, vault.totalAssets(), 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+        CfdEnginePlanTypes.FundingDelta memory fd =
+            CfdEnginePlanLib.planFunding(snap, lastMarkPrice, 0, order.isClose, order.sizeDelta == pos.size);
+        _applyFundingAndMark(
+            fd.bullFundingIndexDelta,
+            fd.bearFundingIndexDelta,
+            fd.fundingAbsSkewUsdc,
+            fd.newLastFundingTime,
+            fd.newLastMarkPrice,
+            fd.newLastMarkTime
+        );
+        _applyFundingSettlement(fd, order.accountId, pos);
 
         uint256 marginAfter = pos.margin;
         uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
@@ -264,7 +271,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
-    function test_H1_PartialCloseLossConsumesCommittedMarginReservation() public {
+    function test_H1_PartialCloseLossMustNotConsumeQueuedCommittedMargin() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         bytes32 counterId = bytes32(uint256(uint160(counterparty)));
 
@@ -279,20 +286,23 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = router.committedMargins(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 1.08e8, pool.totalAssets());
 
-        // Close at 1.08e8 (basket up → BULL loss). 50k of 100k position.
-        // BULL PnL = (entryBasket - exitBasket) * size = (1e8 - 1.08e8) * 50k
-        // This loss exceeds free settlement, forcing consumption of committed margin.
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
+        assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
+            "Preview should use the underwater partial-close invalid reason"
+        );
+    }
 
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
-        uint256 committedAfter = router.committedMargins(1);
+    function test_H1_PartialClosePlannerViewKeepsQueuedCommittedMarginUnreachable() public {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(900e6, 100e6, 4000e6, 0);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-        assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
-        assertLt(settlementAfter, settlementBefore, "Settlement balance should decrease from loss");
-        assertLt(committedAfter, committedBefore, "Committed margin reservation should be partially consumed by loss");
+        assertEq(buckets.settlementBalanceUsdc, 0, "Planner partial-close view should exclude queued committed margin from settlement");
+        assertEq(buckets.freeSettlementUsdc, 0, "Excluded queued committed margin must not reappear as free settlement");
+        assertEq(buckets.otherLockedMarginUsdc, 0, "Partial-close view should treat other locked margin as unreachable");
     }
 
 }
@@ -317,52 +327,72 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         );
     }
 
-    function test_H2_FullyUtilizedTraderCanSubmitAndExecuteCloseOrder() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function _setupCloseBountyBacked() internal returns (bytes32 accountId, bytes32 counterId) {
+        accountId = bytes32(uint256(uint160(trader)));
+        counterId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 5001e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 1e6, "Close bounty should be prefunded");
+    }
+
+    function test_H2_FullyUtilizedTraderCannotSubmitCloseOrder() public {
+        _setupFullyUtilized();
+
+        vm.prank(trader);
+        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+    }
+
+    function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
-        assertTrue(record.bountyDeferred, "Close order bounty should be deferred when free settlement is 0");
-        assertEq(record.executionBountyUsdc, 1e6, "Deferred bounty amount should be 1 USDC");
-        assertEq(router.executionBountyReserves(1), 0, "Router should not custody deferred bounty");
+        uint64 headOrderId = router.nextExecuteId();
+        uint256 reservedBounty = router.executionBountyReserves(headOrderId);
+        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
-        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        assertEq(escrow.executionBountyUsdc, 0, "Deferred bounty must not appear in account escrow view");
+        assertGe(
+            reservedBounty + freeSettlement,
+            router.quoteCloseOrderExecutionBountyUsdc(),
+            "Head close order should be economically backed the moment it enters FIFO"
+        );
+        assertEq(
+            router.getOrderRecord(headOrderId).executionBountyUsdc,
+            router.quoteCloseOrderExecutionBountyUsdc(),
+            "Close orders should escrow the full bounty in router custody"
+        );
+    }
 
-        uint256 routerBalanceBefore = usdc.balanceOf(address(router));
+    function test_H2_SlippageFailedHeadCloseMustStillPayKeeper() public {
+        _setupCloseBountyBacked();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 90_000_000, true);
+
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
+        vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-        assertEq(sizeAfter, 0, "Close should have fully closed the position");
-
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 1e6, "Keeper should receive the deferred bounty from freed margin");
-
-        assertEq(
-            usdc.balanceOf(address(router)),
-            routerBalanceBefore,
-            "Router USDC balance should be unchanged (deferred bounty bypasses router custody)"
-        );
-
-        record = router.getOrderRecord(1);
-        assertFalse(record.bountyDeferred, "Deferred flag should be cleared after collection");
-        assertEq(record.executionBountyUsdc, 0, "Bounty amount should be zeroed after collection");
+        assertEq(keeperBounty, 1e6, "Head slippage failure should still pay the keeper bounty");
+        assertEq(router.nextExecuteId(), 2, "Head failure should still advance the FIFO pointer");
     }
 
-    function test_H2_ExpiredDeferredCloseForfeitsKeeperBounty() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        assertTrue(router.getOrderRecord(1).bountyDeferred, "Should be deferred");
 
         router.proposeMaxOrderAge(60);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -378,22 +408,20 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 0, "Expired deferred close should forfeit keeper bounty");
+        assertEq(keeperBounty, 1e6, "Expired head close should still pay the keeper bounty");
 
         assertEq(
             clearinghouse.getFreeSettlementBalanceUsdc(accountId),
             0,
-            "Trader margin should remain untouched after expired close"
+            "Escrowed close bounty should be consumed from prefunded free settlement"
         );
     }
 
-    function test_H2_LiquidationWithDeferredCloseOrderDoesNotOverTransfer() public {
-        (bytes32 accountId,) = _setupFullyUtilized();
+    function test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyEscrowedBounty() public {
+        (bytes32 accountId,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
-
-        assertTrue(router.getOrderRecord(1).bountyDeferred, "Should be deferred");
 
         uint256 routerBalanceBefore = usdc.balanceOf(address(router));
 
@@ -408,8 +436,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         assertEq(
             usdc.balanceOf(address(router)),
-            routerBalanceBefore,
-            "Router should not transfer USDC it doesnt hold for deferred bounties"
+            routerBalanceBefore - 1e6,
+            "Router should transfer exactly the escrowed close bounty on liquidation"
         );
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
@@ -424,4 +452,28 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, type(uint256).max, false);
     }
 
+}
+
+contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest {
+
+    address seniorLp = address(0xA11CE);
+    address juniorLp = address(0xB0B);
+
+    function test_L1_FinalizeSeniorRate_StaleMarkMustNotAccrueYield() public {
+        address trader = address(0x3333);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundSenior(seniorLp, 200_000e6);
+        _fundJunior(juniorLp, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 unpaidBefore = pool.unpaidSeniorYield();
+
+        pool.proposeSeniorRate(1600);
+        vm.warp(block.timestamp + 48 hours + 121);
+        pool.finalizeSeniorRate();
+
+        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue senior yield");
+    }
 }
