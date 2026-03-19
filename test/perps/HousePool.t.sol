@@ -1233,6 +1233,7 @@ contract HousePoolAuditTest is BasePerpTest {
         assertGt(seniorAfterLoss, 0, "Senior not fully wiped");
 
         usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
 
         vm.prank(address(juniorVault));
         pool.reconcile();
