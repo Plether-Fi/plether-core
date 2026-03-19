@@ -559,12 +559,19 @@ contract MarginClearinghouse is Ownable2Step {
             return (0, 0);
         }
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalances[accountId],
-            positionMarginUsdc[accountId],
-            includeOtherLockedMargin ? committedOrderMarginUsdc[accountId] : 0,
-            includeOtherLockedMargin ? reservedSettlementUsdc[accountId] : 0
-        );
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = includeOtherLockedMargin
+            ? MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+                settlementBalances[accountId],
+                positionMarginUsdc[accountId],
+                committedOrderMarginUsdc[accountId],
+                reservedSettlementUsdc[accountId]
+            )
+            : MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
+                settlementBalances[accountId],
+                positionMarginUsdc[accountId],
+                committedOrderMarginUsdc[accountId],
+                reservedSettlementUsdc[accountId]
+            );
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =

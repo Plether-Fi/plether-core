@@ -632,11 +632,20 @@ library CfdEnginePlanLib {
         if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.LOSS_CONSUMED) {
             settlementBalance -= fd.fundingLossConsumedFromMargin + fd.fundingLossConsumedFromFree;
         }
-        return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+        if (includeOtherLockedMargin) {
+            return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+                settlementBalance,
+                adjustedPosMargin,
+                snap.lockedBuckets.committedOrderMarginUsdc,
+                snap.lockedBuckets.reservedSettlementUsdc
+            );
+        }
+
+        return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
             settlementBalance,
             adjustedPosMargin,
-            includeOtherLockedMargin ? snap.lockedBuckets.committedOrderMarginUsdc : 0,
-            includeOtherLockedMargin ? snap.lockedBuckets.reservedSettlementUsdc : 0
+            snap.lockedBuckets.committedOrderMarginUsdc,
+            snap.lockedBuckets.reservedSettlementUsdc
         );
     }
 

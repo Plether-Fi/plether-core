@@ -25,7 +25,7 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
     function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(60e6, 20e6, 30e6, 0);
+            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(60e6, 20e6, 30e6, 0);
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
             MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);
@@ -34,17 +34,9 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
         assertEq(plan.freeSettlementConsumedUsdc, 10e6, "Plan should consume free settlement first");
         assertEq(plan.activeMarginConsumedUsdc, 0, "Protected residual margin must not be attributed as consumed");
-        assertEq(
-            plan.otherLockedMarginConsumedUsdc,
-            30e6,
-            "Plan should consume queued committed margin after free settlement"
-        );
-        assertEq(
-            buckets.totalLockedMarginUsdc - mutation.positionMarginUnlockedUsdc
-                - mutation.otherLockedMarginUnlockedUsdc,
-            20e6,
-            "Applied locked margin should equal surviving protected residual margin"
-        );
+        assertEq(plan.otherLockedMarginConsumedUsdc, 0, "Partial-close view must keep queued committed margin unreachable");
+        assertEq(mutation.settlementDebitUsdc, 10e6, "Applied settlement debit should stop at reachable free settlement");
+        assertEq(mutation.otherLockedMarginUnlockedUsdc, 0, "Queued committed margin must remain locked in partial-close planning");
     }
 
 }
@@ -279,7 +271,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
-    function test_H1_PartialCloseLossConsumesCommittedMarginReservation() public {
+    function test_H1_PartialCloseLossMustNotConsumeQueuedCommittedMargin() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         bytes32 counterId = bytes32(uint256(uint160(counterparty)));
 
@@ -294,43 +286,23 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = router.committedMargins(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 1.08e8, pool.totalAssets());
 
-        // Close at 1.08e8 (basket up → BULL loss). 50k of 100k position.
-        // BULL PnL = (entryBasket - exitBasket) * size = (1e8 - 1.08e8) * 50k
-        // This loss exceeds free settlement, forcing consumption of committed margin.
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
-
-        uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
-        uint256 committedAfter = router.committedMargins(1);
-
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-        assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
-        assertLt(settlementAfter, settlementBefore, "Settlement balance should decrease from loss");
-        assertLt(committedAfter, committedBefore, "Committed margin reservation should be partially consumed by loss");
+        assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
+        assertEq(
+            uint8(preview.invalidReason),
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
+            "Preview should use the underwater partial-close invalid reason"
+        );
     }
 
-    function test_H1_PartialCloseMustNotConsumeCommittedMarginReservation() public {
-        bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterId = bytes32(uint256(uint160(counterparty)));
+    function test_H1_PartialClosePlannerViewKeepsQueuedCommittedMarginUnreachable() public {
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
+            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(900e6, 100e6, 4000e6, 0);
 
-        _fundTrader(trader, 10_000e6);
-        _fundTrader(counterparty, 50_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
-
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
-
-        uint256 committedBefore = router.committedMargins(1);
-
-        _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
-
-        uint256 committedAfter = router.committedMargins(1);
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
-
-        assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position live");
-        assertEq(committedAfter, committedBefore, "Partial close should not consume queued committed margin");
+        assertEq(buckets.settlementBalanceUsdc, 0, "Planner partial-close view should exclude queued committed margin from settlement");
+        assertEq(buckets.freeSettlementUsdc, 0, "Excluded queued committed margin must not reappear as free settlement");
+        assertEq(buckets.otherLockedMarginUsdc, 0, "Partial-close view should treat other locked margin as unreachable");
     }
 
 }

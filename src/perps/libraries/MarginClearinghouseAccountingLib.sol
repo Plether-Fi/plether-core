@@ -42,6 +42,19 @@ library MarginClearinghouseAccountingLib {
             buckets.settlementBalanceUsdc > encumberedUsdc ? buckets.settlementBalanceUsdc - encumberedUsdc : 0;
     }
 
+    function buildPartialCloseUsdcBuckets(
+        uint256 settlementBalanceUsdc,
+        uint256 positionMarginUsdc,
+        uint256 committedOrderMarginUsdc,
+        uint256 reservedSettlementUsdc
+    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
+        uint256 excludedOtherLocked = committedOrderMarginUsdc + reservedSettlementUsdc;
+        uint256 effectiveSettlementBalance =
+            settlementBalanceUsdc > excludedOtherLocked ? settlementBalanceUsdc - excludedOtherLocked : 0;
+
+        return buildAccountUsdcBuckets(effectiveSettlementBalance, positionMarginUsdc, 0, 0);
+    }
+
     function planFundingLossConsumption(
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc

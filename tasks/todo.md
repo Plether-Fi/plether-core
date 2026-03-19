@@ -1,3 +1,13 @@
+- [x] Fix partial-close settlement reachability so queued committed/reserved collateral stays excluded from both preview and live loss consumption
+- [x] Add/adjust regressions proving partial closes cannot implicitly spend queued collateral
+- [x] Run targeted Forge coverage for clearinghouse + close preview/live parity
+
+Review:
+- Added `buildPartialCloseUsdcBuckets(...)` in `src/perps/libraries/MarginClearinghouseAccountingLib.sol` and switched both `src/perps/libraries/CfdEnginePlanLib.sol` and `src/perps/MarginClearinghouse.sol` to use it whenever partial closes must exclude queued committed/reserved collateral from reachable settlement.
+- Added a clearinghouse regression in `test/perps/MarginClearinghouse.t.sol` proving `consumeCloseLoss(..., false, ...)` now stops at free settlement plus released live margin and leaves queued reservations untouched.
+- Tightened `test/perps/AuditBlockingAccountingFindingsFailing.t.sol` H1 coverage around the new partial-close helper semantics without relying on stateful preview/live interleaving.
+- Verified green: `forge test --match-path test/perps/MarginClearinghouse.t.sol --match-test "ConsumeCloseLoss"`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "PreviewClose_UnderwaterPartialMatchesLiveRevert|PreviewClose_PartialLossUsesSettlementFreedByReleasedMargin"`, and `forge test --match-path test/perps/AuditBlockingAccountingFindingsFailing.t.sol --match-test "H1_"`.
+
 - [x] Sweep remaining perps docs for stale deferred-close-bounty language and numbering drift
 - [x] Remove dead `bountyDeferred` compatibility state from `OrderRouter`
 - [x] Re-run focused perps verification for close-bounty accounting
