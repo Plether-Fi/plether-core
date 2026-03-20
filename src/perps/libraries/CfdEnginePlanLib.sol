@@ -531,7 +531,7 @@ library CfdEnginePlanLib {
             bool includeOtherLockedMargin = remainingSize == 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets = _buildCloseSettlementBuckets(
-                snap, cs.marginToFreeUsdc, delta.funding, cs.remainingMarginUsdc, includeOtherLockedMargin
+                snap, cs.marginToFreeUsdc, delta.funding, includeOtherLockedMargin
             );
             delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
                 closeBuckets, cs.remainingMarginUsdc, lossUsdc
@@ -622,10 +622,8 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 marginToFreeUsdc,
         CfdEnginePlanTypes.FundingDelta memory fd,
-        uint256 remainingPosMarginUsdc,
         bool includeOtherLockedMargin
     ) private pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
-        remainingPosMarginUsdc;
         uint256 posMarginAfterFunding =
             snap.lockedBuckets.positionMarginUsdc + fd.posMarginIncrease - fd.posMarginDecrease;
         uint256 adjustedPosMargin =
