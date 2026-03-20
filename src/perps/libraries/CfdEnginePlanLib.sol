@@ -605,7 +605,10 @@ library CfdEnginePlanLib {
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
                 protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0,
+                deferredTraderPayoutDeltaUsdc: (delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0)
+                    + (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
+                        ? uint256(delta.funding.pendingFundingUsdc)
+                        : 0),
                 deferredLiquidationBountyDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: 0
             }),
