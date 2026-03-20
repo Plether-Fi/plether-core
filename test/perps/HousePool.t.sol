@@ -558,7 +558,11 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(engine));
         pool.recordRecapitalizationInflow(25_000e6);
 
-        assertEq(pool.seniorPrincipal(), 85_000e6, "Recapitalization should restore senior immediately");
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 85_000e6, "Pending state should reflect queued senior restoration immediately");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 85_000e6, "Reconcile should apply the queued recapitalization intent");
         assertEq(pool.unassignedAssets(), 0, "Known recapitalization semantics should avoid quarantine while seeded");
     }
 
@@ -580,7 +584,11 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(engine));
         pool.recordRecapitalizationInflow(10_000e6);
 
-        assertEq(pool.seniorPrincipal(), 10_000e6, "Recapitalization should attach to existing seeded senior ownership");
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 10_000e6, "Pending state should attach recapitalization to seeded senior ownership");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 10_000e6, "Reconcile should attach recapitalization to existing seeded senior ownership");
         assertEq(pool.seniorHighWaterMark(), 50_000e6, "Recapitalization should preserve the original restoration target");
     }
 
@@ -602,7 +610,11 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(engine));
         pool.recordTradingRevenueInflow(7_000e6);
 
-        assertEq(pool.juniorPrincipal(), 7_000e6, "Known trading revenue should attach directly to seeded junior ownership");
+        (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingJunior, 7_000e6, "Pending state should reflect queued trading revenue immediately");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 7_000e6, "Reconcile should attach trading revenue to seeded junior ownership");
         assertEq(pool.unassignedAssets(), 0, "Seeded trading revenue should avoid quarantine");
     }
 
@@ -623,6 +635,11 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(engine));
         pool.recordTradingRevenueInflow(35_000e6);
 
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 30_000e6, "Pending state should restore seeded senior to its HWM first");
+        assertEq(pendingJunior, 5_000e6, "Pending state should route residual trading revenue to seeded junior");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
         assertEq(pool.seniorPrincipal(), 30_000e6, "Trading revenue should restore seeded senior to its HWM first");
         assertEq(pool.juniorPrincipal(), 5_000e6, "Residual trading revenue should then attach to seeded junior");
         assertEq(pool.unassignedAssets(), 0, "Seeded waterfall routing should avoid quarantine for known trading revenue");
@@ -698,7 +715,9 @@ contract HousePoolTest is BasePerpTest {
         pool.recordRecapitalizationInflow(50_000e6);
 
         assertEq(pool.unpaidSeniorYield(), 0, "Stale-window principal mutation should not accrue yield");
-        assertEq(pool.lastReconcileTime(), block.timestamp, "Stale-window mutation should still checkpoint the clock");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.lastReconcileTime(), block.timestamp, "Stale-window queued mutation should checkpoint the clock when applied");
     }
 
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {

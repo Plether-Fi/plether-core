@@ -58,6 +58,8 @@ Controlled inflow families must remain distinct:
 - `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
 - `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
 
+These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into typed accounting intents that flow through a single HousePool application path with one checkpoint / freshness policy.
+
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 
 ### Trader Liability Bounds
