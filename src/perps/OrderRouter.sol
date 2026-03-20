@@ -61,6 +61,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         bool hasTerminalCloseQueued;
     }
 
+    struct QueuedPositionView {
+        bool exists;
+        CfdTypes.Side side;
+        uint256 size;
+    }
+
     struct PendingOrderView {
         uint64 orderId;
         bool isClose;
@@ -302,17 +308,14 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             revert OrderRouter__TooManyPendingOrders();
         }
         if (isClose) {
-            if (!engine.hasOpenPosition(accountId)) {
+            QueuedPositionView memory queuedPosition = _getQueuedPositionView(accountId);
+            if (!queuedPosition.exists || queuedPosition.size == 0) {
                 revert OrderRouter__NoOpenPosition();
             }
-            if (engine.getPositionSide(accountId) != side) {
+            if (queuedPosition.side != side) {
                 revert OrderRouter__CloseSideMismatch();
             }
-            uint256 positionSize = engine.getPositionSize(accountId);
-            if (sizeDelta > positionSize) {
-                revert OrderRouter__CloseSizeExceedsPosition();
-            }
-            if (pendingCloseSize[accountId] + sizeDelta > positionSize) {
+            if (sizeDelta > queuedPosition.size) {
                 revert OrderRouter__CloseSizeExceedsPosition();
             }
         }
@@ -775,6 +778,38 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             revert OrderRouter__OrderNotPending();
         }
         order = record.core;
+    }
+
+    function _getQueuedPositionView(
+        bytes32 accountId
+    ) internal view returns (QueuedPositionView memory queuedPosition) {
+        if (engine.hasOpenPosition(accountId)) {
+            queuedPosition.exists = true;
+            queuedPosition.side = engine.getPositionSide(accountId);
+            queuedPosition.size = engine.getPositionSize(accountId);
+        }
+
+        uint64 orderId = pendingHeadOrderId[accountId];
+        while (orderId != 0) {
+            CfdTypes.Order memory order = orderRecords[orderId].core;
+
+            if (order.isClose) {
+                if (queuedPosition.exists && order.side == queuedPosition.side) {
+                    queuedPosition.size = queuedPosition.size > order.sizeDelta ? queuedPosition.size - order.sizeDelta : 0;
+                    if (queuedPosition.size == 0) {
+                        queuedPosition.exists = false;
+                    }
+                }
+            } else if (!queuedPosition.exists || queuedPosition.size == 0) {
+                queuedPosition.exists = true;
+                queuedPosition.side = order.side;
+                queuedPosition.size = order.sizeDelta;
+            } else if (order.side == queuedPosition.side) {
+                queuedPosition.size += order.sizeDelta;
+            }
+
+            orderId = orderRecords[orderId].nextPendingOrderId;
+        }
     }
 
     function _failedOrderBountyPolicy(

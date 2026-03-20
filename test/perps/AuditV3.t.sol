@@ -388,7 +388,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         });
     }
 
-    function test_H02_OneDollarDepositCanRecapWipedTranche() public {
+    function test_H02_OneDollarDepositCannotRecapWipedTranche() public {
         // Senior absorbs last-loss; junior absorbs first-loss.
         // With senior + junior, a trading loss that exceeds junior wipes it to exactly 0.
         _fundSenior(address(this), 10_000e6);
@@ -420,10 +420,9 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         usdc.mint(attacker, 1e6);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.deposit(1e6, attacker);
         vm.stopPrank();
-
-        assertEq(pool.juniorPrincipal(), 1e6, "Recapitalization should restore junior principal from zero");
     }
 
 }

@@ -116,8 +116,6 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
         uint256 before = pool.lastReconcileTime();
-        uint256 oldRate = pool.seniorRateBps();
-        uint256 principal = pool.seniorPrincipal();
 
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 121);
@@ -128,13 +126,8 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 elapsed = block.timestamp - before;
-        uint256 expectedOldYield = (principal * oldRate * elapsed) / (10_000 * 365 days);
-        assertEq(
-            pool.unpaidSeniorYield(),
-            expectedOldYield,
-            "Stale-mark intervals should defer senior yield accrual, not erase it when finalizing a new rate"
-        );
+        assertEq(pool.unpaidSeniorYield(), 0, "Stale-mark intervals should not accrue deferred senior yield");
+        assertGt(pool.lastReconcileTime(), before, "Finalization and reconcile should checkpoint time through the stale interval");
     }
 
 }

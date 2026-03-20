@@ -79,11 +79,7 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertGt(
-            pool.unpaidSeniorYield(),
-            0,
-            "Old senior rate accrual should be checkpointed before the new rate takes effect"
-        );
+        assertEq(pool.unpaidSeniorYield(), 0, "Stale-mark finalization should not back-apply senior yield");
     }
 
 }

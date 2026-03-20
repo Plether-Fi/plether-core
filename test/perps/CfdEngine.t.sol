@@ -454,7 +454,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 deferred = engine.deferredPayoutUsdc(accountId);
         assertGt(deferred, 0, "Setup should create a deferred payout");
 
-        _fundJunior(address(this), deferred);
+        usdc.mint(address(pool), deferred);
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
 
         vm.prank(trader);
@@ -1485,7 +1485,7 @@ contract CfdEngineTest is BasePerpTest {
         assertGt(statusBefore.deferredTraderPayoutUsdc, 0);
         assertFalse(statusBefore.traderPayoutClaimableNow);
 
-        _fundJunior(address(this), statusBefore.deferredTraderPayoutUsdc);
+        usdc.mint(address(pool), statusBefore.deferredTraderPayoutUsdc);
 
         CfdEngine.DeferredPayoutStatus memory statusAfter = engine.getDeferredPayoutStatus(accountId, address(this));
         assertTrue(statusAfter.traderPayoutClaimableNow);
@@ -1511,7 +1511,7 @@ contract CfdEngineTest is BasePerpTest {
             "Deferred clearer bounty should be unclaimable while vault is illiquid"
         );
 
-        _fundJunior(address(this), deferredBounty);
+        usdc.mint(address(pool), deferredBounty);
 
         CfdEngine.DeferredPayoutStatus memory statusAfterFunding = engine.getDeferredPayoutStatus(bytes32(0), keeper);
         assertTrue(

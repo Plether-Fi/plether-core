@@ -112,7 +112,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         );
     }
 
-    function test_M2_WipedTrancheCanAcceptNewDeposits() public {
+    function test_M2_WipedTrancheRejectsNewDeposits() public {
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
 
@@ -128,10 +128,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         vm.startPrank(recapLp);
         usdc.approve(address(seniorVault), type(uint256).max);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         seniorVault.deposit(10_000e6, recapLp);
         vm.stopPrank();
-
-        assertGt(pool.seniorPrincipal(), 0, "Wiped tranche should accept recapitalization deposits");
     }
 
     function test_I1_CloseWithMarginDeltaMustRevert() public {

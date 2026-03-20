@@ -139,7 +139,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
         uint256 yieldAfter = pool.unpaidSeniorYield();
         uint256 yieldAccrued = yieldAfter - yieldBefore;
 
-        assertGt(yieldAccrued, 10e6, "C-02: stale reconciles currently allow retroactive accrual once mark refreshes");
+        assertGt(yieldAccrued, 0, "Setup should still accrue yield during the brief fresh interval before staleness");
+        assertLt(yieldAccrued, 10e6, "C-02: stale reconciles should checkpoint time instead of retroactively accruing yield");
     }
 
 }

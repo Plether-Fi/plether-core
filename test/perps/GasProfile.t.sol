@@ -332,11 +332,7 @@ contract GasProfileTest is Test {
         require(deferred > 0, "Setup failed: no deferred payout");
 
         // Replenish pool so claim can succeed
-        _mintUsdc(lp, deferred);
-        vm.startPrank(lp);
-        IERC20(usdc).approve(address(juniorVault), deferred);
-        juniorVault.deposit(deferred, lp);
-        vm.stopPrank();
+        _mintUsdc(address(pool), deferred);
 
         vm.prank(alice);
         uint256 g0 = gasleft();

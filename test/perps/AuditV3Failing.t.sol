@@ -111,7 +111,7 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         return 500_000e6;
     }
 
-    function test_4_JuniorCanBeRecapitalizedAfterWipeout() public {
+    function test_4_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
         _fundTrader(address(0xA11CE), 100_000e6);
 
@@ -130,10 +130,9 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         usdc.mint(lp, 50_000e6);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), 50_000e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         juniorVault.deposit(50_000e6, lp);
         vm.stopPrank();
-
-        assertGt(pool.juniorPrincipal(), 0, "Junior recapitalized");
     }
 
 }
@@ -164,7 +163,7 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         });
     }
 
-    function test_4_SeniorCanBeRecapitalizedAfterFullWipeout() public {
+    function test_4_SeniorCannotBeRecapitalizedAfterFullWipeoutViaOrdinaryDeposit() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
         _fundTrader(address(0xA11CE), 600_000e6);
 
@@ -190,11 +189,9 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         usdc.mint(lp, 1_000_000e6);
         vm.startPrank(lp);
         usdc.approve(address(seniorVault), 1_000_000e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
         seniorVault.deposit(1_000_000e6, lp);
         vm.stopPrank();
-
-        assertEq(pool.seniorPrincipal(), 1_000_000e6, "Senior recapitalized");
-        assertEq(pool.seniorHighWaterMark(), 1_000_000e6, "Recap seeds a fresh HWM");
     }
 
 }

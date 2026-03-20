@@ -1226,13 +1226,13 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_CloseCommit_RevertsWithoutLivePositionEvenIfPendingOrderExists() public {
+    function test_CloseCommit_AllowsPendingOpenPositionExposure() public {
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-
-        vm.expectRevert(OrderRouter.OrderRouter__NoOpenPosition.selector);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
         vm.stopPrank();
+
+        assertEq(router.nextCommitId(), 3, "Close intents should be queueable against pending open exposure");
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
