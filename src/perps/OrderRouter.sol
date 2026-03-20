@@ -502,6 +502,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         bytes[] calldata pythUpdateData
     ) external payable {
         _skipStaleOrders(orderId);
+        if (orderId < nextExecuteId) {
+            orderId = nextExecuteId;
+        }
         if (orderId != nextExecuteId) {
             revert OrderRouter__FIFOViolation();
         }
@@ -682,17 +685,17 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 upToId
     ) internal {
         uint256 age = maxOrderAge;
-        if (age == 0) {
-            return;
-        }
-        while (nextExecuteId < upToId) {
+        while (nextExecuteId <= upToId) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
-            CfdTypes.Order memory order = record.core;
             if (record.status != OrderStatus.Pending) {
                 nextExecuteId++;
                 continue;
             }
+            if (headId == upToId || age == 0) {
+                break;
+            }
+            CfdTypes.Order memory order = record.core;
             if (block.timestamp - order.commitTime <= age) {
                 break;
             }

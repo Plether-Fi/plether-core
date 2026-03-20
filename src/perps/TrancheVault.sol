@@ -124,7 +124,8 @@ contract TrancheVault is ERC4626 {
         if (!POOL.isWithdrawalLive()) {
             return 0;
         }
-        uint256 ownerAssets = _convertToAssets(balanceOf(_owner), Math.Rounding.Floor);
+        uint256 ownerShares = _unlockedOwnerShares(_owner);
+        uint256 ownerAssets = _convertToAssets(ownerShares, Math.Rounding.Floor);
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
         uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
         return ownerAssets < poolMax ? ownerAssets : poolMax;
@@ -139,7 +140,7 @@ contract TrancheVault is ERC4626 {
         if (!POOL.isWithdrawalLive()) {
             return 0;
         }
-        uint256 ownerShares = balanceOf(_owner);
+        uint256 ownerShares = _unlockedOwnerShares(_owner);
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = POOL.getPendingTrancheState();
         uint256 poolMax = IS_SENIOR ? maxSeniorWithdrawUsdc : maxJuniorWithdrawUsdc;
         uint256 maxShares = _convertToShares(poolMax, Math.Rounding.Floor);
@@ -229,6 +230,15 @@ contract TrancheVault is ERC4626 {
         }
         seedReceiver = receiver;
         seedShareFloor = floorShares;
+    }
+
+    function _unlockedOwnerShares(
+        address _owner
+    ) internal view returns (uint256 ownerShares) {
+        ownerShares = balanceOf(_owner);
+        if (_owner == seedReceiver && seedReceiver != address(0)) {
+            ownerShares = ownerShares > seedShareFloor ? ownerShares - seedShareFloor : 0;
+        }
     }
 
 }

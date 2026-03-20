@@ -162,9 +162,54 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        vm.expectRevert(OrderRouter.OrderRouter__FIFOViolation.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
         vm.roll(10);
         router.executeOrder(1, empty);
+    }
+
+    function test_ExecuteOrder_SkipsFailedHeadEvenWhenExpirationDisabled() public {
+        address other = address(0x333);
+        bytes32 otherId = bytes32(uint256(uint160(other)));
+
+        _fundTrader(other, 350e6);
+        _open(otherId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
+        vm.prank(other);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, type(uint256).max, false); // order 2, non-head
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
+
+        vm.prank(other);
+        clearinghouse.withdraw(otherId, 70e6);
+
+        vm.prank(address(this));
+        router.proposeMaxOrderAge(0);
+        vm.warp(block.timestamp + router.TIMELOCK_DELAY());
+        vm.prank(address(this));
+        router.finalizeMaxOrderAge();
+
+        bytes[] memory pythPrice = new bytes[](1);
+        pythPrice[0] = abi.encode(uint256(102_500_000));
+        vm.deal(other, 10 ether);
+        vm.prank(other);
+        router.executeLiquidation{value: 0}(otherId, pythPrice);
+
+        assertEq(router.nextExecuteId(), 1, "Liquidating a non-head account should not advance the global head");
+
+        assertEq(router.nextExecuteId(), 1, "Liquidation of a non-head order should leave the head pointer unchanged initially");
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 2, "Executing the original head should expose the failed order as the new head");
+
+        vm.roll(block.number + 1);
+        router.executeOrder(2, empty);
+
+        assertEq(router.nextExecuteId(), 4, "Single-order execution should fast-forward across failed heads even when expiration is disabled");
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {

@@ -790,9 +790,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (statusSnapshot.degradedMode) {
             return false;
         }
-        if (unassignedAssets > 0) {
-            return false;
-        }
         HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
             HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
         if (

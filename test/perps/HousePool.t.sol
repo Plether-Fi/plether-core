@@ -501,6 +501,20 @@ contract HousePoolTest is BasePerpTest {
         vm.stopPrank();
     }
 
+    function test_SeedReceiverMaxViews_ExcludeLockedFloor() public {
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+        pool.initializeSeedPosition(false, assets, seed);
+
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+
+        assertEq(juniorVault.maxRedeem(seed), 0, "Seed receiver maxRedeem must exclude the locked floor shares");
+        assertEq(juniorVault.maxWithdraw(seed), 0, "Seed receiver maxWithdraw must exclude the locked floor assets");
+    }
+
     function test_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public {
         uint256 seedAssets = 100_000e6;
         address seed = address(0xBEEF);
@@ -629,7 +643,27 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior withdraw caps must exclude quarantined assets");
         assertEq(maxSeniorWithdraw, 0, "Pending state should not expose quarantined assets to senior caps");
         assertEq(maxJuniorWithdraw, 0, "Pending state should not expose quarantined assets to junior caps");
-        assertFalse(pool.isWithdrawalLive(), "Withdrawals should not be live while bootstrap assignment is pending");
+        assertTrue(pool.isWithdrawalLive(), "Withdrawals can stay live because quarantined assets are already reserved");
+    }
+
+    function test_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals() public {
+        _fundSenior(alice, 100_000e6);
+        usdc.mint(address(pool), 10_000e6);
+        pool.accountExcess();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1);
+        uint256 quotedAssets = seniorVault.maxWithdraw(alice);
+
+        assertEq(pool.unassignedAssets(), 10_000e6, "Setup should quarantine revenue with no junior owners");
+        assertEq(quotedAssets, 100_000e6, "Senior LP should still be able to withdraw their own non-quarantined assets");
+
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        seniorVault.withdraw(quotedAssets, alice, alice);
+        assertEq(usdc.balanceOf(alice), aliceBefore + quotedAssets, "Senior withdrawal should remain executable");
     }
 
     function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
