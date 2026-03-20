@@ -32,6 +32,7 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__NotPool();
     error TrancheVault__SeedFloorBreached();
     error TrancheVault__InvalidSeedPosition();
+    error TrancheVault__TerminallyWiped();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -86,6 +87,7 @@ contract TrancheVault is ERC4626 {
         address receiver
     ) public override returns (uint256) {
         POOL.reconcile();
+        _requireActiveTranche();
         return super.deposit(assets, receiver);
     }
 
@@ -94,7 +96,26 @@ contract TrancheVault is ERC4626 {
         address receiver
     ) public override returns (uint256) {
         POOL.reconcile();
+        _requireActiveTranche();
         return super.mint(shares, receiver);
+    }
+
+    function maxDeposit(
+        address
+    ) public view override returns (uint256) {
+        if (_isTerminallyWiped()) {
+            return 0;
+        }
+        return super.maxDeposit(address(0));
+    }
+
+    function maxMint(
+        address
+    ) public view override returns (uint256) {
+        if (_isTerminallyWiped()) {
+            return 0;
+        }
+        return super.maxMint(address(0));
     }
 
     function withdraw(
@@ -238,6 +259,16 @@ contract TrancheVault is ERC4626 {
         ownerShares = balanceOf(_owner);
         if (_owner == seedReceiver && seedReceiver != address(0)) {
             ownerShares = ownerShares > seedShareFloor ? ownerShares - seedShareFloor : 0;
+        }
+    }
+
+    function _isTerminallyWiped() internal view returns (bool) {
+        return totalSupply() > 0 && totalAssets() == 0;
+    }
+
+    function _requireActiveTranche() internal view {
+        if (_isTerminallyWiped()) {
+            revert TrancheVault__TerminallyWiped();
         }
     }
 

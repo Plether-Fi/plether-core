@@ -901,16 +901,23 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {
+        uint256 remaining = amount;
         if (state.seniorSupply > 0) {
             uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
                 ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
                 : 0;
             if (gap > 0) {
-                state.waterfall.seniorPrincipal += amount > gap ? gap : amount;
+                uint256 seniorAssignedUsdc = remaining > gap ? gap : remaining;
+                state.waterfall.seniorPrincipal += seniorAssignedUsdc;
+                remaining -= seniorAssignedUsdc;
             } else if (state.waterfall.seniorPrincipal == 0 && state.waterfall.juniorPrincipal == 0) {
-                state.waterfall.seniorPrincipal += amount;
-                state.waterfall.seniorHighWaterMark += amount;
+                state.waterfall.seniorPrincipal += remaining;
+                state.waterfall.seniorHighWaterMark += remaining;
+                remaining = 0;
             }
+        }
+        if (remaining > 0) {
+            state.unassignedAssets += remaining;
         }
     }
 
@@ -936,6 +943,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
         if (remaining > 0 && state.juniorSupply > 0) {
             state.waterfall.juniorPrincipal += remaining;
+            remaining = 0;
+        }
+
+        if (remaining > 0) {
+            state.unassignedAssets += remaining;
         }
     }
 

@@ -515,6 +515,33 @@ contract HousePoolTest is BasePerpTest {
         assertEq(juniorVault.maxWithdraw(seed), 0, "Seed receiver maxWithdraw must exclude the locked floor assets");
     }
 
+    function test_WipedSeededTranche_IsTerminallyNonDepositable() public {
+        uint256 seedAssets = 100_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, seed);
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertGt(juniorVault.totalSupply(), 0, "Seed shares should still exist");
+        assertEq(juniorVault.totalAssets(), 0, "Setup should wipe tranche assets while shares remain");
+        assertEq(juniorVault.maxDeposit(alice), 0, "Wiped tranche must report zero maxDeposit");
+        assertEq(juniorVault.maxMint(alice), 0, "Wiped tranche must report zero maxMint");
+
+        usdc.mint(alice, 1e6);
+        vm.startPrank(alice);
+        usdc.approve(address(juniorVault), 1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        juniorVault.deposit(1e6, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        juniorVault.mint(1e18, alice);
+        vm.stopPrank();
+    }
+
     function test_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public {
         uint256 seedAssets = 100_000e6;
         address seed = address(0xBEEF);
@@ -592,6 +619,18 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.seniorHighWaterMark(), 50_000e6, "Recapitalization should preserve the original restoration target");
     }
 
+    function test_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "No senior claimant path should leave senior principal unchanged");
+        assertEq(pool.unassignedAssets(), 10_000e6, "Unclaimable recapitalization must fall back into unassigned assets");
+    }
+
     function test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public {
         uint256 seedAssets = 20_000e6;
 
@@ -616,6 +655,19 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
         assertEq(pool.juniorPrincipal(), 7_000e6, "Reconcile should attach trading revenue to seeded junior ownership");
         assertEq(pool.unassignedAssets(), 0, "Seeded trading revenue should avoid quarantine");
+    }
+
+    function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
+        usdc.mint(address(pool), 7_000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(7_000e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "No claimant path should leave senior principal unchanged");
+        assertEq(pool.juniorPrincipal(), 0, "No claimant path should leave junior principal unchanged");
+        assertEq(pool.unassignedAssets(), 7_000e6, "Unclaimable trading revenue must fall back into unassigned assets");
     }
 
     function test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {

@@ -58,7 +58,13 @@ Controlled inflow families must remain distinct:
 - `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
 - `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
 
-These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into a small, explicit pending-accounting state that flows through a single HousePool application path with one checkpoint / freshness policy.
+These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into a small, explicit pending-accounting state that flows through a single HousePool application path.
+
+Current policy nuance:
+
+- fresh-mark reconcile math and pending-bucket application share the same HousePool settlement entrypoint,
+- the senior-yield checkpoint still respects mark freshness,
+- but pending recapitalization / pending zero-principal trading buckets may be applied even when stale marks cause reconcile waterfall math to be skipped.
 
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 
@@ -247,9 +253,9 @@ Lifecycle rule:
 The final routing model is:
 
 - protocol fees remain outside LP equity via `accumulatedFeesUsdc`, even when the raw USDC transfer itself is accounted immediately,
-- recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`,
+- recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`, with any remainder that still has no claimant path falling into `unassignedAssets`,
 - LP-owned trading revenue uses `recordTradingRevenueInflow`; if live principal exists, normal reconcile applies the waterfall, and if both principals are zero but seed claimants exist, the revenue attaches directly to the seeded waterfall path (senior restoration first, junior residual second),
-- only inflows whose owner cannot be inferred from source semantics or seeded claimant continuity may remain in `unassignedAssets` for explicit governance assignment.
+- only inflows whose owner cannot be inferred from source semantics or seeded claimant continuity may remain in `unassignedAssets` for explicit governance assignment, and pending recap/trading buckets must also fall back into `unassignedAssets` whenever no claimant path exists.
 
 The intended end state is that `unassignedAssets` is exceptional telemetry, not a routine accounting mode.
 
@@ -311,6 +317,7 @@ Notes:
 - If economic assets exist while no tranche shares can validly claim them, those assets must sit in an explicit `unassignedAssets` bucket rather than being silently attributed to the next LP.
 - While `unassignedAssets > 0`, tranche deposits must remain blocked until governance explicitly assigns the bucket by minting matching tranche shares to a chosen bootstrap receiver.
 - A tranche with `totalSupply == 0` must not accumulate live principal; any revenue that would otherwise land there must be redirected into `unassignedAssets`.
+- If a tranche still has outstanding shares but `totalAssets() == 0`, treat it as terminally non-depositable; ordinary ERC4626 `deposit` / `mint` must not be used to revive a wiped seeded tranche.
 - Preferred steady state is permanent seed-share ownership in each tranche: protocol-controlled seed shares remain non-redeemable below a configured floor so ordinary LP exits cannot make a tranche ownerless.
 
 Required liabilities in this view:
