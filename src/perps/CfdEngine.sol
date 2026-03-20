@@ -561,7 +561,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         pos.margin += amount;
         _sideState(pos.side).totalMargin += amount;
         pos.lastUpdateTime = uint64(block.timestamp);
-        _assertPostSolvency();
 
         emit MarginAdded(accountId, amount);
     }

@@ -3145,6 +3145,30 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         pool.withdrawJunior(1e6, address(this));
     }
 
+    function test_DegradedMode_AllowsAddMarginToExistingPosition() public {
+        address trader = address(0xD004);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 200_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8);
+
+        _enterDegradedMode();
+        assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
+
+        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
+        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+
+        vm.prank(trader);
+        engine.addMargin(accountId, 1_000e6);
+
+        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(marginAfter, marginBefore + 1_000e6, "Add margin should still increase position margin");
+        assertEq(
+            clearinghouse.lockedMarginUsdc(accountId),
+            lockedBefore + 1_000e6,
+            "Add margin should remain usable during degraded mode"
+        );
+    }
+
 }
 
 // ==========================================
