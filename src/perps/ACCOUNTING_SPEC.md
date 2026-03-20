@@ -58,13 +58,13 @@ Controlled inflow families must remain distinct:
 - `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
 - `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
 
-These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into a small, explicit pending-accounting state that flows through a single HousePool application path.
+These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into a small, explicit pending-accounting state that flows through the HousePool settlement entrypoint, with freshness gating applied only to the mark-dependent reconcile math.
 
 Current policy nuance:
 
 - fresh-mark reconcile math and pending-bucket application share the same HousePool settlement entrypoint,
 - the senior-yield checkpoint still respects mark freshness,
-- but pending recapitalization / pending zero-principal trading buckets may be applied even when stale marks cause reconcile waterfall math to be skipped.
+- but pending recapitalization / pending zero-principal trading buckets may still be applied when stale marks cause reconcile waterfall math to be skipped, because those buckets represent already-funded cash events rather than mark-dependent LP repricing.
 
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 
@@ -502,7 +502,8 @@ Oracle freshness policy must be action-specific.
 ### Reconciliation / Withdrawals
 
 - must use a freshness policy suitable for LP accounting,
-- stale marks may block reconciliation entirely, or allow only conservative admin actions that do not accrue stale-window yield or move LP value across the waterfall.
+- stale marks may block reconcile waterfall math entirely while still allowing already-funded pending recapitalization / zero-principal trading buckets to apply through the same settlement entrypoint,
+- conservative stale-window actions must not accrue stale-window yield or perform mark-dependent LP repricing across the waterfall.
 
 Required principle:
 

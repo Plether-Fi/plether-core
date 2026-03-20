@@ -101,21 +101,21 @@ contract TrancheVault is ERC4626 {
     }
 
     function maxDeposit(
-        address
+        address receiver
     ) public view override returns (uint256) {
         if (_isTerminallyWiped()) {
             return 0;
         }
-        return super.maxDeposit(address(0));
+        return super.maxDeposit(receiver);
     }
 
     function maxMint(
-        address
+        address receiver
     ) public view override returns (uint256) {
         if (_isTerminallyWiped()) {
             return 0;
         }
-        return super.maxMint(address(0));
+        return super.maxMint(receiver);
     }
 
     function withdraw(

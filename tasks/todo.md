@@ -1,3 +1,11 @@
+- [x] Tighten HousePool freshness wording so docs match stale-mark pending-bucket behavior
+- [x] Clean up `TrancheVault.maxDeposit()` / `maxMint()` receiver forwarding
+
+Review:
+- Updated `src/perps/ACCOUNTING_SPEC.md` and `src/perps/SECURITY.md` so the docs now say freshness gates only mark-dependent reconcile/waterfall math; already-funded pending recapitalization and zero-principal trading buckets may still apply through the same HousePool settlement entrypoint when marks are stale.
+- Cleaned up `src/perps/TrancheVault.sol` so `maxDeposit(address receiver)` / `maxMint(address receiver)` forward the actual receiver to `super` instead of hardcoding `address(0)`.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_WipedSeededTranche_IsTerminallyNonDepositable"`.
+
 - [x] Fix uncovered full-close funding-loss accounting in planner close buckets/solvency preview
 - [x] Fix fresh-account open planning to use global side margin baseline
 - [x] Add regression coverage for both plan/apply mismatches and run targeted Forge tests
@@ -77,7 +85,7 @@ Review:
 
 Review:
 - Added `ICfdEngine.HousePoolInputSnapshot` plus `getHousePoolInputSnapshot(uint256 markStalenessLimit)` so the engine now hands HousePool one typed accounting/freshness boundary instead of many loosely coupled getters.
-- Refactored `src/perps/HousePool.sol` and `src/perps/libraries/HousePoolAccountingLib.sol` so withdrawal accounting, reconcile accounting, and mark-freshness policy all derive from that single engine snapshot.
+- Refactored `src/perps/HousePool.sol` and `src/perps/libraries/HousePoolAccountingLib.sol` so withdrawal accounting, reconcile accounting, and mark-freshness policy all derive from that single engine snapshot, while already-funded pending buckets can still settle through the shared HousePool entrypoint when stale marks skip reconcile waterfall math.
 - Added targeted engine tests in `test/perps/CfdEngine.t.sol` covering both normal-market and frozen-oracle snapshot semantics.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "GetHousePoolInputSnapshot|GetProtocolAccountingView_ReflectsDeferredLiabilities"` and `forge test --match-path test/perps/HousePool.t.sol --match-test "M12_GetFreeUSDC_ReservesFees|GetVaultLiquidityView_ReturnsCurrentPoolState|FrozenOracle_UsesRelaxedMarkFreshnessForWithdrawals|StaleMarkBlocksWithdrawal"`.
 
@@ -423,6 +431,70 @@ Review:
 - Valid: `getPositionView()` / `getAccountLedgerSnapshot()` use stored funding via `getPendingFunding(pos)`, while liquidation preview/live paths first project funding indices in `CfdEnginePlanLib.planGlobalFunding(...)`.
 - Valid: `HousePool.getMaxSeniorWithdraw()` / `getMaxJuniorWithdraw()` remain accounting-only and ungated by stale marks or degraded mode, while `TrancheVault.maxWithdraw()` / `maxRedeem()` apply the safer liveness gate.
 - Verified green support checks: `forge test --match-path test/perps/CfdEngine.t.sol --match-test test_ClearBadDebt_ReducesOutstandingDebt`, `forge test --match-path test/perps/AuditValidFindingsFailing.t.sol --match-test test_M2_StaleReconcileMustNotAdvanceClock`, and `forge test --match-path test/perps/AuditTightenedFindingsFailing.t.sol --match-test test_L1_StaleIntervalsMustNotAccrueSeniorYield`.
+
+- [x] Add failing regressions for the newly verified HousePool / view-accounting findings (H-01, M-01, L-01, L-02, L-03)
+
+Review:
+- Added `test/perps/AuditHousePoolViewFindingsFailing.t.sol` with five focused failing regressions covering: zero-principal junior cash capture, empty-junior revenue assignment, stale reconcile checkpointing, projected-funding drift in simple health views, and ungated HousePool withdrawal-cap getters.
+- Verified the new file fails 5/5 on the current branch with the expected signatures: H-01 attacker redemption profits from stranded cash (`1999999999 > 1000000000`), M-01 empty junior still accrues principal (`99086505 != 0`), L-01 stale reconcile leaves `lastReconcileTime` unchanged (`1709532000 != 1712124000`), L-02 position/account views report stored instead of projected funding (`0 != -1643769865`), and L-03 `getMaxSeniorWithdraw()` stays positive while withdrawals are not live (`100000000000 != 0`).
+- Verification: `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`.
+
+- [x] Fix HousePool / view-accounting findings (H-01, M-01, L-01, L-02, L-03)
+
+Review:
+- Fixed HousePool bootstrap/orphan handling in `src/perps/HousePool.sol`: zero-principal distributable cash is now quarantined in `orphanedJuniorAssets`, first junior deposits sweep that bucket into principal before minting, stale reconciles checkpoint `lastReconcileTime`, and zero-supply junior revenue is redirected into the orphan bucket instead of live principal.
+- Fixed view/accounting drift in `src/perps/CfdEngine.sol` by projecting funding in `getPositionView()` and `getAccountLedgerSnapshot()` with the same global-funding planning path used by liquidation previews.
+- Fixed withdrawal-cap getters in `src/perps/HousePool.sol` to return zero whenever withdrawals are not live, matching the safer vault-facing behavior.
+- Verified green: `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`, `forge test --match-path test/perps/HousePool.t.sol`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClearBadDebt_ReducesOutstandingDebt|test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState|test_GetPositionView_ReturnsLivePositionState"`.
+
+- [x] Redesign HousePool bootstrap/orphan handling to be explicit rather than silently assigning assets to the next LP
+
+Review:
+- Strengthened the redesign further by making bootstrap assignment share-backed instead of raw principal mutation: `src/perps/HousePool.sol` now computes pre-bootstrap share issuance, assigns `unassignedAssets` to the chosen tranche, and mints matching shares to the specified receiver through pool-only `bootstrapMint` in `src/perps/TrancheVault.sol`.
+- Updated the external surface in `src/perps/interfaces/IHousePool.sol` and added `src/perps/interfaces/ITrancheVaultBootstrap.sol`; the owner path is now `assignUnassignedAssets(bool toSenior, address receiver)` so quarantined value always gets an explicit owner at assignment time.
+- Updated the invariant docs in `src/perps/ACCOUNTING_SPEC.md` and added coverage in `test/perps/HousePool.t.sol` plus the audit regression file to verify blocked deposits before bootstrap and share-backed ownership creation during bootstrap.
+- Verified green: `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`, `forge test --match-path test/perps/HousePool.t.sol`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClearBadDebt_ReducesOutstandingDebt|test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState|test_GetPositionView_ReturnsLivePositionState"`.
+
+- [x] Start implementing permanent seed-share architecture to reduce ownerless tranche states in steady state
+
+Review:
+- Added seed-position infrastructure in `src/perps/HousePool.sol` and `src/perps/TrancheVault.sol`: owner-only `initializeSeedPosition(bool,uint256,address)` seeds a tranche with real USDC, mints share-backed seed ownership, and registers a permanent `seedShareFloor` enforced by the vault.
+- Extended `src/perps/interfaces/IHousePool.sol` and `src/perps/interfaces/ITrancheVaultBootstrap.sol`, and updated `src/perps/ACCOUNTING_SPEC.md` to document the preferred steady state: seeded tranches should stay owner-backed so ordinary LP exits do not force value into `unassignedAssets`.
+- Added coverage in `test/perps/HousePool.t.sol` for seed initialization, seed-floor enforcement, and the seeded-junior revenue path that keeps normal revenue out of quarantine after the last user LP exits.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_InitializeSeedPosition_MintsPermanentSeedShares|test_SeedReceiverCannotRedeemBelowFloor|test_SeededJuniorRevenueStaysOwnedAfterLastUserExits|test_AssignUnassignedAssets_MintsMatchingSharesToReceiver"`, `forge test --match-path test/perps/HousePool.t.sol`, `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClearBadDebt_ReducesOutstandingDebt|test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState|test_GetPositionView_ReturnsLivePositionState"`.
+
+- [x] Wire seed initialization into the shared perps test setup path
+
+Review:
+- Updated `test/perps/BasePerpTest.sol` with optional `_initialJuniorSeedDeposit()`, `_initialSeniorSeedDeposit()`, `_juniorSeedReceiver()`, and `_seniorSeedReceiver()` hooks so canonical perps setup can now seed either tranche before ordinary LP deposits without changing existing tests that leave the hooks at zero.
+- Added `HousePoolSeededBaseSetupTest` in `test/perps/HousePool.t.sol` to prove the shared setup path can boot both senior and junior seed positions and register their floors correctly.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_BasePerpTest_CanBootstrapSeededSetup|test_InitializeSeedPosition_MintsPermanentSeedShares|test_SeedReceiverCannotRedeemBelowFloor|test_SeededJuniorRevenueStaysOwnedAfterLastUserExits"`, `forge test --match-path test/perps/HousePool.t.sol`, and `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`.
+
+- [x] Classify known recapitalization inflows so seeded steady state hits `unassignedAssets` less often
+
+Review:
+- Added source-aware recap routing in `src/perps/HousePool.sol` via `recordRecapitalizationInflow(uint256)`: engine-owned bad-debt recap now restores seeded senior principal immediately up to the high-water mark, and if seeded senior shares exist with zero live principal it reattaches the recapitalization directly to that claimant set instead of falling back to generic quarantine.
+- Updated `src/perps/interfaces/ICfdVault.sol` and switched `src/perps/CfdEngine.sol` `clearBadDebt()` to call the new recap-specific hook instead of generic `recordProtocolInflow()`.
+- Added coverage in `test/perps/HousePool.t.sol` for both seeded-senior restoration and the zero-principal-but-seeded-supply case, and updated the invariant mock vault in `test/perps/invariant/mocks/MockInvariantVault.sol` for the extended vault interface.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting|test_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist|test_BasePerpTest_CanBootstrapSeededSetup"`, `forge test --match-path test/perps/HousePool.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test test_ClearBadDebt_ReducesOutstandingDebt`, and `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`.
+
+- [x] Finish the ownership-routing model: classify LP-owned trading inflows, document canonical seed lifecycle, and push `unassignedAssets` toward exceptional-only use
+
+Review:
+- Added `recordTradingRevenueInflow(uint256)` to `src/perps/HousePool.sol` and `src/perps/interfaces/ICfdVault.sol`, then switched realized LP-revenue paths in `src/perps/CfdEngine.sol` (trade-cost capture, collectible funding losses, close-loss seizures, liquidation residual seizures) to this hook instead of generic `recordProtocolInflow()`.
+- Implemented seeded zero-principal routing in `src/perps/HousePool.sol`: when both tranche principals are zero but seed claimants exist, known LP trading revenue now restores seeded senior up to its HWM first and then attaches residual value to seeded junior, avoiding `unassignedAssets` for these normal economic flows.
+- Documented the final model end-to-end in `src/perps/ACCOUNTING_SPEC.md`, including controlled inflow families, canonical deployment lifecycle, and the intended role of `unassignedAssets` as an exceptional fallback rather than a routine state.
+- Tightened external documentation in `src/perps/interfaces/IHousePool.sol` to state that canonical deployment should initialize both tranche seeds before ordinary LP operation.
+- Added coverage in `test/perps/HousePool.t.sol` for seeded trading revenue attaching directly to junior and for seeded zero-principal waterfall routing across both tranches; updated `test/perps/invariant/mocks/MockInvariantVault.sol` to satisfy the expanded vault interface.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists|test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero|test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting|test_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist"`, `forge test --match-path test/perps/HousePool.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClearBadDebt_ReducesOutstandingDebt|test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState|test_GetPositionView_ReturnsLivePositionState"`, and `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`.
+
+- [x] Fix post-review issues in HousePool quarantine and direct-principal accrual handling
+
+Review:
+- Fixed withdrawal leakage in `src/perps/HousePool.sol` by reserving `unassignedAssets` inside the pool withdrawal snapshot, making `getFreeUSDC()` / pending tranche caps exclude quarantined assets, and additionally marking withdrawals not live while bootstrap assignment remains pending.
+- Fixed retroactive senior-yield accrual in `src/perps/HousePool.sol` by checkpointing the senior-yield clock before every direct principal mutation path (`recordRecapitalizationInflow`, `recordTradingRevenueInflow`, `assignUnassignedAssets`, `initializeSeedPosition`).
+- Added regressions in `test/perps/HousePool.t.sol` for both behaviors: quarantined assets no longer appear withdrawable, and seeded principal initialization no longer mints retroactive senior yield after a long idle period.
+- Verified green: `forge test --match-path test/perps/HousePool.t.sol --match-test "test_UnassignedAssets_AreReservedFromWithdrawalLiquidity|test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation|test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero|test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting"`, `forge test --match-path test/perps/HousePool.t.sol`, `forge test --match-path test/perps/AuditHousePoolViewFindingsFailing.t.sol`, and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ClearBadDebt_ReducesOutstandingDebt|test_GetAccountLedgerSnapshot_ReflectsExpandedAccountHealthState|test_GetPositionView_ReturnsLivePositionState"`.
 
 - [x] Extract first-class solvency and withdrawal accounting modules and reroute engine views through them
 
