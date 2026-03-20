@@ -56,6 +56,20 @@ abstract contract BasePerpTest is Test {
 
         _bypassAllTimelocks();
 
+        uint256 juniorSeed = _initialJuniorSeedDeposit();
+        if (juniorSeed > 0) {
+            usdc.mint(address(this), juniorSeed);
+            usdc.approve(address(pool), juniorSeed);
+            pool.initializeSeedPosition(false, juniorSeed, _juniorSeedReceiver());
+        }
+
+        uint256 seniorSeed = _initialSeniorSeedDeposit();
+        if (seniorSeed > 0) {
+            usdc.mint(address(this), seniorSeed);
+            usdc.approve(address(pool), seniorSeed);
+            pool.initializeSeedPosition(true, seniorSeed, _seniorSeedReceiver());
+        }
+
         uint256 junior = _initialJuniorDeposit();
         if (junior > 0) {
             _fundJunior(address(this), junior);
@@ -94,6 +108,22 @@ abstract contract BasePerpTest is Test {
 
     function _initialSeniorDeposit() internal pure virtual returns (uint256) {
         return 0;
+    }
+
+    function _initialJuniorSeedDeposit() internal pure virtual returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure virtual returns (uint256) {
+        return 0;
+    }
+
+    function _juniorSeedReceiver() internal view virtual returns (address) {
+        return address(this);
+    }
+
+    function _seniorSeedReceiver() internal view virtual returns (address) {
+        return address(this);
     }
 
     // --- Funding helpers ---

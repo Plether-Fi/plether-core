@@ -455,6 +455,218 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 sharesPreview = juniorVault.previewDeposit(100_000e6);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), 0, "Bootstrap assignment should empty the quarantine bucket");
+        assertEq(pool.juniorPrincipal(), 100_000e6, "Bootstrap assignment should create matching junior principal");
+        assertEq(juniorVault.balanceOf(alice), sharesPreview, "Receiver should get shares at the pre-bootstrap price");
+    }
+
+    function test_InitializeSeedPosition_MintsPermanentSeedShares() public {
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+
+        uint256 sharesPreview = juniorVault.previewDeposit(assets);
+        pool.initializeSeedPosition(false, assets, seed);
+
+        assertEq(pool.juniorPrincipal(), assets, "Seed init should create junior principal");
+        assertEq(juniorVault.balanceOf(seed), sharesPreview, "Seed receiver should own the seeded shares");
+        assertEq(juniorVault.seedReceiver(), seed, "Seed receiver should be recorded");
+        assertEq(juniorVault.seedShareFloor(), sharesPreview, "Seed floor should match minted seed shares");
+    }
+
+    function test_SeedReceiverCannotRedeemBelowFloor() public {
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+        pool.initializeSeedPosition(false, assets, seed);
+
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        vm.startPrank(seed);
+        vm.expectRevert(TrancheVault.TrancheVault__SeedFloorBreached.selector);
+        juniorVault.transfer(alice, 1);
+        vm.stopPrank();
+    }
+
+    function test_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public {
+        uint256 seedAssets = 100_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, seed);
+
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        vm.startPrank(bob);
+        juniorVault.redeem(juniorVault.balanceOf(bob), bob, bob);
+        vm.stopPrank();
+
+        uint256 unassignedBefore = pool.unassignedAssets();
+        _mintAndAccountPoolExcess(50_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.unassignedAssets(), unassignedBefore, "Seeded tranches should keep normal revenue out of quarantine");
+        assertGt(pool.juniorPrincipal(), seedAssets, "Seeded junior tranche should retain ownership of new revenue");
+    }
+
+    function test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting() public {
+        uint256 seedAssets = 100_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xdead), 40_000e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 60_000e6, "Loss should impair the seeded senior tranche");
+
+        usdc.mint(address(pool), 25_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(25_000e6);
+
+        assertEq(pool.seniorPrincipal(), 85_000e6, "Recapitalization should restore senior immediately");
+        assertEq(pool.unassignedAssets(), 0, "Known recapitalization semantics should avoid quarantine while seeded");
+    }
+
+    function test_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist() public {
+        uint256 seedAssets = 50_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "Setup should leave seed shares but no live senior principal");
+        assertGt(seniorVault.totalSupply(), 0, "Seed shares should still exist");
+
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+
+        assertEq(pool.seniorPrincipal(), 10_000e6, "Recapitalization should attach to existing seeded senior ownership");
+        assertEq(pool.seniorHighWaterMark(), 50_000e6, "Recapitalization should preserve the original restoration target");
+    }
+
+    function test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public {
+        uint256 seedAssets = 20_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, address(this));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.juniorPrincipal(), 0, "Setup should leave junior seed shares but no live principal");
+        assertGt(juniorVault.totalSupply(), 0, "Seeded junior shares should remain outstanding");
+
+        usdc.mint(address(pool), 7_000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(7_000e6);
+
+        assertEq(pool.juniorPrincipal(), 7_000e6, "Known trading revenue should attach directly to seeded junior ownership");
+        assertEq(pool.unassignedAssets(), 0, "Seeded trading revenue should avoid quarantine");
+    }
+
+    function test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
+        usdc.mint(address(this), 30_000e6);
+        usdc.approve(address(pool), 30_000e6);
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
+
+        usdc.mint(address(this), 10_000e6);
+        usdc.approve(address(pool), 10_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 35_000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(35_000e6);
+
+        assertEq(pool.seniorPrincipal(), 30_000e6, "Trading revenue should restore seeded senior to its HWM first");
+        assertEq(pool.juniorPrincipal(), 5_000e6, "Residual trading revenue should then attach to seeded junior");
+        assertEq(pool.unassignedAssets(), 0, "Seeded waterfall routing should avoid quarantine for known trading revenue");
+    }
+
+    function test_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        (,, uint256 maxSeniorWithdraw, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
+
+        assertEq(pool.unassignedAssets(), 100_000e6, "Setup should quarantine zero-principal cash");
+        assertEq(pool.getFreeUSDC(), 0, "Quarantined assets must not appear as free withdrawal liquidity");
+        assertEq(pool.getMaxSeniorWithdraw(), 0, "Senior withdraw caps must exclude quarantined assets");
+        assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior withdraw caps must exclude quarantined assets");
+        assertEq(maxSeniorWithdraw, 0, "Pending state should not expose quarantined assets to senior caps");
+        assertEq(maxJuniorWithdraw, 0, "Pending state should not expose quarantined assets to junior caps");
+        assertFalse(pool.isWithdrawalLive(), "Withdrawals should not be live while bootstrap assignment is pending");
+    }
+
+    function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
+        vm.warp(block.timestamp + 30 days);
+
+        usdc.mint(address(this), 100_000e6);
+        usdc.approve(address(pool), 100_000e6);
+        pool.initializeSeedPosition(true, 100_000e6, address(this));
+
+        assertEq(pool.unpaidSeniorYield(), 0, "Seed initialization should not mint retroactive yield");
+        assertEq(pool.lastReconcileTime(), block.timestamp, "Principal mutation should checkpoint the accrual clock");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 100_000e6, "Later reconcile must not retroactively accrue on newly added principal");
+        assertEq(pool.unpaidSeniorYield(), 0, "Later reconcile must not mint retroactive yield on seeded principal");
+    }
+
+    function test_RecordRecapitalizationInflow_StaleMarkCheckpointsWithoutAccruingYield() public {
+        address trader = address(0x99991);
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        _fundTrader(trader, 50_000e6);
+
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 30 days);
+
+        usdc.mint(address(pool), 50_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(50_000e6);
+
+        assertEq(pool.unpaidSeniorYield(), 0, "Stale-window principal mutation should not accrue yield");
+        assertEq(pool.lastReconcileTime(), block.timestamp, "Stale-window mutation should still checkpoint the clock");
+    }
+
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
         _fundJunior(bob, 500_000e6);
 
@@ -878,6 +1090,33 @@ contract HousePoolTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 reserved = fees + uint256(unrealizedFunding);
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
+    }
+
+}
+
+contract HousePoolSeededBaseSetupTest is BasePerpTest {
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 25_000e6;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 10_000e6;
+    }
+
+    function test_BasePerpTest_CanBootstrapSeededSetup() public view {
+        assertEq(pool.juniorPrincipal(), 25_000e6, "Shared setup should initialize the junior seed");
+        assertEq(pool.seniorPrincipal(), 10_000e6, "Shared setup should initialize the senior seed");
+        assertEq(juniorVault.seedShareFloor(), juniorVault.balanceOf(address(this)), "Junior seed floor should be registered");
+        assertEq(seniorVault.seedShareFloor(), seniorVault.balanceOf(address(this)), "Senior seed floor should be registered");
     }
 
 }

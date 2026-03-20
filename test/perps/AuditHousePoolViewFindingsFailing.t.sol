@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.33;
+
+import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {HousePool} from "../../src/perps/HousePool.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {BasePerpTest} from "./BasePerpTest.sol";
+
+contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest {
+
+    address attacker = address(0xBAD);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_H1_ZeroPrincipalRecapitalizationCashMustNotBeCapturableByNextJuniorDepositor() public {
+        uint256 strandedCash = 1_000e6;
+        usdc.mint(address(pool), strandedCash);
+        pool.accountExcess();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(attacker, strandedCash);
+        vm.startPrank(attacker);
+        usdc.approve(address(juniorVault), strandedCash);
+        vm.expectRevert(HousePool.HousePool__PendingBootstrap.selector);
+        juniorVault.deposit(strandedCash, attacker);
+        vm.stopPrank();
+
+        assertEq(
+            usdc.balanceOf(attacker),
+            strandedCash,
+            "Deposits must stay blocked until governance explicitly assigns unclaimed pool cash"
+        );
+        assertEq(pool.unassignedAssets(), strandedCash, "Zero-principal pool cash should remain quarantined");
+
+        pool.assignUnassignedAssets(false, address(this));
+
+        assertEq(pool.unassignedAssets(), 0, "Explicit bootstrap should consume the quarantined cash bucket");
+        assertGt(juniorVault.balanceOf(address(this)), 0, "Bootstrap assignment should mint claimable junior shares");
+    }
+
+}
+
+contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
+
+    address seniorLp = address(0x1111);
+    address juniorLp = address(0x2222);
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_M1_ReconcileMustNotAssignRevenueToZeroSupplyJuniorTranche() public {
+        _fundSenior(seniorLp, 100_000e6);
+        _fundJunior(juniorLp, 100_000e6);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.startPrank(juniorLp);
+        juniorVault.redeem(juniorVault.balanceOf(juniorLp), juniorLp, juniorLp);
+        vm.stopPrank();
+
+        usdc.mint(address(pool), 100e6);
+        pool.accountExcess();
+        uint256 unassignedBefore = pool.unassignedAssets();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(juniorVault.totalSupply(), 0, "Junior supply should be empty after the last LP exits");
+        assertEq(pool.juniorPrincipal(), 0, "Revenue must not accrue to a tranche with zero outstanding shares");
+        assertGt(
+            pool.unassignedAssets(),
+            unassignedBefore,
+            "Revenue that would have gone to an empty junior tranche must be quarantined instead"
+        );
+    }
+
+}
+
+contract AuditHousePoolViewFindingsFailing_StaleYieldBackfill is BasePerpTest {
+
+    address seniorLp = address(0x4444);
+    address juniorLp = address(0x5555);
+    address trader = address(0x6666);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_L1_StaleReconcileMustCheckpointClock() public {
+        _fundSenior(seniorLp, 200_000e6);
+        _fundJunior(juniorLp, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 before = pool.lastReconcileTime();
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 staleReconcileTime = block.timestamp;
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(
+            pool.lastReconcileTime(),
+            staleReconcileTime,
+            "Stale reconcile should checkpoint time so stale-window yield cannot be backfilled later"
+        );
+        assertGt(staleReconcileTime, before, "Test must exercise a later stale checkpoint");
+    }
+
+}
+
+contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest {
+
+    address trader = address(0x7777);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0.5e18,
+            maxApy: 3e18,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_L2_SimpleHealthViewsMustUseProjectedFunding() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 30 days);
+
+        CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+        ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 1e8, pool.totalAssets());
+
+        assertEq(positionView.pendingFundingUsdc, preview.fundingUsdc, "Position view should project pending funding");
+        assertEq(snapshot.pendingFundingUsdc, preview.fundingUsdc, "Ledger snapshot should project pending funding");
+    }
+
+}
+
+contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest {
+
+    address seniorLp = address(0x8888);
+    address juniorLp = address(0x9999);
+    address trader = address(0xAAAA);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 1e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5 * 1e6,
+            bountyBps: 15
+        });
+    }
+
+    function test_L3_WithdrawalCapGettersMustZeroWhenWithdrawalsAreNotLive() public {
+        _fundSenior(seniorLp, 100_000e6);
+        _fundJunior(juniorLp, 100_000e6);
+        _fundTrader(trader, 50_000e6);
+
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 121);
+
+        assertFalse(pool.isWithdrawalLive(), "Withdrawal liveness should be false once the mark is stale");
+        assertEq(pool.getMaxSeniorWithdraw(), 0, "Senior withdrawal cap getter should be liveness-gated");
+        assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior withdrawal cap getter should be liveness-gated");
+    }
+
+}

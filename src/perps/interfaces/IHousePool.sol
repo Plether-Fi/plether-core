@@ -9,6 +9,8 @@ interface IHousePool {
     function seniorPrincipal() external view returns (uint256);
     /// @notice Total USDC attributed to the junior tranche (6 decimals)
     function juniorPrincipal() external view returns (uint256);
+    /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
+    function unassignedAssets() external view returns (uint256);
 
     function depositSenior(
         uint256 amount
@@ -24,6 +26,13 @@ interface IHousePool {
         uint256 amount,
         address receiver
     ) external;
+
+    /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
+    function assignUnassignedAssets(bool toSenior, address receiver) external;
+
+    /// @notice Seeds a tranche with permanent share-backed minimum ownership using real USDC.
+    /// @dev Canonical deployment should initialize both tranche seeds before enabling ordinary LP lifecycle.
+    function initializeSeedPosition(bool toSenior, uint256 amount, address receiver) external;
 
     /// @notice Max withdrawable by senior, capped by free USDC
     function getMaxSeniorWithdraw() external view returns (uint256);

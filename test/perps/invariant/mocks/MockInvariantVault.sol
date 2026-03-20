@@ -82,6 +82,22 @@ contract MockInvariantVault is ICfdVault {
         }
     }
 
+    function recordRecapitalizationInflow(
+        uint256
+    ) external view {
+        if (msg.sender != engine) {
+            revert("unauthorized");
+        }
+    }
+
+    function recordTradingRevenueInflow(
+        uint256
+    ) external view {
+        if (msg.sender != engine) {
+            revert("unauthorized");
+        }
+    }
+
     function markStalenessLimit() external pure returns (uint256) {
         return 120;
     }

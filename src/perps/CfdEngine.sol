@@ -636,7 +636,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         if (amount > 0) {
             USDC.safeTransferFrom(msg.sender, address(vault), amount);
-            vault.recordProtocolInflow(amount);
+            vault.recordRecapitalizationInflow(amount);
         }
         accumulatedBadDebtUsdc = badDebt - amount;
         emit BadDebtCleared(amount, accumulatedBadDebtUsdc);
@@ -972,7 +972,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             pos,
             lastMarkPrice,
             CAP_PRICE,
-            getPendingFunding(pos),
+            _getProjectedPendingFunding(accountId, pos),
             snapshot.terminalReachableUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
@@ -1001,7 +1001,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             pos,
             lastMarkPrice,
             CAP_PRICE,
-            getPendingFunding(pos),
+            _getProjectedPendingFunding(accountId, pos),
             reachableUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
@@ -1385,6 +1385,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.entryFunding = state.entryFunding;
     }
 
+    function _getProjectedPendingFunding(
+        bytes32 accountId,
+        CfdTypes.Position memory pos
+    ) internal view returns (int256 fundingUsdc) {
+        if (pos.size == 0) {
+            return 0;
+        }
+
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, lastMarkPrice, vault.totalAssets(), 0);
+        CfdEnginePlanTypes.GlobalFundingDelta memory fundingDelta = CfdEnginePlanLib.planGlobalFunding(snap, lastMarkPrice, 0);
+        int256 postFundingIndex = pos.side == CfdTypes.Side.BULL
+            ? snap.bullSide.fundingIndex + fundingDelta.bullFundingIndexDelta
+            : snap.bearSide.fundingIndex + fundingDelta.bearFundingIndexDelta;
+        fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
+    }
+
     // ==========================================
     // PLAN-APPLY: REVERT DISPATCH + APPLY
     // ==========================================
@@ -1506,7 +1522,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 loss = uint256(-fd.pendingFundingUsdc);
             (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc,) =
                 clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
-            vault.recordProtocolInflow(marginConsumedUsdc + freeSettlementConsumedUsdc);
+            vault.recordTradingRevenueInflow(marginConsumedUsdc + freeSettlementConsumedUsdc);
             pos.margin -= fd.posMarginDecrease;
         }
 
@@ -1563,7 +1579,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 netMarginChange =
             clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
         if (delta.tradeCostUsdc > 0) {
-            vault.recordProtocolInflow(uint256(delta.tradeCostUsdc));
+            vault.recordTradingRevenueInflow(uint256(delta.tradeCostUsdc));
         }
 
         if (netMarginChange > 0) {
@@ -1627,7 +1643,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
                 delta.deletePosition,
                 address(vault)
             );
-            vault.recordProtocolInflow(seizedUsdc);
+            vault.recordTradingRevenueInflow(seizedUsdc);
             _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
             accumulatedBadDebtUsdc += delta.badDebtUsdc;
         }
@@ -1671,7 +1687,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
             delta.accountId, reservationOrderIds, delta.posMargin, delta.residualUsdc, address(vault)
         );
-        vault.recordProtocolInflow(seizedUsdc);
+        vault.recordTradingRevenueInflow(seizedUsdc);
         _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
         if (payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(delta.accountId, payoutUsdc);

@@ -26,6 +26,12 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
+    /// @notice Records an explicit recapitalization inflow intended to restore senior first.
+    function recordRecapitalizationInflow(uint256 amount) external;
+
+    /// @notice Records LP-owned trading revenue and directly attaches it to seeded claimants when both tranches are otherwise at zero principal.
+    function recordTradingRevenueInflow(uint256 amount) external;
+
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
     function markStalenessLimit() external view returns (uint256);
 

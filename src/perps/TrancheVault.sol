@@ -22,10 +22,16 @@ contract TrancheVault is ERC4626 {
 
     mapping(address => uint256) public lastDepositTime;
 
+    address public seedReceiver;
+    uint256 public seedShareFloor;
+
     error TrancheVault__DepositCooldown();
     error TrancheVault__TransferDuringCooldown();
     error TrancheVault__TrancheImpaired();
     error TrancheVault__ThirdPartyDepositForExistingHolder();
+    error TrancheVault__NotPool();
+    error TrancheVault__SeedFloorBreached();
+    error TrancheVault__InvalidSeedPosition();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -56,6 +62,9 @@ contract TrancheVault is ERC4626 {
         address to,
         uint256 amount
     ) internal override {
+        if (from == seedReceiver && from != address(0) && balanceOf(from) - amount < seedShareFloor) {
+            revert TrancheVault__SeedFloorBreached();
+        }
         if (from != address(0) && to != address(0)) {
             if (block.timestamp < lastDepositTime[from] + DEPOSIT_COOLDOWN) {
                 revert TrancheVault__TransferDuringCooldown();
@@ -185,6 +194,41 @@ contract TrancheVault is ERC4626 {
             POOL.withdrawJunior(assets, receiver);
         }
         emit Withdraw(caller, receiver, _owner, assets, shares);
+    }
+
+    /// @notice Mints shares to explicitly bootstrap previously quarantined pool assets into this tranche.
+    /// @dev Only the pool may call this. The pool must have already assigned matching assets to the tranche principal.
+    function bootstrapMint(
+        uint256 shares,
+        address receiver
+    ) external {
+        if (msg.sender != address(POOL)) {
+            revert TrancheVault__NotPool();
+        }
+        _mint(receiver, shares);
+        lastDepositTime[receiver] = block.timestamp;
+    }
+
+    /// @notice Registers or increases the permanent seed-share floor for this tranche.
+    /// @dev The pool must mint the corresponding shares before or within the same flow.
+    function configureSeedPosition(
+        address receiver,
+        uint256 floorShares
+    ) external {
+        if (msg.sender != address(POOL)) {
+            revert TrancheVault__NotPool();
+        }
+        if (receiver == address(0) || floorShares == 0) {
+            revert TrancheVault__InvalidSeedPosition();
+        }
+        if (seedReceiver != address(0) && seedReceiver != receiver) {
+            revert TrancheVault__InvalidSeedPosition();
+        }
+        if (balanceOf(receiver) < floorShares || floorShares < seedShareFloor) {
+            revert TrancheVault__InvalidSeedPosition();
+        }
+        seedReceiver = receiver;
+        seedShareFloor = floorShares;
     }
 
 }

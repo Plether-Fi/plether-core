@@ -52,6 +52,12 @@ Operational consequences:
 - raw-balance shortfalls reduce `physicalAssets` immediately via the `min(rawAssets, accountedAssets)` boundary,
 - all core accounting paths must consume canonical `physicalAssets` / `totalAssets()` rather than raw token balance.
 
+Controlled inflow families must remain distinct:
+
+- `recordProtocolInflow`: protocol-owned fees or ambiguous accounted inflows that are not LP equity,
+- `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
+- `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
+
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
 
 ### Trader Liability Bounds
@@ -217,6 +223,34 @@ Design rule:
 - `CfdEngine -> HousePoolStatusSnapshot -> withdrawal liveness gates / status views`
 - `CfdEngine preview APIs -> solvency outputs -> frontend and keeper decisioning`
 
+## Canonical Deployment Lifecycle
+
+The preferred steady state is seeded ownership continuity, not repeated governance bootstrap.
+
+Required deployment order for a fresh perps pool:
+
+1. Deploy `HousePool`, `TrancheVault` contracts, engine, router, and clearinghouse wiring.
+2. Set the senior and junior vault addresses on `HousePool`.
+3. Call `initializeSeedPosition(true, ...)` for senior and `initializeSeedPosition(false, ...)` for junior using real USDC.
+4. Only after both seeds are live should ordinary LP deposits, trading activity, and recapitalization flows be considered canonical.
+
+Lifecycle rule:
+
+- seed positions are the default owner-continuity mechanism,
+- share-backed `assignUnassignedAssets(...)` is the exceptional fallback,
+- `unassignedAssets` should only appear when value exists but no seeded claimant path can safely determine ownership.
+
+## Ownership Routing Model
+
+The final routing model is:
+
+- protocol fees remain outside LP equity via `accumulatedFeesUsdc`, even when the raw USDC transfer itself is accounted immediately,
+- recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`,
+- LP-owned trading revenue uses `recordTradingRevenueInflow`; if live principal exists, normal reconcile applies the waterfall, and if both principals are zero but seed claimants exist, the revenue attaches directly to the seeded waterfall path (senior restoration first, junior residual second),
+- only inflows whose owner cannot be inferred from source semantics or seeded claimant continuity may remain in `unassignedAssets` for explicit governance assignment.
+
+The intended end state is that `unassignedAssets` is exceptional telemetry, not a routine accounting mode.
+
 ### A. Risk-Increasing Solvency View
 
 Question answered:
@@ -272,6 +306,10 @@ Notes:
 
 - This view is for principal and yield accounting, not open-path solvency.
 - Temporary under-recognition is acceptable; over-recognition is not.
+- If economic assets exist while no tranche shares can validly claim them, those assets must sit in an explicit `unassignedAssets` bucket rather than being silently attributed to the next LP.
+- While `unassignedAssets > 0`, tranche deposits must remain blocked until governance explicitly assigns the bucket by minting matching tranche shares to a chosen bootstrap receiver.
+- A tranche with `totalSupply == 0` must not accumulate live principal; any revenue that would otherwise land there must be redirected into `unassignedAssets`.
+- Preferred steady state is permanent seed-share ownership in each tranche: protocol-controlled seed shares remain non-redeemable below a configured floor so ordinary LP exits cannot make a tranche ownerless.
 
 Required liabilities in this view:
 
