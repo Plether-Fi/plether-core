@@ -26,6 +26,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
     bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngine.CfdEngine__TypedOrderFailure.selector;
+    bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngine.CfdEngine__MarkPriceOutOfOrder.selector;
 
     enum OrderStatus {
         None,
@@ -142,6 +143,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__TooManyPendingOrders();
     error OrderRouter__DegradedMode();
     error OrderRouter__CloseOnlyMode();
+    error OrderRouter__OraclePublishTimeOutOfOrder();
 
     enum OrderFailReason {
         Expired,
@@ -546,6 +548,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             }
         }
 
+        if (oraclePublishTime < engine.lastMarkTime()) {
+            revert OrderRouter__OraclePublishTimeOutOfOrder();
+        }
+
         uint256 capPrice = engine.CAP_PRICE();
         if (executionPrice > capPrice) {
             executionPrice = capPrice;
@@ -570,6 +576,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             emit OrderExecuted(orderId, executionPrice);
         } catch (bytes memory revertData) {
             bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
+            if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
+                revert OrderRouter__OraclePublishTimeOutOfOrder();
+            }
             OrderFailReason reason =
                 selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             emit OrderFailed(orderId, reason);
@@ -609,6 +618,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
                 revert OrderRouter__OraclePriceTooStale();
             }
+        }
+
+        if (oraclePublishTime < engine.lastMarkTime()) {
+            revert OrderRouter__OraclePublishTimeOutOfOrder();
         }
 
         uint256 capPrice = engine.CAP_PRICE();
@@ -667,6 +680,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
             } catch (bytes memory revertData) {
                 bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
+                if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
+                    revert OrderRouter__OraclePublishTimeOutOfOrder();
+                }
                 OrderFailReason reason =
                     selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
                 emit OrderFailed(orderId, reason);

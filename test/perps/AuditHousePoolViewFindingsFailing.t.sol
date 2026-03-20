@@ -5,7 +5,24 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {HousePoolAccountingLib} from "../../src/perps/libraries/HousePoolAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+
+contract HousePoolAccountingLibHarness {
+
+    function buildWithdrawal(
+        ICfdEngine.HousePoolInputSnapshot memory snapshot
+    ) external pure returns (HousePoolAccountingLib.WithdrawalSnapshot memory) {
+        return HousePoolAccountingLib.buildWithdrawalSnapshot(snapshot);
+    }
+
+    function buildReconcile(
+        ICfdEngine.HousePoolInputSnapshot memory snapshot
+    ) external pure returns (HousePoolAccountingLib.ReconcileSnapshot memory) {
+        return HousePoolAccountingLib.buildReconcileSnapshot(snapshot);
+    }
+
+}
 
 contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest {
 
@@ -187,6 +204,43 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
         assertFalse(pool.isWithdrawalLive(), "Withdrawal liveness should be false once the mark is stale");
         assertEq(pool.getMaxSeniorWithdraw(), 0, "Senior withdrawal cap getter should be liveness-gated");
         assertEq(pool.getMaxJuniorWithdraw(), 0, "Junior withdrawal cap getter should be liveness-gated");
+    }
+
+}
+
+contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerpTest {
+
+    HousePoolAccountingLibHarness harness;
+
+    function setUp() public override {
+        super.setUp();
+        harness = new HousePoolAccountingLibHarness();
+    }
+
+    function test_M2_GrossAssetsMustNotExceedActualCashWhenFeesExceedCash() public {
+        address trader = address(0x1234);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundJunior(address(this), 500_000e6);
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        assertGt(fees, 0, "Setup must accrue protocol fees");
+
+        uint256 actualCash = 10_000_000;
+        uint256 burnAmount = pool.totalAssets() - actualCash;
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), burnAmount);
+
+        ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
+        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
+
+        assertEq(snapshot.netPhysicalAssetsUsdc, 0, "Net physical assets should saturate to zero once fees exceed cash");
+        assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
+        assertLe(withdrawalSnapshot.physicalAssets, pool.totalAssets(), "Withdrawal snapshot gross assets must not exceed actual cash");
+        assertLe(reconcileSnapshot.physicalAssets, pool.totalAssets(), "Reconcile snapshot gross assets must not exceed actual cash");
     }
 
 }

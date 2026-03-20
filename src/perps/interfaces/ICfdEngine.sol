@@ -13,6 +13,7 @@ interface ICfdEngine {
     }
 
     error CfdEngine__TypedOrderFailure(OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose);
+    error CfdEngine__MarkPriceOutOfOrder();
 
     /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
     /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
@@ -78,6 +79,7 @@ interface ICfdEngine {
     }
 
     struct HousePoolInputSnapshot {
+        uint256 physicalAssetsUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
         uint256 withdrawalFundingLiabilityUsdc;

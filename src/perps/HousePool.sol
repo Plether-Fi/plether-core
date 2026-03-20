@@ -903,17 +903,19 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     ) internal pure {
         uint256 remaining = amount;
         if (state.seniorSupply > 0) {
-            uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
-                ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
-                : 0;
-            if (gap > 0) {
-                uint256 seniorAssignedUsdc = remaining > gap ? gap : remaining;
-                state.waterfall.seniorPrincipal += seniorAssignedUsdc;
-                remaining -= seniorAssignedUsdc;
-            } else if (state.waterfall.seniorPrincipal == 0 && state.waterfall.juniorPrincipal == 0) {
+            if (state.waterfall.seniorPrincipal == 0 && state.waterfall.juniorPrincipal == 0) {
                 state.waterfall.seniorPrincipal += remaining;
-                state.waterfall.seniorHighWaterMark += remaining;
+                state.waterfall.seniorHighWaterMark = remaining;
                 remaining = 0;
+            } else {
+                uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
+                    ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
+                    : 0;
+                if (gap > 0) {
+                    uint256 seniorAssignedUsdc = remaining > gap ? gap : remaining;
+                    state.waterfall.seniorPrincipal += seniorAssignedUsdc;
+                    remaining -= seniorAssignedUsdc;
+                }
             }
         }
         if (remaining > 0) {

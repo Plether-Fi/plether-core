@@ -1279,6 +1279,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 markStalenessLimit
     ) internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
         uint256 vaultAssetsUsdc = vault.totalAssets();
+        snapshot.physicalAssetsUsdc = vaultAssetsUsdc;
         snapshot.protocolFeesUsdc = accumulatedFeesUsdc;
         snapshot.netPhysicalAssetsUsdc =
             vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;

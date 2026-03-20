@@ -616,7 +616,7 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 10_000e6, "Reconcile should attach recapitalization to existing seeded senior ownership");
-        assertEq(pool.seniorHighWaterMark(), 50_000e6, "Recapitalization should preserve the original restoration target");
+        assertEq(pool.seniorHighWaterMark(), 10_000e6, "Recapitalization should reset the HWM after a full wipeout");
     }
 
     function test_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {

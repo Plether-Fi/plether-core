@@ -30,7 +30,7 @@ library HousePoolAccountingLib {
     function buildWithdrawalSnapshot(
         ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
-        snapshot.physicalAssets = engineSnapshot.netPhysicalAssetsUsdc + engineSnapshot.protocolFeesUsdc;
+        snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
@@ -43,7 +43,7 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        snapshot.physicalAssets = engineSnapshot.netPhysicalAssetsUsdc + engineSnapshot.protocolFeesUsdc;
+        snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.deferredLiabilities =
             engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredClearerBountyUsdc;

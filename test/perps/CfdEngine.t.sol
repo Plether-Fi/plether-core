@@ -722,6 +722,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, engine.hasLiveLiability());
         assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
+        assertEq(housePoolSnapshot.physicalAssetsUsdc, snapshot.vaultAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
         assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
         assertEq(snapshot.freeUsdc, viewData.freeUsdc);
@@ -856,6 +857,9 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngine.HousePoolStatusSnapshot memory status = engine.getHousePoolStatusSnapshot();
         uint256 fees = engine.accumulatedFeesUsdc();
 
+        assertEq(
+            snapshot.physicalAssetsUsdc, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
+        );
         assertEq(
             snapshot.netPhysicalAssetsUsdc, pool.totalAssets() - fees, "Snapshot net assets must exclude protocol fees"
         );

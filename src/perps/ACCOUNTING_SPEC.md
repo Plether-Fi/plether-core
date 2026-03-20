@@ -253,7 +253,7 @@ Lifecycle rule:
 The final routing model is:
 
 - protocol fees remain outside LP equity via `accumulatedFeesUsdc`, even when the raw USDC transfer itself is accounted immediately,
-- recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`, with any remainder that still has no claimant path falling into `unassignedAssets`,
+- recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`; after a full wipeout (`seniorPrincipal == 0 && juniorPrincipal == 0`), the first recapitalization resets `seniorHighWaterMark` to the new recapitalized principal instead of reviving the stale pre-wipeout mark, with any remainder that still has no claimant path falling into `unassignedAssets`,
 - LP-owned trading revenue uses `recordTradingRevenueInflow`; if live principal exists, normal reconcile applies the waterfall, and if both principals are zero but seed claimants exist, the revenue attaches directly to the seeded waterfall path (senior restoration first, junior residual second),
 - only inflows whose owner cannot be inferred from source semantics or seeded claimant continuity may remain in `unassignedAssets` for explicit governance assignment, and pending recap/trading buckets must also fall back into `unassignedAssets` whenever no claimant path exists.
 

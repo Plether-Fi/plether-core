@@ -152,6 +152,172 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
 
 }
 
+contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTest {
+
+    MockPyth mockPyth;
+    bytes32 constant FEED_A = bytes32(uint256(1));
+    bytes32 constant FEED_B = bytes32(uint256(2));
+    bytes32[] feedIds;
+    uint256[] weights;
+    uint256[] bases;
+
+    address alice = address(0xA11CE);
+    address keeper = address(0xBEEF);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 1_000_000e6;
+    }
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        mockPyth = new MockPyth();
+
+        clearinghouse = new MarginClearinghouse(address(usdc));
+        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        pool = new HousePool(address(usdc), address(engine));
+
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
+        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setVault(address(pool));
+
+        feedIds.push(FEED_A);
+        feedIds.push(FEED_B);
+        weights.push(0.5e18);
+        weights.push(0.5e18);
+        bases.push(1e8);
+        bases.push(1e8);
+
+        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        engine.setOrderRouter(address(router));
+        pool.setOrderRouter(address(router));
+
+        _bypassAllTimelocks();
+        _fundTrader(alice, 50_000e6);
+        vm.deal(alice, 1 ether);
+        vm.deal(keeper, 1 ether);
+    }
+
+    function test_H2_OlderButFreshSingleExecutionMustLeaveOrderPending() public {
+        vm.warp(1000);
+        vm.roll(100);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 1020);
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
+
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.warp(1025);
+        vm.roll(101);
+        vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        router.executeOrder(1, updateData);
+
+        assertEq(router.nextExecuteId(), 1, "Out-of-order keeper input must not consume the order");
+        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for an out-of-order mark");
+    }
+
+    function test_H2_OlderButFreshBatchExecutionMustLeaveQueuedOrdersPending() public {
+        vm.warp(1000);
+        vm.roll(100);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8, false);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 1020);
+
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
+
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = "";
+
+        vm.warp(1025);
+        vm.roll(101);
+        vm.prank(keeper);
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
+        router.executeOrderBatch(2, updateData);
+
+        assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
+        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for failed out-of-order batch execution");
+    }
+
+}
+
+contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_M1_PostWipeoutRecapPathMustMatchDepositPathHwmSemantics() public {
+        uint256 seedAssets = 50_000e6;
+        uint256 recapAmount = 10_000e6;
+        address seed = address(0xBEEF);
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, seed);
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(seniorVault), recapAmount);
+        vm.startPrank(address(seniorVault));
+        usdc.approve(address(pool), recapAmount);
+        pool.depositSenior(recapAmount);
+        vm.stopPrank();
+
+        uint256 depositRouteHwm = pool.seniorHighWaterMark();
+        assertEq(depositRouteHwm, recapAmount, "Deposit route should establish the baseline post-wipeout HWM");
+
+        HousePool recapPool = new HousePool(address(usdc), address(engine));
+        TrancheVault recapSeniorVault =
+            new TrancheVault(IERC20(address(usdc)), address(recapPool), true, "Plether Senior LP", "seniorUSDC");
+        TrancheVault recapJuniorVault =
+            new TrancheVault(IERC20(address(usdc)), address(recapPool), false, "Plether Junior LP", "juniorUSDC");
+        recapPool.setSeniorVault(address(recapSeniorVault));
+        recapPool.setJuniorVault(address(recapJuniorVault));
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(recapPool), seedAssets);
+        recapPool.initializeSeedPosition(true, seedAssets, seed);
+
+        usdc.burn(address(recapPool), recapPool.totalAssets());
+        vm.prank(address(recapJuniorVault));
+        recapPool.reconcile();
+
+        usdc.mint(address(recapPool), recapAmount);
+        vm.prank(address(engine));
+        recapPool.recordRecapitalizationInflow(recapAmount);
+        vm.prank(address(recapJuniorVault));
+        recapPool.reconcile();
+
+        assertEq(
+            recapPool.seniorHighWaterMark(),
+            depositRouteHwm,
+            "Governance recap and direct deposit should share the same post-wipeout HWM semantics"
+        );
+    }
+
+}
+
 contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
 
     address alice = address(0xA11CE);
