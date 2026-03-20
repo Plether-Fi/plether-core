@@ -12,7 +12,6 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title HousePool
 /// @notice Tranched house pool. Senior tranche gets fixed-rate yield with last-loss protection.
@@ -21,7 +20,6 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
-    using Math for uint256;
 
     struct VaultLiquidityView {
         uint256 totalAssetsUsdc;
@@ -34,28 +32,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         bool markFresh;
         bool oracleFrozen;
         bool degradedMode;
-    }
-
-    enum AccountingIntentKind {
-        Recapitalization,
-        TradingRevenue,
-        AssignUnassigned,
-        InitializeSeed
-    }
-
-    struct AccountingIntent {
-        AccountingIntentKind kind;
-        uint256 amountUsdc;
-        uint256 shares;
-        bool toSenior;
-        address receiver;
-    }
-
-    struct PendingIntent {
-        AccountingIntentKind kind;
-        uint256 amountUsdc;
-        bool toSenior;
-        address receiver;
     }
 
     struct PendingAccountingState {
@@ -78,9 +54,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     uint256 public seniorHighWaterMark;
     uint256 public accountedAssets;
     uint256 public unassignedAssets;
-    uint256 public pendingIntentAssets;
-    uint256 public pendingIntentHead;
-    PendingIntent[] internal pendingIntents;
+    uint256 public pendingRecapitalizationUsdc;
+    uint256 public pendingTradingRevenueUsdc;
 
     uint256 public lastReconcileTime;
     uint256 public seniorRateBps;
@@ -132,7 +107,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     );
     event UnassignedAssetsAssigned(bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted);
     event SeedPositionInitialized(bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted);
-    event AccountingIntentQueued(AccountingIntentKind indexed kind, uint256 amountUsdc, bool indexed toSenior, address receiver);
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -378,8 +352,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
 
         accountedAssets += amount;
-        pendingIntentAssets += amount;
-        _enqueueIntent(PendingIntent(AccountingIntentKind.Recapitalization, amount, true, address(0)));
+        pendingRecapitalizationUsdc += amount;
         emit RecapitalizationInflowAccounted(msg.sender, amount, 0);
     }
 
@@ -397,8 +370,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
         accountedAssets += amount;
         if (seniorPrincipal + juniorPrincipal == 0) {
-            pendingIntentAssets += amount;
-            _enqueueIntent(PendingIntent(AccountingIntentKind.TradingRevenue, amount, false, address(0)));
+            pendingTradingRevenueUsdc += amount;
         }
         emit TradingRevenueInflowAccounted(msg.sender, amount, 0, 0);
     }
@@ -426,9 +398,15 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__BootstrapSharesZero();
         }
 
-        _enqueueIntent(PendingIntent(AccountingIntentKind.AssignUnassigned, 0, toSenior, receiver));
         _checkpointSeniorYieldClock();
-        _drainPendingIntents();
+        if (toSenior) {
+            seniorPrincipal += amount;
+            seniorHighWaterMark += amount;
+        } else {
+            juniorPrincipal += amount;
+        }
+        unassignedAssets = 0;
+        ITrancheVaultBootstrap(targetVault).bootstrapMint(shares, receiver);
         emit UnassignedAssetsAssigned(toSenior, receiver, amount, shares);
     }
 
@@ -462,9 +440,15 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC.safeTransferFrom(msg.sender, address(this), amount);
 
         accountedAssets += amount;
-        _enqueueIntent(PendingIntent(AccountingIntentKind.InitializeSeed, amount, toSenior, receiver));
         _checkpointSeniorYieldClock();
-        _drainPendingIntents();
+        if (toSenior) {
+            seniorPrincipal += amount;
+            seniorHighWaterMark += amount;
+        } else {
+            juniorPrincipal += amount;
+        }
+        ITrancheVaultBootstrap(targetVault).bootstrapMint(shares, receiver);
+        ITrancheVaultBootstrap(targetVault).configureSeedPosition(receiver, shares);
         emit SeedPositionInitialized(toSenior, receiver, amount, shares);
     }
 
@@ -691,9 +675,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (_markIsFreshForReconcile(accountingSnapshot, _getHousePoolStatusSnapshot())) {
             HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-            if (pendingIntentAssets > 0) {
-                snapshot.distributable = snapshot.distributable > pendingIntentAssets
-                    ? snapshot.distributable - pendingIntentAssets
+            uint256 pendingAssets = _pendingBucketAssets();
+            if (pendingAssets > 0) {
+                snapshot.distributable = snapshot.distributable > pendingAssets
+                    ? snapshot.distributable - pendingAssets
                     : 0;
             }
             bool juniorSupplyZero = _juniorShareSupply() == 0;
@@ -729,7 +714,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             lastReconcileTime = block.timestamp;
         }
 
-        _drainPendingIntents();
+        _applyPendingBucketsLive();
     }
 
     function _getWithdrawalSnapshot()
@@ -752,9 +737,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-            if (pendingIntentAssets > 0) {
-                snapshot.distributable = snapshot.distributable > pendingIntentAssets
-                    ? snapshot.distributable - pendingIntentAssets
+            uint256 pendingAssets = _pendingBucketAssets();
+            if (pendingAssets > 0) {
+                snapshot.distributable = snapshot.distributable > pendingAssets
+                    ? snapshot.distributable - pendingAssets
                     : 0;
             }
             pendingState.unassignedAssets = _normalizeUnassignedAssets(snapshot.distributable);
@@ -787,7 +773,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             }
         }
 
-        _previewPendingIntents(pendingState);
+        _applyPendingBucketsPreview(pendingState);
     }
 
     function _markIsFreshForReconcile(
@@ -855,9 +841,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 reservedUnassignedAssets
     ) internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
         snapshot = HousePoolAccountingLib.buildWithdrawalSnapshot(accountingSnapshot);
-        if (pendingIntentAssets > 0) {
-            snapshot.reserved += pendingIntentAssets;
-            snapshot.freeUsdc = snapshot.freeUsdc > pendingIntentAssets ? snapshot.freeUsdc - pendingIntentAssets : 0;
+        uint256 pendingAssets = _pendingBucketAssets();
+        if (pendingAssets > 0) {
+            snapshot.reserved += pendingAssets;
+            snapshot.freeUsdc = snapshot.freeUsdc > pendingAssets ? snapshot.freeUsdc - pendingAssets : 0;
         }
         if (reservedUnassignedAssets > 0) {
             snapshot.reserved += reservedUnassignedAssets;
@@ -875,15 +862,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         lastReconcileTime = block.timestamp;
     }
 
-    function _enqueueIntent(
-        PendingIntent memory intent
-    ) internal {
-        pendingIntents.push(intent);
-        emit AccountingIntentQueued(intent.kind, intent.amountUsdc, intent.toSenior, intent.receiver);
-    }
-
-    function _drainPendingIntents() internal {
-        if (pendingIntentHead == pendingIntents.length) {
+    function _applyPendingBucketsLive() internal {
+        if (pendingRecapitalizationUsdc == 0 && pendingTradingRevenueUsdc == 0) {
             return;
         }
 
@@ -893,112 +873,27 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         state.seniorSupply = _seniorShareSupply();
         state.juniorSupply = _juniorShareSupply();
 
-        while (pendingIntentHead < pendingIntents.length) {
-            PendingIntent memory intent = pendingIntents[pendingIntentHead];
-            if (
-                intent.kind == AccountingIntentKind.Recapitalization || intent.kind == AccountingIntentKind.TradingRevenue
-            ) {
-                pendingIntentAssets = pendingIntentAssets > intent.amountUsdc ? pendingIntentAssets - intent.amountUsdc : 0;
-            }
-            _applyPendingIntent(state, intent);
-            pendingIntentHead++;
+        if (pendingRecapitalizationUsdc > 0) {
+            _applyRecapitalizationIntent(state, pendingRecapitalizationUsdc);
+            pendingRecapitalizationUsdc = 0;
+        }
+        if (pendingTradingRevenueUsdc > 0) {
+            _routeSeededRevenue(state, pendingTradingRevenueUsdc);
+            pendingTradingRevenueUsdc = 0;
         }
 
         _setWaterfallState(state.waterfall);
         unassignedAssets = state.unassignedAssets;
     }
 
-    function _previewPendingIntents(
+    function _applyPendingBucketsPreview(
         PendingAccountingState memory state
     ) internal view {
-        for (uint256 i = pendingIntentHead; i < pendingIntents.length; i++) {
-            _applyPendingIntentPreview(state, pendingIntents[i]);
+        if (pendingRecapitalizationUsdc > 0) {
+            _applyRecapitalizationIntent(state, pendingRecapitalizationUsdc);
         }
-    }
-
-    function _applyPendingIntent(
-        PendingAccountingState memory state,
-        PendingIntent memory intent
-    ) internal {
-        if (intent.kind == AccountingIntentKind.Recapitalization) {
-            _applyRecapitalizationIntent(state, intent.amountUsdc);
-            return;
-        }
-        if (intent.kind == AccountingIntentKind.TradingRevenue) {
-            _routeSeededRevenue(state, intent.amountUsdc);
-            return;
-        }
-
-        address targetVault = intent.toSenior ? seniorVault : juniorVault;
-        uint256 targetAssets = intent.toSenior ? state.waterfall.seniorPrincipal : state.waterfall.juniorPrincipal;
-        uint256 targetSupply = intent.toSenior ? state.seniorSupply : state.juniorSupply;
-        uint256 shares = _previewVaultShares(intent.kind == AccountingIntentKind.AssignUnassigned ? state.unassignedAssets : intent.amountUsdc, targetSupply, targetAssets);
-
-        if (intent.kind == AccountingIntentKind.AssignUnassigned) {
-            uint256 amount = state.unassignedAssets;
-            if (intent.toSenior) {
-                state.waterfall.seniorPrincipal += amount;
-                state.waterfall.seniorHighWaterMark += amount;
-                state.seniorSupply += shares;
-            } else {
-                state.waterfall.juniorPrincipal += amount;
-                state.juniorSupply += shares;
-            }
-            state.unassignedAssets = 0;
-            ITrancheVaultBootstrap(targetVault).bootstrapMint(shares, intent.receiver);
-            return;
-        }
-
-        if (intent.toSenior) {
-            state.waterfall.seniorPrincipal += intent.amountUsdc;
-            state.waterfall.seniorHighWaterMark += intent.amountUsdc;
-            state.seniorSupply += shares;
-        } else {
-            state.waterfall.juniorPrincipal += intent.amountUsdc;
-            state.juniorSupply += shares;
-        }
-        ITrancheVaultBootstrap(targetVault).bootstrapMint(shares, intent.receiver);
-        ITrancheVaultBootstrap(targetVault).configureSeedPosition(intent.receiver, shares);
-    }
-
-    function _applyPendingIntentPreview(
-        PendingAccountingState memory state,
-        PendingIntent memory intent
-    ) internal pure {
-        if (intent.kind == AccountingIntentKind.Recapitalization) {
-            _applyRecapitalizationIntent(state, intent.amountUsdc);
-            return;
-        }
-        if (intent.kind == AccountingIntentKind.TradingRevenue) {
-            _routeSeededRevenue(state, intent.amountUsdc);
-            return;
-        }
-
-        uint256 targetAssets = intent.toSenior ? state.waterfall.seniorPrincipal : state.waterfall.juniorPrincipal;
-        uint256 targetSupply = intent.toSenior ? state.seniorSupply : state.juniorSupply;
-        uint256 assets = intent.kind == AccountingIntentKind.AssignUnassigned ? state.unassignedAssets : intent.amountUsdc;
-        uint256 shares = _previewVaultShares(assets, targetSupply, targetAssets);
-
-        if (intent.kind == AccountingIntentKind.AssignUnassigned) {
-            if (intent.toSenior) {
-                state.waterfall.seniorPrincipal += assets;
-                state.waterfall.seniorHighWaterMark += assets;
-                state.seniorSupply += shares;
-            } else {
-                state.waterfall.juniorPrincipal += assets;
-                state.juniorSupply += shares;
-            }
-            state.unassignedAssets = 0;
-            return;
-        }
-
-        if (intent.toSenior) {
-            state.waterfall.seniorPrincipal += assets;
-            state.waterfall.seniorHighWaterMark += assets;
-            state.seniorSupply += shares;
-        } else {
-            state.waterfall.juniorPrincipal += assets;
-            state.juniorSupply += shares;
+        if (pendingTradingRevenueUsdc > 0) {
+            _routeSeededRevenue(state, pendingTradingRevenueUsdc);
         }
     }
 
@@ -1044,12 +939,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
-    function _previewVaultShares(
-        uint256 assets,
-        uint256 supply,
-        uint256 totalAssetsUsdc
-    ) internal pure returns (uint256) {
-        return assets.mulDiv(supply + 1000, totalAssetsUsdc + 1, Math.Rounding.Floor);
+    function _pendingBucketAssets() internal view returns (uint256) {
+        return pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
     }
 
     function _getHousePoolInputSnapshot() internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
