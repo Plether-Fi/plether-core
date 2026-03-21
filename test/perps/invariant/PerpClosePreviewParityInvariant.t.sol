@@ -73,7 +73,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
         (,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -89,8 +88,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview =
-                    engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
+                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
@@ -115,7 +113,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseWithPositiveFundingImpliesVaultCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
         (,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -131,8 +128,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview =
-                    engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
+                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (preview.valid && preview.fundingUsdc > 0 && preview.deferredPayoutUsdc == 0) {
                     assertGe(
@@ -147,7 +143,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
         (,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -157,8 +152,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory fullPreview =
-                engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            CfdEngine.ClosePreview memory fullPreview = engine.previewClose(accountId, size, oraclePrice);
             if (!fullPreview.valid) {
                 continue;
             }
@@ -169,8 +163,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview =
-                    engine.previewClose(accountId, fractions[f], oraclePrice, vaultDepthUsdc);
+                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
@@ -263,7 +256,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         uint256 vaultDepthUsdc,
         bool isFullClose
     ) internal view {
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, oraclePrice, vaultDepthUsdc);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, oraclePrice);
 
         if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredPayoutUsdc == 0)) {
             return;

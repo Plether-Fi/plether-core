@@ -208,7 +208,14 @@ interface ICfdEngine {
         uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 
+    /// @notice Canonical liquidation preview using the vault's current accounted depth.
     function previewLiquidation(
+        bytes32 accountId,
+        uint256 oraclePrice
+    ) external view returns (LiquidationPreview memory preview);
+
+    /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
+    function simulateLiquidation(
         bytes32 accountId,
         uint256 oraclePrice,
         uint256 vaultDepthUsdc

@@ -131,7 +131,9 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
 
         assertEq(
-            clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "commit should move the only free settlement into bounty escrow"
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            0,
+            "commit should move the only free settlement into bounty escrow"
         );
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
@@ -140,7 +142,9 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertEq(size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time");
+        assertEq(
+            size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time"
+        );
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             executionBountyUsdc,
@@ -198,7 +202,11 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 1, "Liquidating a non-head account should not advance the global head");
 
-        assertEq(router.nextExecuteId(), 1, "Liquidation of a non-head order should leave the head pointer unchanged initially");
+        assertEq(
+            router.nextExecuteId(),
+            1,
+            "Liquidation of a non-head order should leave the head pointer unchanged initially"
+        );
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
@@ -1331,9 +1339,17 @@ contract OrderRouterPythTest is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Skipped head should move behind the next queued order");
-        assertEq(escrow.pendingOrderCount, 2, "Later order should remain pending if another non-terminal gate stops the batch");
+        assertEq(
+            escrow.pendingOrderCount,
+            2,
+            "Later order should remain pending if another non-terminal gate stops the batch"
+        );
         assertEq(router.executionBountyReserves(1), 1e6, "Skipped head should retain its execution bounty escrow");
-        assertEq(router.executionBountyReserves(2), 1e6, "Later order should retain escrow if it remains pending after the skip");
+        assertEq(
+            router.executionBountyReserves(2),
+            1e6,
+            "Later order should retain escrow if it remains pending after the skip"
+        );
     }
 
     function test_DeferredPayout_CloseDoesNotBlockLaterQueuedOrders() public {
@@ -1422,7 +1438,9 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Retryable slippage miss should keep the queue head pending");
         assertEq(escrow.pendingOrderCount, 1, "Retryable slippage miss should preserve pending escrow state");
         assertEq(usdc.balanceOf(address(router)), 1e6, "Keeper reserve should remain escrowed in router custody");
-        assertGt(router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable slippage miss should set cooldown");
+        assertGt(
+            router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable slippage miss should set cooldown"
+        );
     }
 
     function test_SingleExecute_RevertsDuringRetryCooldown() public {
@@ -1473,12 +1491,20 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Retryable close slippage miss should not pay keeper bounty");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Retryable close slippage miss should not pay keeper bounty"
+        );
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
         );
         assertEq(router.nextExecuteId(), closeOrderId, "Retryable close slippage miss should keep the order pending");
-        assertEq(router.executionBountyReserves(closeOrderId), 1e6, "Close bounty should remain escrowed while order stays pending");
+        assertEq(
+            router.executionBountyReserves(closeOrderId),
+            1e6,
+            "Close bounty should remain escrowed while order stays pending"
+        );
     }
 
     function test_InsufficientPythFee_Reverts() public {
@@ -1886,8 +1912,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
         uint256 vaultAssetsBefore = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview =
-            engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -1962,14 +1987,22 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             if (logs[i].topics[0] == fundingUpdatedSig && fundingLogIndex == type(uint256).max) {
                 fundingLogIndex = i;
             }
-            if (logs[i].topics[0] == protocolInflowSig && logs[i].emitter == address(pool) && inflowLogIndex == type(uint256).max)
-            {
+            if (
+                logs[i].topics[0] == protocolInflowSig && logs[i].emitter == address(pool)
+                    && inflowLogIndex == type(uint256).max
+            ) {
                 inflowLogIndex = i;
             }
         }
 
-        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "liquidation path should sync funding for the elapsed interval");
-        assertGt(engine.lastFundingTime(), fundingBefore, "liquidation must materialize pending funding before fee booking");
+        assertEq(
+            engine.lastFundingTime(),
+            uint64(block.timestamp),
+            "liquidation path should sync funding for the elapsed interval"
+        );
+        assertGt(
+            engine.lastFundingTime(), fundingBefore, "liquidation must materialize pending funding before fee booking"
+        );
         assertLt(
             fundingLogIndex,
             inflowLogIndex,

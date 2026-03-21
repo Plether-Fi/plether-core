@@ -287,8 +287,16 @@ contract PerpInvariantTest is BasePerpTest {
 
         assertEq(pool.seniorPrincipal(), pendingSenior, "Pending senior principal must match reconcile-first state");
         assertEq(pool.juniorPrincipal(), pendingJunior, "Pending junior principal must match reconcile-first state");
-        assertEq(pool.getMaxSeniorWithdraw(), pendingMaxSenior, "Pending senior withdraw cap must match reconcile-first state");
-        assertEq(pool.getMaxJuniorWithdraw(), pendingMaxJunior, "Pending junior withdraw cap must match reconcile-first state");
+        assertEq(
+            pool.getMaxSeniorWithdraw(),
+            pendingMaxSenior,
+            "Pending senior withdraw cap must match reconcile-first state"
+        );
+        assertEq(
+            pool.getMaxJuniorWithdraw(),
+            pendingMaxJunior,
+            "Pending junior withdraw cap must match reconcile-first state"
+        );
     }
 
     function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public view {
@@ -375,8 +383,7 @@ contract PerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) =
-                engine.positions(accountId);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
 
             assertEq(positionView.exists, size > 0, "Position view existence must match stored size");
             if (size == 0) {
@@ -626,7 +633,7 @@ contract PerpInvariantTest is BasePerpTest {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepth);
+            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
             assertEq(
                 preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view"
             );
@@ -903,7 +910,7 @@ contract AdversarialPerpHandler is Test {
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice, vaultDepth);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
         }
@@ -1009,7 +1016,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             uint8(OrderRouter.OrderStatus.Pending),
             "Retryable slippage head must remain pending immediately after the batch attempt"
         );
-        assertGt(handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Retryable slippage head must retain escrowed bounty");
+        assertGt(
+            handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Retryable slippage head must retain escrowed bounty"
+        );
         assertGe(
             handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
             handler.ghost_lastRetryableSlippageEscrowUsdc(),
@@ -1037,13 +1046,19 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
 
         if (pendingCount == 0) {
-            assertTrue(headOrderId == 0 || headOrderId >= nextCommitId, "Empty queue should not expose a live head pointer");
+            assertTrue(
+                headOrderId == 0 || headOrderId >= nextCommitId, "Empty queue should not expose a live head pointer"
+            );
             return;
         }
 
         while (cursor != 0 && cursor < nextCommitId && traversed <= pendingCount) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(cursor);
-            assertEq(uint8(record.status), uint8(OrderRouter.OrderStatus.Pending), "Global queue must only traverse pending orders");
+            assertEq(
+                uint8(record.status),
+                uint8(OrderRouter.OrderStatus.Pending),
+                "Global queue must only traverse pending orders"
+            );
             assertEq(record.prevGlobalOrderId, expectedPrev, "Global queue prev links must remain consistent");
             expectedPrev = cursor;
             cursor = record.nextGlobalOrderId;

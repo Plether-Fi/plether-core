@@ -9,9 +9,9 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
+import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
 import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
-import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
@@ -919,13 +919,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _canPayFreshVaultPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _availableCashForFreshVaultPayouts();
+        return amountUsdc <= _freshVaultReservation().freeCashUsdc;
     }
 
     function _availableCashForFreshVaultPayouts() internal view returns (uint256) {
-        return CashPriorityLib.availableCashForFreshPayouts(
-            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
-        );
+        return _freshVaultReservation().freeCashUsdc;
     }
 
     function _claimableHeadAmountUsdc() internal view returns (uint256) {
@@ -934,9 +932,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return 0;
         }
 
-        uint256 headRemainingUsdc = deferredClaims[claimId].remainingUsdc;
-        uint256 vaultAssetsUsdc = vault.totalAssets();
-        return vaultAssetsUsdc < headRemainingUsdc ? vaultAssetsUsdc : headRemainingUsdc;
+        return _headDeferredClaimReservation(deferredClaims[claimId].remainingUsdc).headClaimServiceableUsdc;
+    }
+
+    function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+        return CashPriorityLib.reserveFreshPayouts(
+            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
+        );
+    }
+
+    function _headDeferredClaimReservation(
+        uint256 headClaimAmountUsdc
+    ) internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+        return CashPriorityLib.reserveDeferredHeadClaim(
+            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc, headClaimAmountUsdc
+        );
     }
 
     function _enqueueDeferredClaim(
@@ -947,11 +957,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) internal {
         uint64 claimId = nextDeferredClaimId++;
         deferredClaims[claimId] = ICfdEngine.DeferredClaim({
-            claimType: claimType,
-            accountId: accountId,
-            keeper: keeper,
-            remainingUsdc: amountUsdc,
-            nextClaimId: 0
+            claimType: claimType, accountId: accountId, keeper: keeper, remainingUsdc: amountUsdc, nextClaimId: 0
         });
 
         if (deferredClaimTailId == 0) {
@@ -1191,25 +1197,44 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint64 headClaimId = deferredClaimHeadId;
         ICfdEngine.DeferredClaim storage headClaim = deferredClaims[headClaimId];
         status.deferredTraderPayoutUsdc = deferredPayoutUsdc[accountId];
-        status.traderPayoutClaimableNow =
-            status.deferredTraderPayoutUsdc > 0 && headClaim.claimType == ICfdEngine.DeferredClaimType.TraderPayout
-                && headClaim.accountId == accountId && _claimableHeadAmountUsdc() > 0;
+        status.traderPayoutClaimableNow = status.deferredTraderPayoutUsdc > 0
+            && headClaim.claimType == ICfdEngine.DeferredClaimType.TraderPayout && headClaim.accountId == accountId
+            && _claimableHeadAmountUsdc() > 0;
         status.deferredClearerBountyUsdc = deferredClearerBountyUsdc[keeper];
-        status.liquidationBountyClaimableNow =
-            status.deferredClearerBountyUsdc > 0 && headClaim.claimType == ICfdEngine.DeferredClaimType.ClearerBounty
-                && headClaim.keeper == keeper && _claimableHeadAmountUsdc() > 0;
+        status.liquidationBountyClaimableNow = status.deferredClearerBountyUsdc > 0
+            && headClaim.claimType == ICfdEngine.DeferredClaimType.ClearerBounty && headClaim.keeper == keeper
+            && _claimableHeadAmountUsdc() > 0;
     }
 
     function getDeferredClaimHead() external view returns (ICfdEngine.DeferredClaim memory claim) {
         return deferredClaims[deferredClaimHeadId];
     }
 
+    /// @notice Canonical close preview using the vault's current accounted depth.
     function previewClose(
+        bytes32 accountId,
+        uint256 sizeDelta,
+        uint256 oraclePrice
+    ) external view returns (ClosePreview memory preview) {
+        return _previewClose(accountId, sizeDelta, oraclePrice, vault.totalAssets());
+    }
+
+    /// @notice Hypothetical close simulation at a caller-supplied vault depth.
+    function simulateClose(
         bytes32 accountId,
         uint256 sizeDelta,
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (ClosePreview memory preview) {
+        return _previewClose(accountId, sizeDelta, oraclePrice, vaultDepthUsdc);
+    }
+
+    function _previewClose(
+        bytes32 accountId,
+        uint256 sizeDelta,
+        uint256 oraclePrice,
+        uint256 vaultDepthUsdc
+    ) internal view returns (ClosePreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
@@ -1281,11 +1306,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
+    /// @notice Canonical liquidation preview using the vault's current accounted depth.
     function previewLiquidation(
+        bytes32 accountId,
+        uint256 oraclePrice
+    ) external view returns (LiquidationPreview memory preview) {
+        return _previewLiquidation(accountId, oraclePrice, vault.totalAssets());
+    }
+
+    /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
+    function simulateLiquidation(
         bytes32 accountId,
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
+        return _previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+    }
+
+    function _previewLiquidation(
+        bytes32 accountId,
+        uint256 oraclePrice,
+        uint256 vaultDepthUsdc
+    ) internal view returns (LiquidationPreview memory preview) {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
         preview.oraclePrice = price;
 
@@ -1508,7 +1550,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, lastMarkPrice, vault.totalAssets(), 0);
-        CfdEnginePlanTypes.GlobalFundingDelta memory fundingDelta = CfdEnginePlanLib.planGlobalFunding(snap, lastMarkPrice, 0);
+        CfdEnginePlanTypes.GlobalFundingDelta memory fundingDelta =
+            CfdEnginePlanLib.planGlobalFunding(snap, lastMarkPrice, 0);
         int256 postFundingIndex = pos.side == CfdTypes.Side.BULL
             ? snap.bullSide.fundingIndex + fundingDelta.bullFundingIndexDelta
             : snap.bearSide.fundingIndex + fundingDelta.bearFundingIndexDelta;

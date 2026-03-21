@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1433.1399999999999 581" width="1433.1399999999999" height="581" style="--bg:#ffffff;--fg:#1f2328;--line:#9ca3af;--accent:#6b7280;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Inter', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 30%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="4.8" refX="8" refY="2.4" orient="auto">
+    <polygon points="0 0, 8 2.4, 0 4.8" fill="var(--_arrow)" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="4.8" refX="0" refY="2.4" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.4, 8 4.8" fill="var(--_arrow)" />
+  </marker>
+</defs>
+<polyline points="888.0775,76 888.0775,133" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="888.0775,169 888.0775,197.5 1173.365,197.5 1173.365,226" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="1173.365,262 1173.365,290.5 890.7199999999999,290.5 890.7199999999999,337 769.2524999999998,337" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="721.0774999999999,319 721.0774999999999,290.5 380.53999999999996,290.5 380.53999999999996,151 804.1524999999999,151" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="721.0774999999999,355 721.0774999999999,383.5 556.0149999999999,383.5 556.0149999999999,412" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="556.0149999999999,448 556.0149999999999,476.5 102.47499999999991,476.5 102.47499999999991,505" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="556.0149999999999,448 556.0149999999999,476.5 324.9549999999999,476.5 324.9549999999999,505" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="556.0149999999999,448 556.0149999999999,505" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="556.0149999999999,448 556.0149999999999,476.5 751.4399999999999,476.5 751.4399999999999,505" fill="none" stroke="var(--_line)" stroke-width="0.75" marker-end="url(#arrowhead)" />
+<polyline points="888.0775,169 888.0775,197.5 800.3399999999999,197.5 800.3399999999999,226" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="1173.365,262 1173.365,319" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="721.0774999999999,355 721.0774999999999,383.5 886.1399999999999,383.5 886.1399999999999,412" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<polyline points="556.0149999999999,448 556.0149999999999,476.5 1138.7649999999999,476.5 1138.7649999999999,505" fill="none" stroke="var(--_line)" stroke-width="0.75" stroke-dasharray="4 4" />
+<rect x="791.4175" y="91" width="193.32" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="888.0775" y="104.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Deposit or withdraw trader cash</text>
+<rect x="1025.225" y="184" width="296.28000000000003" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="1173.365" y="197.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Reserve committed margin + seize execution bounty</text>
+<rect x="819.8" y="277" width="141.84" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="890.7199999999999" y="290.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Validated order intent</text>
+<rect x="272.43999999999994" y="230.5" width="216.20000000000002" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="380.53999999999996" y="244" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Settle, seize, classify liabilities</text>
+<rect x="433.6149999999999" y="370" width="244.8" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="556.0149999999999" y="383.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Account protocol, revenue, recap inflows</text>
+<rect x="42.994999999999905" y="463" width="118.96000000000001" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="102.47499999999991" y="476.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Mint / burn shares</text>
+<rect x="173.95499999999993" y="463" width="302" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="324.9549999999999" y="476.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Queue unpaid trader payouts + liquidation bounties</text>
+<rect x="487.95499999999987" y="463" width="136.12" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="556.0149999999999" y="476.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Segregate non-LP fees</text>
+<rect x="657.64" y="463" width="187.6" height="27" rx="4" ry="4" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />
+<text x="751.4399999999999" y="476.5" text-anchor="middle" dy="0.35em" font-size="11" font-weight="400" fill="var(--_text-muted)">Hold exceptional ownership gap</text>
+<rect x="800.5775" y="40" width="175" height="36" rx="18" ry="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2px" />
+<rect x="804.1524999999999" y="133" width="167.85000000000002" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="1118.04" y="226" width="110.65" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="672.9024999999999" y="319" width="96.35000000000001" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="507.83999999999986" y="412" width="96.35000000000001" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="39.99999999999991" y="505" width="124.95" height="36" rx="0" ry="0" fill="#f1f5f9" stroke="#475569" stroke-width="2px" />
+<rect x="237.45499999999993" y="505" width="175" height="36" rx="0" ry="0" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5px" />
+<rect x="493.53999999999985" y="505" width="124.95" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<rect x="642.4899999999999" y="505" width="217.9" height="36" rx="6" ry="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5px" />
+<polygon points="518.6399999999999,226 1094.04,226 1094.04,262 518.6399999999999,262 506.6399999999999,244" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="970.315,319 1388.415,319 1388.415,355 970.315,355 958.315,337" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="640.1899999999998,412 1144.09,412 1144.09,448 640.1899999999998,448 628.1899999999998,430" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<polygon points="896.3899999999999,505 1393.1399999999999,505 1393.1399999999999,541 896.3899999999999,541 884.3899999999999,523" fill="#fafafa" stroke="#d4d4d4" stroke-width="0.75px" />
+<text x="888.0775" y="58" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e40af">Trader / LP / Keeper</text>
+<text x="888.0774999999999" y="151" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">MarginClearinghouse</text>
+<text x="1173.365" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">OrderRouter</text>
+<text x="721.0774999999999" y="337" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">CfdEngine</text>
+<text x="556.0149999999999" y="430" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">HousePool</text>
+<text x="102.47499999999991" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#1e293b">TrancheVaults</text>
+<text x="324.9549999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#713f12">Deferred Claim Queue</text>
+<text x="556.0149999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Protocol Fees</text>
+<text x="751.4399999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Unassigned / Excess Assets</text>
+<text x="800.3399999999999" y="244" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Trader domain: free settlement, live position margin, committed order margin</text>
+<text x="1173.365" y="337" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Queue domain: router-custodied execution-bounty escrow</text>
+<text x="886.1399999999999" y="430" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Ledger domain: close, liquidation, solvency, withdrawal accounting</text>
+<text x="1138.7649999999999" y="523" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Pool domain: accounted assets, tranche waterfall, fee segregation</text>
+</svg>

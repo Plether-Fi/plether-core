@@ -34,9 +34,17 @@ contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
 
         assertEq(plan.freeSettlementConsumedUsdc, 10e6, "Plan should consume free settlement first");
         assertEq(plan.activeMarginConsumedUsdc, 0, "Protected residual margin must not be attributed as consumed");
-        assertEq(plan.otherLockedMarginConsumedUsdc, 0, "Partial-close view must keep queued committed margin unreachable");
-        assertEq(mutation.settlementDebitUsdc, 10e6, "Applied settlement debit should stop at reachable free settlement");
-        assertEq(mutation.otherLockedMarginUnlockedUsdc, 0, "Queued committed margin must remain locked in partial-close planning");
+        assertEq(
+            plan.otherLockedMarginConsumedUsdc, 0, "Partial-close view must keep queued committed margin unreachable"
+        );
+        assertEq(
+            mutation.settlementDebitUsdc, 10e6, "Applied settlement debit should stop at reachable free settlement"
+        );
+        assertEq(
+            mutation.otherLockedMarginUnlockedUsdc,
+            0,
+            "Queued committed margin must remain locked in partial-close planning"
+        );
     }
 
 }
@@ -286,7 +294,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = router.committedMargins(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 1.08e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 1.08e8);
 
         assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
         assertEq(
@@ -300,7 +308,11 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
             MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(900e6, 100e6, 4000e6, 0);
 
-        assertEq(buckets.settlementBalanceUsdc, 0, "Planner partial-close view should exclude queued committed margin from settlement");
+        assertEq(
+            buckets.settlementBalanceUsdc,
+            0,
+            "Planner partial-close view should exclude queued committed margin from settlement"
+        );
         assertEq(buckets.freeSettlementUsdc, 0, "Excluded queued committed margin must not reappear as free settlement");
         assertEq(buckets.otherLockedMarginUsdc, 0, "Partial-close view should treat other locked margin as unreachable");
     }
@@ -392,7 +404,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         assertEq(keeperBounty, 0, "Retryable slippage miss should not pay the keeper bounty");
         assertEq(router.nextExecuteId(), 1, "Single queued retryable miss should remain the current head");
         assertEq(router.executionBountyReserves(1), 1e6, "Escrowed close bounty should remain in router custody");
-        assertGt(router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown");
+        assertGt(
+            router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown"
+        );
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {
@@ -483,4 +497,5 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorYield is BasePerpTest
 
         assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue senior yield");
     }
+
 }

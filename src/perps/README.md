@@ -10,7 +10,7 @@ Traditional perpetuals face infinite upside tail risk. Plether's synthetic asset
 
 Five contracts strictly decouple custody, execution, and ledger math to isolate systemic risk.
 
-For the target accounting model that should govern future refactors, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md).
+For the target accounting model that should govern future refactors, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For a one-page operational map of custody buckets, mutators, accounting readers, and cross-domain value flows, see [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
 
 ### Architectural Changelog
 
@@ -114,11 +114,13 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Fail-Soft Keeper Bounties**: Liquidations are still fail-soft if the House Pool cannot immediately fund the liquidation bounty from cash left after already-outstanding deferred claims. The state transition still completes and the unpaid amount is recorded as a deferred bounty claim in that same oldest-first queue. Head servicing is permissionless there as well, but payment still goes to the recorded keeper. Order-execution bounties remain router-custodied user escrow, so normal order execution does not depend on vault liquidity.
 
-**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty claims are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths, and the live payout/fee-withdrawal paths now reserve that same senior cash before funding fresh payouts. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
+**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty claims are included in withdrawal reserve, solvency, and HousePool reconciliation/NAV paths, and one shared senior-cash reservation kernel now gates fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing. LP accounting therefore treats them as senior claims on vault liquidity until they are actually paid.
 
 **Accounting Domains**: `CfdEngine` now uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), solvency (`SolvencyAccountingLib`), and withdrawal reserves (`WithdrawalAccountingLib`). This keeps preview/live execution and protocol-level balance-sheet policy separated by domain instead of by call site.
 
-**Preview Solvency Signals**: Close and liquidation previews expose both the transition-only `triggersDegradedMode` flag and the raw post-op solvency result (`postOpDegradedMode`, `effectiveAssetsAfterUsdc`, `maxLiabilityAfterUsdc`) so integrators can distinguish "this action newly latches degraded mode" from "the system would still be degraded after this action."
+**Preview Solvency Signals**: Canonical `previewClose()` / `previewLiquidation()` and hypothetical `simulateClose()` / `simulateLiquidation()` expose both the transition-only `triggersDegradedMode` flag and the raw post-op solvency result (`postOpDegradedMode`, `effectiveAssetsAfterUsdc`, `maxLiabilityAfterUsdc`) so integrators can distinguish "this action newly latches degraded mode" from "the system would still be degraded after this action."
+
+**Canonical vs Hypothetical Views**: Canonical `previewClose()` / `previewLiquidation()` read vault depth from `HousePool.totalAssets()` internally and therefore always answer "what would happen right now." Hypothetical `simulateClose()` / `simulateLiquidation()` are the explicit what-if APIs for caller-supplied depth assumptions.
 
 **Key Invariants**:
 

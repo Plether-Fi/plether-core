@@ -65,7 +65,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         vm.warp(block.timestamp + 14 days);
 
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 40_000e18, 0.9e8, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 40_000e18, 0.9e8);
         assertTrue(preview.valid, "Partial close preview should be valid");
         assertTrue(preview.fundingUsdc != 0, "Funding should have accrued with asymmetric OI");
 
@@ -102,7 +102,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 liquidationPrice = 1.15e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, liquidationPrice, vaultDepth);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;
@@ -147,7 +147,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 closePrice = 0.95e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 100_000e18, closePrice, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 100_000e18, closePrice);
 
         if (!preview.valid) {
             return;
@@ -189,7 +189,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 liquidationPrice = 1.2e8;
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, liquidationPrice, vaultDepth);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, liquidationPrice);
 
         if (!preview.liquidatable) {
             return;

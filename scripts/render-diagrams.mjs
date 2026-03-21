@@ -320,9 +320,32 @@ const perpsLpWithdrawalAvailability = `graph TD
     class B1,B2,B3 hardfail
 ${smClasses}`;
 
+const perpsInternalArchitecture = `graph TD
+    U([Trader / LP / Keeper]) -->|Deposit or withdraw trader cash| MC[MarginClearinghouse]
+    MC -->|Reserve committed margin + seize execution bounty| OR[OrderRouter]
+    OR -->|Validated order intent| EN[CfdEngine]
+    EN -->|Settle, seize, classify liabilities| MC
+    EN -->|Account protocol, revenue, recap inflows| HP[HousePool]
+    HP -->|Mint / burn shares| TV[TrancheVaults]
+    HP -->|Queue unpaid trader payouts + liquidation bounties| DF[Deferred Claim Queue]
+    HP -->|Segregate non-LP fees| PF(Protocol Fees)
+    HP -->|Hold exceptional ownership gap| UA(Unassigned / Excess Assets)
+
+    MC -.- MCN>Trader domain: free settlement, live position margin, committed order margin]
+    OR -.- ORN>Queue domain: router-custodied execution-bounty escrow]
+    EN -.- ENN>Ledger domain: close, liquidation, solvency, withdrawal accounting]
+    HP -.- HPN>Pool domain: accounted assets, tranche waterfall, fee segregation]
+
+    class U user
+    class MC,OR,EN,HP,TV contract
+    class PF,UA token
+    class DF external
+    class MCN,ORN,ENN,HPN desc
+${classes}`;
+
 mkdirSync(outDir, { recursive: true });
 
-const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12, svg13, svg14, svg15, svg16, svg17] = await Promise.all([
+const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12, svg13, svg14, svg15, svg16, svg17, svg18] = await Promise.all([
   renderMermaid(howItWorks, theme),
   renderMermaid(tokenFlow, theme),
   renderMermaid(bearLeverage, theme),
@@ -340,6 +363,7 @@ const [svg1, svg2, svg3, svg4, svg5, svg6, svg7, svg8, svg9, svg10, svg11, svg12
   renderMermaid(perpsReservationLifecycle, theme),
   renderMermaid(perpsOracleRegimes, theme),
   renderMermaid(perpsLpWithdrawalAvailability, theme),
+  renderMermaid(perpsInternalArchitecture, theme),
 ]);
 
 writeFileSync(`${outDir}/how-it-works.svg`, svg1);
@@ -359,5 +383,6 @@ writeFileSync(`${outDir}/perps-tranche-waterfall.svg`, svg14);
 writeFileSync(`${outDir}/perps-reservation-lifecycle.svg`, svg15);
 writeFileSync(`${outDir}/perps-oracle-regimes.svg`, svg16);
 writeFileSync(`${outDir}/perps-lp-withdrawal-availability.svg`, svg17);
+writeFileSync(`${outDir}/perps-internal-architecture-map.svg`, svg18);
 
-console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw, perps-order-lifecycle, perps-position-lifecycle, perps-tranche-waterfall, perps-reservation-lifecycle, perps-oracle-regimes, perps-lp-withdrawal-availability');
+console.log('Rendered: how-it-works, token-flow, bear-leverage, bull-leverage, staking, burn, flywheel, invar-deposit, invar-lp-deposit, invar-lp-withdraw, invar-withdraw, perps-order-lifecycle, perps-position-lifecycle, perps-tranche-waterfall, perps-reservation-lifecycle, perps-oracle-regimes, perps-lp-withdrawal-availability, perps-internal-architecture-map');
