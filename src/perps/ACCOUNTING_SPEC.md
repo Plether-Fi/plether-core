@@ -330,7 +330,7 @@ Required liabilities in this view:
 - deferred trader payouts,
 - deferred liquidation bounties.
 
-These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. Live payout, claim, and fee-withdrawal paths must reserve this same senior cash before deciding whether fresh vault cash is available.
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so those paths cannot drift on what cash is truly free.
 
 Deferred servicing rule:
 

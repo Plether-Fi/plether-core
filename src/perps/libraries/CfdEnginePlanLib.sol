@@ -5,9 +5,9 @@ import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdMath} from "../CfdMath.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
+import {CashPriorityLib} from "./CashPriorityLib.sol";
 import {CfdEngineSettlementLib} from "./CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./CfdEngineSnapshotsLib.sol";
-import {CashPriorityLib} from "./CashPriorityLib.sol";
 import {CloseAccountingLib} from "./CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "./MarginClearinghouseAccountingLib.sol";
@@ -192,9 +192,10 @@ library CfdEnginePlanLib {
                     fd.payoutType = CfdEnginePlanTypes.FundingPayoutType.CLOSE_SETTLEMENT;
                     fd.closeFundingSettlementUsdc = int256(gain);
                 } else if (
-                    CashPriorityLib.availableCashForFreshPayouts(
-                        snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
-                    ) >= gain
+                    CashPriorityLib.reserveFreshPayouts(
+                            snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+                        )
+                        .freeCashUsdc >= gain
                 ) {
                     fd.payoutType = CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT;
                     fd.posMarginIncrease = gain;
@@ -525,9 +526,11 @@ library CfdEnginePlanLib {
         delta.executionFeeUsdc = cs.executionFeeUsdc;
         delta.realizedPnlUsdc = cs.realizedPnlUsdc;
 
-        uint256 availableCashForFreshPayouts = CashPriorityLib.availableCashForFreshPayouts(
+        uint256 availableCashForFreshPayouts =
+            CashPriorityLib.reserveFreshPayouts(
             effectiveVaultCash, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
-        );
+        )
+        .freeCashUsdc;
 
         if (cs.netSettlementUsdc > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
@@ -539,9 +542,8 @@ library CfdEnginePlanLib {
             uint256 lossUsdc = uint256(-cs.netSettlementUsdc);
             bool includeOtherLockedMargin = remainingSize == 0;
 
-            IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets = _buildCloseSettlementBuckets(
-                snap, cs.marginToFreeUsdc, delta.funding, includeOtherLockedMargin
-            );
+            IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
+                _buildCloseSettlementBuckets(snap, cs.marginToFreeUsdc, delta.funding, includeOtherLockedMargin);
             delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
                 closeBuckets, cs.remainingMarginUsdc, lossUsdc
             );
@@ -616,8 +618,8 @@ library CfdEnginePlanLib {
                 maxLiabilityAfterUsdc: postMaxLiability,
                 deferredTraderPayoutDeltaUsdc: (delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0)
                     + (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
-                        ? uint256(delta.funding.pendingFundingUsdc)
-                        : 0),
+                            ? uint256(delta.funding.pendingFundingUsdc)
+                            : 0),
                 deferredLiquidationBountyDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: 0
             }),
@@ -738,9 +740,10 @@ library CfdEnginePlanLib {
 
         if (delta.residualPlan.payoutUsdc > 0) {
             delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;
-            delta.payoutIsImmediate = CashPriorityLib.availableCashForFreshPayouts(
-                snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
-            ) >= delta.traderPayoutUsdc;
+            delta.payoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
+                    snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+                )
+                .freeCashUsdc >= delta.traderPayoutUsdc;
             delta.payoutIsDeferred = !delta.payoutIsImmediate;
         }
 

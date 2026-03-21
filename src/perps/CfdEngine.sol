@@ -919,13 +919,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _canPayFreshVaultPayout(
         uint256 amountUsdc
     ) internal view returns (bool) {
-        return amountUsdc <= _availableCashForFreshVaultPayouts();
+        return amountUsdc <= _freshVaultReservation().freeCashUsdc;
     }
 
     function _availableCashForFreshVaultPayouts() internal view returns (uint256) {
-        return CashPriorityLib.availableCashForFreshPayouts(
-            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
-        );
+        return _freshVaultReservation().freeCashUsdc;
     }
 
     function _claimableHeadAmountUsdc() internal view returns (uint256) {
@@ -934,9 +932,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return 0;
         }
 
-        uint256 headRemainingUsdc = deferredClaims[claimId].remainingUsdc;
-        uint256 vaultAssetsUsdc = vault.totalAssets();
-        return vaultAssetsUsdc < headRemainingUsdc ? vaultAssetsUsdc : headRemainingUsdc;
+        return _headDeferredClaimReservation(deferredClaims[claimId].remainingUsdc).headClaimServiceableUsdc;
+    }
+
+    function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+        return CashPriorityLib.reserveFreshPayouts(
+            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
+        );
+    }
+
+    function _headDeferredClaimReservation(
+        uint256 headClaimAmountUsdc
+    ) internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
+        return CashPriorityLib.reserveDeferredHeadClaim(
+            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc, headClaimAmountUsdc
+        );
     }
 
     function _enqueueDeferredClaim(

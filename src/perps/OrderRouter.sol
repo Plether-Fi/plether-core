@@ -829,7 +829,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
             if (order.isClose) {
                 if (queuedPosition.exists && order.side == queuedPosition.side) {
-                    queuedPosition.size = queuedPosition.size > order.sizeDelta ? queuedPosition.size - order.sizeDelta : 0;
+                    queuedPosition.size =
+                        queuedPosition.size > order.sizeDelta ? queuedPosition.size - order.sizeDelta : 0;
                     if (queuedPosition.size == 0) {
                         queuedPosition.exists = false;
                     }
@@ -911,11 +912,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             return;
         }
 
-        if (
-            !CashPriorityLib.canPayFreshPayout(
-                vault.totalAssets(), engine.totalDeferredPayoutUsdc(), engine.totalDeferredClearerBountyUsdc(), liquidationBountyUsdc
-            )
-        ) {
+        CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
+            vault.totalAssets(), engine.totalDeferredPayoutUsdc(), engine.totalDeferredClearerBountyUsdc()
+        );
+        if (liquidationBountyUsdc > reservation.freeCashUsdc) {
             engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
             return;
         }
@@ -1211,7 +1211,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 executionBountyUsdc
     ) internal {
         uint256 freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        uint256 freeBackedBountyUsdc = freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
+        uint256 freeBackedBountyUsdc =
+            freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
         if (freeBackedBountyUsdc > 0) {
             clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
         }

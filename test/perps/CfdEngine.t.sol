@@ -559,6 +559,48 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims() public {
+        address trader = address(0xD309);
+        address keeper = address(0xD30A);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        uint256 deferred = engine.deferredPayoutUsdc(accountId);
+        assertGt(deferred, 0, "Setup should create a deferred trader payout");
+
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, deferred);
+
+        vm.startPrank(address(pool));
+        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        vm.stopPrank();
+
+        uint256 partialLiquidity = deferred / 2;
+        usdc.mint(address(pool), partialLiquidity);
+
+        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
+        vm.prank(trader);
+        engine.claimDeferredPayout(accountId);
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            clearinghouseBefore + partialLiquidity,
+            "Head deferred trader claim should consume partial liquidity before later claims"
+        );
+        assertEq(
+            engine.deferredPayoutUsdc(accountId), deferred - partialLiquidity, "Head deferred payout should shrink"
+        );
+        assertEq(engine.deferredClearerBountyUsdc(keeper), deferred, "Later deferred bounty should remain untouched");
+    }
+
     function test_ClaimDeferredPayout_RevertsWithoutLiquidityOrPayout() public {
         address trader = address(0xD303);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -689,6 +731,42 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__NoFeesToWithdraw.selector);
         engine.withdrawFees(treasury);
+    }
+
+    function test_WithdrawFees_RespectsSeniorCashReservation() public {
+        bytes32 accountId = bytes32(uint256(0xFEE1));
+        address keeper = address(0xFEE2);
+        address treasury = address(0xFEE3);
+        _fundTrader(address(uint160(uint256(accountId))), 5000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        uint256 deferredBounty = 25e6;
+        uint256 solvencyBuffer = pool.totalAssets();
+
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, deferredBounty);
+
+        vm.startPrank(address(pool));
+        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        vm.stopPrank();
+
+        usdc.mint(address(pool), fees);
+
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        engine.withdrawFees(treasury);
+
+        usdc.mint(address(pool), deferredBounty + solvencyBuffer);
+        engine.withdrawFees(treasury);
+
+        assertEq(usdc.balanceOf(treasury), fees, "Fee withdrawal should succeed once senior deferred cash is funded");
+        assertEq(engine.accumulatedFeesUsdc(), 0, "Fee withdrawal should still clear accumulated fees");
+        assertEq(
+            engine.deferredClearerBountyUsdc(keeper),
+            deferredBounty,
+            "Withdrawing fees must not consume deferred senior claims"
+        );
     }
 
     function test_AddMargin_UpdatesPositionAndSideTotals() public {
