@@ -345,6 +345,29 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.executionBountyReserves(1), 1_000_000, "Close orders should pre-seize the flat router bounty");
     }
 
+    function test_CloseCommit_CanReserveKeeperBountyFromPositionMarginWhenFullyUtilized() public {
+        address trader = address(0x334);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x335);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 1000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "setup must fully consume free settlement");
+        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+
+        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(router.executionBountyReserves(1), 1_000_000, "Close orders should still escrow full bounty");
+        assertEq(marginAfter, marginBefore - 1_000_000, "Close bounty should fall back to active margin");
+        assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the close bounty after fallback");
+    }
+
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
@@ -665,7 +688,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
-        assertEq(router.nextExecuteId(), 4, "All 3 orders should be processed");
+        assertEq(router.nextExecuteId(), 0, "Empty global queue should clear to zero sentinel after processing");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
@@ -778,7 +801,7 @@ contract OrderRouterTest is BasePerpTest {
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
     }
 
-    function test_PoisonedHead_CloseFailureDoesNotPinLaterOrders() public {
+    function test_PoisonedHead_CloseSlippageSkipsToTailAndLetsTailExecute() public {
         address carol = address(0x556);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 carolId = bytes32(uint256(uint160(carol)));
@@ -808,11 +831,19 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
-        assertEq(router.nextExecuteId(), 4, "failed close at queue head must not pin later orders");
+        assertEq(router.nextExecuteId(), 2, "retryable slippage miss must leave the head order pending");
         (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
-        assertEq(carolSize, 5000 * 1e18, "later valid order must still execute");
+        assertEq(carolSize, 5000 * 1e18, "tail order should execute once the retryable head is skipped to the tail");
+
+        bytes[] memory betterPrice = new bytes[](1);
+        betterPrice[0] = abi.encode(uint256(90_000_000));
+        vm.warp(block.timestamp + 6);
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(3, betterPrice);
+
+        assertEq(router.nextExecuteId(), 4, "once marketable again, batch should consume the retried head");
     }
 
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
@@ -1268,7 +1299,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
     }
 
-    function test_StateMachine_BatchCancelsTerminalHeadAndPreservesNonTerminalTail() public {
+    function test_StateMachine_BatchSkipsRetryableSlippageHeadToTail() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1286,9 +1317,10 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrderBatch(2, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should consume only the head order");
-        assertEq(escrow.pendingOrderCount, 1, "Trailing queued order should remain pending after batch break");
-        assertEq(router.executionBountyReserves(2), 1e6, "Trailing order execution bounty should remain escrowed");
+        assertEq(router.nextExecuteId(), 2, "Skipped head should move behind the next queued order");
+        assertEq(escrow.pendingOrderCount, 2, "Later order should remain pending if another non-terminal gate stops the batch");
+        assertEq(router.executionBountyReserves(1), 1e6, "Skipped head should retain its execution bounty escrow");
+        assertEq(router.executionBountyReserves(2), 1e6, "Later order should retain escrow if it remains pending after the skip");
     }
 
     function test_DeferredPayout_CloseDoesNotBlockLaterQueuedOrders() public {
@@ -1357,10 +1389,10 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(router)), 1e6, "Router custody should continue escrowing the keeper reserve");
     }
 
-    function testFuzz_SlippageFailureClearsEscrowAndAdvancesQueue(
+    function testFuzz_SlippageFailurePreservesEscrowAndRequeuesOrder(
         uint256 adverseTarget
     ) public {
-        adverseTarget = bound(adverseTarget, 100_000_000, 150_000_000);
+        adverseTarget = bound(adverseTarget, 1, 99_999_999);
         vm.warp(3000);
 
         vm.prank(alice);
@@ -1374,12 +1406,41 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        assertEq(router.nextExecuteId(), 2, "Terminal slippage failure should advance the queue");
-        assertEq(escrow.pendingOrderCount, 0, "Terminal slippage failure should clear pending escrow state");
-        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should be paid out from router custody");
+        assertEq(router.nextExecuteId(), 1, "Retryable slippage miss should keep the queue head pending");
+        assertEq(escrow.pendingOrderCount, 1, "Retryable slippage miss should preserve pending escrow state");
+        assertEq(usdc.balanceOf(address(router)), 1e6, "Keeper reserve should remain escrowed in router custody");
+        assertGt(router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable slippage miss should set cooldown");
     }
 
-    function test_SlippageFailedCloseOrderPaysEscrowedClearerBounty() public {
+    function test_SingleExecute_RevertsDuringRetryCooldown() public {
+        vm.warp(3000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 90_000_000, false);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        vm.expectRevert(OrderRouter.OrderRouter__RetryCooldownActive.selector);
+        router.executeOrder(1, empty);
+    }
+
+    function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 0, "Queue head should clear to zero sentinel when empty");
+
+        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        router.executeOrder(1, empty);
+    }
+
+    function test_SlippageFailedCloseOrderPreservesEscrowedBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _open(aliceId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -1397,14 +1458,12 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         router.executeOrder(closeOrderId, empty);
 
-        assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            1e6,
-            "Slippage-failed close order should pay the escrowed clearer bounty"
-        );
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "Retryable close slippage miss should not pay keeper bounty");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
         );
+        assertEq(router.nextExecuteId(), closeOrderId, "Retryable close slippage miss should keep the order pending");
+        assertEq(router.executionBountyReserves(closeOrderId), 1e6, "Close bounty should remain escrowed while order stays pending");
     }
 
     function test_InsufficientPythFee_Reverts() public {

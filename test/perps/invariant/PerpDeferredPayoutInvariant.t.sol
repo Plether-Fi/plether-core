@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
@@ -31,19 +32,30 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_DeferredPayoutStatusMatchesEngineAndVaultLiquidity() public view {
-        uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 totalDeferredPayoutUsdc;
+        ICfdEngine.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        bool headHasLiquidity = vault.totalAssets() > 0 && headClaim.remainingUsdc > 0;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(accountId, address(handler));
             uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+            uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(address(handler));
 
             assertEq(status.deferredTraderPayoutUsdc, deferredPayoutUsdc, "Deferred payout status amount mismatch");
             assertEq(
                 status.traderPayoutClaimableNow,
-                deferredPayoutUsdc > 0 && vaultAssetsUsdc >= deferredPayoutUsdc,
+                deferredPayoutUsdc > 0 && headHasLiquidity
+                    && uint8(headClaim.claimType) == uint8(ICfdEngine.DeferredClaimType.TraderPayout)
+                    && headClaim.accountId == accountId,
                 "Deferred payout claimability mismatch"
+            );
+            assertEq(
+                status.liquidationBountyClaimableNow,
+                deferredClearerBountyUsdc > 0 && headHasLiquidity
+                    && uint8(headClaim.claimType) == uint8(ICfdEngine.DeferredClaimType.ClearerBounty)
+                    && headClaim.keeper == address(handler),
+                "Deferred clearer bounty claimability mismatch"
             );
 
             totalDeferredPayoutUsdc += deferredPayoutUsdc;

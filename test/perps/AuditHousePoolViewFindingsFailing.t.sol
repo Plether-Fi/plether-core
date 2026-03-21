@@ -107,7 +107,7 @@ contract AuditHousePoolViewFindingsFailing_StaleYieldBackfill is BasePerpTest {
         return 0;
     }
 
-    function test_L1_StaleReconcileMustCheckpointClock() public {
+    function test_L1_StaleReconcileMustPreserveClock() public {
         _fundSenior(seniorLp, 200_000e6);
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
@@ -118,16 +118,14 @@ contract AuditHousePoolViewFindingsFailing_StaleYieldBackfill is BasePerpTest {
         uint256 before = pool.lastReconcileTime();
 
         vm.warp(block.timestamp + 30 days);
-        uint256 staleReconcileTime = block.timestamp;
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(
             pool.lastReconcileTime(),
-            staleReconcileTime,
-            "Stale reconcile should checkpoint time so stale-window yield cannot be backfilled later"
+            before,
+            "Stale reconcile should preserve the clock so stale-window yield is not destroyed"
         );
-        assertGt(staleReconcileTime, before, "Test must exercise a later stale checkpoint");
     }
 
 }

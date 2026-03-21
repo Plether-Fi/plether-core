@@ -339,12 +339,17 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 1e6, "Close bounty should be prefunded");
     }
 
-    function test_H2_FullyUtilizedTraderCannotSubmitCloseOrder() public {
-        _setupFullyUtilized();
+    function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
+        (bytes32 accountId,) = _setupFullyUtilized();
+
+        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
 
         vm.prank(trader);
-        vm.expectRevert(OrderRouter.OrderRouter__InsufficientFreeEquity.selector);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+
+        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        assertEq(router.executionBountyReserves(1), 1e6, "Close order should still escrow the keeper bounty");
+        assertEq(marginAfter, marginBefore - 1e6, "Fully utilized close should source bounty from position margin");
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {
@@ -369,7 +374,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         );
     }
 
-    function test_H2_SlippageFailedHeadCloseMustStillPayKeeper() public {
+    function test_H2_SlippageFailedHeadCloseMustSkipWithoutPayingKeeper() public {
         _setupCloseBountyBacked();
 
         vm.prank(trader);
@@ -384,8 +389,10 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 1e6, "Head slippage failure should still pay the keeper bounty");
-        assertEq(router.nextExecuteId(), 2, "Head failure should still advance the FIFO pointer");
+        assertEq(keeperBounty, 0, "Retryable slippage miss should not pay the keeper bounty");
+        assertEq(router.nextExecuteId(), 1, "Single queued retryable miss should remain the current head");
+        assertEq(router.executionBountyReserves(1), 1e6, "Escrowed close bounty should remain in router custody");
+        assertGt(router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown");
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {

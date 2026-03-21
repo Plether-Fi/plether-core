@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
+import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -291,7 +292,8 @@ contract HousePoolTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
         router.executeOrder{value: 0}(2, pythData);
 
-        vm.warp(block.timestamp + 30 days);
+        uint256 staleTime = block.timestamp + 30 days;
+        vm.warp(staleTime);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -354,12 +356,16 @@ contract HousePoolTest is BasePerpTest {
         bytes32 traderId = bytes32(uint256(uint160(trader)));
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
+        uint256 reconcileBefore = pool.lastReconcileTime();
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 121);
-        uint256 staleFinalizeTime = block.timestamp;
         pool.finalizeSeniorRate();
 
-        assertEq(pool.lastReconcileTime(), staleFinalizeTime, "Stale finalize should checkpoint reconcile time");
+        assertEq(
+            pool.lastReconcileTime(),
+            reconcileBefore,
+            "Stale finalize should preserve the senior accrual clock until a fresh reconcile occurs"
+        );
     }
 
     function test_FinalizeSeniorRate_SyncsFundingBeforeReconcile() public {
@@ -457,7 +463,8 @@ contract HousePoolTest is BasePerpTest {
 
     function test_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
         usdc.mint(address(pool), 100_000e6);
-        pool.accountExcess();
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -611,12 +618,33 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(engine));
         pool.recordRecapitalizationInflow(10_000e6);
 
-        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6, "Pending state should attach recapitalization to seeded senior ownership");
+        assertEq(maxJuniorWithdraw, 0, "No junior principal should remain withdrawable during seeded-senior recap preview");
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 10_000e6, "Reconcile should attach recapitalization to existing seeded senior ownership");
         assertEq(pool.seniorHighWaterMark(), 10_000e6, "Recapitalization should reset the HWM after a full wipeout");
+    }
+
+    function test_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public {
+        uint256 seedAssets = 50_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+
+        (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 10_000e6, "Projected recapitalization should credit senior principal");
+        assertEq(maxSeniorWithdraw, 10_000e6, "Projected credited senior assets must remain withdrawable in preview");
     }
 
     function test_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
@@ -699,7 +727,8 @@ contract HousePoolTest is BasePerpTest {
 
     function test_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
         usdc.mint(address(pool), 100_000e6);
-        pool.accountExcess();
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(100_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -736,14 +765,15 @@ contract HousePoolTest is BasePerpTest {
     }
 
     function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
-        vm.warp(block.timestamp + 30 days);
+        uint256 staleTime = block.timestamp + 30 days;
+        vm.warp(staleTime);
 
         usdc.mint(address(this), 100_000e6);
         usdc.approve(address(pool), 100_000e6);
         pool.initializeSeedPosition(true, 100_000e6, address(this));
 
         assertEq(pool.unpaidSeniorYield(), 0, "Seed initialization should not mint retroactive yield");
-        assertEq(pool.lastReconcileTime(), block.timestamp, "Principal mutation should checkpoint the accrual clock");
+        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Principal mutation should checkpoint the yield clock");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -760,16 +790,126 @@ contract HousePoolTest is BasePerpTest {
         bytes32 traderId = bytes32(uint256(uint160(trader)));
         _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(block.timestamp + 30 days);
+        uint256 staleTime = block.timestamp + 30 days;
+        vm.warp(staleTime);
 
         usdc.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordRecapitalizationInflow(50_000e6);
 
         assertEq(pool.unpaidSeniorYield(), 0, "Stale-window principal mutation should not accrue yield");
+        uint256 reconcileBefore = pool.lastReconcileTime();
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(pool.lastReconcileTime(), block.timestamp, "Stale-window queued mutation should checkpoint the clock when applied");
+        assertEq(
+            pool.lastReconcileTime(),
+            reconcileBefore,
+            "Stale-window queued mutation should not erase senior accrual time while the mark is stale"
+        );
+        assertEq(
+            pool.lastSeniorYieldCheckpointTime(),
+            reconcileBefore,
+            "Non-senior stale bucket routing should not reset the senior yield base"
+        );
+        assertEq(pool.seniorPrincipal(), 100_000e6, "No senior deficit means recap should not over-credit senior");
+        assertEq(pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting");
+    }
+
+    function test_StalePendingSeniorMutation_CapsFutureYieldToPostCheckpointInterval() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 150_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 50_000e6, "Setup should impair senior before stale recapitalization");
+        assertEq(pool.seniorHighWaterMark(), 100_000e6, "Setup should preserve the pre-loss HWM");
+
+        address trader = address(0x77771);
+        _fundTrader(trader, 50_000e6);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+
+        uint256 staleTime = block.timestamp + 30 days;
+        vm.warp(staleTime);
+
+        usdc.mint(address(pool), 50_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(50_000e6);
+
+        uint256 checkpointBefore = pool.lastSeniorYieldCheckpointTime();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Stale senior mutation should checkpoint yield time");
+        assertEq(pool.unpaidSeniorYield(), 0, "Stale senior mutation should not accrue yield");
+        assertEq(pool.seniorPrincipal(), 100_000e6, "Stale recapitalization should restore senior principal to the HWM");
+
+        uint256 freshTime = staleTime + 2 days;
+        vm.warp(freshTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(freshTime));
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 expectedYieldUpperBound = (100_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
+        assertLe(
+            pool.seniorPrincipal(),
+            100_000e6 + expectedYieldUpperBound,
+            "Fresh reconcile must not accrue more than the post-checkpoint senior yield interval"
+        );
+        assertGt(pool.lastSeniorYieldCheckpointTime(), checkpointBefore, "Yield checkpoint should advance after stale principal mutation");
+    }
+
+    function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), 100_000e6, "Setup should quarantine all assets before bootstrapping");
+
+        address trader = address(0x99992);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
+
+        pool.assignUnassignedAssets(false, alice);
+
+        assertLt(pool.juniorPrincipal(), 100_000e6, "Bootstrap assignment must normalize away unrealized trader liabilities");
+        assertEq(pool.unassignedAssets(), 0, "Assignment should still consume the normalized unassigned bucket");
+    }
+
+    function test_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
+        uint256 seedAssets = 50_000e6;
+
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "Setup should fully wipe senior principal");
+        assertGt(pool.seniorHighWaterMark(), 0, "Historical HWM should survive the wipeout before rebootstrapping");
+
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(10_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        pool.assignUnassignedAssets(true, alice);
+
+        assertEq(pool.seniorPrincipal(), 10_000e6, "Bootstrapping should restore senior principal from unassigned assets");
+        assertEq(pool.seniorHighWaterMark(), 10_000e6, "Bootstrapping after wipeout must reset the senior HWM baseline");
     }
 
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
@@ -1160,8 +1300,6 @@ contract HousePoolTest is BasePerpTest {
         engine.finalizeRiskParams();
 
         _fundJunior(bob, 1_000_000 * 1e6);
-        uint256 juniorBefore = pool.juniorPrincipal();
-
         address trader1 = address(0x444);
         _fundTrader(trader1, 100_000 * 1e6);
         vm.prank(trader1);
@@ -1195,6 +1333,90 @@ contract HousePoolTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 reserved = fees + uint256(unrealizedFunding);
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
+    }
+
+}
+
+contract HousePoolSeedLifecycleGateTest is BasePerpTest {
+
+    address alice = address(0x111);
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_OpenCommit_RevertsDuringPartialSeedLifecycle() public {
+        uint256 juniorSeed = 1_000e6;
+        usdc.mint(address(this), juniorSeed);
+        usdc.approve(address(pool), juniorSeed);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+
+        _fundTrader(alice, 10_000e6);
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__SeedLifecycleIncomplete.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+    }
+
+    function test_OpenCommit_RevertsWhenSeedsCompleteButTradingNotActivated() public {
+        uint256 juniorSeed = 1_000e6;
+        uint256 seniorSeed = 1_000e6;
+        usdc.mint(address(this), juniorSeed + seniorSeed);
+        usdc.approve(address(pool), juniorSeed + seniorSeed);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+        pool.initializeSeedPosition(true, seniorSeed, address(this));
+
+        _fundTrader(alice, 11_000e6);
+        vm.prank(alice);
+        vm.expectRevert(OrderRouter.OrderRouter__TradingNotActive.selector);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+
+        pool.activateTrading();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+    }
+
+    function test_OrdinaryDeposit_RevertsWhenSeedLifecycleStartedButTradingInactive() public {
+        uint256 juniorSeed = 1_000e6;
+        uint256 depositAmount = 5_000e6;
+
+        usdc.mint(address(this), juniorSeed + depositAmount);
+        usdc.approve(address(pool), juniorSeed + depositAmount);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+
+        usdc.approve(address(juniorVault), depositAmount);
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
+        juniorVault.deposit(depositAmount, address(this));
+    }
+
+    function test_OrdinaryDeposit_RevertsWhenSeedsCompleteButTradingInactive() public {
+        uint256 juniorSeed = 1_000e6;
+        uint256 seniorSeed = 1_000e6;
+        uint256 depositAmount = 5_000e6;
+
+        usdc.mint(address(this), juniorSeed + seniorSeed + depositAmount);
+        usdc.approve(address(pool), juniorSeed + seniorSeed);
+        pool.initializeSeedPosition(false, juniorSeed, address(this));
+        pool.initializeSeedPosition(true, seniorSeed, address(this));
+
+        usdc.approve(address(juniorVault), depositAmount);
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
+        juniorVault.deposit(depositAmount, address(this));
+
+        pool.activateTrading();
+        juniorVault.deposit(depositAmount, address(this));
     }
 
 }

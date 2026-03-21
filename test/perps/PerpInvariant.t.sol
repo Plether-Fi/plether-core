@@ -201,7 +201,7 @@ contract PerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_GlobalSolvency() public {
+    function invariant_GlobalSolvency() public view {
         uint256 effectiveAssets = pool.totalAssets();
         uint256 fees = engine.accumulatedFeesUsdc();
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
@@ -242,7 +242,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_SymmetricalFunding() public {
+    function invariant_SymmetricalFunding() public view {
         int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
         int256 bearIdx = _sideFundingIndex(CfdTypes.Side.BEAR);
         assertEq(bullIdx + bearIdx, 0, "Funding must be zero-sum");
@@ -263,13 +263,13 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, effectivePool, "Claimed equity cannot exceed MtM-adjusted pool value");
     }
 
-    function invariant_FeesWithinVault() public {
+    function invariant_FeesWithinVault() public view {
         uint256 fees = engine.accumulatedFeesUsdc();
         uint256 poolBalance = pool.totalAssets();
         assertLe(fees, poolBalance, "Accumulated fees must not exceed vault balance");
     }
 
-    function invariant_WithdrawalAccountingMatchesEngineReserve() public {
+    function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
         uint256 poolAssets = pool.totalAssets();
         uint256 reserved = engine.getWithdrawalReservedUsdc();
         uint256 expectedFree = poolAssets > reserved ? poolAssets - reserved : 0;
@@ -278,18 +278,30 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(pool.getFreeUSDC(), poolAssets, "Free USDC cannot exceed physical assets");
     }
 
-    function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public {
+    function invariant_HousePoolPendingStateMatchesReconcileFirstState() public {
+        (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingMaxSenior, uint256 pendingMaxJunior) =
+            pool.getPendingTrancheState();
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), pendingSenior, "Pending senior principal must match reconcile-first state");
+        assertEq(pool.juniorPrincipal(), pendingJunior, "Pending junior principal must match reconcile-first state");
+        assertEq(pool.getMaxSeniorWithdraw(), pendingMaxSenior, "Pending senior withdraw cap must match reconcile-first state");
+        assertEq(pool.getMaxJuniorWithdraw(), pendingMaxJunior, "Pending junior withdraw cap must match reconcile-first state");
+    }
+
+    function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public view {
         bool hasLiveLiability = engine.hasLiveLiability();
         bool hasDirectionalLiability = engine.getMaxLiability() > 0;
         assertEq(hasLiveLiability, hasDirectionalLiability, "Live-liability flag must match nonzero bounded liability");
     }
 
-    function invariant_PendingKeeperReservesBackedByRouterUsdc() public {
+    function invariant_PendingKeeperReservesBackedByRouterUsdc() public view {
         uint256 pendingKeeperReserves;
-        uint64 nextExecuteId = router.nextExecuteId();
         uint64 nextCommitId = router.nextCommitId();
 
-        for (uint64 orderId = nextExecuteId; orderId < nextCommitId; orderId++) {
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;
@@ -304,7 +316,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public {
+    function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public view {
         uint256 trackedBalances;
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
@@ -318,7 +330,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_KnownActorUsdcConservation() public {
+    function invariant_KnownActorUsdcConservation() public view {
         uint256 actorBalances =
             usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
         for (uint256 i = 0; i < 3; i++) {
@@ -336,7 +348,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AggregateOIMatchesPositions() public {
+    function invariant_AggregateOIMatchesPositions() public view {
         uint256 sumBullSize;
         uint256 sumBearSize;
 
@@ -357,7 +369,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), sumBearSize, "Bear OI must match sum of bear positions");
     }
 
-    function invariant_LivePositionsRemainSingleDirectionAndBounded() public {
+    function invariant_LivePositionsRemainSingleDirectionAndBounded() public view {
         uint256 capPrice = engine.CAP_PRICE();
 
         for (uint256 i = 0; i < 3; i++) {
@@ -391,7 +403,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_EntryNotionalsMatchPositions() public {
+    function invariant_EntryNotionalsMatchPositions() public view {
         uint256 sumBullNotional;
         uint256 sumBearNotional;
 
@@ -412,7 +424,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(_sideEntryNotional(CfdTypes.Side.BEAR), sumBearNotional, "Bear entry notional must match positions");
     }
 
-    function invariant_PositionMarginsBackedByClearinghouse() public {
+    function invariant_PositionMarginsBackedByClearinghouse() public view {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -432,7 +444,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_GlobalSideMarginsMatchPositions() public {
+    function invariant_GlobalSideMarginsMatchPositions() public view {
         uint256 sumBullMargin;
         uint256 sumBearMargin;
 
@@ -461,7 +473,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public {
+    function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public view {
         (,,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
@@ -489,10 +501,9 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_ClearinghouseBucketsConserveTrackedState() public {
+    function invariant_ClearinghouseBucketsConserveTrackedState() public view {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
@@ -513,10 +524,9 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public {
+    function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public view {
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
@@ -527,15 +537,14 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_CommittedMarginOwnershipAccountingConservesQueuedExposure() public {
-        uint64 nextExecuteId = router.nextExecuteId();
+    function invariant_CommittedMarginOwnershipAccountingConservesQueuedExposure() public view {
         uint64 nextCommitId = router.nextCommitId();
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             uint256 rawQueuedCommitted;
 
-            for (uint64 orderId = nextExecuteId; orderId < nextCommitId; orderId++) {
+            for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
                 (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
                 if (queuedAccountId != accountId || sizeDelta == 0) {
                     continue;
@@ -552,7 +561,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_ProtocolAccountingViewMatchesAccessors() public {
+    function invariant_ProtocolAccountingViewMatchesAccessors() public view {
         CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
 
         assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
@@ -577,7 +586,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_WithdrawalReserveIncludesDeferredLiabilities() public {
+    function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
@@ -590,7 +599,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_PoolLiquidityViewMatchesProtocolAccounting() public {
+    function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
         CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
 
@@ -603,7 +612,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(vaultView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
     }
 
-    function invariant_LiquidationPreviewMatchesPositionView() public {
+    function invariant_LiquidationPreviewMatchesPositionView() public view {
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
             return;
@@ -644,6 +653,14 @@ contract AdversarialPerpHandler is Test {
     uint256 public ghost_starvationEvents;
     uint256 public ghost_expectedDeferredClearerBounty;
     uint256 public ghost_failSoftLiquidations;
+    uint256 public ghost_lastRetryableSlippageBatch;
+    uint64 public ghost_lastRetryableSlippageOrderId;
+    uint64 public ghost_lastRetryableSlippageBeforeExecuteId;
+    uint64 public ghost_lastRetryableSlippageAfterExecuteId;
+    uint8 public ghost_lastRetryableSlippageOrderStatus;
+    uint256 public ghost_lastRetryableSlippageEscrowUsdc;
+    uint256 public ghost_lastRetryableSlippageRouterBalanceUsdc;
+    uint64 public ghost_lastRetryableSlippageRetryAfter;
 
     constructor(
         MockUSDC _usdc,
@@ -788,8 +805,6 @@ contract AdversarialPerpHandler is Test {
         uint256 maxOrdersFuzz,
         uint256 oraclePriceFuzz
     ) external {
-        uint64 nextExecuteId = router.nextExecuteId();
-        uint64 nextCommitId = router.nextCommitId();
         address actor = actors[ghost_batchAttempts % actors.length];
         bytes32 accountId = _accountId(actor);
 
@@ -806,10 +821,7 @@ contract AdversarialPerpHandler is Test {
         vm.prank(actor);
         router.commitOrder(side, 1000e18, 200e6, 1e8, false);
 
-        nextCommitId = router.nextCommitId();
-        nextExecuteId = router.nextExecuteId();
-
-        uint256 pending = nextCommitId - nextExecuteId;
+        uint256 pending = _countPendingOrders();
         uint256 maxOrders = bound(maxOrdersFuzz, pending, pending);
         uint256 oraclePrice = bound(oraclePriceFuzz, 99_000_000, 101_000_000);
 
@@ -820,11 +832,61 @@ contract AdversarialPerpHandler is Test {
         vm.roll(block.number + 1);
 
         uint64 beforeExecute = router.nextExecuteId();
+        bool retryableSlippageAtHead;
+        if (beforeExecute < router.nextCommitId()) {
+            OrderRouter.OrderRecord memory headRecord = router.getOrderRecord(beforeExecute);
+            if (headRecord.status == OrderRouter.OrderStatus.Pending) {
+                retryableSlippageAtHead = !_checkSlippage(headRecord.core, oraclePrice);
+                if (retryableSlippageAtHead) {
+                    ghost_lastRetryableSlippageOrderId = beforeExecute;
+                    ghost_lastRetryableSlippageBeforeExecuteId = beforeExecute;
+                }
+            }
+        }
         try router.executeOrderBatch(uint64(maxOrders), priceData) {} catch {}
         uint64 afterExecute = router.nextExecuteId();
 
+        if (retryableSlippageAtHead) {
+            OrderRouter.OrderRecord memory postRecord = router.getOrderRecord(ghost_lastRetryableSlippageOrderId);
+            if (postRecord.retryAfterTimestamp > 0) {
+                ghost_lastRetryableSlippageBatch++;
+                ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
+                ghost_lastRetryableSlippageOrderStatus = uint8(postRecord.status);
+                ghost_lastRetryableSlippageEscrowUsdc = postRecord.executionBountyUsdc;
+                ghost_lastRetryableSlippageRouterBalanceUsdc = usdc.balanceOf(address(router));
+                ghost_lastRetryableSlippageRetryAfter = postRecord.retryAfterTimestamp;
+            }
+        }
+
         if (afterExecute > beforeExecute) {
             ghost_batchAdvances++;
+        }
+    }
+
+    function _checkSlippage(
+        CfdTypes.Order memory order,
+        uint256 executionPrice
+    ) internal pure returns (bool) {
+        if (order.targetPrice == 0) {
+            return true;
+        }
+        if (order.isClose) {
+            if (order.side == CfdTypes.Side.BULL) {
+                return executionPrice <= order.targetPrice;
+            }
+            return executionPrice >= order.targetPrice;
+        }
+        if (order.side == CfdTypes.Side.BULL) {
+            return executionPrice >= order.targetPrice;
+        }
+        return executionPrice <= order.targetPrice;
+    }
+
+    function _countPendingOrders() internal view returns (uint256 pending) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+            if (router.getOrderRecord(orderId).status == OrderRouter.OrderStatus.Pending) {
+                pending++;
+            }
         }
     }
 
@@ -901,9 +963,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_AdversarialEscrowStaysBacked() public {
+    function invariant_AdversarialEscrowStaysBacked() public view {
         uint256 pendingKeeperReserves;
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;
@@ -918,13 +980,13 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialBatchProcessingRemainsLive() public {
+    function invariant_AdversarialBatchProcessingRemainsLive() public view {
         uint64 nextExecuteId = router.nextExecuteId();
         uint64 nextCommitId = router.nextCommitId();
         assertLe(nextExecuteId, nextCommitId, "Queue pointers must remain ordered");
     }
 
-    function invariant_AdversarialViewsStayConsistent() public {
+    function invariant_AdversarialViewsStayConsistent() public view {
         CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
 
@@ -937,9 +999,63 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialRouterCustodiesOnlyPendingKeeperReserves() public {
+    function invariant_AdversarialRetryableSlippageMissPreservesHeadAndEscrow() public view {
+        if (handler.ghost_lastRetryableSlippageBatch() == 0) {
+            return;
+        }
+
+        assertEq(
+            handler.ghost_lastRetryableSlippageOrderStatus(),
+            uint8(OrderRouter.OrderStatus.Pending),
+            "Retryable slippage head must remain pending immediately after the batch attempt"
+        );
+        assertGt(handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Retryable slippage head must retain escrowed bounty");
+        assertGe(
+            handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
+            handler.ghost_lastRetryableSlippageEscrowUsdc(),
+            "Router must continue backing retryable slippage escrow immediately after the batch attempt"
+        );
+        assertGt(
+            handler.ghost_lastRetryableSlippageRetryAfter(),
+            0,
+            "Retryable slippage head must record a future cooldown after being skipped"
+        );
+    }
+
+    function invariant_GlobalQueueLinksRemainConsistent() public view {
+        uint64 nextCommitId = router.nextCommitId();
+        uint64 headOrderId = router.nextExecuteId();
+        uint64 traversed;
+        uint64 cursor = headOrderId;
+        uint64 expectedPrev;
+        uint256 pendingCount;
+
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+            if (router.getOrderRecord(orderId).status == OrderRouter.OrderStatus.Pending) {
+                pendingCount++;
+            }
+        }
+
+        if (pendingCount == 0) {
+            assertTrue(headOrderId == 0 || headOrderId >= nextCommitId, "Empty queue should not expose a live head pointer");
+            return;
+        }
+
+        while (cursor != 0 && cursor < nextCommitId && traversed <= pendingCount) {
+            OrderRouter.OrderRecord memory record = router.getOrderRecord(cursor);
+            assertEq(uint8(record.status), uint8(OrderRouter.OrderStatus.Pending), "Global queue must only traverse pending orders");
+            assertEq(record.prevGlobalOrderId, expectedPrev, "Global queue prev links must remain consistent");
+            expectedPrev = cursor;
+            cursor = record.nextGlobalOrderId;
+            traversed++;
+        }
+
+        assertEq(traversed, pendingCount, "Global queue traversal must cover every pending order exactly once");
+    }
+
+    function invariant_AdversarialRouterCustodiesOnlyPendingKeeperReserves() public view {
         uint256 pendingKeeperReserves;
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;
@@ -954,7 +1070,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public {
+    function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public view {
         for (uint256 i = 0; i < 4; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.actors(i))));
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
@@ -962,7 +1078,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public {
+    function invariant_AdversarialLiquidationPayoutFailureOnlyDefersBounty() public view {
         assertEq(
             engine.deferredClearerBountyUsdc(address(handler)),
             handler.ghost_expectedDeferredClearerBounty(),
@@ -970,7 +1086,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_DeferredClearerBountyTotalsConserveClaims() public {
+    function invariant_DeferredClearerBountyTotalsConserveClaims() public view {
         assertEq(
             engine.totalDeferredClearerBountyUsdc(),
             engine.deferredClearerBountyUsdc(address(handler)),

@@ -96,7 +96,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     }
 
     function _livePendingOrderCount() internal view returns (uint256 count) {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
             if (uint256(record.status) == uint256(OrderRouter.OrderStatus.Pending)) {
                 count++;
@@ -105,7 +105,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     }
 
     function _liveMarginOrderCount() internal view returns (uint256 count) {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
             if (uint256(record.status) == uint256(OrderRouter.OrderStatus.Pending) && record.inMarginQueue) {
                 count++;

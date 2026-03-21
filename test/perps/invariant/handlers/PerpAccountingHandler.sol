@@ -411,7 +411,7 @@ contract PerpAccountingHandler is Test {
     function accountRouterEscrow(
         bytes32 accountId
     ) public view returns (uint256 totalEscrowUsdc) {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (queuedAccountId != accountId || sizeDelta == 0) {
                 continue;
@@ -423,7 +423,7 @@ contract PerpAccountingHandler is Test {
     function accountLiveReserveCount(
         bytes32 accountId
     ) external view returns (uint256 count) {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (queuedAccountId != accountId || sizeDelta == 0) {
                 continue;
@@ -839,7 +839,7 @@ contract PerpAccountingHandler is Test {
     function _firstPendingCloseOrderId(
         bytes32 accountId
     ) internal view returns (uint64 orderId) {
-        for (orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,, bool isClose) = router.orders(orderId);
             if (queuedAccountId == accountId && sizeDelta > 0 && isClose) {
                 return orderId;

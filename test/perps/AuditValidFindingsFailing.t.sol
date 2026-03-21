@@ -156,7 +156,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.lastReconcileTime(), block.timestamp, "Stale reconcile should checkpoint time immediately");
+        assertEq(pool.lastReconcileTime(), beforeTime, "Stale reconcile should preserve the accrual clock");
     }
 
 }

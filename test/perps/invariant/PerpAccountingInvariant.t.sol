@@ -418,7 +418,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function _sumPendingExecutionBounties() internal view returns (uint256 totalBounties) {
-        for (uint64 orderId = router.nextExecuteId(); orderId < router.nextCommitId(); orderId++) {
+        for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
             if (accountId == bytes32(0) || sizeDelta == 0) {
                 continue;

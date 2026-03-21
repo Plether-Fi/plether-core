@@ -70,6 +70,10 @@ abstract contract BasePerpTest is Test {
             pool.initializeSeedPosition(true, seniorSeed, _seniorSeedReceiver());
         }
 
+        if (_autoActivateTrading() && pool.isSeedLifecycleComplete()) {
+            pool.activateTrading();
+        }
+
         uint256 junior = _initialJuniorDeposit();
         if (junior > 0) {
             _fundJunior(address(this), junior);
@@ -120,6 +124,10 @@ abstract contract BasePerpTest is Test {
 
     function _juniorSeedReceiver() internal view virtual returns (address) {
         return address(this);
+    }
+
+    function _autoActivateTrading() internal pure virtual returns (bool) {
+        return true;
     }
 
     function _seniorSeedReceiver() internal view virtual returns (address) {

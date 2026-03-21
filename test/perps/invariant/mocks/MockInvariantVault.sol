@@ -102,4 +102,16 @@ contract MockInvariantVault is ICfdVault {
         return 120;
     }
 
+    function isSeedLifecycleComplete() external pure returns (bool) {
+        return true;
+    }
+
+    function hasSeedLifecycleStarted() external pure returns (bool) {
+        return true;
+    }
+
+    function isTradingActive() external pure returns (bool) {
+        return true;
+    }
+
 }
