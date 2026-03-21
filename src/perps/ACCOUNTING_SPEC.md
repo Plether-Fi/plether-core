@@ -330,12 +330,13 @@ Required liabilities in this view:
 - deferred trader payouts,
 - deferred liquidation bounties.
 
-These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so those paths cannot drift on what cash is truly free.
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so those paths cannot drift on what cash is truly free, and that same kernel must reserve protocol-fee inventory from non-fee cash uses.
 
 Deferred servicing rule:
 
 - deferred trader payouts and deferred clearer bounties are appended to one oldest-first claim queue,
-- fresh vault cash may only fund new payouts or fee withdrawals above the queued senior-claim remainder,
+- fresh vault cash may only fund new non-fee payouts above the queued senior-claim remainder and reserved protocol-fee inventory,
+- fee withdrawals may only consume protocol-fee inventory that remains after reserving queued senior claims,
 - direct claim calls may only service the current queue head but servicing itself is permissionless and must still pay the recorded beneficiary,
 - if only partial liquidity is available, that partial liquidity services the queue head before any later claim becomes claimable.
 

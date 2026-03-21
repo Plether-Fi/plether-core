@@ -769,6 +769,33 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ClaimDeferredClearerBounty_RespectsProtocolFeeReservation() public {
+        bytes32 accountId = bytes32(uint256(0xFEE4));
+        address keeper = address(0xFEE5);
+        _fundTrader(address(uint160(uint256(accountId))), 5000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        uint256 fees = engine.accumulatedFeesUsdc();
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, 1e6);
+
+        vm.startPrank(address(pool));
+        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        vm.stopPrank();
+
+        usdc.mint(address(pool), fees);
+
+        CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(bytes32(0), keeper);
+        assertFalse(
+            status.liquidationBountyClaimableNow, "Pure fee inventory must not make deferred bounty claims payable"
+        );
+
+        vm.prank(keeper);
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
+        engine.claimDeferredClearerBounty();
+    }
+
     function test_AddMargin_UpdatesPositionAndSideTotals() public {
         address trader = address(0xABCD);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -2605,6 +2632,18 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 20_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 31);
+
+        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        engine.checkWithdraw(accountId);
+    }
+
+    function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
+        bytes32 accountId = bytes32(uint256(0x5158));
+        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 20_000 * 1e18, 2000 * 1e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(0, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
         engine.checkWithdraw(accountId);

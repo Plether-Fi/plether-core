@@ -916,7 +916,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), engine.totalDeferredPayoutUsdc(), engine.totalDeferredClearerBountyUsdc()
+            vault.totalAssets(),
+            engine.accumulatedFeesUsdc(),
+            engine.totalDeferredPayoutUsdc(),
+            engine.totalDeferredClearerBountyUsdc()
         );
         if (liquidationBountyUsdc > reservation.freeCashUsdc) {
             engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);

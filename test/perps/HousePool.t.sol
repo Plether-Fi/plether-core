@@ -342,11 +342,7 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 48 hours + 121);
         pool.finalizeSeniorRate();
 
-        assertEq(
-            pool.unpaidSeniorYield(),
-            unpaidBefore,
-            "Stale-mark finalization should not accrue yield"
-        );
+        assertEq(pool.unpaidSeniorYield(), unpaidBefore, "Stale-mark finalization should not accrue yield");
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should still update after stale-mark checkpointing");
     }
 
@@ -496,6 +492,27 @@ contract HousePoolTest is BasePerpTest {
         assertEq(juniorVault.seedShareFloor(), sharesPreview, "Seed floor should match minted seed shares");
     }
 
+    function test_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
+        _fundJunior(alice, 200_000e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(bob)));
+        _fundTrader(bob, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 1 days);
+        uint256 seedAssets = 100_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+
+        assertEq(
+            engine.lastFundingTime(),
+            block.timestamp,
+            "Seed initialization must checkpoint funding before new depth is added"
+        );
+    }
+
     function test_SeedReceiverCannotRedeemBelowFloor() public {
         uint256 assets = 100_000e6;
         address seed = address(0xBEEF);
@@ -581,7 +598,9 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.unassignedAssets(), unassignedBefore, "Seeded tranches should keep normal revenue out of quarantine");
+        assertEq(
+            pool.unassignedAssets(), unassignedBefore, "Seeded tranches should keep normal revenue out of quarantine"
+        );
         assertGt(pool.juniorPrincipal(), seedAssets, "Seeded junior tranche should retain ownership of new revenue");
     }
 
@@ -631,10 +650,16 @@ contract HousePoolTest is BasePerpTest {
 
         (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 10_000e6, "Pending state should attach recapitalization to seeded senior ownership");
-        assertEq(maxJuniorWithdraw, 0, "No junior principal should remain withdrawable during seeded-senior recap preview");
+        assertEq(
+            maxJuniorWithdraw, 0, "No junior principal should remain withdrawable during seeded-senior recap preview"
+        );
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(pool.seniorPrincipal(), 10_000e6, "Reconcile should attach recapitalization to existing seeded senior ownership");
+        assertEq(
+            pool.seniorPrincipal(),
+            10_000e6,
+            "Reconcile should attach recapitalization to existing seeded senior ownership"
+        );
         assertEq(pool.seniorHighWaterMark(), 10_000e6, "Recapitalization should reset the HWM after a full wipeout");
     }
 
@@ -667,7 +692,9 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), 0, "No senior claimant path should leave senior principal unchanged");
-        assertEq(pool.unassignedAssets(), 10_000e6, "Unclaimable recapitalization must fall back into unassigned assets");
+        assertEq(
+            pool.unassignedAssets(), 10_000e6, "Unclaimable recapitalization must fall back into unassigned assets"
+        );
     }
 
     function test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public {
@@ -684,29 +711,29 @@ contract HousePoolTest is BasePerpTest {
         assertEq(pool.juniorPrincipal(), 0, "Setup should leave junior seed shares but no live principal");
         assertGt(juniorVault.totalSupply(), 0, "Seeded junior shares should remain outstanding");
 
-        usdc.mint(address(pool), 7_000e6);
+        usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7_000e6);
+        pool.recordTradingRevenueInflow(7000e6);
 
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
-        assertEq(pendingJunior, 7_000e6, "Pending state should reflect queued trading revenue immediately");
+        assertEq(pendingJunior, 7000e6, "Pending state should reflect queued trading revenue immediately");
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(pool.juniorPrincipal(), 7_000e6, "Reconcile should attach trading revenue to seeded junior ownership");
+        assertEq(pool.juniorPrincipal(), 7000e6, "Reconcile should attach trading revenue to seeded junior ownership");
         assertEq(pool.unassignedAssets(), 0, "Seeded trading revenue should avoid quarantine");
     }
 
     function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
-        usdc.mint(address(pool), 7_000e6);
+        usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7_000e6);
+        pool.recordTradingRevenueInflow(7000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), 0, "No claimant path should leave senior principal unchanged");
         assertEq(pool.juniorPrincipal(), 0, "No claimant path should leave junior principal unchanged");
-        assertEq(pool.unassignedAssets(), 7_000e6, "Unclaimable trading revenue must fall back into unassigned assets");
+        assertEq(pool.unassignedAssets(), 7000e6, "Unclaimable trading revenue must fall back into unassigned assets");
     }
 
     function test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
@@ -728,12 +755,14 @@ contract HousePoolTest is BasePerpTest {
 
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 30_000e6, "Pending state should restore seeded senior to its HWM first");
-        assertEq(pendingJunior, 5_000e6, "Pending state should route residual trading revenue to seeded junior");
+        assertEq(pendingJunior, 5000e6, "Pending state should route residual trading revenue to seeded junior");
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 30_000e6, "Trading revenue should restore seeded senior to its HWM first");
-        assertEq(pool.juniorPrincipal(), 5_000e6, "Residual trading revenue should then attach to seeded junior");
-        assertEq(pool.unassignedAssets(), 0, "Seeded waterfall routing should avoid quarantine for known trading revenue");
+        assertEq(pool.juniorPrincipal(), 5000e6, "Residual trading revenue should then attach to seeded junior");
+        assertEq(
+            pool.unassignedAssets(), 0, "Seeded waterfall routing should avoid quarantine for known trading revenue"
+        );
     }
 
     function test_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
@@ -784,11 +813,17 @@ contract HousePoolTest is BasePerpTest {
         pool.initializeSeedPosition(true, 100_000e6, address(this));
 
         assertEq(pool.unpaidSeniorYield(), 0, "Seed initialization should not mint retroactive yield");
-        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Principal mutation should checkpoint the yield clock");
+        assertEq(
+            pool.lastSeniorYieldCheckpointTime(),
+            block.timestamp,
+            "Principal mutation should checkpoint the yield clock"
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(pool.seniorPrincipal(), 100_000e6, "Later reconcile must not retroactively accrue on newly added principal");
+        assertEq(
+            pool.seniorPrincipal(), 100_000e6, "Later reconcile must not retroactively accrue on newly added principal"
+        );
         assertEq(pool.unpaidSeniorYield(), 0, "Later reconcile must not mint retroactive yield on seeded principal");
     }
 
@@ -823,7 +858,9 @@ contract HousePoolTest is BasePerpTest {
             "Non-senior stale bucket routing should not reset the senior yield base"
         );
         assertEq(pool.seniorPrincipal(), 100_000e6, "No senior deficit means recap should not over-credit senior");
-        assertEq(pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting");
+        assertEq(
+            pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting"
+        );
     }
 
     function test_StalePendingSeniorMutation_CapsFutureYieldToPostCheckpointInterval() public {
@@ -855,7 +892,9 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Stale senior mutation should checkpoint yield time");
+        assertEq(
+            pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Stale senior mutation should checkpoint yield time"
+        );
         assertEq(pool.unpaidSeniorYield(), 0, "Stale senior mutation should not accrue yield");
         assertEq(pool.seniorPrincipal(), 100_000e6, "Stale recapitalization should restore senior principal to the HWM");
 
@@ -872,7 +911,11 @@ contract HousePoolTest is BasePerpTest {
             100_000e6 + expectedYieldUpperBound,
             "Fresh reconcile must not accrue more than the post-checkpoint senior yield interval"
         );
-        assertGt(pool.lastSeniorYieldCheckpointTime(), checkpointBefore, "Yield checkpoint should advance after stale principal mutation");
+        assertGt(
+            pool.lastSeniorYieldCheckpointTime(),
+            checkpointBefore,
+            "Yield checkpoint should advance after stale principal mutation"
+        );
     }
 
     function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
@@ -893,7 +936,9 @@ contract HousePoolTest is BasePerpTest {
 
         pool.assignUnassignedAssets(false, alice);
 
-        assertLt(pool.juniorPrincipal(), 100_000e6, "Bootstrap assignment must normalize away unrealized trader liabilities");
+        assertLt(
+            pool.juniorPrincipal(), 100_000e6, "Bootstrap assignment must normalize away unrealized trader liabilities"
+        );
         assertEq(pool.unassignedAssets(), 0, "Assignment should still consume the normalized unassigned bucket");
     }
 
@@ -919,7 +964,9 @@ contract HousePoolTest is BasePerpTest {
 
         pool.assignUnassignedAssets(true, alice);
 
-        assertEq(pool.seniorPrincipal(), 10_000e6, "Bootstrapping should restore senior principal from unassigned assets");
+        assertEq(
+            pool.seniorPrincipal(), 10_000e6, "Bootstrapping should restore senior principal from unassigned assets"
+        );
         assertEq(pool.seniorHighWaterMark(), 10_000e6, "Bootstrapping after wipeout must reset the senior HWM baseline");
     }
 
@@ -938,8 +985,14 @@ contract HousePoolTest is BasePerpTest {
 
         pool.assignUnassignedAssets(true, alice);
 
-        assertEq(pool.seniorPrincipal(), strandedAssets, "Bootstrap should seed fresh senior principal from unassigned assets");
-        assertEq(pool.seniorHighWaterMark(), strandedAssets, "Fresh senior bootstrap must replace the stale HWM baseline");
+        assertEq(
+            pool.seniorPrincipal(),
+            strandedAssets,
+            "Bootstrap should seed fresh senior principal from unassigned assets"
+        );
+        assertEq(
+            pool.seniorHighWaterMark(), strandedAssets, "Fresh senior bootstrap must replace the stale HWM baseline"
+        );
         assertEq(pool.juniorPrincipal(), juniorAssets, "Junior principal should remain untouched");
         assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
     }
@@ -1390,7 +1443,7 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
     }
 
     function test_OpenCommit_RevertsDuringPartialSeedLifecycle() public {
-        uint256 juniorSeed = 1_000e6;
+        uint256 juniorSeed = 1000e6;
         usdc.mint(address(this), juniorSeed);
         usdc.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
@@ -1402,8 +1455,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
     }
 
     function test_OpenCommit_RevertsWhenSeedsCompleteButTradingNotActivated() public {
-        uint256 juniorSeed = 1_000e6;
-        uint256 seniorSeed = 1_000e6;
+        uint256 juniorSeed = 1000e6;
+        uint256 seniorSeed = 1000e6;
         usdc.mint(address(this), juniorSeed + seniorSeed);
         usdc.approve(address(pool), juniorSeed + seniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
@@ -1421,8 +1474,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
     }
 
     function test_OrdinaryDeposit_RevertsWhenSeedLifecycleStartedButTradingInactive() public {
-        uint256 juniorSeed = 1_000e6;
-        uint256 depositAmount = 5_000e6;
+        uint256 juniorSeed = 1000e6;
+        uint256 depositAmount = 5000e6;
 
         usdc.mint(address(this), juniorSeed + depositAmount);
         usdc.approve(address(pool), juniorSeed + depositAmount);
@@ -1436,9 +1489,9 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
     }
 
     function test_OrdinaryDeposit_RevertsWhenSeedsCompleteButTradingInactive() public {
-        uint256 juniorSeed = 1_000e6;
-        uint256 seniorSeed = 1_000e6;
-        uint256 depositAmount = 5_000e6;
+        uint256 juniorSeed = 1000e6;
+        uint256 seniorSeed = 1000e6;
+        uint256 depositAmount = 5000e6;
 
         usdc.mint(address(this), juniorSeed + seniorSeed + depositAmount);
         usdc.approve(address(pool), juniorSeed + seniorSeed);
@@ -1479,8 +1532,12 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
     function test_BasePerpTest_CanBootstrapSeededSetup() public view {
         assertEq(pool.juniorPrincipal(), 25_000e6, "Shared setup should initialize the junior seed");
         assertEq(pool.seniorPrincipal(), 10_000e6, "Shared setup should initialize the senior seed");
-        assertEq(juniorVault.seedShareFloor(), juniorVault.balanceOf(address(this)), "Junior seed floor should be registered");
-        assertEq(seniorVault.seedShareFloor(), seniorVault.balanceOf(address(this)), "Senior seed floor should be registered");
+        assertEq(
+            juniorVault.seedShareFloor(), juniorVault.balanceOf(address(this)), "Junior seed floor should be registered"
+        );
+        assertEq(
+            seniorVault.seedShareFloor(), seniorVault.balanceOf(address(this)), "Senior seed floor should be registered"
+        );
     }
 
 }
@@ -1710,7 +1767,9 @@ contract HousePoolAuditTest is BasePerpTest {
         juniorVault.withdraw(quotedAssets, bob, bob);
 
         assertEq(
-            usdc.balanceOf(bob), bobBalanceBefore + quotedAssets, "maxWithdraw quote should remain executable after sync"
+            usdc.balanceOf(bob),
+            bobBalanceBefore + quotedAssets,
+            "maxWithdraw quote should remain executable after sync"
         );
     }
 
@@ -1748,7 +1807,9 @@ contract HousePoolAuditTest is BasePerpTest {
 
         assertEq(redeemedAssets, previewAssets, "maxRedeem quote should reconcile to the previewed asset amount");
         assertEq(
-            usdc.balanceOf(bob), bobBalanceBefore + redeemedAssets, "maxRedeem quote should remain executable after sync"
+            usdc.balanceOf(bob),
+            bobBalanceBefore + redeemedAssets,
+            "maxRedeem quote should remain executable after sync"
         );
     }
 

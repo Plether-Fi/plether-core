@@ -517,7 +517,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (fees == 0) {
             revert CfdEngine__NoFeesToWithdraw();
         }
-        if (!_canPayFreshVaultPayout(fees)) {
+        if (!_canWithdrawProtocolFees(fees)) {
             revert CfdEngine__InsufficientVaultLiquidity();
         }
         accumulatedFeesUsdc = 0;
@@ -722,7 +722,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         uint256 price = lastMarkPrice;
         if (price == 0) {
-            return;
+            revert CfdEngine__MarkPriceStale();
         }
 
         uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : 30;
@@ -922,6 +922,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return amountUsdc <= _freshVaultReservation().freeCashUsdc;
     }
 
+    function _canWithdrawProtocolFees(
+        uint256 amountUsdc
+    ) internal view returns (bool) {
+        return amountUsdc <= _freshVaultReservation().protocolFeeWithdrawalUsdc;
+    }
+
     function _availableCashForFreshVaultPayouts() internal view returns (uint256) {
         return _freshVaultReservation().freeCashUsdc;
     }
@@ -937,7 +943,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
-            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
+            vault.totalAssets(), accumulatedFeesUsdc, totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
         );
     }
 
@@ -945,7 +951,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 headClaimAmountUsdc
     ) internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveDeferredHeadClaim(
-            vault.totalAssets(), totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc, headClaimAmountUsdc
+            vault.totalAssets(),
+            accumulatedFeesUsdc,
+            totalDeferredPayoutUsdc,
+            totalDeferredClearerBountyUsdc,
+            headClaimAmountUsdc
         );
     }
 

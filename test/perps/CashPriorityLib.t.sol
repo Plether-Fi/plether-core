@@ -9,17 +9,20 @@ contract CashPriorityLibTest is Test {
 
     function test_ReserveFreshPayouts_ReservesAllDeferredSeniorClaims() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveFreshPayouts(100e6, 30e6, 20e6);
+            CashPriorityLib.reserveFreshPayouts(100e6, 10e6, 30e6, 20e6);
 
         assertEq(reservation.totalSeniorClaimsUsdc, 50e6, "Total senior claims should sum deferred obligations");
         assertEq(reservation.reservedSeniorCashUsdc, 50e6, "Fresh payouts must reserve the full deferred queue");
-        assertEq(reservation.freeCashUsdc, 50e6, "Fresh payouts may only use cash above deferred claims");
+        assertEq(reservation.protocolFeeWithdrawalUsdc, 10e6, "Protocol fees remain withdrawable after senior claims");
+        assertEq(
+            reservation.freeCashUsdc, 40e6, "Fresh payouts may only use cash above deferred claims and protocol fees"
+        );
         assertEq(reservation.headClaimServiceableUsdc, 0, "Fresh payout reservations do not service deferred claims");
     }
 
     function test_ReserveDeferredHeadClaim_PrioritizesHeadOverLaterClaims() public pure {
         CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveDeferredHeadClaim(40e6, 70e6, 30e6, 70e6);
+            CashPriorityLib.reserveDeferredHeadClaim(40e6, 10e6, 70e6, 30e6, 70e6);
 
         assertEq(reservation.totalSeniorClaimsUsdc, 100e6, "Total senior claims should include both deferred classes");
         assertEq(
@@ -28,9 +31,14 @@ contract CashPriorityLibTest is Test {
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash should remain while senior claims exceed physical cash");
         assertEq(
             reservation.headClaimServiceableUsdc,
-            40e6,
-            "Partial liquidity should still service the head claim before later claims"
+            30e6,
+            "Head claims may only use cash left after reserving protocol fees"
         );
+    }
+
+    function test_CanWithdrawProtocolFees_OnlyUsesCashAboveDeferredClaims() public pure {
+        assertTrue(CashPriorityLib.canWithdrawProtocolFees(100e6, 20e6, 30e6, 10e6, 20e6));
+        assertFalse(CashPriorityLib.canWithdrawProtocolFees(40e6, 20e6, 30e6, 10e6, 20e6));
     }
 
 }

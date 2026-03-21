@@ -193,7 +193,10 @@ library CfdEnginePlanLib {
                     fd.closeFundingSettlementUsdc = int256(gain);
                 } else if (
                     CashPriorityLib.reserveFreshPayouts(
-                            snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+                            snap.vaultCashUsdc,
+                            snap.accumulatedFeesUsdc,
+                            snap.totalDeferredPayoutUsdc,
+                            snap.totalDeferredClearerBountyUsdc
                         )
                         .freeCashUsdc >= gain
                 ) {
@@ -528,7 +531,10 @@ library CfdEnginePlanLib {
 
         uint256 availableCashForFreshPayouts =
             CashPriorityLib.reserveFreshPayouts(
-            effectiveVaultCash, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+            effectiveVaultCash,
+            snap.accumulatedFeesUsdc,
+            snap.totalDeferredPayoutUsdc,
+            snap.totalDeferredClearerBountyUsdc
         )
         .freeCashUsdc;
 
@@ -741,7 +747,10 @@ library CfdEnginePlanLib {
         if (delta.residualPlan.payoutUsdc > 0) {
             delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;
             delta.payoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+                    snap.vaultCashUsdc,
+                    snap.accumulatedFeesUsdc,
+                    snap.totalDeferredPayoutUsdc,
+                    snap.totalDeferredClearerBountyUsdc
                 )
                 .freeCashUsdc >= delta.traderPayoutUsdc;
             delta.payoutIsDeferred = !delta.payoutIsImmediate;
