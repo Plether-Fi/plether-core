@@ -1,3 +1,19 @@
+- [x] Design a perps internal architecture diagram that matches the repo Mermaid conventions
+- [x] Add the new diagram to `scripts/render-diagrams.mjs`
+- [x] Render and embed the new SVG in the internal architecture map
+
+Review:
+- Added `perpsInternalArchitecture` to `scripts/render-diagrams.mjs` and wired it into the shared render pipeline as `assets/diagrams/perps-internal-architecture-map.svg`.
+- Embedded the rendered SVG in `src/perps/INTERNAL_ARCHITECTURE_MAP.md` so the one-page architecture note now opens with a visual custody-and-flow map before the detailed tables.
+- Verified by running `npm ci` to install the local diagram dependency and `node scripts/render-diagrams.mjs`, which rendered the new diagram successfully.
+
+- [x] Add a one-page perps internal architecture map for asset ownership and value flows
+- [x] Link the new architecture map from the perps README
+
+Review:
+- Added `src/perps/INTERNAL_ARCHITECTURE_MAP.md` as a one-page ops map with four compact sections: asset buckets, mutation boundaries, accounting readers, and cross-domain value flows.
+- Linked the new map from `src/perps/README.md` so auditors and contributors can jump from the narrative overview into the custody/accounting matrix without digging through the full spec first.
+
 - [x] Tighten HousePool freshness wording so docs match stale-mark pending-bucket behavior
 - [x] Clean up `TrancheVault.maxDeposit()` / `maxMint()` receiver forwarding
 
@@ -816,3 +832,15 @@ Review:
 - Updated `src/perps/interfaces/ICfdEngine.sol`, `src/perps/README.md`, and `src/perps/ACCOUNTING_SPEC.md` to make the canonical-preview vs hypothetical-simulation boundary explicit for integrators.
 - Repointed perps preview call sites and tests to canonical previews by default, and moved the cash-illiquidity / alternate-depth cases onto explicit simulation coverage in `test/perps/CfdEngine.t.sol`.
 - Verified green: `forge fmt --check` on touched files, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth|PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth|SimulateClose_FullCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid|SimulateClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid|SimulateClose_DeferredFundingCountsTowardPostCloseDegradedMode|LiquidationPreview_InterfaceMatchesContractStructLayout)"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`, `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`, and `forge test --match-path test/perps/invariant/PerpClosePreviewParityInvariant.t.sol`.
+
+## Perps Senior Cash Reservation Kernel Plan (Mar 21 2026)
+
+- [x] Inspect fee withdrawal, fresh payout, liquidation bounty, and deferred-claim cash reservation logic for drift
+- [x] Implement one canonical senior-cash reservation kernel and route those paths through it
+- [x] Update docs/tests and run focused perps verification for the shared reservation policy
+
+Review:
+- Expanded `src/perps/libraries/CashPriorityLib.sol` into the canonical senior-cash reservation kernel, with one shared reservation struct covering total senior claims, reserved senior cash, fresh free cash, and queue-head claim serviceability.
+- Routed `src/perps/CfdEngine.sol`, `src/perps/OrderRouter.sol`, and `src/perps/libraries/CfdEnginePlanLib.sol` through that shared kernel so fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, deferred-claim servicing, and previews all answer the same cash-priority question.
+- Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
+- Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.
