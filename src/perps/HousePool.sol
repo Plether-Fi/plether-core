@@ -436,7 +436,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
 
         if (toSenior) {
-            if (seniorPrincipal == 0 && juniorPrincipal == 0) {
+            if (seniorPrincipal == 0) {
                 seniorPrincipal = amount;
                 seniorHighWaterMark = amount;
             } else {

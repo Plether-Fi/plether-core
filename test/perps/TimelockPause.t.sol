@@ -294,7 +294,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
-        assertEq(router.nextExecuteId(), 2);
+        assertEq(router.nextExecuteId(), 0);
     }
 
     function test_ExecuteLiquidation_WorksWhenPaused() public {

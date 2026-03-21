@@ -56,7 +56,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertGt(router.nextExecuteId(), 1, "Someone must clear the invalid binding head for queue liveness");
+        assertEq(router.nextExecuteId(), 0, "Clearing the invalid binding head should drain the queue to the zero sentinel");
         assertGt(
             usdc.balanceOf(address(this)) - keeperBefore,
             0,

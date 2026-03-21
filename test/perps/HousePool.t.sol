@@ -6,8 +6,11 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract HousePoolTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -529,6 +532,10 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(address(this), seedAssets);
         usdc.approve(address(pool), seedAssets);
         pool.initializeSeedPosition(false, seedAssets, seed);
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(true, 1e6, address(this));
+        pool.activateTrading();
 
         usdc.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -556,6 +563,10 @@ contract HousePoolTest is BasePerpTest {
         usdc.mint(address(this), seedAssets);
         usdc.approve(address(pool), seedAssets);
         pool.initializeSeedPosition(false, seedAssets, seed);
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(true, 1e6, address(this));
+        pool.activateTrading();
 
         _fundSenior(alice, 100_000e6);
         _fundJunior(bob, 100_000e6);
@@ -910,6 +921,27 @@ contract HousePoolTest is BasePerpTest {
 
         assertEq(pool.seniorPrincipal(), 10_000e6, "Bootstrapping should restore senior principal from unassigned assets");
         assertEq(pool.seniorHighWaterMark(), 10_000e6, "Bootstrapping after wipeout must reset the senior HWM baseline");
+    }
+
+    function test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists() public {
+        uint256 juniorAssets = 20_000e6;
+        uint256 strandedAssets = 30_000e6;
+        uint256 legacySeniorHwm = 50_000e6;
+
+        usdc.mint(address(pool), juniorAssets + strandedAssets);
+
+        stdstore.target(address(pool)).sig("seniorPrincipal()").checked_write(uint256(0));
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(juniorAssets);
+        stdstore.target(address(pool)).sig("seniorHighWaterMark()").checked_write(legacySeniorHwm);
+        stdstore.target(address(pool)).sig("accountedAssets()").checked_write(juniorAssets + strandedAssets);
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(strandedAssets);
+
+        pool.assignUnassignedAssets(true, alice);
+
+        assertEq(pool.seniorPrincipal(), strandedAssets, "Bootstrap should seed fresh senior principal from unassigned assets");
+        assertEq(pool.seniorHighWaterMark(), strandedAssets, "Fresh senior bootstrap must replace the stale HWM baseline");
+        assertEq(pool.juniorPrincipal(), juniorAssets, "Junior principal should remain untouched");
+        assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
     }
 
     function test_SweepExcess_RemovesDonationWithoutChangingAccountedAssets() public {
@@ -1399,6 +1431,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(depositAmount, address(this));
+        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reflect lifecycle gating");
+        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should reflect lifecycle gating");
     }
 
     function test_OrdinaryDeposit_RevertsWhenSeedsCompleteButTradingInactive() public {
@@ -1414,8 +1448,11 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(depositAmount, address(this));
+        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero before activation");
+        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero before activation");
 
         pool.activateTrading();
+        assertGt(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should reopen after activation");
         juniorVault.deposit(depositAmount, address(this));
     }
 

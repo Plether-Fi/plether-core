@@ -1476,10 +1476,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(accountId);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
 
-        if (orderRouter != address(0)) {
-            snap.marginReservationIds = IOrderRouterAccounting(orderRouter).getMarginReservationIds(accountId);
-        }
-
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
         snap.totalDeferredPayoutUsdc = totalDeferredPayoutUsdc;

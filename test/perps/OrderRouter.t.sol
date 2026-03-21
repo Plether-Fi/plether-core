@@ -73,7 +73,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, emptyPayload);
 
-        assertEq(router.nextExecuteId(), 2, "Queue MUST increment even if Engine reverts");
+        assertEq(router.nextExecuteId(), 0, "Terminal engine reverts should clear the queue to the zero sentinel");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(accountId);
@@ -162,7 +162,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        vm.expectRevert(OrderRouter.OrderRouter__OrderNotPending.selector);
+        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
         vm.roll(10);
         router.executeOrder(1, empty);
     }
@@ -204,12 +204,12 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 2, "Executing the original head should expose the failed order as the new head");
+        assertEq(router.nextExecuteId(), 3, "Liquidation should already have cleared the invalidated non-head order");
 
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        assertEq(router.nextExecuteId(), 4, "Single-order execution should fast-forward across failed heads even when expiration is disabled");
+        assertEq(router.nextExecuteId(), 0, "Single-order execution should clear the queue to the zero sentinel when exhausted");
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
@@ -716,7 +716,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
-        assertEq(router.nextExecuteId(), 4, "All 3 should be consumed");
+        assertEq(router.nextExecuteId(), 2, "Batch should stop with the retryable middle order still pending at the head");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
@@ -728,6 +728,19 @@ contract OrderRouterTest is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
         vm.roll(block.number + 1);
         router.executeOrderBatch(0, empty);
+    }
+
+    function test_BatchExecution_EmptyQueueAfterDrain_RevertsBeforeOracleWork() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(1, empty);
+
+        assertEq(router.nextExecuteId(), 0, "Queue should be empty after draining the only batch order");
+        vm.expectRevert(OrderRouter.OrderRouter__NoOrdersToExecute.selector);
+        router.executeOrderBatch(1, empty);
     }
 
     function test_BatchExecution_UncommittedMaxId_Reverts() public {
@@ -793,9 +806,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(uint64(spamCount + 1), empty);
         uint256 gasUsed = gasBefore - gasleft();
 
-        assertEq(
-            router.nextExecuteId(), spamCount + 2, "batch should clear the adversarial queue and reach the tail order"
-        );
+        assertEq(router.nextExecuteId(), 1, "batch should execute the tail order without requiring the adversarial retryable head to clear");
         (uint256 size,,,,,,,) = engine.positions(carolId);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
@@ -843,7 +854,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, betterPrice);
 
-        assertEq(router.nextExecuteId(), 4, "once marketable again, batch should consume the retried head");
+        assertEq(router.nextExecuteId(), 0, "once marketable again, batch should consume the retried head and clear the queue");
     }
 
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
@@ -921,8 +932,8 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 2_100_000, "executor should earn only router-custodied bounties across mixed heads");
-        assertEq(router.nextExecuteId(), 5, "mixed failed and successful heads should not pin the queue");
+        assertEq(executorReward, 1_000_000, "Retryable invalid heads should not pay the executor while the valid tail still executes");
+        assertEq(router.nextExecuteId(), 2, "mixed failed and successful heads should leave the retryable head pending for a later keeper");
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "valid tail order should still execute after mixed heads");
@@ -1060,12 +1071,14 @@ contract OrderRouterPythTest is BasePerpTest {
         );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
-            1e6,
-            "Executor should receive failed binding open-order bounty"
+            0,
+            "Retryable slippage misses should preserve escrow instead of paying the executor"
         );
         assertEq(
             engine.accumulatedFeesUsdc(), 0, "Failed binding open-order bounty should not be routed to protocol revenue"
         );
+        assertEq(router.nextExecuteId(), 1, "Retryable slippage miss should leave the order pending at the head");
+        assertEq(router.executionBountyReserves(1), 1e6, "Retryable slippage miss should keep the bounty escrowed");
     }
 
     function _setDegradedModeForTest() internal {
@@ -1295,7 +1308,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrderBatch(2, empty);
 
         IOrderRouterAccounting.AccountEscrowView memory finalEscrow = router.getAccountEscrow(accountId);
-        assertEq(router.nextExecuteId(), 3, "Honest keeper should later consume both queued orders");
+        assertEq(router.nextExecuteId(), 0, "Honest keeper should later consume both queued orders and clear the queue");
         assertEq(finalEscrow.pendingOrderCount, 0, "Escrow should be fully released after terminal execution");
     }
 
@@ -1346,7 +1359,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, priceData);
 
-        assertEq(router.nextExecuteId(), 4, "Deferred-payout close should not stall the FIFO queue");
+        assertEq(router.nextExecuteId(), 0, "Deferred-payout close should not stall the FIFO queue and should drain it when no orders remain");
         assertGt(
             engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
         );
@@ -1419,6 +1432,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 90_000_000, false);
 
         bytes[] memory empty = _pythUpdateData();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -1431,6 +1445,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _pythUpdateData();
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp + 6));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
@@ -1896,9 +1911,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             snapshotBefore.terminalReachableUsdc,
             "Preview must exclude queued execution escrow from liquidation reachability"
         );
-        assertEq(
-            router.pendingOrderCounts(accountId), 0, "Liquidation should clear the liquidated account's queued orders"
-        );
+        assertEq(router.nextExecuteId(), 0, "Liquidation should clear the global queue head when only liquidated-account orders remain");
         assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first open-order bounty escrow");
         assertEq(
             router.executionBountyReserves(uint64(queuedOrderCount)),
@@ -2029,8 +2042,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         assertEq(
             router.nextExecuteId(),
-            queuedOrderCount + 1,
-            "Liquidation should consume the liquidated account's queued orders"
+            0,
+            "Liquidation should consume the liquidated account's queued orders and clear the queue to the zero sentinel"
         );
 
         vm.prank(trader);
@@ -2953,7 +2966,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(6, empty);
 
-        assertEq(router.nextExecuteId(), 7, "Queue advanced past spam + real order");
+        assertEq(router.nextExecuteId(), 0, "Queue advanced past spam + real order and drained to the zero sentinel");
     }
 
     // Regression: H-03
@@ -2968,7 +2981,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 2);
+        assertEq(router.nextExecuteId(), 0);
     }
 
     // Regression: H-03
@@ -3016,7 +3029,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(4, empty);
 
-        assertEq(router.nextExecuteId(), 5, "Batch advanced past stale + real order");
+        assertEq(router.nextExecuteId(), 0, "Batch advanced past stale + real order and drained to the zero sentinel");
     }
 
     // Regression: H-03

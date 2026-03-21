@@ -101,6 +101,10 @@ interface IMarginClearinghouse {
     function releaseOrderReservation(
         uint64 orderId
     ) external returns (uint256 releasedUsdc);
+    /// @notice Releases any remaining reservation balance for an order if it is still active.
+    function releaseOrderReservationIfActive(
+        uint64 orderId
+    ) external returns (uint256 releasedUsdc);
     /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
     function consumeOrderReservation(
         uint64 orderId,

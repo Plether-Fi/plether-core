@@ -305,6 +305,29 @@ contract MarginClearinghouse is Ownable2Step {
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
 
+    function releaseOrderReservationIfActive(
+        uint64 orderId
+    ) external onlyOperator returns (uint256 releasedUsdc) {
+        IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
+        if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
+            return 0;
+        }
+
+        releasedUsdc = reservation.remainingAmountUsdc;
+        if (releasedUsdc > 0) {
+            _consumeReservationBucket(reservation.accountId, reservation.bucket, releasedUsdc);
+            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
+                activeCommittedOrderReservationUsdc[reservation.accountId] -= releasedUsdc;
+            } else {
+                activeReservedSettlementReservationUsdc[reservation.accountId] -= releasedUsdc;
+            }
+        }
+
+        reservation.status = IMarginClearinghouse.ReservationStatus.Released;
+        reservation.remainingAmountUsdc = 0;
+        emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
+    }
+
     function consumeOrderReservation(
         uint64 orderId,
         uint256 amountUsdc

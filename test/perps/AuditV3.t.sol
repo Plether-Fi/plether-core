@@ -100,8 +100,6 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
 
-        uint64 execIdBefore = router.nextExecuteId();
-
         // executeOrder should soft-fail the open order (like batch does at line 416),
         // advancing the queue. Bug: hard reverts with OracleFrozen, queue stuck.
         bytes[] memory priceData = new bytes[](1);
@@ -112,8 +110,8 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             abi.encodeWithSelector(router.executeOrder.selector, uint64(1), priceData)
         );
 
-        uint64 execIdAfter = router.nextExecuteId();
-        assertGt(execIdAfter, execIdBefore, "C-01: open orders must soft-fail during frozen weekend, not hard revert");
+        assertTrue(ok, "C-01: open orders must soft-fail during frozen weekend, not hard revert");
+        assertEq(router.nextExecuteId(), 0, "C-01: soft-failed frozen-weekend open should drain the queue to the zero sentinel");
     }
 
     function test_C01_CloseOrderBlockedByOpenInFrozenQueue() public {

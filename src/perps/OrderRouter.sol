@@ -629,6 +629,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
     ) external payable {
+        if (nextExecuteId == 0) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
         if (maxOrderId < nextExecuteId) {
             revert OrderRouter__NoOrdersToExecute();
         }
@@ -1018,10 +1021,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _releaseCommittedMargin(
         uint64 orderId
     ) internal {
-        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
-        if (reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
-            clearinghouse.releaseOrderReservation(orderId);
-        }
+        clearinghouse.releaseOrderReservationIfActive(orderId);
     }
 
     function _linkPendingOrder(
@@ -1246,7 +1246,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         if (success) {
-            _clearCommittedMargin(orderId);
             _collectExecutionBounty(orderId);
         } else {
             _releaseCommittedMargin(orderId);
@@ -1280,16 +1279,6 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
         advanceHead;
-    }
-
-    function _clearCommittedMargin(
-        uint64 orderId
-    ) internal {
-        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
-        if (reservation.status == IMarginClearinghouse.ReservationStatus.Active && reservation.remainingAmountUsdc > 0)
-        {
-            clearinghouse.consumeOrderReservation(orderId, reservation.remainingAmountUsdc);
-        }
     }
 
     function _releaseCommittedMarginForExecution(

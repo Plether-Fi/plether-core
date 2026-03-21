@@ -467,13 +467,27 @@ contract PerpAccountingHandler is Test {
     function ghostOrderLifecycleState(
         uint64 orderId
     ) external view returns (uint8) {
-        return ghostOrderState[orderId];
+        uint8 storedState = ghostOrderState[orderId];
+        if (storedState == GHOST_ORDER_NONE) {
+            return GHOST_ORDER_NONE;
+        }
+
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        if (record.status == OrderRouter.OrderStatus.Pending) {
+            return GHOST_ORDER_PENDING;
+        }
+
+        return record.status == OrderRouter.OrderStatus.Executed ? GHOST_ORDER_EXECUTED : GHOST_ORDER_FAILED;
     }
 
     function ghostOrderRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
-        return ghostOrderCommittedMargin[orderId];
+        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        if (record.status == OrderRouter.OrderStatus.Pending) {
+            return router.committedMargins(orderId);
+        }
+        return 0;
     }
 
     function reservationRemainingCommittedMargin(
@@ -491,13 +505,41 @@ contract PerpAccountingHandler is Test {
     function reservationConsumedAmount(
         uint64 orderId
     ) external view returns (uint256) {
-        return ghostReservationConsumed[orderId];
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
+        uint256 original = ghostReservationOriginal[orderId];
+        uint256 terminalizedOrConsumed = original > reservation.remainingAmountUsdc
+            ? original - reservation.remainingAmountUsdc
+            : 0;
+        if (reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
+            return terminalizedOrConsumed;
+        }
+
+        uint256 released = ghostReservationReleased[orderId];
+        if (reservation.status == IMarginClearinghouse.ReservationStatus.Consumed && terminalizedOrConsumed > released) {
+            return terminalizedOrConsumed - released;
+        }
+
+        uint256 consumed = ghostReservationConsumed[orderId];
+        return consumed > terminalizedOrConsumed ? terminalizedOrConsumed : consumed;
     }
 
     function reservationReleasedAmount(
         uint64 orderId
     ) external view returns (uint256) {
-        return ghostReservationReleased[orderId];
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
+        uint256 original = ghostReservationOriginal[orderId];
+        uint256 terminalizedOrConsumed = original > reservation.remainingAmountUsdc
+            ? original - reservation.remainingAmountUsdc
+            : 0;
+        if (reservation.status != IMarginClearinghouse.ReservationStatus.Released) {
+            return 0;
+        }
+
+        uint256 consumed = ghostReservationConsumed[orderId];
+        if (terminalizedOrConsumed > consumed) {
+            return terminalizedOrConsumed - consumed;
+        }
+        return 0;
     }
 
     function reservationStatus(
@@ -581,7 +623,8 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
+            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            if (ghostOrderOwner[orderId] == accountId && record.status == OrderRouter.OrderStatus.Pending) {
                 count++;
             }
         }
@@ -591,9 +634,10 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
             if (
-                ghostOrderOwner[orderId] == accountId && ghostOrderState[orderId] == GHOST_ORDER_PENDING
-                    && ghostOrderCommittedMargin[orderId] > 0
+                ghostOrderOwner[orderId] == accountId && record.status == OrderRouter.OrderStatus.Pending
+                    && record.inMarginQueue && router.committedMargins(orderId) > 0
             ) {
                 count++;
             }
@@ -700,13 +744,18 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         if (committedMarginUsdc > 0) {
             ghost.decreaseCommittedMargin(accountId, committedMarginUsdc);
-            IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
+        }
+
+        uint256 terminalizedAmount = ghostReservationOriginal[orderId] - ghostReservationConsumed[orderId]
+            - ghostReservationReleased[orderId] - reservation.remainingAmountUsdc;
+        if (terminalizedAmount > 0) {
             if (reservation.status == IMarginClearinghouse.ReservationStatus.Released) {
-                ghostReservationReleased[orderId] += committedMarginUsdc;
+                ghostReservationReleased[orderId] += terminalizedAmount;
             } else if (reservation.status == IMarginClearinghouse.ReservationStatus.Consumed) {
-                ghostReservationConsumed[orderId] += committedMarginUsdc;
+                ghostReservationConsumed[orderId] += terminalizedAmount;
             }
         }
 
@@ -745,8 +794,14 @@ contract PerpAccountingHandler is Test {
         uint64 endExecuteId
     ) internal {
         uint256[4] memory releasedByProcessedOrders;
-        if (endExecuteId > startExecuteId) {
-            for (uint64 orderId = startExecuteId; orderId < endExecuteId; orderId++) {
+        uint64 upperBound = endExecuteId == 0 ? router.nextCommitId() : endExecuteId;
+        if (upperBound > startExecuteId) {
+            for (uint64 orderId = startExecuteId; orderId < upperBound; orderId++) {
+                OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+                if (record.status == OrderRouter.OrderStatus.Pending) {
+                    continue;
+                }
+
                 bytes32 accountId = ghostOrderOwner[orderId];
                 if (accountId != bytes32(0)) {
                     releasedByProcessedOrders[_actorIndex(accountId)] += ghostOrderCommittedMargin[orderId];
