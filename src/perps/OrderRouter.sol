@@ -8,6 +8,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
+import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -40,8 +41,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         CfdTypes.Order core;
         OrderStatus status;
         uint256 executionBountyUsdc;
+        uint64 retryAfterTimestamp;
         uint64 nextPendingOrderId;
         uint64 prevPendingOrderId;
+        uint64 nextGlobalOrderId;
+        uint64 prevGlobalOrderId;
         uint64 nextMarginOrderId;
         uint64 prevMarginOrderId;
         bool inMarginQueue;
@@ -76,6 +80,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 targetPrice;
         uint64 commitTime;
         uint64 commitBlock;
+        uint64 retryAfterTimestamp;
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
     }
@@ -98,6 +103,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint64 internal constant RETRYABLE_SKIP_COOLDOWN = 5;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
@@ -115,6 +121,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     mapping(bytes32 => uint64) public pendingTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
+    uint64 public globalTailOrderId;
 
     error OrderRouter__ZeroSize();
     error OrderRouter__CloseMarginDeltaNotAllowed();
@@ -149,6 +156,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__TooManyPendingOrders();
     error OrderRouter__DegradedMode();
     error OrderRouter__CloseOnlyMode();
+    error OrderRouter__SeedLifecycleIncomplete();
+    error OrderRouter__TradingNotActive();
+    error OrderRouter__RetryCooldownActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
 
     enum OrderFailReason {
@@ -164,6 +174,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
+    event OrderSkipped(uint64 indexed orderId, OrderFailReason reason, uint64 retryAfterTimestamp);
 
     enum FailedOrderBountyPolicy {
         None,
@@ -296,6 +307,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             if (_isCloseOnlyWindow()) {
                 revert OrderRouter__CloseOnlyMode();
             }
+            if (vault.hasSeedLifecycleStarted() && !vault.isSeedLifecycleComplete()) {
+                revert OrderRouter__SeedLifecycleIncomplete();
+            }
+            if (vault.isSeedLifecycleComplete() && !vault.isTradingActive()) {
+                revert OrderRouter__TradingNotActive();
+            }
         }
         if (sizeDelta == 0) {
             revert OrderRouter__ZeroSize();
@@ -345,6 +362,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             pendingCloseSize[accountId] += sizeDelta;
         }
         _linkPendingOrder(accountId, orderId);
+        _linkGlobalOrder(orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
     }
@@ -483,6 +501,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 targetPrice: order.targetPrice,
                 commitTime: order.commitTime,
                 commitBlock: order.commitBlock,
+                retryAfterTimestamp: record.retryAfterTimestamp,
                 committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
                 executionBountyUsdc: record.executionBountyUsdc
             });
@@ -495,18 +514,24 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     // STEP 2: THE REVEAL (Keeper Execution)
     // ==========================================
 
-    /// @notice Keeper executes the next order in strict FIFO sequence.
+    /// @notice Keeper executes the current global queue head.
     ///         Validates oracle freshness and publish-time ordering against the order commit,
-    ///         checks slippage, then delegates to CfdEngine. The executor is paid from the
-    ///         order's router-custodied execution bounty whether the order fills or is invalid/expired,
-    ///         so the queue remains economically serviceable as well as un-brickable.
-    /// @param orderId Must equal nextExecuteId (stale orders are auto-skipped)
+    ///         checks slippage, then delegates to CfdEngine. Terminal invalid/expired orders pay from
+    ///         router-custodied execution bounty, while retryable slippage misses are requeued to the
+    ///         global tail with cooldown so keepers cannot burn out-of-market intents or pin the FIFO head.
+    /// @param orderId Must equal the current global queue head (expired orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
     ) external payable {
+        if (nextExecuteId == 0) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
         _skipStaleOrders(orderId);
+        if (nextExecuteId == 0) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
         if (orderId < nextExecuteId) {
             orderId = nextExecuteId;
         }
@@ -518,6 +543,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeExecution(orderId, 0, false, FailedOrderBountyPolicy.ClearerFull);
             return;
+        }
+        if (_orderRecord(orderId).retryAfterTimestamp > block.timestamp) {
+            revert OrderRouter__RetryCooldownActive();
         }
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
@@ -561,8 +589,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         if (!_checkSlippage(order, executionPrice)) {
-            emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
-            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order));
+            _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
+            _sendEth(msg.sender, msg.value - pythFee);
             return;
         }
 
@@ -592,10 +620,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         _finalizeExecution(orderId, pythFee, true, FailedOrderBountyPolicy.ClearerFull);
     }
 
-    /// @notice Executes all pending orders up to maxOrderId against a single Pyth price tick.
+    /// @notice Executes queued pending orders against a single Pyth price tick.
     ///         Updates Pyth once, then loops through the FIFO queue. Aggregates reserved USDC
     ///         execution bounties across processed orders and refunds excess ETH in a single transfer.
-    /// @param maxOrderId Inclusive upper bound of order IDs to process (must be committed)
+    /// @param maxOrderId Inclusive upper bound on committed order ids the batch may begin processing from
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrderBatch(
         uint64 maxOrderId,
@@ -630,14 +658,21 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 capPrice = engine.CAP_PRICE();
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
 
-        while (nextExecuteId <= maxOrderId) {
+        uint256 scanned;
+        uint256 maxScans = nextCommitId;
+        while (nextExecuteId != 0 && nextExecuteId <= maxOrderId && scanned < maxScans) {
+            scanned++;
             uint64 orderId = nextExecuteId;
             OrderRecord storage record = _orderRecord(orderId);
             CfdTypes.Order memory order = record.core;
 
             if (record.status != OrderStatus.Pending) {
-                nextExecuteId++;
+                nextExecuteId = record.nextGlobalOrderId;
                 continue;
+            }
+
+            if (record.retryAfterTimestamp > block.timestamp) {
+                break;
             }
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
@@ -664,8 +699,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             }
 
             if (!_checkSlippage(order, clampedPrice)) {
-                emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order));
+                _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
                 continue;
             }
 
@@ -704,11 +738,11 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 upToId
     ) internal {
         uint256 age = maxOrderAge;
-        while (nextExecuteId <= upToId) {
+        while (nextExecuteId != 0 && nextExecuteId <= upToId) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != OrderStatus.Pending) {
-                nextExecuteId++;
+                nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
             if (headId == upToId || age == 0) {
@@ -877,6 +911,15 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             return;
         }
 
+        if (
+            !CashPriorityLib.canPayFreshPayout(
+                vault.totalAssets(), engine.totalDeferredPayoutUsdc(), engine.totalDeferredClearerBountyUsdc(), liquidationBountyUsdc
+            )
+        ) {
+            engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
+            return;
+        }
+
         try vault.payOut(msg.sender, liquidationBountyUsdc) {}
         catch {
             engine.recordDeferredClearerBounty(msg.sender, liquidationBountyUsdc);
@@ -997,6 +1040,63 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         pendingTailOrderId[accountId] = orderId;
     }
 
+    function _linkGlobalOrder(
+        uint64 orderId
+    ) internal {
+        uint64 tailOrderId = globalTailOrderId;
+        if (tailOrderId == 0) {
+            nextExecuteId = orderId;
+            globalTailOrderId = orderId;
+            return;
+        }
+
+        orderRecords[tailOrderId].nextGlobalOrderId = orderId;
+        orderRecords[orderId].prevGlobalOrderId = tailOrderId;
+        globalTailOrderId = orderId;
+    }
+
+    function _unlinkGlobalOrder(
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        uint64 prevOrderId = record.prevGlobalOrderId;
+        uint64 nextOrderId = record.nextGlobalOrderId;
+        uint64 headOrderId = nextExecuteId;
+        uint64 tailOrderId = globalTailOrderId;
+
+        if (headOrderId == orderId) {
+            nextExecuteId = nextOrderId;
+        } else if (prevOrderId != 0) {
+            orderRecords[prevOrderId].nextGlobalOrderId = nextOrderId;
+        } else if (tailOrderId != orderId) {
+            revert OrderRouter__PendingOrderLinkCorrupted();
+        }
+
+        if (tailOrderId == orderId) {
+            globalTailOrderId = prevOrderId;
+        } else if (nextOrderId != 0) {
+            orderRecords[nextOrderId].prevGlobalOrderId = prevOrderId;
+        } else if (headOrderId != orderId) {
+            revert OrderRouter__PendingOrderLinkCorrupted();
+        }
+
+        record.nextGlobalOrderId = 0;
+        record.prevGlobalOrderId = 0;
+    }
+
+    function _skipRetryableOrder(
+        uint64 orderId,
+        OrderFailReason reason
+    ) internal {
+        _unlinkGlobalOrder(orderId);
+        _linkGlobalOrder(orderId);
+
+        OrderRecord storage record = _orderRecord(orderId);
+        record.retryAfterTimestamp = uint64(block.timestamp + RETRYABLE_SKIP_COOLDOWN);
+
+        emit OrderSkipped(orderId, reason, record.retryAfterTimestamp);
+    }
+
     function _unlinkPendingOrder(
         bytes32 accountId,
         uint64 orderId
@@ -1090,16 +1190,41 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 executionBountyUsdc,
         bool isClose
     ) internal {
-        isClose;
         if (executionBountyUsdc == 0) {
             return;
         }
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
-            revert OrderRouter__InsufficientFreeEquity();
+
+        if (isClose) {
+            _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
+        } else {
+            if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
+                revert OrderRouter__InsufficientFreeEquity();
+            }
+
+            clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
+        }
+        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
+    }
+
+    function _reserveCloseExecutionBounty(
+        bytes32 accountId,
+        uint256 executionBountyUsdc
+    ) internal {
+        uint256 freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        uint256 freeBackedBountyUsdc = freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
+        if (freeBackedBountyUsdc > 0) {
+            clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
         }
 
-        clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));
-        orderRecords[orderId].executionBountyUsdc = executionBountyUsdc;
+        uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
+        if (marginBackedBountyUsdc == 0) {
+            return;
+        }
+
+        try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}
+        catch {
+            revert OrderRouter__InsufficientFreeEquity();
+        }
     }
 
     function _reserveCommittedMargin(
@@ -1145,16 +1270,16 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             _unlinkPendingOrder(accountId, orderId);
             _unlinkMarginOrder(accountId, orderId);
         }
+        _unlinkGlobalOrder(orderId);
         record.status = terminalStatus;
+        record.retryAfterTimestamp = 0;
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;
         }
         if (accountId != bytes32(0) && record.core.isClose && pendingCloseSize[accountId] >= record.core.sizeDelta) {
             pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
-        if (advanceHead) {
-            nextExecuteId++;
-        }
+        advanceHead;
     }
 
     function _clearCommittedMargin(

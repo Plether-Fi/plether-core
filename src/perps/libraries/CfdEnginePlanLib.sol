@@ -7,6 +7,7 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {CfdEngineSettlementLib} from "./CfdEngineSettlementLib.sol";
 import {CfdEngineSnapshotsLib} from "./CfdEngineSnapshotsLib.sol";
+import {CashPriorityLib} from "./CashPriorityLib.sol";
 import {CloseAccountingLib} from "./CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "./MarginClearinghouseAccountingLib.sol";
@@ -190,7 +191,11 @@ library CfdEnginePlanLib {
                 if (isClose && isFullClose) {
                     fd.payoutType = CfdEnginePlanTypes.FundingPayoutType.CLOSE_SETTLEMENT;
                     fd.closeFundingSettlementUsdc = int256(gain);
-                } else if (snap.vaultCashUsdc >= gain) {
+                } else if (
+                    CashPriorityLib.availableCashForFreshPayouts(
+                        snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+                    ) >= gain
+                ) {
                     fd.payoutType = CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT;
                     fd.posMarginIncrease = gain;
                     fd.fundingVaultPayoutUsdc = gain;
@@ -520,10 +525,14 @@ library CfdEnginePlanLib {
         delta.executionFeeUsdc = cs.executionFeeUsdc;
         delta.realizedPnlUsdc = cs.realizedPnlUsdc;
 
+        uint256 availableCashForFreshPayouts = CashPriorityLib.availableCashForFreshPayouts(
+            effectiveVaultCash, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+        );
+
         if (cs.netSettlementUsdc > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
             delta.traderPayoutUsdc = uint256(cs.netSettlementUsdc);
-            delta.payoutIsImmediate = effectiveVaultCash >= delta.traderPayoutUsdc;
+            delta.payoutIsImmediate = availableCashForFreshPayouts >= delta.traderPayoutUsdc;
             delta.payoutIsDeferred = !delta.payoutIsImmediate;
         } else if (cs.netSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
@@ -729,7 +738,9 @@ library CfdEnginePlanLib {
 
         if (delta.residualPlan.payoutUsdc > 0) {
             delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;
-            delta.payoutIsImmediate = snap.vaultCashUsdc >= delta.traderPayoutUsdc;
+            delta.payoutIsImmediate = CashPriorityLib.availableCashForFreshPayouts(
+                snap.vaultCashUsdc, snap.totalDeferredPayoutUsdc, snap.totalDeferredClearerBountyUsdc
+            ) >= delta.traderPayoutUsdc;
             delta.payoutIsDeferred = !delta.payoutIsImmediate;
         }
 

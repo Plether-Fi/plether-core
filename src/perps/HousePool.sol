@@ -41,6 +41,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 juniorSupply;
     }
 
+    struct HousePoolContext {
+        ICfdEngine.HousePoolInputSnapshot accountingSnapshot;
+        ICfdEngine.HousePoolStatusSnapshot statusSnapshot;
+        PendingAccountingState pendingState;
+    }
+
     IERC20 public immutable USDC;
     ICfdEngine public immutable ENGINE;
 
@@ -58,8 +64,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     uint256 public pendingTradingRevenueUsdc;
 
     uint256 public lastReconcileTime;
+    uint256 public lastSeniorYieldCheckpointTime;
     uint256 public seniorRateBps;
     uint256 public markStalenessLimit = 120;
+    bool public override(ICfdVault, IHousePool) isTradingActive;
+    bool public seniorSeedInitialized;
+    bool public juniorSeedInitialized;
 
     uint256 public constant TIMELOCK_DELAY = 48 hours;
 
@@ -90,6 +100,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     error HousePool__NoUnassignedAssets();
     error HousePool__BootstrapSharesZero();
     error HousePool__SeedAlreadyInitialized();
+    error HousePool__TradingActivationNotReady();
 
     event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     event SeniorRateUpdated(uint256 newRateBps);
@@ -107,6 +118,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     );
     event UnassignedAssetsAssigned(bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted);
     event SeedPositionInitialized(bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted);
+    event TradingActivated();
 
     modifier onlyVault() {
         if (msg.sender != seniorVault && msg.sender != juniorVault) {
@@ -124,6 +136,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC = IERC20(_usdc);
         ENGINE = ICfdEngine(_engine);
         lastReconcileTime = block.timestamp;
+        lastSeniorYieldCheckpointTime = block.timestamp;
         seniorRateBps = 800; // 8% APY default
     }
 
@@ -199,7 +212,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             _reconcile(accountingSnapshot);
         } else {
-            lastReconcileTime = block.timestamp;
+            if (seniorPrincipal == 0) {
+                lastReconcileTime = block.timestamp;
+            }
+            _applyPendingBucketsLive(accountingSnapshot, statusSnapshot);
         }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;
@@ -267,6 +283,22 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function totalAssets() public view returns (uint256) {
         uint256 raw = USDC.balanceOf(address(this));
         return raw < accountedAssets ? raw : accountedAssets;
+    }
+
+    function isSeedLifecycleComplete() public view returns (bool) {
+        return seniorSeedInitialized && juniorSeedInitialized;
+    }
+
+    function hasSeedLifecycleStarted() public view override(ICfdVault, IHousePool) returns (bool) {
+        return seniorSeedInitialized || juniorSeedInitialized;
+    }
+
+    function activateTrading() external onlyOwner {
+        if (!isSeedLifecycleComplete()) {
+            revert HousePool__TradingActivationNotReady();
+        }
+        isTradingActive = true;
+        emit TradingActivated();
     }
 
     /// @notice Raw USDC balance currently held by the pool, including unsolicited transfers.
@@ -381,12 +413,17 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         bool toSenior,
         address receiver
     ) external onlyOwner {
+        if (receiver == address(0)) {
+            revert HousePool__ZeroAddress();
+        }
+
+        HousePoolContext memory ctx = _syncAndBuildHousePoolContext();
+        _requireFreshMark(ctx.accountingSnapshot, ctx.statusSnapshot);
+        _reconcile(ctx.accountingSnapshot);
+
         uint256 amount = unassignedAssets;
         if (amount == 0) {
             revert HousePool__NoUnassignedAssets();
-        }
-        if (receiver == address(0)) {
-            revert HousePool__ZeroAddress();
         }
 
         address targetVault = toSenior ? seniorVault : juniorVault;
@@ -398,10 +435,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__BootstrapSharesZero();
         }
 
-        _checkpointSeniorYieldClock();
         if (toSenior) {
-            seniorPrincipal += amount;
-            seniorHighWaterMark += amount;
+            if (seniorPrincipal == 0 && juniorPrincipal == 0) {
+                seniorPrincipal = amount;
+                seniorHighWaterMark = amount;
+            } else {
+                seniorPrincipal += amount;
+                seniorHighWaterMark += amount;
+            }
         } else {
             juniorPrincipal += amount;
         }
@@ -440,12 +481,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC.safeTransferFrom(msg.sender, address(this), amount);
 
         accountedAssets += amount;
-        _checkpointSeniorYieldClock();
         if (toSenior) {
+            _checkpointSeniorYieldBeforePrincipalMutation(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
             seniorPrincipal += amount;
             seniorHighWaterMark += amount;
+            seniorSeedInitialized = true;
         } else {
             juniorPrincipal += amount;
+            juniorSeedInitialized = true;
         }
         ITrancheVaultBootstrap(targetVault).bootstrapMint(shares, receiver);
         ITrancheVaultBootstrap(targetVault).configureSeedPosition(receiver, shares);
@@ -475,10 +518,12 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         USDC.safeTransferFrom(msg.sender, address(this), amount);
         accountedAssets += amount;
         if (seniorPrincipal == 0) {
+            _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
             seniorHighWaterMark = amount;
             seniorPrincipal = amount;
             return;
         }
+        _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
         seniorHighWaterMark += amount;
         seniorPrincipal += amount;
     }
@@ -596,18 +641,16 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             uint256 maxJuniorWithdrawUsdc
         )
     {
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
-        PendingAccountingState memory pendingState = _previewPendingAccountingState(accountingSnapshot, statusSnapshot);
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
-            _buildWithdrawalSnapshot(accountingSnapshot, pendingState.unassignedAssets);
-        if (!_withdrawalsLive(accountingSnapshot, statusSnapshot)) {
-            seniorPrincipalUsdc = pendingState.waterfall.seniorPrincipal;
-            juniorPrincipalUsdc = pendingState.waterfall.juniorPrincipal;
+            _buildWithdrawalSnapshot(ctx.accountingSnapshot, ctx.pendingState.unassignedAssets, true);
+        if (!_withdrawalsLive(ctx.accountingSnapshot, ctx.statusSnapshot)) {
+            seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
+            juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
             return (seniorPrincipalUsdc, juniorPrincipalUsdc, 0, 0);
         }
-        seniorPrincipalUsdc = pendingState.waterfall.seniorPrincipal;
-        juniorPrincipalUsdc = pendingState.waterfall.juniorPrincipal;
+        seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
+        juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
 
         uint256 free = withdrawalSnapshot.freeUsdc;
         maxSeniorWithdrawUsdc = free < seniorPrincipalUsdc ? free : seniorPrincipalUsdc;
@@ -626,7 +669,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
-            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets);
+            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, false);
         HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
             HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
 
@@ -671,7 +714,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function _reconcile(
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot
     ) internal {
-        uint256 elapsed = block.timestamp - lastReconcileTime;
+        uint256 yieldElapsed = block.timestamp > lastSeniorYieldCheckpointTime
+            ? block.timestamp - lastSeniorYieldCheckpointTime
+            : 0;
         if (_markIsFreshForReconcile(accountingSnapshot, _getHousePoolStatusSnapshot())) {
             HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
                 HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
@@ -685,6 +730,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             unassignedAssets = _normalizeUnassignedAssets(snapshot.distributable);
 
             lastReconcileTime = block.timestamp;
+            lastSeniorYieldCheckpointTime = block.timestamp;
 
             uint256 claimedEquity = seniorPrincipal + juniorPrincipal;
             if (claimedEquity == 0) {
@@ -694,7 +740,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
                     ? snapshot.distributable - unassignedAssets
                     : 0;
                 HousePoolWaterfallAccountingLib.ReconcilePlan memory plan = HousePoolWaterfallAccountingLib.planReconcile(
-                    seniorPrincipal, juniorPrincipal, distributableToClaims, seniorRateBps, elapsed
+                    seniorPrincipal, juniorPrincipal, distributableToClaims, seniorRateBps, yieldElapsed
                 );
                 unpaidSeniorYield += plan.yieldAccrued;
 
@@ -710,11 +756,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
                     _absorbLoss(plan.deltaUsdc);
                 }
             }
-        } else {
-            lastReconcileTime = block.timestamp;
         }
 
-        _applyPendingBucketsLive();
+        _applyPendingBucketsLive(accountingSnapshot, _getHousePoolStatusSnapshot());
     }
 
     function _getWithdrawalSnapshot()
@@ -722,7 +766,25 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         view
         returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot)
     {
-        return _buildWithdrawalSnapshot(_getHousePoolInputSnapshot(), unassignedAssets);
+        return _buildWithdrawalSnapshot(_getHousePoolInputSnapshot(), unassignedAssets, false);
+    }
+
+    function _buildHousePoolContext(
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal view returns (HousePoolContext memory ctx) {
+        ctx.accountingSnapshot = accountingSnapshot;
+        ctx.statusSnapshot = statusSnapshot;
+        ctx.pendingState = _previewPendingAccountingState(accountingSnapshot, statusSnapshot);
+    }
+
+    function _syncAndBuildHousePoolContext() internal returns (HousePoolContext memory ctx) {
+        ENGINE.syncFunding();
+        return _buildCurrentHousePoolContext();
+    }
+
+    function _buildCurrentHousePoolContext() internal view returns (HousePoolContext memory ctx) {
+        return _buildHousePoolContext(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());
     }
 
     function _previewPendingAccountingState(
@@ -747,7 +809,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             if (pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal == 0) {
                 pendingState.unassignedAssets = snapshot.distributable;
             } else {
-                uint256 elapsed = block.timestamp - lastReconcileTime;
+                uint256 elapsed = block.timestamp > lastSeniorYieldCheckpointTime
+                    ? block.timestamp - lastSeniorYieldCheckpointTime
+                    : 0;
                 uint256 distributableToClaims = snapshot.distributable > pendingState.unassignedAssets
                     ? snapshot.distributable - pendingState.unassignedAssets
                     : 0;
@@ -836,15 +900,19 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
+
     function _buildWithdrawalSnapshot(
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        uint256 reservedUnassignedAssets
+        uint256 reservedUnassignedAssets,
+        bool isProjected
     ) internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
         snapshot = HousePoolAccountingLib.buildWithdrawalSnapshot(accountingSnapshot);
-        uint256 pendingAssets = _pendingBucketAssets();
-        if (pendingAssets > 0) {
-            snapshot.reserved += pendingAssets;
-            snapshot.freeUsdc = snapshot.freeUsdc > pendingAssets ? snapshot.freeUsdc - pendingAssets : 0;
+        if (!isProjected) {
+            uint256 pendingAssets = _pendingBucketAssets();
+            if (pendingAssets > 0) {
+                snapshot.reserved += pendingAssets;
+                snapshot.freeUsdc = snapshot.freeUsdc > pendingAssets ? snapshot.freeUsdc - pendingAssets : 0;
+            }
         }
         if (reservedUnassignedAssets > 0) {
             snapshot.reserved += reservedUnassignedAssets;
@@ -852,17 +920,33 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
     }
 
-    function _checkpointSeniorYieldClock() internal {
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
-        uint256 elapsed = block.timestamp > lastReconcileTime ? block.timestamp - lastReconcileTime : 0;
-        if (elapsed > 0 && _markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
+    function _checkpointSeniorYieldBeforePrincipalMutation(
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal {
+        uint256 elapsed = block.timestamp > lastSeniorYieldCheckpointTime
+            ? block.timestamp - lastSeniorYieldCheckpointTime
+            : 0;
+        if (elapsed == 0) {
+            return;
+        }
+
+        if (seniorPrincipal == 0) {
+            lastSeniorYieldCheckpointTime = block.timestamp;
+            return;
+        }
+
+        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             unpaidSeniorYield += HousePoolWaterfallAccountingLib.accrueSeniorYield(seniorPrincipal, seniorRateBps, elapsed);
         }
-        lastReconcileTime = block.timestamp;
+
+        lastSeniorYieldCheckpointTime = block.timestamp;
     }
 
-    function _applyPendingBucketsLive() internal {
+    function _applyPendingBucketsLive(
+        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+    ) internal {
         if (pendingRecapitalizationUsdc == 0 && pendingTradingRevenueUsdc == 0) {
             return;
         }
@@ -880,6 +964,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (pendingTradingRevenueUsdc > 0) {
             _routeSeededRevenue(state, pendingTradingRevenueUsdc);
             pendingTradingRevenueUsdc = 0;
+        }
+
+        if (state.waterfall.seniorPrincipal != seniorPrincipal) {
+            _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
         }
 
         _setWaterfallState(state.waterfall);

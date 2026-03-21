@@ -509,7 +509,7 @@ contract MarginClearinghouse is Ownable2Step {
     /// @dev Unrelated locked margin remains protected.
     function consumeFundingLoss(
         bytes32 accountId,
-        uint256 lockedPositionMarginUsdc,
+        uint256,
         uint256 lossUsdc,
         address recipient
     )
@@ -604,7 +604,7 @@ contract MarginClearinghouse is Ownable2Step {
     function consumeLiquidationResidual(
         bytes32 accountId,
         uint64[] calldata reservationOrderIds,
-        uint256 lockedPositionMarginUsdc,
+        uint256,
         int256 residualUsdc,
         address recipient
     ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
@@ -860,6 +860,28 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 
+        settlementBalances[accountId] -= amount;
+        IERC20(settlementAsset).safeTransfer(recipient, amount);
+
+        emit AssetSeized(accountId, settlementAsset, amount, recipient);
+    }
+
+    function seizePositionMarginUsdc(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external onlyOperator {
+        if (recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        if (amount == 0) {
+            return;
+        }
+        if (settlementBalances[accountId] < amount) {
+            revert MarginClearinghouse__InsufficientAssetToSeize();
+        }
+
+        _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, amount);
         settlementBalances[accountId] -= amount;
         IERC20(settlementAsset).safeTransfer(recipient, amount);
 

@@ -173,6 +173,12 @@ interface IMarginClearinghouse {
         uint256 amount,
         address recipient
     ) external;
+    /// @notice Transfers settlement USDC from active position margin to a recipient and unlocks the same amount.
+    function seizePositionMarginUsdc(
+        bytes32 accountId,
+        uint256 amount,
+        address recipient
+    ) external;
     function getAccountUsdcBuckets(
         bytes32 accountId
     ) external view returns (AccountUsdcBuckets memory buckets);

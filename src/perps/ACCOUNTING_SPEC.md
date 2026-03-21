@@ -63,7 +63,8 @@ These inflow entrypoints must not mutate LP principal through ad hoc, path-speci
 Current policy nuance:
 
 - fresh-mark reconcile math and pending-bucket application share the same HousePool settlement entrypoint,
-- the senior-yield checkpoint still respects mark freshness,
+- the senior-yield checkpoint still respects mark freshness and must not destroy elapsed accrual time when a stale mark forces the yield math to be skipped,
+- senior-yield accrual time and reconcile time are tracked separately, and any principal-changing stale-path mutation must checkpoint the senior-yield clock before mutating principal,
 - but pending recapitalization / pending zero-principal trading buckets may still be applied when stale marks cause reconcile waterfall math to be skipped, because those buckets represent already-funded cash events rather than mark-dependent LP repricing.
 
 `netPhysicalAssets` is the starting point for both withdrawal and solvency views.
@@ -326,7 +327,27 @@ Required liabilities in this view:
 - deferred trader payouts,
 - deferred liquidation bounties.
 
-These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived.
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. Live payout, claim, and fee-withdrawal paths must reserve this same senior cash before deciding whether fresh vault cash is available.
+
+Deferred servicing rule:
+
+- deferred trader payouts and deferred clearer bounties are appended to one oldest-first claim queue,
+- fresh vault cash may only fund new payouts or fee withdrawals above the queued senior-claim remainder,
+- direct claim calls may only service the current queue head but servicing itself is permissionless and must still pay the recorded beneficiary,
+- if only partial liquidity is available, that partial liquidity services the queue head before any later claim becomes claimable.
+
+Close-order bounty policy:
+
+- close intents may source their flat router-custodied keeper bounty from active position margin once free settlement is exhausted,
+- this is an explicit bounded liveness tradeoff rather than a free lunch,
+- the maximum margin parked in router escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
+- liquidation / collateral reachability analysis should treat that escrowed amount as temporarily unavailable until the queued close is executed, expired, or cleaned up.
+
+Seed lifecycle policy:
+
+- once bootstrap seeding begins, new risk-increasing trading intents and ordinary LP deposits may only resume after both senior and junior seed positions exist on-chain and owner activation has occurred,
+- before that point the system may still accept explicit bootstrap / seed actions,
+- this prevents early protocol inflows or trading revenue from entering an ambiguous claimant state before both tranche ownership sets are anchored.
 
 ### D. Liquidation Equity View
 
@@ -503,7 +524,8 @@ Oracle freshness policy must be action-specific.
 
 - must use a freshness policy suitable for LP accounting,
 - stale marks may block reconcile waterfall math entirely while still allowing already-funded pending recapitalization / zero-principal trading buckets to apply through the same settlement entrypoint,
-- conservative stale-window actions must not accrue stale-window yield or perform mark-dependent LP repricing across the waterfall.
+- conservative stale-window actions must not accrue stale-window yield or perform mark-dependent LP repricing across the waterfall,
+- projected withdrawal views must map pending buckets exactly once before reserving any remaining unassigned assets.
 
 Required principle:
 
@@ -535,13 +557,14 @@ Required transition rules:
 - execution consumes escrow exactly once,
 - user cancellation is disallowed once an order is pending,
 - expiry releases user margin and applies the configured execution-bounty policy,
-- non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order.
+- non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order,
+- retryable slippage misses also leave the order pending, must not consume its escrowed execution bounty, and should be requeued behind the current global tail with an explicit cooldown rather than pinning the FIFO head.
 
 Current bounty policy notes:
 
 - Risk-increasing orders reserve router-custodied execution bounty at commit time and pay it from that escrow on success/failure/expiry according to policy.
-- Close orders reserve a flat user-funded router escrow bounty at commit time.
-- Successful, expired, and otherwise invalid close executions pay the clearer from that router escrow according to the same terminal bounty policy used by other orders.
+- Close orders reserve a flat user-funded router escrow bounty at commit time, sourcing it from free settlement first and then active position margin if the account is otherwise fully utilized.
+- Successful, expired, and otherwise terminal invalid close executions pay the clearer from that router escrow according to the same terminal bounty policy used by other orders.
 - Close-order execution bounty flow does not create protocol-fee revenue or deferred vault liabilities.
 - The deferred bounty liability bucket is reserved for liquidation bounties when immediate vault payment is unavailable. Order-execution bounties are user-funded router escrow and should never enter this liability bucket.
 

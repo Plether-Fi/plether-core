@@ -60,4 +60,8 @@ interface IHousePool {
     /// @notice Whether withdrawals are currently possible (not degraded, mark is fresh)
     function isWithdrawalLive() external view returns (bool);
 
+    function hasSeedLifecycleStarted() external view returns (bool);
+
+    function isTradingActive() external view returns (bool);
+
 }

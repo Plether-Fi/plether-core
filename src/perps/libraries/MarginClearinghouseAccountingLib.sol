@@ -106,7 +106,7 @@ library MarginClearinghouseAccountingLib {
     }
 
     function applyFundingLossMutation(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        IMarginClearinghouse.AccountUsdcBuckets memory,
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
@@ -114,11 +114,10 @@ library MarginClearinghouseAccountingLib {
     }
 
     function applyTerminalLossMutation(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 protectedLockedMarginUsdc,
+        IMarginClearinghouse.AccountUsdcBuckets memory,
+        uint256,
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
-        protectedLockedMarginUsdc;
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
         mutation.positionMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
         mutation.otherLockedMarginUnlockedUsdc = consumption.otherLockedMarginConsumedUsdc;

@@ -35,4 +35,13 @@ interface ICfdVault {
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
     function markStalenessLimit() external view returns (uint256);
 
+    /// @notice Returns true once both tranche seed positions exist.
+    function isSeedLifecycleComplete() external view returns (bool);
+
+    /// @notice Returns true if bootstrap seeding has started for either tranche.
+    function hasSeedLifecycleStarted() external view returns (bool);
+
+    /// @notice Returns true if owner has activated trading after seed completion.
+    function isTradingActive() external view returns (bool);
+
 }

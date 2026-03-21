@@ -33,6 +33,7 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__SeedFloorBreached();
     error TrancheVault__InvalidSeedPosition();
     error TrancheVault__TerminallyWiped();
+    error TrancheVault__TradingNotActive();
 
     /// @param _usdc         Underlying USDC token used as the vault asset
     /// @param _pool         HousePool that holds USDC and manages the tranche waterfall
@@ -87,6 +88,7 @@ contract TrancheVault is ERC4626 {
         address receiver
     ) public override returns (uint256) {
         POOL.reconcile();
+        _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         return super.deposit(assets, receiver);
     }
@@ -96,6 +98,7 @@ contract TrancheVault is ERC4626 {
         address receiver
     ) public override returns (uint256) {
         POOL.reconcile();
+        _requireLifecycleActiveForOrdinaryDeposit();
         _requireActiveTranche();
         return super.mint(shares, receiver);
     }
@@ -269,6 +272,12 @@ contract TrancheVault is ERC4626 {
     function _requireActiveTranche() internal view {
         if (_isTerminallyWiped()) {
             revert TrancheVault__TerminallyWiped();
+        }
+    }
+
+    function _requireLifecycleActiveForOrdinaryDeposit() internal view {
+        if (POOL.hasSeedLifecycleStarted() && !POOL.isTradingActive()) {
+            revert TrancheVault__TradingNotActive();
         }
     }
 
