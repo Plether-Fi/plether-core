@@ -225,8 +225,7 @@ contract PerpAccountingHandler is Test {
             router.orders(orderId);
         uint256 deferredTraderPayoutUsdc;
         if (isClose && marginDelta == 0) {
-            CfdEngine.ClosePreview memory preview =
-                engine.previewClose(accountId, sizeDelta, targetPrice, vaultAssetDepth());
+            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice);
             if (preview.valid) {
                 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
             }
@@ -260,7 +259,7 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, price, vaultAssetDepth());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, price);
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
@@ -335,8 +334,7 @@ contract PerpAccountingHandler is Test {
         vault.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
-        CfdEngine.ClosePreview memory closePreview =
-            engine.previewClose(accountId, size, closeOraclePrice, vault.totalAssets());
+        CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, closeOraclePrice);
         uint256 deferredTraderPayoutUsdc = closePreview.deferredPayoutUsdc;
         _recordTerminalReservationSet(accountId);
 

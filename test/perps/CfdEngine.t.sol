@@ -360,7 +360,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewClose_FullCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
+    function test_SimulateClose_FullCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(1));
         bytes32 bearId = bytes32(uint256(2));
@@ -376,13 +376,40 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 10_000e18, 1e8, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 10_000e18, 1e8, vaultDepth);
         assertTrue(preview.valid, "Full close preview should remain valid under illiquid positive funding");
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid positive-funding close should not promise immediate cash");
         assertGt(preview.deferredPayoutUsdc, 0, "Preview should surface deferred payout from positive funding credit");
     }
 
-    function test_PreviewClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
+    function test_PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth() public {
+        bytes32 bullId = bytes32(uint256(0xC10));
+        bytes32 bearId = bytes32(uint256(0xC11));
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 canonicalDepth = pool.totalAssets();
+        CfdEngine.ClosePreview memory canonicalPreview = engine.previewClose(bearId, 10_000e18, 1e8);
+        CfdEngine.ClosePreview memory matchedSimulation = engine.simulateClose(bearId, 10_000e18, 1e8, canonicalDepth);
+        CfdEngine.ClosePreview memory lowDepthSimulation =
+            engine.simulateClose(bearId, 10_000e18, 1e8, canonicalDepth / 10);
+
+        assertEq(
+            canonicalPreview.fundingUsdc, matchedSimulation.fundingUsdc, "Canonical close preview should use live depth"
+        );
+        assertGt(
+            lowDepthSimulation.fundingUsdc,
+            canonicalPreview.fundingUsdc,
+            "Simulation should honor lower hypothetical depth"
+        );
+    }
+
+    function test_SimulateClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(1));
         bytes32 bearId = bytes32(uint256(2));
@@ -398,7 +425,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 5000e18, 1e8, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 1e8, vaultDepth);
         assertTrue(preview.valid, "Partial close preview should remain valid under illiquid positive funding");
         assertEq(preview.immediatePayoutUsdc, 0, "Illiquid positive-funding partial close should not promise cash");
         assertGt(preview.deferredPayoutUsdc, 0, "Preview should include deferred funding payout on partial close");
@@ -412,7 +439,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(remainingSize, preview.remainingSize, "Partial close should preserve the residual position");
     }
 
-    function test_PreviewClose_DeferredFundingCountsTowardPostCloseDegradedMode() public {
+    function test_SimulateClose_DeferredFundingCountsTowardPostCloseDegradedMode() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(1));
         bytes32 bearId = bytes32(uint256(2));
@@ -428,7 +455,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 5000e18, 1e8, vaultDepth);
+        CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 1e8, vaultDepth);
         assertTrue(preview.valid, "Partial close preview should remain valid under illiquid positive funding");
         assertGt(preview.deferredPayoutUsdc, 0, "Setup must defer funding payout");
         assertEq(
@@ -489,7 +516,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(relayer);
         engine.claimDeferredPayout(accountId);
 
-        assertEq(clearinghouse.balanceUsdc(accountId), clearinghouseBefore + deferred, "Permissionless service should still credit the recorded trader");
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            clearinghouseBefore + deferred,
+            "Permissionless service should still credit the recorded trader"
+        );
     }
 
     function test_ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually() public {
@@ -517,9 +548,15 @@ contract CfdEngineTest is BasePerpTest {
         engine.claimDeferredPayout(accountId);
 
         assertEq(
-            clearinghouse.balanceUsdc(accountId), clearinghouseBefore + claimableNow, "Head claim should consume all currently available head liquidity"
+            clearinghouse.balanceUsdc(accountId),
+            clearinghouseBefore + claimableNow,
+            "Head claim should consume all currently available head liquidity"
         );
-        assertEq(engine.deferredPayoutUsdc(accountId), deferred - claimableNow, "Partial head claim should leave remainder queued");
+        assertEq(
+            engine.deferredPayoutUsdc(accountId),
+            deferred - claimableNow,
+            "Partial head claim should leave remainder queued"
+        );
     }
 
     function test_ClaimDeferredPayout_RevertsWithoutLiquidityOrPayout() public {
@@ -1026,8 +1063,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory normalPreview =
-            engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory normalPreview = engine.previewClose(accountId, 100_000e18, 80_000_000);
         assertTrue(normalPreview.valid);
         assertGt(normalPreview.immediatePayoutUsdc, 0);
         assertEq(normalPreview.deferredPayoutUsdc, 0);
@@ -1036,8 +1072,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        CfdEngine.ClosePreview memory illiquidPreview =
-            engine.previewClose(accountId, 100_000e18, 80_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory illiquidPreview = engine.previewClose(accountId, 100_000e18, 80_000_000);
         assertTrue(illiquidPreview.valid);
         assertEq(illiquidPreview.immediatePayoutUsdc, 0);
         assertGt(illiquidPreview.deferredPayoutUsdc, 0);
@@ -1056,7 +1091,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bearId, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
         _open(bullId, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 500_000e18, 20_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 500_000e18, 20_000_000);
         assertTrue(preview.triggersDegradedMode, "Preview should flag the profitable close that reveals insolvency");
 
         _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
@@ -1092,7 +1127,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertGt(postFunding, 0, "Setup must leave post-close funding as a solvency liability");
 
-        CfdEngine.ClosePreview memory preDrainPreview = engine.previewClose(bullId, bullSize, 1e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preDrainPreview = engine.previewClose(bullId, bullSize, 1e8);
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
         uint256 targetAssets = _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc()
@@ -1103,7 +1138,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullSize, 1e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullSize, 1e8);
         assertTrue(
             preview.triggersDegradedMode, "Preview should use post-close funding clip when testing degraded mode"
         );
@@ -1135,7 +1170,7 @@ contract CfdEngineTest is BasePerpTest {
         _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
         assertTrue(engine.degradedMode(), "Setup close should latch degraded mode");
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 900_000e18, 20_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 900_000e18, 20_000_000);
         assertTrue(preview.valid, "Full close should remain previewable after degraded mode latches");
         assertFalse(preview.triggersDegradedMode, "Transition flag should stay false after degraded mode latches");
         assertEq(
@@ -1152,7 +1187,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 1e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 1e8);
 
         assertTrue(preview.valid, "Preview should remain valid when close earns a negative VPI rebate");
         assertLt(preview.vpiDeltaUsdc, 0, "Preview should expose negative VPI as a rebate instead of panicking");
@@ -1170,8 +1205,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 freeSettlementBeforePreview = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
-        CfdEngine.ClosePreview memory preview =
-            engine.previewClose(accountId, 50_000e18, 110_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 110_000_000);
 
         assertGt(
             preview.seizedCollateralUsdc,
@@ -1189,8 +1223,7 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _open(accountId, CfdTypes.Side.BEAR, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview =
-            engine.previewClose(accountId, 100_000 * 1e18, 80_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000 * 1e18, 80_000_000);
         (uint256 sizeBefore,,,,,,,) = engine.positions(accountId);
 
         assertFalse(preview.valid, "Preview should reject an underwater partial close that invades residual backing");
@@ -1218,8 +1251,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 2000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview =
-            engine.previewClose(accountId, 100_000e18, 110_000_000, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 110_000_000);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 110_000_000);
@@ -1237,10 +1269,8 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 5000e6);
         _open(accountId, CfdTypes.Side.BEAR, 100_000e18, 4000e6, 1e8);
 
-        CfdEngine.ClosePreview memory cappedPreview =
-            engine.previewClose(accountId, 100_000e18, 2e8, pool.totalAssets());
-        CfdEngine.ClosePreview memory overCapPreview =
-            engine.previewClose(accountId, 100_000e18, 3e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory cappedPreview = engine.previewClose(accountId, 100_000e18, 2e8);
+        CfdEngine.ClosePreview memory overCapPreview = engine.previewClose(accountId, 100_000e18, 3e8);
 
         assertEq(
             overCapPreview.executionPrice,
@@ -1274,8 +1304,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 100e6);
 
-        CfdEngine.LiquidationPreview memory preview =
-            engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
         assertTrue(preview.liquidatable);
         assertEq(preview.keeperBountyUsdc, 15_150_000);
         assertLe(preview.keeperBountyUsdc, uint256(preview.equityUsdc));
@@ -1315,7 +1344,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
 
         CfdEngine.PositionView memory viewData = engine.getPositionView(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 110_000_000, vaultDepth);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 110_000_000);
 
         assertTrue(viewData.liquidatable, "Position view should use current notional for maintenance threshold");
         assertTrue(preview.liquidatable, "Liquidation preview should use current notional for maintenance threshold");
@@ -1327,6 +1356,36 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
     }
 
+    function test_PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth() public {
+        address trader = address(0xAB14015);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 2000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1105e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, 895e6);
+
+        vm.warp(block.timestamp + 1 days);
+
+        uint256 canonicalDepth = pool.totalAssets();
+        CfdEngine.LiquidationPreview memory canonicalPreview = engine.previewLiquidation(accountId, 110_000_000);
+        CfdEngine.LiquidationPreview memory matchedSimulation =
+            engine.simulateLiquidation(accountId, 110_000_000, canonicalDepth);
+        CfdEngine.LiquidationPreview memory lowDepthSimulation =
+            engine.simulateLiquidation(accountId, 110_000_000, canonicalDepth / 10);
+
+        assertEq(
+            canonicalPreview.fundingUsdc,
+            matchedSimulation.fundingUsdc,
+            "Canonical liquidation preview should use live depth"
+        );
+        assertLt(
+            lowDepthSimulation.fundingUsdc,
+            canonicalPreview.fundingUsdc,
+            "Simulation should honor lower hypothetical depth"
+        );
+    }
+
     function test_LiquidationPreview_InterfaceMatchesContractStructLayout() public {
         address trader = address(0xAB1402);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1336,10 +1395,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 895e6);
 
-        CfdEngine.LiquidationPreview memory contractPreview =
-            engine.previewLiquidation(accountId, 110_000_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory contractPreview = engine.previewLiquidation(accountId, 110_000_000);
         ICfdEngine.LiquidationPreview memory interfacePreview =
-            ICfdEngine(address(engine)).previewLiquidation(accountId, 110_000_000, pool.totalAssets());
+            ICfdEngine(address(engine)).previewLiquidation(accountId, 110_000_000);
 
         assertEq(interfacePreview.liquidatable, contractPreview.liquidatable);
         assertEq(interfacePreview.oraclePrice, contractPreview.oraclePrice);
@@ -1369,16 +1427,12 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1 days);
 
-        uint256 vaultDepth = pool.totalAssets();
-
-        CfdEngine.LiquidationPreview memory projectedPreview =
-            engine.previewLiquidation(accountId, 110_000_000, vaultDepth);
+        CfdEngine.LiquidationPreview memory projectedPreview = engine.previewLiquidation(accountId, 110_000_000);
 
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
 
-        CfdEngine.LiquidationPreview memory fundedPreview =
-            engine.previewLiquidation(accountId, 110_000_000, vaultDepth);
+        CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(accountId, 110_000_000);
 
         assertApproxEqAbs(
             projectedPreview.fundingUsdc,
@@ -1418,8 +1472,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.LiquidationPreview memory preview =
-            engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         bytes[] memory priceData = new bytes[](1);
@@ -1454,8 +1507,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-        CfdEngine.LiquidationPreview memory preview =
-            engine.previewLiquidation(accountId, 102_500_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000);
         ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
 
         assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
@@ -1485,8 +1537,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 100e6);
 
-        CfdEngine.LiquidationPreview memory preview =
-            engine.previewLiquidation(accountId, 101_000_000, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(101_000_000));
@@ -1524,7 +1575,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertGt(postFunding, 0, "Setup must leave post-liquidation funding as a solvency liability");
 
-        CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 1e8);
         assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
@@ -1536,7 +1587,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8);
         assertTrue(
             preview.triggersDegradedMode,
             "Liquidation preview should use post-liquidation funding clip when testing degraded mode"
@@ -1599,8 +1650,13 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), deferred);
 
         CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(accountId, keeper);
-        assertTrue(status.traderPayoutClaimableNow, "Oldest deferred trader claim should be claimable under partial liquidity");
-        assertFalse(status.liquidationBountyClaimableNow, "Later deferred clearer claim should remain queued behind the trader head");
+        assertTrue(
+            status.traderPayoutClaimableNow, "Oldest deferred trader claim should be claimable under partial liquidity"
+        );
+        assertFalse(
+            status.liquidationBountyClaimableNow,
+            "Later deferred clearer claim should remain queued behind the trader head"
+        );
     }
 
     function test_DeferredClearerBounty_Lifecycle() public {
@@ -3266,7 +3322,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         address trader = address(0xD004);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 200_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
 
         _enterDegradedMode();
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
@@ -3275,13 +3331,13 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
 
         vm.prank(trader);
-        engine.addMargin(accountId, 1_000e6);
+        engine.addMargin(accountId, 1000e6);
 
         (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
-        assertEq(marginAfter, marginBefore + 1_000e6, "Add margin should still increase position margin");
+        assertEq(marginAfter, marginBefore + 1000e6, "Add margin should still increase position margin");
         assertEq(
             clearinghouse.lockedMarginUsdc(accountId),
-            lockedBefore + 1_000e6,
+            lockedBefore + 1000e6,
             "Add margin should remain usable during degraded mode"
         );
     }
@@ -3714,7 +3770,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
         vm.warp(block.timestamp + 180 days);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8);
         assertTrue(preview.liquidatable, "BULL majority must be liquidatable after funding drain");
 
         address keeper = address(0x999);
@@ -3752,7 +3808,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
         (uint256 sizeA,,,,,,,) = engine.positions(bullIdA);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullIdA, sizeA, 1e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullIdA, sizeA, 1e8);
         assertTrue(preview.valid, "Close preview must be valid");
 
         _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);

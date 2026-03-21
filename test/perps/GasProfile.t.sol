@@ -430,7 +430,7 @@ contract GasProfileTest is Test {
 
         bytes32 aliceId = _accountId(alice);
         uint256 g0 = gasleft();
-        engine.previewClose(aliceId, 50_000e18, 0.95e8, pool.totalAssets());
+        engine.previewClose(aliceId, 50_000e18, 0.95e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("17_previewClose", gas);
     }
@@ -442,7 +442,7 @@ contract GasProfileTest is Test {
 
         bytes32 aliceId = _accountId(alice);
         uint256 g0 = gasleft();
-        engine.previewLiquidation(aliceId, 1.1e8, pool.totalAssets());
+        engine.previewLiquidation(aliceId, 1.1e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("18_previewLiquidation", gas);
     }

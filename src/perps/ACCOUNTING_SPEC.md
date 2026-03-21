@@ -201,11 +201,12 @@ Design rule:
 
 - status flags should stay separate from accounting quantities so downstream consumers can explain whether an action is blocked by state gating or by insufficient free cash
 
-### C. Preview Solvency Outputs
+### C. Preview And Simulation Solvency Outputs
 
 Produced by:
 
-- close and liquidation preview APIs in `CfdEngine`
+- canonical close and liquidation preview APIs in `CfdEngine`
+- hypothetical close and liquidation simulation APIs in `CfdEngine`
 
 Consumed by:
 
@@ -224,13 +225,15 @@ Field semantics:
 
 Design rule:
 
-- preview callers should use these fields to distinguish "this action is allowed but containment will latch" from "the protocol is already degraded"
+- canonical preview and hypothetical simulation callers should use these fields to distinguish "this action is allowed but containment will latch" from "the protocol is already degraded"
+- canonical preview APIs must source vault depth from live protocol state; caller-supplied depth belongs only on explicitly hypothetical simulation APIs
 
 ### D. Snapshot Consumer Graph
 
 - `CfdEngine -> HousePoolInputSnapshot -> HousePoolAccountingLib -> withdrawal limits / reconciliation`
 - `CfdEngine -> HousePoolStatusSnapshot -> withdrawal liveness gates / status views`
-- `CfdEngine preview APIs -> solvency outputs -> frontend and keeper decisioning`
+- `CfdEngine canonical preview APIs -> solvency outputs -> frontend and keeper decisioning`
+- `CfdEngine hypothetical simulation APIs -> solvency outputs -> what-if analysis and operator tooling`
 
 ## Canonical Deployment Lifecycle
 
@@ -479,7 +482,7 @@ It must trigger whenever a realized state transition leaves:
 Implementation note:
 
 - solvency accounting should remain distinct from withdrawal accounting even when both start from the same physical vault assets, because solvency may count bounded receivables that LP withdrawals must ignore.
-- preview APIs should expose both the transition flag and the raw post-op solvency state so frontends can tell whether an action newly enters degraded mode or simply remains there.
+- canonical preview and hypothetical simulation APIs should expose both the transition flag and the raw post-op solvency state so frontends and operators can tell whether an action newly enters degraded mode or simply remains there.
 
 Allowed while degraded:
 

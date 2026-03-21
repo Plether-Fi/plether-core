@@ -33,7 +33,7 @@ contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest 
     }
 
     function test_H1_ZeroPrincipalRecapitalizationCashMustNotBeCapturableByNextJuniorDepositor() public {
-        uint256 strandedCash = 1_000e6;
+        uint256 strandedCash = 1000e6;
         usdc.mint(address(pool), strandedCash);
         pool.accountExcess();
 
@@ -66,6 +66,7 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
 
     address seniorLp = address(0x1111);
     address juniorLp = address(0x2222);
+
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
     }
@@ -157,7 +158,7 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
 
         CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
         ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 1e8, pool.totalAssets());
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 1e8);
 
         assertEq(positionView.pendingFundingUsdc, preview.fundingUsdc, "Position view should project pending funding");
         assertEq(snapshot.pendingFundingUsdc, preview.fundingUsdc, "Ledger snapshot should project pending funding");
@@ -237,8 +238,16 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
 
         assertEq(snapshot.netPhysicalAssetsUsdc, 0, "Net physical assets should saturate to zero once fees exceed cash");
         assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
-        assertLe(withdrawalSnapshot.physicalAssets, pool.totalAssets(), "Withdrawal snapshot gross assets must not exceed actual cash");
-        assertLe(reconcileSnapshot.physicalAssets, pool.totalAssets(), "Reconcile snapshot gross assets must not exceed actual cash");
+        assertLe(
+            withdrawalSnapshot.physicalAssets,
+            pool.totalAssets(),
+            "Withdrawal snapshot gross assets must not exceed actual cash"
+        );
+        assertLe(
+            reconcileSnapshot.physicalAssets,
+            pool.totalAssets(),
+            "Reconcile snapshot gross assets must not exceed actual cash"
+        );
     }
 
 }

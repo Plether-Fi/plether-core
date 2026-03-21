@@ -804,3 +804,15 @@ Review:
 - [ ] `forge test --match-path test/perps/AuditLatest*.t.sol`
 - [ ] `forge test --match-path test/perps/AuditRemaining*.t.sol`
 - [ ] Update `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` for any behavior/accounting boundary changes
+
+## Perps Preview API Boundary Plan (Mar 21 2026)
+
+- [x] Inspect `src/perps` preview entrypoints and call sites for externally supplied vault-depth inputs
+- [x] Split canonical preview APIs from hypothetical simulation APIs so canonical previews read vault depth internally
+- [x] Update tests/docs to use the new preview vs simulation boundary and run focused Forge verification
+
+Review:
+- Updated `src/perps/CfdEngine.sol` so canonical `previewClose()` and `previewLiquidation()` now source depth from `vault.totalAssets()` internally, while new `simulateClose()` / `simulateLiquidation()` entrypoints own the caller-supplied what-if depth path.
+- Updated `src/perps/interfaces/ICfdEngine.sol`, `src/perps/README.md`, and `src/perps/ACCOUNTING_SPEC.md` to make the canonical-preview vs hypothetical-simulation boundary explicit for integrators.
+- Repointed perps preview call sites and tests to canonical previews by default, and moved the cash-illiquidity / alternate-depth cases onto explicit simulation coverage in `test/perps/CfdEngine.t.sol`.
+- Verified green: `forge fmt --check` on touched files, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth|PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth|SimulateClose_FullCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid|SimulateClose_PartialCloseWithPositiveFunding_ShowsDeferredPayoutWhenVaultIlliquid|SimulateClose_DeferredFundingCountsTowardPostCloseDegradedMode|LiquidationPreview_InterfaceMatchesContractStructLayout)"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol`, `forge test --match-path test/perps/invariant/PerpPreviewInvariant.t.sol`, and `forge test --match-path test/perps/invariant/PerpClosePreviewParityInvariant.t.sol`.

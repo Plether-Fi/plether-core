@@ -90,7 +90,6 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
     function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -99,7 +98,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, size, oraclePrice, vaultDepthUsdc);
+            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, size, oraclePrice);
             if (!preview.valid) {
                 continue;
             }
@@ -124,12 +123,10 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
     function invariant_LiquidationPreviewUsesAllOrNothingVaultLiquidityGating() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        uint256 vaultDepthUsdc = vault.totalAssets();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview =
-                engine.previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
             uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
             if (totalPayoutUsdc == 0) {

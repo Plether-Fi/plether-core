@@ -142,7 +142,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         int256 bullFunding = engine.getPendingFunding(bullPos);
         assertLt(bullFunding, -int256(bullPos.margin), "Setup must produce uncovered funding loss on full close");
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullPos.size, 1e8, pool.totalAssets());
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullPos.size, 1e8);
         assertTrue(preview.valid, "Full close preview must remain executable");
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
