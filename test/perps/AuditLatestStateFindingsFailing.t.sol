@@ -130,3 +130,56 @@ contract AuditLatestStateFindingsFailing_SeniorYieldCheckpoint is BasePerpTest {
     }
 
 }
+
+contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTest {
+
+    address seniorLp = address(0x44441);
+    address juniorLp = address(0x55551);
+    address trader = address(0x66661);
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_H1_StaleSeniorMutationMustNotDestroyAccruedYield() public {
+        _fundSenior(seniorLp, 100_000e6);
+        _fundJunior(juniorLp, 100_000e6);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 150_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 50_000e6, "Setup should impair senior before stale recapitalization");
+
+        _fundTrader(trader, 50_000e6);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+
+        uint256 staleStart = block.timestamp;
+        uint256 staleMutationTime = staleStart + 30 days;
+        vm.warp(staleMutationTime);
+
+        usdc.mint(address(pool), 50_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(50_000e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 freshTime = staleMutationTime + 2 days;
+        vm.warp(freshTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(freshTime));
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        uint256 minimumPreservedYield = (50_000e6 * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
+        assertGe(
+            pool.unpaidSeniorYield(),
+            minimumPreservedYield,
+            "Stale senior recapitalization should preserve the pre-mutation senior yield interval"
+        );
+    }
+
+}
