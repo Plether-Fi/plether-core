@@ -323,8 +323,7 @@ contract MarginClearinghouse is Ownable2Step {
             }
         }
 
-        reservation.status = IMarginClearinghouse.ReservationStatus.Released;
-        reservation.remainingAmountUsdc = 0;
+        _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Released);
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
 

@@ -742,12 +742,10 @@ library CfdEnginePlanLib {
 
         delta.residualUsdc = delta.riskState.equityUsdc - int256(delta.keeperBountyUsdc);
         if (delta.residualUsdc >= 0) {
-            uint256 targetBalanceUsdc = uint256(delta.residualUsdc);
-            uint256 settlementTargetUsdc = targetBalanceUsdc < settlementReachableUsdc ? targetBalanceUsdc : settlementReachableUsdc;
             delta.residualPlan =
-                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, int256(settlementTargetUsdc));
-            delta.deferredPayoutRemainingUsdc = targetBalanceUsdc > settlementTargetUsdc ? targetBalanceUsdc - settlementTargetUsdc : 0;
-            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount - delta.deferredPayoutRemainingUsdc;
+                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
+            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount;
+            delta.deferredPayoutRemainingUsdc = 0;
             delta.badDebtUsdc = 0;
         } else {
             delta.residualPlan =

@@ -229,6 +229,30 @@ contract MarginClearinghouseTest is Test {
         assertEq(summary.activeReservationCount, 0);
     }
 
+    function test_ReleaseOrderReservationIfActive_ClearsSummaryMetadata() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 1000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.reserveCommittedOrderMargin(aliceId, 14, 180 * 1e6);
+
+        vm.prank(engine);
+        uint256 releasedUsdc = clearinghouse.releaseOrderReservationIfActive(14);
+
+        IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(14);
+        IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(aliceId);
+        IMarginClearinghouse.AccountReservationSummary memory summary =
+            clearinghouse.getAccountReservationSummary(aliceId);
+
+        assertEq(releasedUsdc, 180 * 1e6);
+        assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
+        assertEq(reservation.remainingAmountUsdc, 0);
+        assertEq(buckets.committedOrderMarginUsdc, 0);
+        assertEq(summary.activeCommittedOrderMarginUsdc, 0);
+        assertEq(summary.activeReservationCount, 0);
+        assertEq(clearinghouse.reservationHeadIndex(aliceId), 1, "Head index should advance past released reservations");
+    }
+
     function test_ConsumeOrderReservation_ReducesResidualAndKeepsAggregateParity() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 1000 * 1e6);
@@ -527,11 +551,19 @@ contract MarginClearinghouseTest is Test {
 
         assertEq(seizedUsdc, 600 * 1e6, "Partial close should only seize free settlement after excluding queued margin");
         assertEq(shortfallUsdc, 100 * 1e6, "Queued margin should remain protected and surface a shortfall");
-        assertEq(buckets.settlementBalanceUsdc, 400 * 1e6, "Settlement debit should stop before invading queued collateral");
-        assertEq(buckets.totalLockedMarginUsdc, 400 * 1e6, "Remaining locked margin should still include live position and queued order");
+        assertEq(
+            buckets.settlementBalanceUsdc, 400 * 1e6, "Settlement debit should stop before invading queued collateral"
+        );
+        assertEq(
+            buckets.totalLockedMarginUsdc,
+            400 * 1e6,
+            "Remaining locked margin should still include live position and queued order"
+        );
         assertEq(buckets.freeSettlementUsdc, 0, "No free settlement should remain after the partial-close debit");
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));
-        assertEq(reservation.remainingAmountUsdc, 300 * 1e6, "Queued reservation should remain untouched by partial close");
+        assertEq(
+            reservation.remainingAmountUsdc, 300 * 1e6, "Queued reservation should remain untouched by partial close"
+        );
     }
 
     function test_ConsumeLiquidationResidual_RevertsWhenReservationIdsDoNotCoverCommittedBucket() public {

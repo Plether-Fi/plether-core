@@ -1022,8 +1022,15 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint256 bounty = record.executionBountyUsdc;
         if (bounty > 0) {
             record.executionBountyUsdc = 0;
-            USDC.safeTransfer(address(clearinghouse), bounty);
-            clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
+            if (record.core.isClose && engine.hasOpenPosition(record.core.accountId)) {
+                USDC.safeTransfer(address(clearinghouse), bounty);
+                clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
+            } else if (record.core.isClose) {
+                USDC.safeTransfer(msg.sender, bounty);
+            } else {
+                address trader = address(uint160(uint256(record.core.accountId)));
+                USDC.safeTransfer(trader, bounty);
+            }
         }
     }
 

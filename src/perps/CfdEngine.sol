@@ -1404,6 +1404,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.seizedCollateralUsdc = delta.residualPlan.seizedUsdc;
         preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
         preview.deferredPayoutUsdc = delta.deferredPayoutRemainingUsdc;
+        if (delta.payoutIsDeferred) {
+            preview.deferredPayoutUsdc += delta.traderPayoutUsdc;
+        }
         preview.badDebtUsdc = delta.badDebtUsdc;
 
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
@@ -1938,7 +1941,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return clearinghouse.getTerminalReachableUsdc(accountId) + deferredPayoutUsdc[accountId];
     }
 
-    function _consumeDeferredTraderPayout(bytes32 accountId, uint256 amountUsdc) internal {
+    function _consumeDeferredTraderPayout(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) internal {
         if (amountUsdc == 0) {
             return;
         }
@@ -1953,7 +1959,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
             uint64 nextClaimId = claim.nextClaimId;
             if (claim.claimType == ICfdEngine.DeferredClaimType.TraderPayout && claim.accountId == accountId) {
-                uint256 consumedUsdc = claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
+                uint256 consumedUsdc =
+                    claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
                 claim.remainingUsdc -= consumedUsdc;
                 remainingToConsume -= consumedUsdc;
 

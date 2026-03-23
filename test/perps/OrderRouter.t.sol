@@ -224,7 +224,11 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(2, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Single-order execution should clear the queue to the zero sentinel when exhausted");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Single-order execution should clear the queue to the zero sentinel when exhausted"
+        );
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
@@ -426,7 +430,11 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
 
         (, uint256 marginAfterCommit,,,,,,) = engine.positions(accountId);
-        assertEq(marginAfterCommit, marginBeforeCommit - 1e6, "commit should temporarily reserve the bounty from position margin");
+        assertEq(
+            marginAfterCommit,
+            marginBeforeCommit - 1e6,
+            "commit should temporarily reserve the bounty from position margin"
+        );
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
         bytes[] memory empty;
@@ -434,10 +442,60 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         (, uint256 marginAfterExecute,,,,,,) = engine.positions(accountId);
-        assertEq(marginAfterExecute, marginBeforeCommit, "failed invalid close should refund margin-backed bounty to position margin");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not receive a refunded margin-backed bounty");
+        assertEq(
+            marginAfterExecute,
+            marginBeforeCommit,
+            "failed invalid close should refund margin-backed bounty to position margin"
+        );
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not receive a refunded margin-backed bounty"
+        );
         assertEq(router.executionBountyReserves(1), 0, "failed close should clear router bounty escrow");
-        assertEq(uint256(router.getOrderRecord(1).status), uint256(OrderRouter.OrderStatus.Failed), "invalid close should finalize as failed");
+        assertEq(
+            uint256(router.getOrderRecord(1).status),
+            uint256(OrderRouter.OrderStatus.Failed),
+            "invalid close should finalize as failed"
+        );
+    }
+
+    function test_InvalidClose_RestoresFreeBackedBountyToClearinghouseBalance() public {
+        address trader = address(0x340);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x341);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        uint256 depth = 5_000_000 * 1e6;
+        _fundTrader(trader, 55_000e6);
+        _fundTrader(counterparty, 500_000e6);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+
+        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minSize = (minNotional * 1e20) / 1e8;
+        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+
+        uint256 freeSettlementBeforeCommit = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
+        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after funding the clearinghouse");
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            freeSettlementBeforeCommit - 1e6,
+            "commit should temporarily seize the close bounty from free settlement"
+        );
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            freeSettlementBeforeCommit,
+            "failed invalid close should restore the free-backed bounty into the clearinghouse ledger"
+        );
+        assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -788,7 +846,9 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, empty);
 
-        assertEq(router.nextExecuteId(), 2, "Batch should stop with the retryable middle order still pending at the head");
+        assertEq(
+            router.nextExecuteId(), 2, "Batch should stop with the retryable middle order still pending at the head"
+        );
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
@@ -878,7 +938,11 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(uint64(spamCount + 1), empty);
         uint256 gasUsed = gasBefore - gasleft();
 
-        assertEq(router.nextExecuteId(), 1, "batch should execute the tail order without requiring the adversarial retryable head to clear");
+        assertEq(
+            router.nextExecuteId(),
+            1,
+            "batch should execute the tail order without requiring the adversarial retryable head to clear"
+        );
         (uint256 size,,,,,,,) = engine.positions(carolId);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
@@ -926,7 +990,11 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, betterPrice);
 
-        assertEq(router.nextExecuteId(), 0, "once marketable again, batch should consume the retried head and clear the queue");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "once marketable again, batch should consume the retried head and clear the queue"
+        );
     }
 
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
@@ -1004,8 +1072,16 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(4, empty);
 
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
-        assertEq(executorReward, 1_000_000, "Retryable invalid heads should not pay the executor while the valid tail still executes");
-        assertEq(router.nextExecuteId(), 2, "mixed failed and successful heads should leave the retryable head pending for a later keeper");
+        assertEq(
+            executorReward,
+            1_000_000,
+            "Retryable invalid heads should not pay the executor while the valid tail still executes"
+        );
+        assertEq(
+            router.nextExecuteId(),
+            2,
+            "mixed failed and successful heads should leave the retryable head pending for a later keeper"
+        );
 
         (uint256 carolSize,,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "valid tail order should still execute after mixed heads");
@@ -1331,6 +1407,48 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
+    function test_InvalidClose_OpenPositionRestoresFreeBackedBountyToClearinghouseBalance() public {
+        address trader = address(0x340);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x341);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        uint256 depth = 5_000_000 * 1e6;
+        _fundTrader(trader, 55_000e6);
+        _fundTrader(counterparty, 500_000e6);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+
+        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minSize = (minNotional * 1e20) / 1e8;
+        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+
+        uint256 freeSettlementBeforeCommit = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
+        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after funding the clearinghouse");
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            freeSettlementBeforeCommit - 1e6,
+            "commit should temporarily seize the close bounty from free settlement"
+        );
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.warp(block.timestamp + 6);
+        mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), block.timestamp);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(
+            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            freeSettlementBeforeCommit,
+            "failed invalid close should restore the free-backed bounty into the clearinghouse ledger"
+        );
+        assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
+    }
+
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
@@ -1446,7 +1564,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(3, priceData);
 
-        assertEq(router.nextExecuteId(), 0, "Deferred-payout close should not stall the FIFO queue and should drain it when no orders remain");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Deferred-payout close should not stall the FIFO queue and should drain it when no orders remain"
+        );
         assertGt(
             engine.deferredPayoutUsdc(accountId), 0, "Deferred payout should remain recorded after batch execution"
         );
@@ -2007,7 +2129,11 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             snapshotBefore.terminalReachableUsdc,
             "Preview must exclude queued execution escrow from liquidation reachability"
         );
-        assertEq(router.nextExecuteId(), 0, "Liquidation should clear the global queue head when only liquidated-account orders remain");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Liquidation should clear the global queue head when only liquidated-account orders remain"
+        );
         assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first open-order bounty escrow");
         assertEq(
             router.executionBountyReserves(uint64(queuedOrderCount)),
