@@ -119,11 +119,13 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore, 1e6, "Keeper should receive the 1 USDC capped reward"
         );
-        assertGt(freeUsdc, 949_000 * 1e6, "Free USDC should be ~$950k (pool - maxLiab - fees)");
-        assertLt(freeUsdc, 951_000 * 1e6, "Free USDC bounded above");
+        assertGt(freeUsdc, 951_000 * 1e6, "Free USDC should include the seeded junior floor plus unencumbered capital");
+        assertLt(freeUsdc, 953_000 * 1e6, "Free USDC bounded above");
 
+        (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
         uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
-        assertEq(bobMaxWithdraw, freeUsdc, "LP should only be able to withdraw unencumbered capital");
+        assertEq(maxSeniorWithdrawUsdc + maxJuniorWithdrawUsdc, freeUsdc, "free USDC should split across tranches");
+        assertEq(bobMaxWithdraw, maxJuniorWithdrawUsdc, "junior LP should only withdraw the junior tranche share of free USDC");
     }
 
     function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {

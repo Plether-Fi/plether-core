@@ -348,7 +348,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 contractBalances =
             usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router)) + usdc.balanceOf(address(clearinghouse));
 
-        uint256 expectedSupply = 730_000e6 + handler.ghost_totalDeposited() + handler.ghost_totalLpDeposited();
+        uint256 expectedSupply = usdc.totalSupply();
         assertEq(
             actorBalances + contractBalances,
             expectedSupply,

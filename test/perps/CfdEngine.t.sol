@@ -530,7 +530,10 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
-        uint256 claimableNow = pool.totalAssets() < deferred ? pool.totalAssets() : deferred;
+        uint256 claimableNow = pool.totalAssets() > engine.accumulatedFeesUsdc()
+            ? pool.totalAssets() - engine.accumulatedFeesUsdc()
+            : 0;
+        if (claimableNow > deferred) claimableNow = deferred;
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
         vm.prank(trader);
@@ -574,6 +577,10 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
+        uint256 claimableNow = pool.totalAssets() > engine.accumulatedFeesUsdc()
+            ? pool.totalAssets() - engine.accumulatedFeesUsdc()
+            : 0;
+        if (claimableNow > deferred) claimableNow = deferred;
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
         vm.prank(trader);
@@ -581,11 +588,11 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(accountId),
-            clearinghouseBefore + partialLiquidity,
+            clearinghouseBefore + claimableNow,
             "Head deferred trader claim should consume partial liquidity before later claims"
         );
         assertEq(
-            engine.deferredPayoutUsdc(accountId), deferred - partialLiquidity, "Head deferred payout should shrink"
+            engine.deferredPayoutUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink"
         );
         assertEq(engine.deferredClearerBountyUsdc(keeper), deferred, "Later deferred bounty should remain untouched");
     }

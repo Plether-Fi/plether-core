@@ -2180,8 +2180,16 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         );
 
         address dave = address(0x444);
+        usdc.mint(dave, 1_000e6);
+        vm.startPrank(dave);
+        usdc.approve(address(seniorVault), 1_000e6);
         assertGt(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should use the projected recapitalized HWM");
         assertGt(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should use the projected recapitalized HWM");
+        uint256 shares = seniorVault.deposit(1_000e6, dave);
+        vm.stopPrank();
+
+        assertGt(shares, 0, "Senior deposit should succeed after reconcile consumes the pending recap");
+        assertEq(pool.seniorPrincipal(), recapAmount + 1_000e6, "Live state should include the recap plus the new deposit");
     }
 
 }
