@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -218,6 +219,76 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         assertGt(size, 0, "Fresh price after commit should execute");
     }
 
+}
+
+contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
+
+    address alice = address(0xA11CE);
+    address bob = address(0xB0B);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
+        return CfdTypes.RiskParams({
+            vpiFactor: 0.05e18,
+            maxSkewRatio: 0.4e18,
+            kinkSkewRatio: 0.25e18,
+            baseApy: 0,
+            maxApy: 0,
+            maintMarginBps: 100,
+            fadMarginBps: 300,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 2_000_000e6;
+    }
+
+    function test_M1_RebateIlliquidityIsTypedAsSolvencyInvalidation() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 bobId = bytes32(uint256(uint160(bob)));
+
+        _fundTrader(alice, 200_000e6);
+        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 2_000e6);
+
+        uint8 code = engine.previewOpenRevertCode(bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+        assertEq(
+            code,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "rebate illiquidity should be surfaced as typed solvency invalidation before execution"
+        );
+    }
+
+    function test_M1_RebateIlliquidityRefundsUserBounty() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        bytes32 bobId = bytes32(uint256(uint160(bob)));
+
+        _fundTrader(alice, 200_000e6);
+        _open(aliceId, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+
+        _fundTrader(bob, 20_000e6);
+        vm.deal(bob, 1 ether);
+        vm.prank(bob);
+        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, false);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 2_000e6);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(bobId);
+        assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation");
+        assertEq(usdc.balanceOf(bob), 1e6, "user should receive the reserved bounty refund");
+    }
 }
 
 contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
