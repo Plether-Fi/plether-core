@@ -1,3 +1,14 @@
+- [x] Refactor perps accounting symmetry around legacy deferred payouts and pending HousePool waterfall updates
+- [x] Add regressions for close-path deferred payout seizure and pending-bucket yield checkpoint preservation
+
+Review:
+- Planned refactor scope: (1) make close and liquidation share the same legacy deferred-payout consumption semantics so deferred value is consumed exactly once before bad debt is socialized, and (2) stop `HousePool._applyPendingBucketsLive()` from writing a stale cached waterfall struct back over freshly checkpointed `unpaidSeniorYield`.
+- Verification target: focused Forge coverage in `test/perps/CfdEngine.t.sol` and `test/perps/HousePool.t.sol`, plus any lightweight planner-level regression harnesses needed for preview/live parity.
+- Implemented a shared deferred-consumption planner helper in `src/perps/libraries/CfdEnginePlanLib.sol`, extended close deltas/previews in `src/perps/CfdEnginePlanTypes.sol` and `src/perps/CfdEngine.sol`, and wired `_applyClose()` to actually consume legacy deferred payout before socializing close bad debt.
+- Updated `src/perps/HousePool.sol` so pending-bucket application refreshes the cached waterfall `unpaidSeniorYield` after checkpointing, preventing the subsequent `_setWaterfallState(...)` write from clobbering freshly accrued yield.
+- Added regressions in `test/perps/CfdEngine.t.sol` for liquidation negative-residual deferred consumption and close-path deferred seizure, plus a fresh-mark pending-recap yield preservation regression in `test/perps/HousePool.t.sol`.
+- Verified green with `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_PlanLiquidation_NegativeResidualFullyConsumesLegacyDeferredWithoutReducingBadDebt|test_Close_ConsumesDeferredPayoutBeforeRecordingBadDebt|test_Liquidation_ConsumesDeferredPayoutBeforeRecordingBadDebt"`, `forge test --match-path test/perps/PreviewExecutionDifferential.t.sol --match-test "Close"`, and `forge test --match-path test/perps/HousePool.t.sol --match-test "test_FreshPendingSeniorMutation_PreservesCheckpointedUnpaidYield|test_StalePendingSeniorMutation_CapsFutureYieldToPostCheckpointInterval|test_MaxDepositAndMaxMint_ReopenForPendingSeniorRecapAfterWipeout"`.
+
 - [x] Design a perps internal architecture diagram that matches the repo Mermaid conventions
 - [x] Add the new diagram to `scripts/render-diagrams.mjs`
 - [x] Render and embed the new SVG in the internal architecture map

@@ -1450,6 +1450,24 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
+    function test_PlanLiquidation_NegativeResidualFullyConsumesLegacyDeferredWithoutReducingBadDebt() public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            harness.planLiquidation(0, 10e6, 2000e18, 99_600_000, 99_000_000);
+
+        assertTrue(delta.liquidatable, "Setup must remain liquidatable");
+        assertEq(delta.keeperBountyUsdc, 5e6, "Setup should use the minimum bounty");
+        assertEq(delta.residualUsdc, -7e6, "Residual should already include the legacy deferred payout");
+        assertEq(
+            delta.existingDeferredConsumedUsdc,
+            10e6,
+            "Negative residual should fully consume the legacy deferred payout once it has already been priced into equity"
+        );
+        assertEq(delta.existingDeferredRemainingUsdc, 0, "No deferred payout should survive a negative residual wipeout");
+        assertEq(delta.badDebtUsdc, 7e6, "Bad debt should remain the residual shortfall without a second offset");
+    }
+
     function test_PreviewLiquidation_ConsumesLegacyDeferredBeforeFreshCashGate() public {
         address trader = address(0xAB14002);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1781,6 +1799,53 @@ contract CfdEngineTest is BasePerpTest {
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
             preview.badDebtUsdc,
             "Bad debt should only reflect the post-deferred shortfall"
+        );
+    }
+
+    function test_Close_ConsumesDeferredPayoutBeforeRecordingBadDebt() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD231));
+        bytes32 bearId = bytes32(uint256(0xD232));
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
+        assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
+
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
+            .checked_write(reducedSettlement);
+
+        CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 80_000_000, vaultDepth);
+        assertGt(preview.existingDeferredConsumedUsdc, 0, "Close preview should seize legacy deferred payout before socializing bad debt");
+        assertLt(
+            preview.existingDeferredRemainingUsdc,
+            deferredBefore,
+            "Close preview should show less deferred payout remaining after loss absorption"
+        );
+
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth);
+
+        assertEq(
+            engine.deferredPayoutUsdc(bearId),
+            preview.deferredPayoutUsdc,
+            "Live close should leave the same deferred payout remainder shown in preview"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            preview.badDebtUsdc,
+            "Bad debt should only reflect the post-deferred shortfall on close"
         );
     }
 

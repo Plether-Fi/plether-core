@@ -1013,6 +1013,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
         if (state.waterfall.seniorPrincipal != seniorPrincipal) {
             _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
+            state.waterfall.unpaidSeniorYield = unpaidSeniorYield;
         }
 
         _setWaterfallState(state.waterfall);

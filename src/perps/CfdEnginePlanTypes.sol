@@ -216,6 +216,8 @@ library CfdEnginePlanTypes {
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;
         bool freshPayoutIsDeferred;
+        uint256 existingDeferredConsumedUsdc;
+        uint256 existingDeferredRemainingUsdc;
 
         CfdEngineSettlementLib.CloseSettlementResult lossResult;
         MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;

@@ -84,6 +84,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
         uint256 freshTraderPayoutUsdc;
+        uint256 existingDeferredConsumedUsdc;
+        uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 seizedCollateralUsdc;
@@ -1341,8 +1343,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
+        preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
+        preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.existingDeferredRemainingUsdc
+            + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
         if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
             preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
         }
@@ -1870,6 +1875,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             );
             vault.recordTradingRevenueInflow(seizedUsdc);
             _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
+            if (delta.existingDeferredConsumedUsdc > 0) {
+                _consumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
+            }
             accumulatedBadDebtUsdc += delta.badDebtUsdc;
         }
 

@@ -31,6 +31,13 @@ contract PerpAccountingHandler is Test {
         uint256 afterTerminalReachableUsdc;
     }
 
+    struct BadDebtDeferredEvent {
+        bool active;
+        bytes32 accountId;
+        uint256 badDebtAfterUsdc;
+        uint256 allowedDeferredAfterUsdc;
+    }
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -51,6 +58,8 @@ contract PerpAccountingHandler is Test {
     mapping(uint64 => uint256) internal ghostReservationConsumed;
     mapping(uint64 => uint256) internal ghostReservationReleased;
     mapping(bytes32 => ReachabilityTransition) internal reachabilityTransitions;
+
+    BadDebtDeferredEvent internal lastBadDebtDeferredEvent;
 
     bytes32 internal lastTerminalReservationAccountId;
     uint256 internal lastTerminalReservationCount;
@@ -105,6 +114,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 amountFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -122,6 +132,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 amountFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -149,6 +160,7 @@ contract PerpAccountingHandler is Test {
         uint256 marginDeltaFuzz,
         uint256 targetPriceFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -175,6 +187,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 targetPriceFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
@@ -199,6 +212,7 @@ contract PerpAccountingHandler is Test {
     function executeNextOrderBatch(
         uint256 batchSizeFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         uint64 nextExecuteId = router.nextExecuteId();
         if (nextExecuteId >= router.nextCommitId()) {
@@ -215,6 +229,7 @@ contract PerpAccountingHandler is Test {
     }
 
     function executeNextOrderModelled() external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         uint64 orderId = router.nextExecuteId();
         if (orderId >= router.nextCommitId()) {
@@ -224,19 +239,28 @@ contract PerpAccountingHandler is Test {
         (bytes32 accountId, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice,,,,, bool isClose) =
             router.orders(orderId);
         uint256 deferredTraderPayoutUsdc;
+        uint256 allowedDeferredAfterUsdc;
         if (isClose && marginDelta == 0) {
             CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice);
             if (preview.valid) {
                 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
+                allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
+                    ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+                    : 0;
             }
         }
 
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory empty;
         try router.executeOrder(orderId, empty) {
             _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId());
             if (deferredTraderPayoutUsdc > 0) {
                 ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
+            }
+            uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
+            if (isClose && badDebtAfter > badDebtBefore) {
+                _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
             }
         } catch {}
     }
@@ -245,6 +269,7 @@ contract PerpAccountingHandler is Test {
         uint256 actorIndex,
         uint256 priceFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
             return;
@@ -263,8 +288,12 @@ contract PerpAccountingHandler is Test {
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
+        uint256 allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
+            ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+            : 0;
         uint256 committedBefore = _trackedCommittedMargin(accountId);
         _recordTerminalReservationSet(accountId);
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
 
         try router.executeLiquidation(accountId, priceData) {
             ghost.recordLiquidation(accountId, usdc.balanceOf(actor), engine.accumulatedBadDebtUsdc());
@@ -276,10 +305,15 @@ contract PerpAccountingHandler is Test {
             if (shouldDefer) {
                 ghost.increaseDeferredClearerBounty(address(this), keeperBountyUsdc);
             }
+            uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
+            if (badDebtAfter > badDebtBefore) {
+                _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
+            }
         } catch {}
     }
 
     function claimDeferredClearerBounty() external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         uint256 ghostDeferredBounty = ghost.deferredClearerBountySnapshot(address(this));
         try engine.claimDeferredClearerBounty() {
@@ -292,6 +326,7 @@ contract PerpAccountingHandler is Test {
     function createDeferredTraderPayout(
         uint256 actorIndex
     ) external {
+        _clearLastBadDebtDeferredEvent();
         address actor = actors[actorIndex % actors.length];
         if (_isLiquidated(actor)) {
             return;
@@ -363,6 +398,7 @@ contract PerpAccountingHandler is Test {
     function claimDeferredPayout(
         uint256 actorIndex
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
@@ -379,6 +415,7 @@ contract PerpAccountingHandler is Test {
     function fundVault(
         uint256 amountFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         uint256 amount = bound(amountFuzz, 1000e6, 250_000e6);
         vault.seedAssets(amount);
@@ -388,6 +425,7 @@ contract PerpAccountingHandler is Test {
     function setRouterPayoutFailureMode(
         uint256 modeFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         vault.setFailRouterPayouts(modeFuzz % 2 == 1);
     }
@@ -395,6 +433,7 @@ contract PerpAccountingHandler is Test {
     function setVaultAssets(
         uint256 amountFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         vault.setAssets(bound(amountFuzz, 0, 1_000_000_000e6));
     }
@@ -402,8 +441,13 @@ contract PerpAccountingHandler is Test {
     function drainVault(
         uint256 floorFuzz
     ) external {
+        _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
         vault.setAssets(bound(floorFuzz, 0, 100e6));
+    }
+
+    function lastBadDebtDeferredEventSnapshot() external view returns (BadDebtDeferredEvent memory) {
+        return lastBadDebtDeferredEvent;
     }
 
     function accountRouterEscrow(
@@ -456,6 +500,23 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256) {
         return ghost.deferredTraderPayoutSnapshot(accountId);
+    }
+
+    function _clearLastBadDebtDeferredEvent() internal {
+        delete lastBadDebtDeferredEvent;
+    }
+
+    function _recordBadDebtDeferredEvent(
+        bytes32 accountId,
+        uint256 badDebtAfterUsdc,
+        uint256 allowedDeferredAfterUsdc
+    ) internal {
+        lastBadDebtDeferredEvent = BadDebtDeferredEvent({
+            active: true,
+            accountId: accountId,
+            badDebtAfterUsdc: badDebtAfterUsdc,
+            allowedDeferredAfterUsdc: allowedDeferredAfterUsdc
+        });
     }
 
     function totalDeferredTraderPayoutSnapshot() external view returns (uint256) {

@@ -937,6 +937,33 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
+    function test_FreshPendingSeniorMutation_PreservesCheckpointedUnpaidYield() public {
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 150_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before recapitalization");
+
+        uint256 freshTime = block.timestamp + 30 days;
+        vm.warp(freshTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(freshTime));
+
+        usdc.mint(address(pool), 50_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(50_000e6);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertGt(pool.unpaidSeniorYield(), 0, "Fresh pending senior mutation should preserve the checkpointed yield");
+        assertEq(pool.seniorPrincipal(), 101_000e6, "Recapitalization should still restore senior principal to the HWM");
+    }
+
     function helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
         usdc.mint(address(pool), 100_000e6);
         pool.accountExcess();

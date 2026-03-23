@@ -99,6 +99,24 @@ library CfdEnginePlanLib {
         .solvencyFunding;
     }
 
+    function _planDeferredPayoutConsumption(
+        uint256 deferredPayoutUsdc,
+        uint256 shortfallUsdc,
+        bool shortfallAlreadyIncludesDeferred
+    ) private pure returns (uint256 consumedUsdc, uint256 remainingUsdc, uint256 badDebtUsdc) {
+        if (deferredPayoutUsdc == 0) {
+            return (0, 0, shortfallUsdc);
+        }
+
+        if (shortfallAlreadyIncludesDeferred) {
+            return (deferredPayoutUsdc, 0, shortfallUsdc);
+        }
+
+        consumedUsdc = deferredPayoutUsdc < shortfallUsdc ? deferredPayoutUsdc : shortfallUsdc;
+        remainingUsdc = deferredPayoutUsdc - consumedUsdc;
+        badDebtUsdc = shortfallUsdc - consumedUsdc;
+    }
+
     // ──────────────────────────────────────────────
     //  PLAN GLOBAL FUNDING (lightweight, for liquidation)
     // ──────────────────────────────────────────────
@@ -557,7 +575,11 @@ library CfdEnginePlanLib {
                 delta.lossConsumption.totalConsumedUsdc, lossUsdc, cs.executionFeeUsdc
             );
             delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
-            delta.badDebtUsdc = delta.lossResult.badDebtUsdc;
+            (
+                delta.existingDeferredConsumedUsdc,
+                delta.existingDeferredRemainingUsdc,
+                delta.badDebtUsdc
+            ) = _planDeferredPayoutConsumption(snap.deferredPayoutForAccount, delta.lossResult.badDebtUsdc, false);
             delta.executionFeeUsdc = delta.lossResult.collectedExecFeeUsdc;
 
             if (delta.lossResult.shortfallUsdc > 0 && cs.remainingMarginUsdc > 0) {
@@ -627,7 +649,8 @@ library CfdEnginePlanLib {
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
                 protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: int256(deferredTraderPayoutIncrease),
+                deferredTraderPayoutDeltaUsdc: int256(deferredTraderPayoutIncrease)
+                    - int256(delta.existingDeferredConsumedUsdc),
                 deferredLiquidationBountyDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: 0
             }),
@@ -746,17 +769,15 @@ library CfdEnginePlanLib {
         delta.residualPlan =
             MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
-        if (delta.residualUsdc >= 0) {
-            delta.existingDeferredConsumedUsdc = snap.deferredPayoutForAccount;
-            delta.existingDeferredRemainingUsdc = 0;
-            delta.badDebtUsdc = 0;
-        } else {
-            delta.existingDeferredConsumedUsdc = snap.deferredPayoutForAccount < delta.residualPlan.badDebtUsdc
-                ? snap.deferredPayoutForAccount
-                : delta.residualPlan.badDebtUsdc;
-            delta.existingDeferredRemainingUsdc = snap.deferredPayoutForAccount - delta.existingDeferredConsumedUsdc;
-            delta.badDebtUsdc = delta.residualPlan.badDebtUsdc - delta.existingDeferredConsumedUsdc;
-        }
+        (
+            delta.existingDeferredConsumedUsdc,
+            delta.existingDeferredRemainingUsdc,
+            delta.badDebtUsdc
+        ) = _planDeferredPayoutConsumption(
+            snap.deferredPayoutForAccount,
+            delta.residualUsdc >= 0 ? 0 : delta.residualPlan.badDebtUsdc,
+            true
+        );
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
         if (delta.residualPlan.freshTraderPayoutUsdc > 0) {
