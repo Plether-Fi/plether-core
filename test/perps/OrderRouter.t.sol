@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -1307,6 +1308,55 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
     }
 
+    function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnPredictableSkewInvalidation() public {
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 800_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
+        address bearTrader = address(0xC333);
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bearTrader, 50_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _fundTrader(alice, 40_000e6);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 700_000e6);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+    }
+
     function test_PostCommitSkewInvalidationRefundsUserBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
@@ -1362,7 +1412,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitMarginDrainInvalidationRefundsUserBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
@@ -1378,7 +1428,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 100_000e18, "Order should fail once post-commit margin is drained");
+        assertEq(size, 10_000e18, "Order should fail once post-commit margin is drained");
         assertEq(margin, 1e6, "Post-commit state mutation should leave the original position untouched");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,

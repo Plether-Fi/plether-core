@@ -177,6 +177,16 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
+    /// @notice Returns the current open-path revert code using canonical vault depth and a caller-supplied oracle snapshot.
+    function previewOpenRevertCode(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (uint8 code);
+
     /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
     function recordDeferredClearerBounty(
         address keeper,

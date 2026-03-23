@@ -168,6 +168,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__RetryCooldownActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
     error OrderRouter__InvalidStalenessLimit();
+    error OrderRouter__PredictableOpenInvalid(uint8 code);
 
     enum OrderFailReason {
         Expired,
@@ -383,6 +384,13 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
+        if (!isClose) {
+            uint8 revertCode =
+                engine.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime());
+            if (revertCode != 0) {
+                revert OrderRouter__PredictableOpenInvalid(revertCode);
+            }
+        }
         if (pendingOrderCounts[accountId] >= MAX_PENDING_ORDERS) {
             revert OrderRouter__TooManyPendingOrders();
         }
