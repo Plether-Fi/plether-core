@@ -531,7 +531,9 @@ contract CfdEngineTest is BasePerpTest {
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
         uint256 claimableNow = pool.totalAssets();
-        if (claimableNow > deferred) claimableNow = deferred;
+        if (claimableNow > deferred) {
+            claimableNow = deferred;
+        }
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
         vm.prank(trader);
@@ -576,7 +578,9 @@ contract CfdEngineTest is BasePerpTest {
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
         uint256 claimableNow = pool.totalAssets();
-        if (claimableNow > deferred) claimableNow = deferred;
+        if (claimableNow > deferred) {
+            claimableNow = deferred;
+        }
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
         vm.prank(trader);
@@ -587,9 +591,7 @@ contract CfdEngineTest is BasePerpTest {
             clearinghouseBefore + claimableNow,
             "Head deferred trader claim should consume partial liquidity before later claims"
         );
-        assertEq(
-            engine.deferredPayoutUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink"
-        );
+        assertEq(engine.deferredPayoutUsdc(accountId), deferred - claimableNow, "Head deferred payout should shrink");
         assertEq(engine.deferredClearerBountyUsdc(keeper), deferred, "Later deferred bounty should remain untouched");
     }
 
@@ -786,7 +788,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(keeper);
         engine.claimDeferredClearerBounty();
 
-        assertEq(usdc.balanceOf(keeper) - keeperBalanceBefore, 1e6, "Keeper should receive the queue-head deferred bounty");
+        assertEq(
+            usdc.balanceOf(keeper) - keeperBalanceBefore, 1e6, "Keeper should receive the queue-head deferred bounty"
+        );
         assertEq(engine.accumulatedFeesUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting");
     }
 
@@ -1462,7 +1466,9 @@ contract CfdEngineTest is BasePerpTest {
             10e6,
             "Negative residual should fully consume the legacy deferred payout once it has already been priced into equity"
         );
-        assertEq(delta.existingDeferredRemainingUsdc, 0, "No deferred payout should survive a negative residual wipeout");
+        assertEq(
+            delta.existingDeferredRemainingUsdc, 0, "No deferred payout should survive a negative residual wipeout"
+        );
         assertEq(delta.badDebtUsdc, 7e6, "Bad debt should remain the residual shortfall without a second offset");
     }
 
@@ -1487,6 +1493,8 @@ contract CfdEngineTest is BasePerpTest {
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 3), bytes32(uint256(10e6)));
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 4), bytes32(uint256(0)));
         vm.store(address(engine), bytes32(uint256(35)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
+        stdstore.target(address(engine)).sig("accountDeferredClaimHeadId(bytes32)").with_key(accountId)
+            .checked_write(uint256(1));
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -1779,9 +1787,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bearId, 80_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
 
-        int256 terminalResidual =
-            int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc + preview.fundingUsdc
-                - int256(preview.keeperBountyUsdc);
+        int256 terminalResidual = int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc
+            + preview.fundingUsdc - int256(preview.keeperBountyUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -1843,7 +1850,11 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
         CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 80_000_000, vaultDepth);
-        assertGt(preview.existingDeferredConsumedUsdc, 0, "Close preview should seize legacy deferred payout before socializing bad debt");
+        assertGt(
+            preview.existingDeferredConsumedUsdc,
+            0,
+            "Close preview should seize legacy deferred payout before socializing bad debt"
+        );
         assertLt(
             preview.existingDeferredRemainingUsdc,
             deferredBefore,
@@ -1851,9 +1862,8 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(80_000_000)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
-        int256 terminalResidual =
-            int256(settlementReachableBefore + deferredBefore) + preview.realizedPnlUsdc + preview.fundingUsdc
-                - int256(nominalExecutionFeeUsdc);
+        int256 terminalResidual = int256(settlementReachableBefore + deferredBefore) + preview.realizedPnlUsdc
+            + preview.fundingUsdc - int256(nominalExecutionFeeUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         _close(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth);
@@ -1916,7 +1926,9 @@ contract CfdEngineTest is BasePerpTest {
             "Consuming a later trader payout must not disturb the unrelated global queue head"
         );
         assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
-        assertEq(engine.accountDeferredClaimHeadId(bearId), 0, "Bear account-local deferred chain should be fully consumed");
+        assertEq(
+            engine.accountDeferredClaimHeadId(bearId), 0, "Bear account-local deferred chain should be fully consumed"
+        );
     }
 
     function test_PreviewLiquidation_ExcludesRouterExecutionEscrowFromReachableCollateral() public {
@@ -2955,8 +2967,32 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 31);
 
+        engine.checkWithdraw(accountId);
+
+        vm.warp(block.timestamp + 270);
+
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
         engine.checkWithdraw(accountId);
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_UsesPoolMarkStalenessLimit() public {
+        pool.proposeMarkStalenessLimit(300);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeMarkStalenessLimit();
+
+        address trader = address(0x5159);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x5160);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+
+        vm.warp(block.timestamp + 31);
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
@@ -3859,6 +3895,36 @@ contract ProtocolPhaseTest is BasePerpTest {
             uint8(unconfigured.getProtocolPhase()),
             uint8(ICfdEngine.ProtocolPhase.Configuring),
             "Engine without vault/router should be Configuring"
+        );
+    }
+
+}
+
+contract ProtocolPhasePreActivationTest is BasePerpTest {
+
+    function _autoActivateTrading() internal pure override returns (bool) {
+        return false;
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function test_PhaseRemainsConfiguringUntilTradingActivation() public {
+        assertTrue(pool.isSeedLifecycleComplete(), "setup should finish seed lifecycle");
+        assertFalse(pool.isTradingActive(), "setup should leave trading inactive");
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Configuring),
+            "Configured but inactive trading should still report Configuring"
+        );
+
+        pool.activateTrading();
+
+        assertEq(
+            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase.Active),
+            "Trading activation should unlock Active phase"
         );
     }
 

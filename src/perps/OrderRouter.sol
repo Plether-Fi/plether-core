@@ -557,6 +557,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                vault.markStalenessLimit(),
                 engine.fadMaxStaleness()
             );
             if (policy.closeOnly && !order.isClose) {
@@ -648,6 +649,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                vault.markStalenessLimit(),
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
@@ -1431,6 +1433,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.MarkRefresh,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                vault.markStalenessLimit(),
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
@@ -1447,7 +1450,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     // ATOMIC LIQUIDATIONS
     // ==========================================
 
-    /// @notice Keeper-triggered liquidation with stricter staleness (≤ 15s).
+    /// @notice Keeper-triggered liquidation using the canonical live-market staleness policy.
     ///         Forfeits any queued-order execution escrow to the vault instead of crediting it back to trader settlement,
     ///         then pays the liquidation keeper bounty in USDC directly from the vault.
     /// @param accountId The account to liquidate (bytes32-encoded address)
@@ -1463,6 +1466,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.Liquidation,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
+                vault.markStalenessLimit(),
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {

@@ -66,7 +66,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     uint256 public lastReconcileTime;
     uint256 public lastSeniorYieldCheckpointTime;
     uint256 public seniorRateBps;
-    uint256 public markStalenessLimit = 120;
+    uint256 public markStalenessLimit = 60;
     bool public override(ICfdVault, IHousePool) isTradingActive;
     bool public seniorSeedInitialized;
     bool public juniorSeedInitialized;

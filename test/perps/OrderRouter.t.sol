@@ -125,7 +125,11 @@ contract OrderRouterTest is BasePerpTest {
         (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
         uint256 bobMaxWithdraw = juniorVault.maxWithdraw(bob);
         assertEq(maxSeniorWithdrawUsdc + maxJuniorWithdrawUsdc, freeUsdc, "free USDC should split across tranches");
-        assertEq(bobMaxWithdraw, maxJuniorWithdrawUsdc, "junior LP should only withdraw the junior tranche share of free USDC");
+        assertEq(
+            bobMaxWithdraw,
+            maxJuniorWithdrawUsdc,
+            "junior LP should only withdraw the junior tranche share of free USDC"
+        );
     }
 
     function test_IncreaseOrder_UsesUnlockedPositionMarginToPayTradeCost() public {
@@ -1218,6 +1222,24 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
     }
 
+    function test_OrderExecution_UsesPoolMarkStalenessLimit() public {
+        pool.proposeMarkStalenessLimit(300);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeMarkStalenessLimit();
+
+        vm.warp(1000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1100);
+        vm.warp(1200);
+        vm.roll(block.number + 1);
+
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 0, "Configured pool staleness limit should allow older live-market prices");
+    }
+
     function test_Slippage_CancelsGracefully() public {
         vm.warp(1000);
 
@@ -1758,7 +1780,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, data);
     }
 
-    function test_LiquidationStaleness_15SecBoundary() public {
+    function test_LiquidationStaleness_UsesPoolMarkStalenessLimit() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
@@ -1774,11 +1796,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
 
-        vm.warp(2016);
+        vm.warp(2061);
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
         router.executeLiquidation(accountId, empty);
 
-        vm.warp(2015);
+        vm.warp(2060);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
     }
@@ -2761,11 +2783,11 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
     }
 
-    function test_FridayGap_LiquidationStaleness15s() public {
+    function test_FridayGap_LiquidationUsesPoolMarkStalenessLimit() public {
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
 
-        vm.warp(FRIDAY_20UTC + 16);
+        vm.warp(FRIDAY_20UTC + 61);
         bytes[] memory empty = _pythUpdateData();
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 

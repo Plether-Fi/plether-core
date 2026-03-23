@@ -347,6 +347,8 @@ interface ICfdEngine {
         uint256 dayNumber
     ) external view returns (bool);
 
+    /// @notice High-level protocol lifecycle used by external status consumers.
+    ///         `Active` means the engine is wired and the vault has enabled live risk-taking.
     enum ProtocolPhase {
         Configuring,
         Active,

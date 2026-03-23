@@ -680,7 +680,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (price == 0) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
-        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : 30;
+        uint256 maxStaleness = _liveMarkStalenessLimit();
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         if (age > maxStaleness) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
@@ -781,7 +781,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : 30;
+        uint256 maxStaleness = _liveMarkStalenessLimit();
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
         if (age > maxStaleness) {
             revert CfdEngine__MarkPriceStale();
@@ -1394,8 +1394,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
         preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.existingDeferredRemainingUsdc
-            + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
+        preview.deferredPayoutUsdc =
+            delta.existingDeferredRemainingUsdc + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
         if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
             preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
         }
@@ -2015,6 +2015,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return clearinghouse.getTerminalReachableUsdc(accountId) + deferredPayoutUsdc[accountId];
     }
 
+    function _liveMarkStalenessLimit() internal view returns (uint256) {
+        return isOracleFrozen() ? fadMaxStaleness : vault.markStalenessLimit();
+    }
+
     function _consumeDeferredTraderPayout(
         bytes32 accountId,
         uint256 amountUsdc
@@ -2254,6 +2258,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
         if (degradedMode) {
             return ICfdEngine.ProtocolPhase.Degraded;
+        }
+        if (!vault.canIncreaseRisk()) {
+            return ICfdEngine.ProtocolPhase.Configuring;
         }
         return ICfdEngine.ProtocolPhase.Active;
     }
