@@ -280,7 +280,9 @@ contract HousePoolTest is BasePerpTest {
 
         uint256 totalBalance = pool.totalAssets();
         assertEq(
-            pool.juniorPrincipal(), totalBalance - fees - SEEDED_SENIOR, "Reconcile should exclude protocol fees exactly"
+            pool.juniorPrincipal(),
+            totalBalance - fees - SEEDED_SENIOR,
+            "Reconcile should exclude protocol fees exactly"
         );
     }
 
@@ -871,7 +873,9 @@ contract HousePoolTest is BasePerpTest {
             "Non-senior stale bucket routing should not reset the senior yield base"
         );
         assertEq(
-            pool.seniorPrincipal(), SEEDED_SENIOR + 100_000e6, "No senior deficit means recap should not over-credit senior"
+            pool.seniorPrincipal(),
+            SEEDED_SENIOR + 100_000e6,
+            "No senior deficit means recap should not over-credit senior"
         );
         assertEq(
             pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting"
@@ -1624,6 +1628,34 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
             juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while bootstrap is pending"
         );
         assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while bootstrap is pending");
+    }
+
+    function test_MaxDeposit_ZeroWhenFreshReconcileWouldCreateUnassignedAssets() public {
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), type(uint256).max);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+
+        usdc.mint(address(pool), 500e6);
+        pool.accountExcess();
+        vm.store(address(juniorVault), bytes32(uint256(2)), bytes32(uint256(0)));
+
+        assertFalse(
+            pool.canAcceptTrancheDeposits(false),
+            "Projected unassigned assets should block deposits before reconcile mutates storage"
+        );
+        assertEq(
+            juniorVault.maxDeposit(address(this)),
+            0,
+            "ERC4626 maxDeposit should account for projected unassigned assets"
+        );
+        assertEq(
+            juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should account for projected unassigned assets"
+        );
+
+        vm.expectRevert();
+        juniorVault.deposit(1e6, address(this));
     }
 
 }

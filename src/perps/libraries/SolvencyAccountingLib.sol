@@ -9,8 +9,8 @@ library SolvencyAccountingLib {
         int256 physicalAssetsDeltaUsdc;
         uint256 protocolFeesDeltaUsdc;
         uint256 maxLiabilityAfterUsdc;
-        uint256 deferredTraderPayoutDeltaUsdc;
-        uint256 deferredLiquidationBountyDeltaUsdc;
+        int256 deferredTraderPayoutDeltaUsdc;
+        int256 deferredLiquidationBountyDeltaUsdc;
         uint256 pendingVaultPayoutUsdc;
     }
 
@@ -116,19 +116,37 @@ library SolvencyAccountingLib {
             physicalAssetsAfterUsdc = physicalAssetsAfterUsdc > debitUsdc ? physicalAssetsAfterUsdc - debitUsdc : 0;
         }
 
+        uint256 deferredTraderPayoutAfterUsdc =
+            _applySignedDelta(currentState.deferredTraderPayoutUsdc, delta.deferredTraderPayoutDeltaUsdc);
+        uint256 deferredClearerBountyAfterUsdc =
+            _applySignedDelta(currentState.deferredClearerBountyUsdc, delta.deferredLiquidationBountyDeltaUsdc);
+
         SolvencyState memory afterState = buildSolvencyState(
             physicalAssetsAfterUsdc,
             currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
             delta.maxLiabilityAfterUsdc,
             currentState.solvencyFundingPnlUsdc,
-            currentState.deferredTraderPayoutUsdc + delta.deferredTraderPayoutDeltaUsdc,
-            currentState.deferredClearerBountyUsdc + delta.deferredLiquidationBountyDeltaUsdc
+            deferredTraderPayoutAfterUsdc,
+            deferredClearerBountyAfterUsdc
         );
 
         result.maxLiabilityAfterUsdc = afterState.maxLiabilityUsdc;
         result.effectiveAssetsAfterUsdc = effectiveAssetsAfterPendingPayout(afterState, delta.pendingVaultPayoutUsdc);
         result.postOpDegradedMode = result.effectiveAssetsAfterUsdc < result.maxLiabilityAfterUsdc;
         result.triggersDegradedMode = !alreadyDegraded && result.postOpDegradedMode;
+    }
+
+    function _applySignedDelta(
+        uint256 value,
+        int256 delta
+    ) private pure returns (uint256 updatedValue) {
+        updatedValue = value;
+        if (delta > 0) {
+            updatedValue += uint256(delta);
+        } else if (delta < 0) {
+            uint256 decrease = uint256(-delta);
+            updatedValue = updatedValue > decrease ? updatedValue - decrease : 0;
+        }
     }
 
 }

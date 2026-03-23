@@ -1443,21 +1443,31 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
-    function test_PreviewLiquidation_PositiveResidualAboveDeferredShowsFreshDeferredPayout() public {
+    function test_PreviewLiquidation_ConsumesLegacyDeferredBeforeFreshCashGate() public {
         address trader = address(0xAB14002);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address keeper = address(0xAB14003);
         _fundTrader(trader, 200e6);
         _open(accountId, CfdTypes.Side.BEAR, 10_000e18, 200e6, 99_700_000);
 
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
             .checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(10e6));
-        stdstore.target(address(engine)).sig("totalDeferredPayoutUsdc()").checked_write(uint256(10e6));
+
+        bytes32 deferredPayoutSlot = keccak256(abi.encode(accountId, uint256(30)));
+        vm.store(address(engine), deferredPayoutSlot, bytes32(uint256(10e6)));
+        vm.store(address(engine), bytes32(uint256(31)), bytes32(uint256(10e6)));
+
+        bytes32 claimBaseSlot = keccak256(abi.encode(uint256(1), uint256(34)));
+        vm.store(address(engine), claimBaseSlot, bytes32(uint256(0)));
+        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 1), accountId);
+        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 2), bytes32(uint256(0)));
+        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 3), bytes32(uint256(10e6)));
+        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 4), bytes32(uint256(0)));
+        vm.store(address(engine), bytes32(uint256(35)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        usdc.transfer(address(0xDEAD), poolAssets - 30e6);
 
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 100_000_000);
 
@@ -1467,13 +1477,37 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(preview.freshTraderPayoutUsdc, 25e6, "Preview should surface the fresh liquidation payout explicitly");
         assertEq(preview.existingDeferredConsumedUsdc, 10e6, "Preview should show the consumed legacy deferred claim");
         assertEq(preview.existingDeferredRemainingUsdc, 0, "Preview should show no leftover legacy deferred claim");
-        assertEq(preview.immediatePayoutUsdc, 0, "Drained vault cash should defer the fresh liquidation payout");
-        assertEq(
-            preview.deferredPayoutUsdc,
-            25e6,
-            "Preview should report the new deferred payout, not just remaining legacy claim"
-        );
+        assertEq(preview.immediatePayoutUsdc, 25e6, "Consumed legacy deferred claim should reopen enough cash");
+        assertEq(preview.deferredPayoutUsdc, 0, "Fresh liquidation payout should no longer stay deferred");
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        vm.prank(keeper);
+        bytes[] memory empty;
+        router.executeLiquidation(accountId, empty);
+
+        uint256 vaultAssets = pool.totalAssets() + preview.keeperBountyUsdc;
+        uint256 fees = engine.accumulatedFeesUsdc();
+        int256 funding = engine.getCappedFundingPnl();
+        uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
+        uint256 liveEffective = funding > 0
+            ? (netPhysical > uint256(funding) ? netPhysical - uint256(funding) : 0)
+            : netPhysical + uint256(-funding);
+        uint256 deferred = engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
+        liveEffective = liveEffective > deferred ? liveEffective - deferred : 0;
+        liveEffective = liveEffective > preview.keeperBountyUsdc ? liveEffective - preview.keeperBountyUsdc : 0;
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId) - settlementBefore,
+            preview.immediatePayoutUsdc,
+            "Live settlement credit should match preview"
+        );
+        assertEq(engine.deferredPayoutUsdc(accountId), 0, "Live liquidation should consume the old deferred claim");
+        assertEq(
+            preview.effectiveAssetsAfterUsdc,
+            liveEffective,
+            "Preview solvency should use net deferred liabilities after consumption"
+        );
     }
 
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {

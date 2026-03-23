@@ -317,11 +317,15 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return false;
         }
 
+        HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
+        if (ctx.pendingState.unassignedAssets > 0) {
+            return false;
+        }
+
         if (!isSenior) {
             return true;
         }
 
-        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         uint256 pendingSeniorPrincipal = ctx.pendingState.waterfall.seniorPrincipal;
         return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= seniorHighWaterMark;
     }

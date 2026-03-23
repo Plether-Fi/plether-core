@@ -416,7 +416,7 @@ contract OrderRouterTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
-    function test_InvalidClose_DoesNotPayKeeperFromMarginBackedBounty() public {
+    function test_InvalidClose_MarginBackedBountyPaysKeeper() public {
         address trader = address(0x338);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address counterparty = address(0x339);
@@ -452,11 +452,11 @@ contract OrderRouterTest is BasePerpTest {
         (, uint256 marginAfterExecute,,,,,,) = engine.positions(accountId);
         assertEq(
             marginAfterExecute,
-            marginBeforeCommit,
-            "failed invalid close should refund margin-backed bounty to position margin"
+            marginBeforeCommit - 1e6,
+            "failed invalid close should keep the consumed margin-backed bounty paid out"
         );
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not receive a refunded margin-backed bounty"
+            usdc.balanceOf(address(this)) - keeperBefore, 1e6, "keeper should receive the escrowed margin-backed bounty"
         );
         assertEq(router.executionBountyReserves(1), 0, "failed close should clear router bounty escrow");
         assertEq(
@@ -466,7 +466,7 @@ contract OrderRouterTest is BasePerpTest {
         );
     }
 
-    function test_InvalidClose_RestoresFreeBackedBountyToClearinghouseBalance() public {
+    function test_InvalidClose_FreeBackedBountyPaysKeeper() public {
         address trader = address(0x340);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address counterparty = address(0x341);
@@ -496,14 +496,16 @@ contract OrderRouterTest is BasePerpTest {
 
         bytes[] memory empty;
         vm.roll(block.number + 1);
+        uint256 keeperBefore = usdc.balanceOf(address(this));
         router.executeOrder(1, empty);
 
         assertEq(
             clearinghouse.getFreeSettlementBalanceUsdc(accountId),
-            freeSettlementBeforeCommit,
-            "failed invalid close should restore the free-backed bounty into the clearinghouse ledger"
+            freeSettlementBeforeCommit - 1e6,
+            "failed invalid close should keep the free-backed bounty consumed"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "keeper should receive the free-backed bounty");
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -1415,7 +1417,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
     }
 
-    function test_InvalidClose_OpenPositionRestoresFreeBackedBountyToClearinghouseBalance() public {
+    function test_InvalidClose_OpenPositionFreeBackedBountyPaysKeeper() public {
         address trader = address(0x340);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address counterparty = address(0x341);
@@ -1447,14 +1449,16 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), block.timestamp);
         vm.roll(block.number + 1);
+        uint256 keeperBefore = usdc.balanceOf(address(this));
         router.executeOrder(1, empty);
 
         assertEq(
             clearinghouse.getFreeSettlementBalanceUsdc(accountId),
-            freeSettlementBeforeCommit,
-            "failed invalid close should restore the free-backed bounty into the clearinghouse ledger"
+            freeSettlementBeforeCommit - 1e6,
+            "failed invalid close should keep the free-backed bounty consumed"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "keeper should receive the free-backed bounty");
     }
 
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {

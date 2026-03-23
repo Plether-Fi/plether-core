@@ -865,7 +865,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         if (revertData.length >= 4 && bytes4(revertData) == TYPED_ORDER_FAILURE_SELECTOR) {
             (ICfdEngine.OrderExecutionFailureClass failureClass,, bool isClose) = _decodeTypedOrderFailure(revertData);
             if (isClose && failureClass == ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid) {
-                return FailedOrderBountyPolicy.RefundUser;
+                return FailedOrderBountyPolicy.ClearerFull;
             }
         }
         if (_isRefundableProtocolStateFailure(revertData)) {
