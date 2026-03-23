@@ -218,6 +218,7 @@ library CfdEnginePlanTypes {
         bool freshPayoutIsDeferred;
         uint256 existingDeferredConsumedUsdc;
         uint256 existingDeferredRemainingUsdc;
+        uint256 deferredFeeRecoveryUsdc;
 
         CfdEngineSettlementLib.CloseSettlementResult lossResult;
         MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;

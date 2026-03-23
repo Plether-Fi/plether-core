@@ -1954,6 +1954,8 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearId, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(1e6)));
+        bytes32 enginePositionSlot = keccak256(abi.encode(bearId, uint256(29)));
+        vm.store(address(engine), bytes32(uint256(enginePositionSlot) + 1), bytes32(uint256(1e6)));
 
         IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(bearId);
         assertEq(locked.positionMarginUsdc, 1e6, "Test must reduce reachable collateral below the terminal close fee");
@@ -1961,12 +1963,12 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 1e8, vaultDepth);
         uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(1e8)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
 
-        assertEq(preview.badDebtUsdc, 0, "Deferred payout should prevent LP bad debt when the shortfall is fee-only");
+        assertEq(preview.badDebtUsdc, 0, "Deferred payout should prevent LP bad debt when close shortfall includes unpaid fees");
         assertEq(preview.executionFeeUsdc, nominalExecutionFeeUsdc, "Preview should report full fee collection after deferred recovery");
-        assertEq(
+        assertGe(
             preview.existingDeferredConsumedUsdc,
             nominalExecutionFeeUsdc - locked.positionMarginUsdc,
-            "Deferred payout should cover the unpaid execution fee remainder"
+            "Deferred payout should cover at least the unpaid execution fee remainder"
         );
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
