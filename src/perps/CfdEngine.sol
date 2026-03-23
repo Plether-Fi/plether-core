@@ -639,7 +639,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         deferredClearerBountyUsdc[beneficiary] -= claimAmountUsdc;
         totalDeferredClearerBountyUsdc -= claimAmountUsdc;
         claim.remainingUsdc -= claimAmountUsdc;
-        vault.payOut(beneficiary, claimAmountUsdc);
+        vault.payOut(address(clearinghouse), claimAmountUsdc);
+        clearinghouse.settleUsdc(bytes32(uint256(uint160(beneficiary))), int256(claimAmountUsdc));
         if (claim.remainingUsdc == 0) {
             _popDeferredClaimHead();
         }

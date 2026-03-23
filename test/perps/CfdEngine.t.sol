@@ -784,12 +784,14 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(status.liquidationBountyClaimableNow, "Queue-head deferred bounty should be claimable ahead of fees");
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
-        uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
         vm.prank(keeper);
         engine.claimDeferredClearerBounty();
 
         assertEq(
-            usdc.balanceOf(keeper) - keeperBalanceBefore, 1e6, "Keeper should receive the queue-head deferred bounty"
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
+            1e6,
+            "Keeper should receive the queue-head deferred bounty as clearinghouse credit"
         );
         assertEq(engine.accumulatedFeesUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting");
     }
@@ -2240,14 +2242,53 @@ contract CfdEngineTest is BasePerpTest {
             "Deferred clearer bounty should become claimable once vault liquidity returns"
         );
 
-        uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
+        bytes32 keeperId = bytes32(uint256(uint160(keeper)));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperId);
         vm.prank(relayer);
         engine.claimDeferredClearerBounty();
 
         CfdEngine.ProtocolAccountingView memory protocolViewAfter = engine.getProtocolAccountingView();
-        assertEq(usdc.balanceOf(keeper) - keeperBalanceBefore, deferredBounty);
+        assertEq(clearinghouse.balanceUsdc(keeperId) - keeperSettlementBefore, deferredBounty);
         assertEq(engine.deferredClearerBountyUsdc(keeper), 0);
         assertEq(protocolViewAfter.totalDeferredClearerBountyUsdc, 0);
+    }
+
+    function test_ClaimDeferredClearerBounty_IgnoresKeeperWalletTransferBlacklist() public {
+        address keeper = address(0xAB1603);
+        address laterKeeper = address(0xAB1604);
+        bytes32 keeperId = bytes32(uint256(uint160(keeper)));
+        uint256 deferredBounty = 25e6;
+
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, deferredBounty);
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(laterKeeper, 5e6);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets);
+        usdc.mint(address(pool), deferredBounty + 5e6);
+
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(usdc.transfer.selector, keeper, deferredBounty),
+            abi.encodeWithSignature("Error(string)", "blacklisted")
+        );
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperId);
+        vm.prank(keeper);
+        engine.claimDeferredClearerBounty();
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperId) - keeperSettlementBefore,
+            deferredBounty,
+            "Deferred clearer bounty should settle to clearinghouse credit without direct keeper transfer"
+        );
+        assertEq(
+            engine.getDeferredClaimHead().keeper,
+            laterKeeper,
+            "Claiming a blacklisted keeper head should not brick the deferred queue"
+        );
     }
 
     function test_CloseLoss_ConsumesQueuedCommittedMarginBeforeBadDebt() public {
