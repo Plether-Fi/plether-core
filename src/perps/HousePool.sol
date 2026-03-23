@@ -327,7 +327,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
 
         uint256 pendingSeniorPrincipal = ctx.pendingState.waterfall.seniorPrincipal;
-        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= seniorHighWaterMark;
+        uint256 pendingSeniorHighWaterMark = ctx.pendingState.waterfall.seniorHighWaterMark;
+        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= pendingSeniorHighWaterMark;
     }
 
     function canIncreaseRisk() public view override(ICfdVault, IHousePool) returns (bool) {

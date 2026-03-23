@@ -2158,6 +2158,32 @@ contract HousePoolSeededBaseSetupTest is BasePerpTest {
         assertEq(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should be zero while senior is impaired");
     }
 
+    function test_MaxDepositAndMaxMint_ReopenForPendingSeniorRecapAfterWipeout() public {
+        uint256 rawAssetsBefore = pool.rawAssets();
+        assertGt(rawAssetsBefore, 0, "Setup should leave real USDC in the pool before wipeout");
+        usdc.burn(address(pool), rawAssetsBefore);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0, "Senior principal should be wiped out before recap");
+        assertGt(pool.seniorHighWaterMark(), 0, "Stored HWM should remain stale until reconcile applies the recap");
+
+        uint256 recapAmount = 500e6;
+        usdc.mint(address(pool), recapAmount);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(recapAmount);
+
+        assertTrue(
+            pool.canAcceptTrancheDeposits(true),
+            "Senior deposits should reopen when pending recap fully clears the projected HWM"
+        );
+
+        address dave = address(0x444);
+        assertGt(seniorVault.maxDeposit(dave), 0, "ERC4626 maxDeposit should use the projected recapitalized HWM");
+        assertGt(seniorVault.maxMint(dave), 0, "ERC4626 maxMint should use the projected recapitalized HWM");
+    }
+
 }
 
 contract HousePoolAuditTest is BasePerpTest {
