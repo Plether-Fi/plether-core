@@ -1725,6 +1725,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         ICfdEngine.OrderExecutionFailureClass failureClass = code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
             || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
             || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+            || code == CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES
             ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
             : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
 

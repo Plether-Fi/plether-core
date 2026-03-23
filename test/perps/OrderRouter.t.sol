@@ -1331,6 +1331,34 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on solvency invalidation");
     }
 
+    function test_PostCommitMarginDrainInvalidationRefundsUserBounty() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+
+        bytes32 positionSlot = keccak256(abi.encode(aliceId, uint256(29)));
+        vm.store(address(engine), bytes32(uint256(positionSlot) + 1), bytes32(uint256(1e6)));
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.warp(7);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
+        assertEq(size, 100_000e18, "Order should fail once post-commit margin is drained");
+        assertEq(margin, 1e6, "Post-commit state mutation should leave the original position untouched");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Keeper should not receive bounty on post-commit margin-drain invalidation"
+        );
+        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on margin-drain invalidation");
+    }
+
     function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
