@@ -765,7 +765,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ClaimDeferredClearerBounty_RespectsProtocolFeeReservation() public {
+    function test_ClaimDeferredClearerBounty_UsesFeeOnlyLiquidityWhenAtQueueHead() public {
         bytes32 accountId = bytes32(uint256(0xFEE4));
         address keeper = address(0xFEE5);
         _fundTrader(address(uint160(uint256(accountId))), 5000e6);
@@ -783,13 +783,15 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), fees);
 
         CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(bytes32(0), keeper);
-        assertFalse(
-            status.liquidationBountyClaimableNow, "Pure fee inventory must not make deferred bounty claims payable"
-        );
+        assertTrue(status.liquidationBountyClaimableNow, "Queue-head deferred bounty should be claimable ahead of fees");
 
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 keeperBalanceBefore = usdc.balanceOf(keeper);
         vm.prank(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientVaultLiquidity.selector);
         engine.claimDeferredClearerBounty();
+
+        assertEq(usdc.balanceOf(keeper) - keeperBalanceBefore, 1e6, "Keeper should receive the queue-head deferred bounty");
+        assertEq(engine.accumulatedFeesUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting");
     }
 
     function test_AddMargin_UpdatesPositionAndSideTotals() public {

@@ -221,14 +221,14 @@ When a position goes underwater (equity < 0):
 #### Deferred Profitable Close Payouts
 
 - **Behavior**: If a profitable close realizes more USDC than the House Pool can immediately transfer, the position is still closed and the unpaid gain is recorded in `deferredPayoutUsdc[accountId]`
-- **Claim path**: Deferred payouts are serviced through an oldest-first queue. Once liquidity returns, anyone may call `claimDeferredPayout(accountId)` for the queue head and the vault pays the currently available amount into the `MarginClearinghouse`, which credits the recorded trader's USDC balance there. Older deferred liabilities therefore cannot be leapfrogged by newer live cash uses, and partial returning liquidity still services the oldest claim first without depending on the beneficiary to show up.
+- **Claim path**: Deferred payouts are serviced through an oldest-first queue. Once liquidity returns, anyone may call `claimDeferredPayout(accountId)` for the queue head and the vault pays the currently available amount into the `MarginClearinghouse`, which credits the recorded trader's USDC balance there. Older deferred liabilities therefore cannot be leapfrogged by newer live cash uses, partial returning liquidity still services the oldest claim first without depending on the beneficiary to show up, and queue-head servicing is senior to protocol-fee withdrawals.
 - **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
 - **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity and are counted in reserve/solvency accounting
 
 #### Deferred Liquidation Bounties
 
 - **Behavior**: If the House Pool cannot immediately fund a liquidation bounty from cash left after reserving existing deferred claims and protocol-fee inventory, the state transition still completes and the unpaid amount is recorded in the deferred bounty liability bucket. Order-execution bounties are router-custodied and therefore do not share this vault-liability path.
-- **Claim path**: Deferred clearer bounties share the same oldest-first queue. Once liquidity returns and a clearer bounty reaches the queue head, anyone may call `claimDeferredClearerBounty()` and the currently available USDC is paid directly to the recorded keeper.
+- **Claim path**: Deferred clearer bounties share the same oldest-first queue. Once liquidity returns and a clearer bounty reaches the queue head, anyone may call `claimDeferredClearerBounty()` and the currently available USDC is paid directly to the recorded keeper. Queue-head servicing remains senior to protocol-fee withdrawals.
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 

@@ -37,9 +37,9 @@ library CashPriorityLib {
             physicalAssetsUsdc, protocolFeesUsdc, deferredTraderPayoutUsdc, deferredClearerBountyUsdc
         );
         reservation.headClaimServiceableUsdc = headClaimAmountUsdc
-            < _saturatingSub(physicalAssetsUsdc, protocolFeesUsdc)
+            < physicalAssetsUsdc
             ? headClaimAmountUsdc
-            : _saturatingSub(physicalAssetsUsdc, protocolFeesUsdc);
+            : physicalAssetsUsdc;
     }
 
     function reservedSeniorCashUsdc(

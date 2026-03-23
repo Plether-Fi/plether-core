@@ -29,11 +29,16 @@ contract CashPriorityLibTest is Test {
             reservation.reservedSeniorCashUsdc, 100e6, "Fresh reservation accounting should still see all senior claims"
         );
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash should remain while senior claims exceed physical cash");
-        assertEq(
-            reservation.headClaimServiceableUsdc,
-            30e6,
-            "Head claims may only use cash left after reserving protocol fees"
-        );
+        assertEq(reservation.headClaimServiceableUsdc, 40e6, "Head claims should be serviced before protocol fees");
+    }
+
+    function test_ReserveDeferredHeadClaim_UsesCashEvenWhenFeesAlsoExceedLiquidity() public pure {
+        CashPriorityLib.SeniorCashReservation memory reservation =
+            CashPriorityLib.reserveDeferredHeadClaim(100e6, 100e6, 100e6, 0, 100e6);
+
+        assertEq(reservation.headClaimServiceableUsdc, 100e6, "Head deferred claim should use all available physical cash");
+        assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "Fees should wait until deferred head claims are funded");
+        assertEq(reservation.freeCashUsdc, 0, "No fresh cash remains while deferred claims consume all liquidity");
     }
 
     function test_CanWithdrawProtocolFees_OnlyUsesCashAboveDeferredClaims() public pure {
