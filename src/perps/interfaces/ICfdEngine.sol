@@ -185,7 +185,10 @@ interface ICfdEngine {
         address recipient
     ) external;
 
-    function restoreCloseOrderExecutionBounty(bytes32 accountId, uint256 amountUsdc) external;
+    function restoreCloseOrderExecutionBounty(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external;
 
     /// @notice Pulls router-custodied cancellation fees into protocol revenue.
     function absorbRouterCancellationFee(

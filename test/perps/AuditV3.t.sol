@@ -112,7 +112,11 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         );
 
         assertTrue(ok, "C-01: open orders must soft-fail during frozen weekend, not hard revert");
-        assertEq(router.nextExecuteId(), 0, "C-01: soft-failed frozen-weekend open should drain the queue to the zero sentinel");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "C-01: soft-failed frozen-weekend open should drain the queue to the zero sentinel"
+        );
     }
 
     function test_C01_CloseOrderBlockedByOpenInFrozenQueue() public {

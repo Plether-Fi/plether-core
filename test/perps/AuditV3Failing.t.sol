@@ -124,8 +124,13 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         pool.activateTrading();
     }
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) { return 0; }
-    function _initialSeniorDeposit() internal pure override returns (uint256) { return 0; }
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
 
     function test_4_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
@@ -178,8 +183,13 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         pool.activateTrading();
     }
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) { return 0; }
-    function _initialSeniorDeposit() internal pure override returns (uint256) { return 0; }
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({

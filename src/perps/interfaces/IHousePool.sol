@@ -30,11 +30,18 @@ interface IHousePool {
     ) external;
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
-    function assignUnassignedAssets(bool toSenior, address receiver) external;
+    function assignUnassignedAssets(
+        bool toSenior,
+        address receiver
+    ) external;
 
     /// @notice Seeds a tranche with permanent share-backed minimum ownership using real USDC.
     /// @dev Canonical deployment should initialize both tranche seeds before enabling ordinary LP lifecycle.
-    function initializeSeedPosition(bool toSenior, uint256 amount, address receiver) external;
+    function initializeSeedPosition(
+        bool toSenior,
+        uint256 amount,
+        address receiver
+    ) external;
 
     /// @notice Max withdrawable by senior, capped by free USDC
     function getMaxSeniorWithdraw() external view returns (uint256);

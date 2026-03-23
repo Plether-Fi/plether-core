@@ -18,10 +18,10 @@ import "forge-std/Script.sol";
 contract DeployInvarCoin is Script {
 
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address constant PLDXY_BEAR = 0xEDE56A22771c7fDA8b80Cc1A1fa2B54420cD4A5d;
+    address constant PLDXY_BEAR = 0x5503FB45370a03909dFfEB207483a2832A9171aD;
     address constant CURVE_LP_TOKEN = CURVE_POOL;
-    address constant CURVE_POOL = 0x2354579380cAd0518C6518e5Ee2A66d30d0149bE;
-    address constant BASKET_ORACLE = 0xfFc35FD33C2acF241F6e46625C7571D64f8AddbD;
+    address constant CURVE_POOL = 0x95D51D6F312DbE66BACC2ed677aD64790f48aa87;
+    address constant BASKET_ORACLE = 0x4f798422388484F2139717A8cE0115De3B06b1DF;
     address constant SEQUENCER_UPTIME_FEED = address(0); // L1: no sequencer feed
     address constant CRV_MINTER = 0xd061D61a4d941c39E5453435B6345Dc261C2fcE0; // L1 Curve Minter
 

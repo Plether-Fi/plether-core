@@ -204,10 +204,10 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
-        usdc.mint(address(this), 2_000e6);
-        usdc.approve(address(pool), 2_000e6);
-        pool.initializeSeedPosition(false, 1_000e6, address(this));
-        pool.initializeSeedPosition(true, 1_000e6, address(this));
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
         _fundJunior(address(this), 1_000_000e6);
         _fundTrader(alice, 50_000e6);

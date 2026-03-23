@@ -80,8 +80,14 @@ contract HousePoolTest is BasePerpTest {
 
         // Senior yield = 500k * 8% * 1 year = 40k (capped at revenue=100k, so 40k)
         // Junior surplus = 100k - 40k = 60k
-        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior gets 8% APY yield plus seeded base yield");
-        assertEq(pool.juniorPrincipal(), SEEDED_JUNIOR + 559_920 * 1e6, "Junior gets residual surplus after seeded base yield");
+        assertEq(
+            pool.seniorPrincipal(), SEEDED_SENIOR + 540_080 * 1e6, "Senior gets 8% APY yield plus seeded base yield"
+        );
+        assertEq(
+            pool.juniorPrincipal(),
+            SEEDED_JUNIOR + 559_920 * 1e6,
+            "Junior gets residual surplus after seeded base yield"
+        );
     }
 
     function test_RevenueDistribution_SeniorCapped() public {
@@ -97,7 +103,9 @@ contract HousePoolTest is BasePerpTest {
 
         // Senior yield would be 40k but capped at 10k revenue
         assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 510_000 * 1e6, "Senior capped at available revenue");
-        assertEq(pool.juniorPrincipal(), SEEDED_JUNIOR + 500_000 * 1e6, "Junior gets nothing when revenue < senior yield");
+        assertEq(
+            pool.juniorPrincipal(), SEEDED_JUNIOR + 500_000 * 1e6, "Junior gets nothing when revenue < senior yield"
+        );
     }
 
     function test_SeniorPreviewDeposit_MatchesReconcileFirstDeposit() public {
@@ -1026,7 +1034,9 @@ contract HousePoolTest is BasePerpTest {
         pool.recordProtocolInflow(25_000e6);
 
         assertEq(
-            pool.totalAssets(), SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6, "Engine-accounted inflow should become canonical immediately"
+            pool.totalAssets(),
+            SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
+            "Engine-accounted inflow should become canonical immediately"
         );
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
@@ -1039,7 +1049,9 @@ contract HousePoolTest is BasePerpTest {
         pool.recordProtocolInflow(25_000e6);
 
         assertEq(
-            pool.totalAssets(), SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6, "Router-accounted inflow should become canonical immediately"
+            pool.totalAssets(),
+            SEEDED_SENIOR + SEEDED_JUNIOR + 525_000e6,
+            "Router-accounted inflow should become canonical immediately"
         );
         assertEq(pool.excessAssets(), 0, "Router-accounted inflow should not remain quarantined as excess");
     }
@@ -1208,7 +1220,11 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped");
-        assertEq(pool.seniorPrincipal(), 402_000 * 1e6, "Senior lost the residual after junior and seeded junior are exhausted");
+        assertEq(
+            pool.seniorPrincipal(),
+            402_000 * 1e6,
+            "Senior lost the residual after junior and seeded junior are exhausted"
+        );
         assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 500_000 * 1e6, "HWM remembers original principal");
 
         // Revenue arrives: $150k. Should restore senior $100k first, then junior gets $50k.
@@ -1250,7 +1266,11 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), 0);
-        assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 100_000 * 1e6, "HWM preserves senior recovery rights after wipeout");
+        assertEq(
+            pool.seniorHighWaterMark(),
+            SEEDED_SENIOR + 100_000 * 1e6,
+            "HWM preserves senior recovery rights after wipeout"
+        );
     }
 
     function test_C3_DepositCooldown_BlocksFlashWithdraw() public {
@@ -1525,7 +1545,9 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         usdc.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
-        assertTrue(pool.hasSeedLifecycleStarted(), "Seed initialization should succeed even with preexisting tranche supply");
+        assertTrue(
+            pool.hasSeedLifecycleStarted(), "Seed initialization should succeed even with preexisting tranche supply"
+        );
         assertEq(juniorVault.seedReceiver(), address(this), "Seed receiver should still be configured canonically");
     }
 
@@ -1557,12 +1579,25 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     address alice = address(0x111);
     address bob = address(0x222);
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) { return 0; }
-    function _initialSeniorDeposit() internal pure override returns (uint256) { return 0; }
-    function _initialJuniorSeedDeposit() internal pure override returns (uint256) { return 0; }
-    function _initialSeniorSeedDeposit() internal pure override returns (uint256) { return 0; }
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
 
-    function _mintAndAccountPoolExcess(uint256 amount) internal {
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _mintAndAccountPoolExcess(
+        uint256 amount
+    ) internal {
         usdc.mint(address(pool), amount);
         pool.accountExcess();
     }
@@ -1581,107 +1616,412 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         });
     }
 
-    function test_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public { helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver(); }
-    function test_InitializeSeedPosition_MintsPermanentSeedShares() public { helper_InitializeSeedPosition_MintsPermanentSeedShares(); }
-    function helper_Test_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public { helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth(); }
-    function test_SeedReceiverCannotRedeemBelowFloor() public { helper_SeedReceiverCannotRedeemBelowFloor(); }
-    function test_SeedReceiverMaxViews_ExcludeLockedFloor() public { helper_SeedReceiverMaxViews_ExcludeLockedFloor(); }
-    function test_WipedSeededTranche_IsTerminallyNonDepositable() public { helper_WipedSeededTranche_IsTerminallyNonDepositable(); }
-    function test_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public { helper_SeededJuniorRevenueStaysOwnedAfterLastUserExits(); }
-    function test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting() public { helper_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting(); }
-    function test_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist() public { helper_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist(); }
-    function test_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public { helper_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets(); }
-    function test_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public { helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets(); }
-    function test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public { helper_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists(); }
-    function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public { helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets(); }
-    function test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public { helper_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero(); }
-    function test_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public { helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity(); }
-    function test_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals() public { helper_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals(); }
-    function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public { helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation(); }
-    function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public { helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets(); }
-    function test_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public { helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout(); }
+    function test_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
+        helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver();
+    }
+
+    function test_InitializeSeedPosition_MintsPermanentSeedShares() public {
+        helper_InitializeSeedPosition_MintsPermanentSeedShares();
+    }
+
+    function helper_Test_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
+        helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth();
+    }
+
+    function test_SeedReceiverCannotRedeemBelowFloor() public {
+        helper_SeedReceiverCannotRedeemBelowFloor();
+    }
+
+    function test_SeedReceiverMaxViews_ExcludeLockedFloor() public {
+        helper_SeedReceiverMaxViews_ExcludeLockedFloor();
+    }
+
+    function test_WipedSeededTranche_IsTerminallyNonDepositable() public {
+        helper_WipedSeededTranche_IsTerminallyNonDepositable();
+    }
+
+    function test_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public {
+        helper_SeededJuniorRevenueStaysOwnedAfterLastUserExits();
+    }
+
+    function test_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting() public {
+        helper_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting();
+    }
+
+    function test_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist() public {
+        helper_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist();
+    }
+
+    function test_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public {
+        helper_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets();
+    }
+
+    function test_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
+        helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets();
+    }
+
+    function test_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public {
+        helper_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists();
+    }
+
+    function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
+        helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets();
+    }
+
+    function test_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
+        helper_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero();
+    }
+
+    function test_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
+        helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity();
+    }
+
+    function test_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals() public {
+        helper_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals();
+    }
+
+    function test_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
+        helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation();
+    }
+
+    function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
+        helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets();
+    }
+
+    function test_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
+        helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout();
+    }
 
     function helper_AssignUnassignedAssets_MintsMatchingSharesToReceiver() public {
-        usdc.mint(address(pool), 100_000e6); pool.accountExcess(); vm.prank(address(juniorVault)); pool.reconcile();
-        uint256 supplyBefore = juniorVault.totalSupply(); uint256 receiverSharesBefore = juniorVault.balanceOf(alice);
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 receiverSharesBefore = juniorVault.balanceOf(alice);
         pool.assignUnassignedAssets(false, alice);
         uint256 mintedShares = juniorVault.balanceOf(alice) - receiverSharesBefore;
-        assertGt(mintedShares, 0); assertEq(juniorVault.totalSupply(), supplyBefore + mintedShares); assertEq(pool.unassignedAssets(), 0);
+        assertGt(mintedShares, 0);
+        assertEq(juniorVault.totalSupply(), supplyBefore + mintedShares);
+        assertEq(pool.unassignedAssets(), 0);
     }
+
     function helper_InitializeSeedPosition_MintsPermanentSeedShares() public {
-        uint256 assets = 100_000e6; address seed = address(0xBEEF); usdc.mint(address(this), assets); usdc.approve(address(pool), assets); pool.initializeSeedPosition(false, assets, seed);
-        assertEq(juniorVault.seedReceiver(), seed); assertGt(juniorVault.seedShareFloor(), 0); assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+        pool.initializeSeedPosition(false, assets, seed);
+        assertEq(juniorVault.seedReceiver(), seed);
+        assertGt(juniorVault.seedShareFloor(), 0);
+        assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
     }
+
     function helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
-        usdc.mint(address(this), 200_000e6); usdc.approve(address(pool), 200_000e6); pool.initializeSeedPosition(false, 100_000e6, address(this)); pool.initializeSeedPosition(true, 100_000e6, address(this)); pool.activateTrading();
-        address trader = address(0x99990); _fundTrader(trader, 50_000e6); bytes32 traderId = bytes32(uint256(uint160(trader))); _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
-        vm.warp(block.timestamp + 30 days); vm.prank(address(router)); engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        usdc.mint(address(this), 100_000e6); usdc.approve(address(pool), 100_000e6); pool.initializeSeedPosition(false, 100_000e6, address(this));
+        usdc.mint(address(this), 200_000e6);
+        usdc.approve(address(pool), 200_000e6);
+        pool.initializeSeedPosition(false, 100_000e6, address(this));
+        pool.initializeSeedPosition(true, 100_000e6, address(this));
+        pool.activateTrading();
+        address trader = address(0x99990);
+        _fundTrader(trader, 50_000e6);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _open(traderId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        usdc.mint(address(this), 100_000e6);
+        usdc.approve(address(pool), 100_000e6);
+        pool.initializeSeedPosition(false, 100_000e6, address(this));
     }
+
     function helper_SeedReceiverCannotRedeemBelowFloor() public {
-        uint256 assets = 100_000e6; address seed = address(0xBEEF); usdc.mint(address(this), assets); usdc.approve(address(pool), assets); pool.initializeSeedPosition(false, assets, seed);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1); vm.startPrank(seed); vm.expectRevert(TrancheVault.TrancheVault__SeedFloorBreached.selector); juniorVault.transfer(alice, 1); vm.stopPrank();
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+        pool.initializeSeedPosition(false, assets, seed);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        vm.startPrank(seed);
+        vm.expectRevert(TrancheVault.TrancheVault__SeedFloorBreached.selector);
+        juniorVault.transfer(alice, 1);
+        vm.stopPrank();
     }
+
     function helper_SeedReceiverMaxViews_ExcludeLockedFloor() public {
-        uint256 assets = 100_000e6; address seed = address(0xBEEF); usdc.mint(address(this), assets); usdc.approve(address(pool), assets); pool.initializeSeedPosition(false, assets, seed);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1); assertEq(juniorVault.maxRedeem(seed), 0); assertEq(juniorVault.maxWithdraw(seed), 0);
+        uint256 assets = 100_000e6;
+        address seed = address(0xBEEF);
+        usdc.mint(address(this), assets);
+        usdc.approve(address(pool), assets);
+        pool.initializeSeedPosition(false, assets, seed);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        assertEq(juniorVault.maxRedeem(seed), 0);
+        assertEq(juniorVault.maxWithdraw(seed), 0);
     }
+
     function helper_WipedSeededTranche_IsTerminallyNonDepositable() public {
-        uint256 seedAssets = 100_000e6; address seed = address(0xBEEF); usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(false, seedAssets, seed);
-        usdc.mint(address(this), 1e6); usdc.approve(address(pool), 1e6); pool.initializeSeedPosition(true, 1e6, address(this)); pool.activateTrading(); usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile();
-        assertGt(juniorVault.totalSupply(), 0); assertEq(juniorVault.totalAssets(), 0); assertEq(juniorVault.maxDeposit(alice), 0); assertEq(juniorVault.maxMint(alice), 0);
-        usdc.mint(alice, 1e6); vm.startPrank(alice); usdc.approve(address(juniorVault), 1e6); vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector); juniorVault.deposit(1e6, alice); vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector); juniorVault.mint(1e18, alice); vm.stopPrank();
+        uint256 seedAssets = 100_000e6;
+        address seed = address(0xBEEF);
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, seed);
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(true, 1e6, address(this));
+        pool.activateTrading();
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertGt(juniorVault.totalSupply(), 0);
+        assertEq(juniorVault.totalAssets(), 0);
+        assertEq(juniorVault.maxDeposit(alice), 0);
+        assertEq(juniorVault.maxMint(alice), 0);
+        usdc.mint(alice, 1e6);
+        vm.startPrank(alice);
+        usdc.approve(address(juniorVault), 1e6);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        juniorVault.deposit(1e6, alice);
+        vm.expectRevert(TrancheVault.TrancheVault__TerminallyWiped.selector);
+        juniorVault.mint(1e18, alice);
+        vm.stopPrank();
     }
+
     function helper_SeededJuniorRevenueStaysOwnedAfterLastUserExits() public {
-        uint256 seedAssets = 100_000e6; address seed = address(0xBEEF); usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(false, seedAssets, seed);
-        usdc.mint(address(this), 1e6); usdc.approve(address(pool), 1e6); pool.initializeSeedPosition(true, 1e6, address(this)); pool.activateTrading(); _fundSenior(alice, 100_000e6); _fundJunior(bob, 100_000e6);
-        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1); vm.startPrank(bob); juniorVault.redeem(juniorVault.balanceOf(bob), bob, bob); vm.stopPrank(); uint256 unassignedBefore = pool.unassignedAssets(); _mintAndAccountPoolExcess(50_000e6); vm.prank(address(juniorVault)); pool.reconcile();
-        assertEq(pool.unassignedAssets(), unassignedBefore); assertGt(pool.juniorPrincipal(), seedAssets);
+        uint256 seedAssets = 100_000e6;
+        address seed = address(0xBEEF);
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, seed);
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(true, 1e6, address(this));
+        pool.activateTrading();
+        _fundSenior(alice, 100_000e6);
+        _fundJunior(bob, 100_000e6);
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
+        vm.startPrank(bob);
+        juniorVault.redeem(juniorVault.balanceOf(bob), bob, bob);
+        vm.stopPrank();
+        uint256 unassignedBefore = pool.unassignedAssets();
+        _mintAndAccountPoolExcess(50_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), unassignedBefore);
+        assertGt(pool.juniorPrincipal(), seedAssets);
     }
+
     function helper_RecordRecapitalizationInflow_RestoresSeededSeniorBeforeFallbackAccounting() public {
-        uint256 seedAssets = 100_000e6; usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(true, seedAssets, address(this)); vm.prank(address(pool)); usdc.transfer(address(0xdead), 40_000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 60_000e6);
-        usdc.mint(address(pool), 25_000e6); vm.prank(address(engine)); pool.recordRecapitalizationInflow(25_000e6); (uint256 pendingSenior,,,) = pool.getPendingTrancheState(); assertEq(pendingSenior, 85_000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 85_000e6); assertEq(pool.unassignedAssets(), 0);
+        uint256 seedAssets = 100_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+        vm.prank(address(pool));
+        usdc.transfer(address(0xdead), 40_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 60_000e6);
+        usdc.mint(address(pool), 25_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(25_000e6);
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 85_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 85_000e6);
+        assertEq(pool.unassignedAssets(), 0);
     }
+
     function helper_RecordRecapitalizationInflow_SeedsSeniorWhenNoPrincipalButSeedSharesExist() public {
-        uint256 seedAssets = 50_000e6; usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(true, seedAssets, address(this)); usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 0); assertGt(seniorVault.totalSupply(), 0);
-        usdc.mint(address(pool), 10_000e6); vm.prank(address(engine)); pool.recordRecapitalizationInflow(10_000e6); (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState(); assertEq(pendingSenior, 10_000e6); assertEq(maxJuniorWithdraw, 0); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 10_000e6); assertEq(pool.seniorHighWaterMark(), 10_000e6);
+        uint256 seedAssets = 50_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertGt(seniorVault.totalSupply(), 0);
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+        (uint256 pendingSenior,,, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 10_000e6);
+        assertEq(maxJuniorWithdraw, 0);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 10_000e6);
+        assertEq(pool.seniorHighWaterMark(), 10_000e6);
     }
+
     function helper_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public {
-        uint256 seedAssets = 50_000e6; usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(true, seedAssets, address(this)); usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile();
-        usdc.mint(address(pool), 10_000e6); vm.prank(address(engine)); pool.recordRecapitalizationInflow(10_000e6); (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState(); assertEq(pendingSenior, 10_000e6); assertEq(maxSeniorWithdraw, 10_000e6);
+        uint256 seedAssets = 50_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+        (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 10_000e6);
+        assertEq(maxSeniorWithdraw, 10_000e6);
     }
+
     function helper_RecordRecapitalizationInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
-        usdc.mint(address(pool), 10_000e6); vm.prank(address(engine)); pool.recordRecapitalizationInflow(10_000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 0); assertEq(pool.unassignedAssets(), 10_000e6);
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordRecapitalizationInflow(10_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.unassignedAssets(), 10_000e6);
     }
+
     function helper_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists() public {
-        uint256 seedAssets = 20_000e6; usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(false, seedAssets, address(this)); usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.juniorPrincipal(), 0); assertGt(juniorVault.totalSupply(), 0);
-        usdc.mint(address(pool), 7000e6); vm.prank(address(engine)); pool.recordTradingRevenueInflow(7000e6); (, uint256 pendingJunior,,) = pool.getPendingTrancheState(); assertEq(pendingJunior, 7000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.juniorPrincipal(), 7000e6); assertEq(pool.unassignedAssets(), 0);
+        uint256 seedAssets = 20_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 0);
+        assertGt(juniorVault.totalSupply(), 0);
+        usdc.mint(address(pool), 7000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(7000e6);
+        (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingJunior, 7000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 7000e6);
+        assertEq(pool.unassignedAssets(), 0);
     }
+
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
-        usdc.mint(address(pool), 7000e6); vm.prank(address(engine)); pool.recordTradingRevenueInflow(7000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 0); assertEq(pool.juniorPrincipal(), 0); assertEq(pool.unassignedAssets(), 7000e6);
+        usdc.mint(address(pool), 7000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(7000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.juniorPrincipal(), 0);
+        assertEq(pool.unassignedAssets(), 7000e6);
     }
+
     function helper_RecordTradingRevenueInflow_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
-        usdc.mint(address(this), 30_000e6); usdc.approve(address(pool), 30_000e6); pool.initializeSeedPosition(true, 30_000e6, address(this)); usdc.mint(address(this), 10_000e6); usdc.approve(address(pool), 10_000e6); pool.initializeSeedPosition(false, 10_000e6, address(this));
-        usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile(); usdc.mint(address(pool), 35_000e6); vm.prank(address(engine)); pool.recordTradingRevenueInflow(35_000e6); (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState(); assertEq(pendingSenior, 30_000e6); assertEq(pendingJunior, 5000e6); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 30_000e6); assertEq(pool.juniorPrincipal(), 5000e6); assertEq(pool.unassignedAssets(), 0);
+        usdc.mint(address(this), 30_000e6);
+        usdc.approve(address(pool), 30_000e6);
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
+        usdc.mint(address(this), 10_000e6);
+        usdc.approve(address(pool), 10_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        usdc.mint(address(pool), 35_000e6);
+        vm.prank(address(engine));
+        pool.recordTradingRevenueInflow(35_000e6);
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 30_000e6);
+        assertEq(pendingJunior, 5000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 30_000e6);
+        assertEq(pool.juniorPrincipal(), 5000e6);
+        assertEq(pool.unassignedAssets(), 0);
     }
+
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
-        usdc.mint(address(pool), 100_000e6); vm.prank(address(engine)); pool.recordProtocolInflow(100_000e6); vm.prank(address(juniorVault)); pool.reconcile(); (,, uint256 maxSeniorWithdraw, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
-        assertEq(pool.unassignedAssets(), 100_000e6); assertEq(pool.getFreeUSDC(), 0); assertEq(pool.getMaxSeniorWithdraw(), 0); assertEq(pool.getMaxJuniorWithdraw(), 0); assertEq(maxSeniorWithdraw, 0); assertEq(maxJuniorWithdraw, 0); assertTrue(pool.isWithdrawalLive());
+        usdc.mint(address(pool), 100_000e6);
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(100_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        (,, uint256 maxSeniorWithdraw, uint256 maxJuniorWithdraw) = pool.getPendingTrancheState();
+        assertEq(pool.unassignedAssets(), 100_000e6);
+        assertEq(pool.getFreeUSDC(), 0);
+        assertEq(pool.getMaxSeniorWithdraw(), 0);
+        assertEq(pool.getMaxJuniorWithdraw(), 0);
+        assertEq(maxSeniorWithdraw, 0);
+        assertEq(maxJuniorWithdraw, 0);
+        assertTrue(pool.isWithdrawalLive());
     }
+
     function helper_UnassignedAssets_DoNotTrapExistingSeniorWithdrawals() public {
-        usdc.mint(address(this), 2_000e6); usdc.approve(address(pool), 2_000e6); pool.initializeSeedPosition(false, 1_000e6, address(this)); pool.initializeSeedPosition(true, 1_000e6, address(this)); pool.activateTrading();
-        _fundSenior(alice, 100_000e6); usdc.mint(address(pool), 10_000e6); pool.accountExcess(); vm.prank(address(juniorVault)); pool.reconcile(); vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1); uint256 quotedAssets = seniorVault.maxWithdraw(alice); assertEq(pool.unassignedAssets(), 0); assertEq(quotedAssets, 100_000e6); uint256 aliceBefore = usdc.balanceOf(alice); vm.prank(alice); seniorVault.withdraw(quotedAssets, alice, alice); assertEq(usdc.balanceOf(alice), aliceBefore + quotedAssets);
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+        _fundSenior(alice, 100_000e6);
+        usdc.mint(address(pool), 10_000e6);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        vm.warp(block.timestamp + seniorVault.DEPOSIT_COOLDOWN() + 1);
+        uint256 quotedAssets = seniorVault.maxWithdraw(alice);
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(quotedAssets, 100_000e6);
+        uint256 aliceBefore = usdc.balanceOf(alice);
+        vm.prank(alice);
+        seniorVault.withdraw(quotedAssets, alice, alice);
+        assertEq(usdc.balanceOf(alice), aliceBefore + quotedAssets);
     }
+
     function helper_InitializeSeedPosition_CheckpointsSeniorYieldBeforePrincipalMutation() public {
-        uint256 staleTime = block.timestamp + 30 days; vm.warp(staleTime); usdc.mint(address(this), 100_000e6); usdc.approve(address(pool), 100_000e6); pool.initializeSeedPosition(true, 100_000e6, address(this)); assertEq(pool.unpaidSeniorYield(), 0); assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 100_000e6); assertEq(pool.unpaidSeniorYield(), 0);
+        uint256 staleTime = block.timestamp + 30 days;
+        vm.warp(staleTime);
+        usdc.mint(address(this), 100_000e6);
+        usdc.approve(address(pool), 100_000e6);
+        pool.initializeSeedPosition(true, 100_000e6, address(this));
+        assertEq(pool.unpaidSeniorYield(), 0);
+        assertEq(pool.lastSeniorYieldCheckpointTime(), block.timestamp);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 100_000e6);
+        assertEq(pool.unpaidSeniorYield(), 0);
     }
+
     function helper_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
-        usdc.mint(address(pool), 100_000e6); pool.accountExcess(); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.unassignedAssets(), 100_000e6); address trader = address(0x99992); bytes32 traderId = bytes32(uint256(uint160(trader))); _fundTrader(trader, 50_000e6); _open(traderId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8); vm.prank(address(router)); engine.updateMarkPrice(1.2e8, uint64(block.timestamp)); pool.assignUnassignedAssets(false, alice); assertLt(pool.juniorPrincipal(), 100_000e6); assertEq(pool.unassignedAssets(), 0);
+        usdc.mint(address(pool), 100_000e6);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), 100_000e6);
+        address trader = address(0x99992);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
+        pool.assignUnassignedAssets(false, alice);
+        assertLt(pool.juniorPrincipal(), 100_000e6);
+        assertEq(pool.unassignedAssets(), 0);
     }
+
     function helper_AssignUnassignedAssets_ResetsSeniorHwmAfterTerminalWipeout() public {
-        uint256 seedAssets = 50_000e6; usdc.mint(address(this), seedAssets); usdc.approve(address(pool), seedAssets); pool.initializeSeedPosition(true, seedAssets, address(this)); usdc.burn(address(pool), pool.totalAssets()); vm.prank(address(juniorVault)); pool.reconcile(); assertEq(pool.seniorPrincipal(), 0); assertGt(pool.seniorHighWaterMark(), 0);
-        usdc.mint(address(pool), 10_000e6); vm.prank(address(engine)); pool.recordProtocolInflow(10_000e6); vm.prank(address(juniorVault)); pool.reconcile(); pool.assignUnassignedAssets(true, alice); assertEq(pool.seniorPrincipal(), 10_000e6); assertEq(pool.seniorHighWaterMark(), 10_000e6);
+        uint256 seedAssets = 50_000e6;
+        usdc.mint(address(this), seedAssets);
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(true, seedAssets, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertGt(pool.seniorHighWaterMark(), 0);
+        usdc.mint(address(pool), 10_000e6);
+        vm.prank(address(engine));
+        pool.recordProtocolInflow(10_000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        pool.assignUnassignedAssets(true, alice);
+        assertEq(pool.seniorPrincipal(), 10_000e6);
+        assertEq(pool.seniorHighWaterMark(), 10_000e6);
     }
+
 }
 
 contract HousePoolSeededBaseSetupTest is BasePerpTest {

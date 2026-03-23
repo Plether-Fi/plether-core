@@ -306,7 +306,9 @@ contract PerpsForkTest is Test {
         vm.expectRevert(CfdEngine.CfdEngine__RouterAlreadySet.selector);
         engine.setOrderRouter(address(realPythRouter));
 
-        assertEq(address(realPythRouter.pyth()), REAL_PYTH, "Router construction should still accept the real Pyth contract");
+        assertEq(
+            address(realPythRouter.pyth()), REAL_PYTH, "Router construction should still accept the real Pyth contract"
+        );
     }
 
     // ==========================================
@@ -336,7 +338,11 @@ contract PerpsForkTest is Test {
         bytes32 aliceId = _accountId(alice);
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "MEV-tainted order should not open position");
-        assertEq(router.nextExecuteId(), 0, "Queue should advance after expiring the MEV-tainted order and clear to the zero sentinel");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Queue should advance after expiring the MEV-tainted order and clear to the zero sentinel"
+        );
     }
 
     function test_Staleness_61SecondPrice_Reverts() public {
@@ -377,7 +383,9 @@ contract PerpsForkTest is Test {
         bytes32 aliceId = _accountId(alice);
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "59-second-old price should execute");
-        assertEq(router.nextExecuteId(), 0, "Successful execution should advance the queue and clear to the zero sentinel");
+        assertEq(
+            router.nextExecuteId(), 0, "Successful execution should advance the queue and clear to the zero sentinel"
+        );
     }
 
     function test_LiquidationStaleness_16SecondsOld_Reverts() public {
@@ -641,8 +649,16 @@ contract PerpsForkTest is Test {
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
         uint256 chAfterClose = clearinghouse.balanceUsdc(aliceId);
-        assertLt(chAfterClose, chBefore, "Pre-claim clearinghouse balance should still reflect close bounty and funding settlement");
-        assertEq(chBefore - chAfterClose, closeBountyUsdc + 66_590, "Only the close bounty and realized funding should move before claim");
+        assertLt(
+            chAfterClose,
+            chBefore,
+            "Pre-claim clearinghouse balance should still reflect close bounty and funding settlement"
+        );
+        assertEq(
+            chBefore - chAfterClose,
+            closeBountyUsdc + 66_590,
+            "Only the close bounty and realized funding should move before claim"
+        );
 
         deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + deferred);
         vm.prank(address(router));
@@ -652,7 +668,11 @@ contract PerpsForkTest is Test {
         engine.claimDeferredPayout(aliceId);
 
         assertEq(engine.deferredPayoutUsdc(aliceId), 0, "Claim should clear deferred payout state");
-        assertEq(clearinghouse.balanceUsdc(aliceId), chAfterClose + deferred, "Claim should credit deferred USDC on top of the post-close settlement balance");
+        assertEq(
+            clearinghouse.balanceUsdc(aliceId),
+            chAfterClose + deferred,
+            "Claim should credit deferred USDC on top of the post-close settlement balance"
+        );
     }
 
     function test_DeferredPayoutBatchDoesNotBlockTailOrder_RealUsdc() public {
@@ -679,12 +699,24 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrderBatch(3, _pythUpdateData());
 
-        assertEq(router.nextExecuteId(), 0, "Batch execution should continue past a deferred-payout close and clear the queue when exhausted");
+        assertEq(
+            router.nextExecuteId(),
+            0,
+            "Batch execution should continue past a deferred-payout close and clear the queue when exhausted"
+        );
         assertGt(engine.deferredPayoutUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
 
         (uint256 size,,,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(aliceId);
-        assertEq(size, 0, "Tail open should be consumed even if deferred payout leaves the protocol unable to re-open immediately");
-        assertEq(uint256(side), uint256(CfdTypes.Side.BULL), "Position metadata should remain stable after the close empties the position");
+        assertEq(
+            size,
+            0,
+            "Tail open should be consumed even if deferred payout leaves the protocol unable to re-open immediately"
+        );
+        assertEq(
+            uint256(side),
+            uint256(CfdTypes.Side.BULL),
+            "Position metadata should remain stable after the close empties the position"
+        );
         assertEq(entryFunding, 0, "Position read should remain well-formed after batch progression");
     }
 

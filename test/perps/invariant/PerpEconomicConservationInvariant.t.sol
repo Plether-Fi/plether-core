@@ -449,9 +449,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             "House-pool snapshot net physical assets must match vault assets net of fees"
         );
         assertEq(
-            snapshot.physicalAssetsUsdc,
-            vaultAssetsUsdc,
-            "House-pool snapshot physical asset decomposition mismatch"
+            snapshot.physicalAssetsUsdc, vaultAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
         );
         assertEq(
             protocolSnapshot.netPhysicalAssetsUsdc,

@@ -120,7 +120,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 100_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
@@ -142,6 +142,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
             "Forfeited queued order bounties should accrue to protocol fees"
         );
     }
+
 }
 
 contract AuditRemainingCoverageFindingsFailing_DustQueueEconomics is BasePerpTest {

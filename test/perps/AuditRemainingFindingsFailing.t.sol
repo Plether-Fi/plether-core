@@ -233,7 +233,9 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__OraclePublishTimeOutOfOrder.selector);
         router.executeOrder(1, empty);
 
-        assertEq(engine.lastMarkTime(), freshPublishTime, "Older execution payload must not roll back the engine mark time");
+        assertEq(
+            engine.lastMarkTime(), freshPublishTime, "Older execution payload must not roll back the engine mark time"
+        );
 
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);

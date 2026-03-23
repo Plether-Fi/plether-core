@@ -190,7 +190,8 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         bases.push(1e8);
         bases.push(1e8);
 
-        router = new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router =
+            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -256,7 +257,9 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         router.executeOrderBatch(2, updateData);
 
         assertEq(router.nextExecuteId(), 1, "Batch execution must not burn queued orders on out-of-order marks");
-        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for failed out-of-order batch execution");
+        assertEq(
+            usdc.balanceOf(keeper), keeperUsdcBefore, "Keeper must not be paid for failed out-of-order batch execution"
+        );
     }
 
 }

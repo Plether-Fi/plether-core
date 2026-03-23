@@ -505,15 +505,15 @@ contract PerpAccountingHandler is Test {
     ) external view returns (uint256) {
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         uint256 original = ghostReservationOriginal[orderId];
-        uint256 terminalizedOrConsumed = original > reservation.remainingAmountUsdc
-            ? original - reservation.remainingAmountUsdc
-            : 0;
+        uint256 terminalizedOrConsumed =
+            original > reservation.remainingAmountUsdc ? original - reservation.remainingAmountUsdc : 0;
         if (reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
             return terminalizedOrConsumed;
         }
 
         uint256 released = ghostReservationReleased[orderId];
-        if (reservation.status == IMarginClearinghouse.ReservationStatus.Consumed && terminalizedOrConsumed > released) {
+        if (reservation.status == IMarginClearinghouse.ReservationStatus.Consumed && terminalizedOrConsumed > released)
+        {
             return terminalizedOrConsumed - released;
         }
 
@@ -526,9 +526,8 @@ contract PerpAccountingHandler is Test {
     ) external view returns (uint256) {
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         uint256 original = ghostReservationOriginal[orderId];
-        uint256 terminalizedOrConsumed = original > reservation.remainingAmountUsdc
-            ? original - reservation.remainingAmountUsdc
-            : 0;
+        uint256 terminalizedOrConsumed =
+            original > reservation.remainingAmountUsdc ? original - reservation.remainingAmountUsdc : 0;
         if (reservation.status != IMarginClearinghouse.ReservationStatus.Released) {
             return 0;
         }

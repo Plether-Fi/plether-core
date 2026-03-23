@@ -138,8 +138,16 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(alice);
         engine.claimDeferredPayout(aliceId);
 
-        assertEq(engine.deferredPayoutUsdc(aliceId), aliceDeferred - claimableNow, "oldest claim should absorb partial liquidity first");
-        assertEq(engine.deferredPayoutUsdc(bobId), bobDeferred, "later claim must remain untouched until older claim is serviced");
+        assertEq(
+            engine.deferredPayoutUsdc(aliceId),
+            aliceDeferred - claimableNow,
+            "oldest claim should absorb partial liquidity first"
+        );
+        assertEq(
+            engine.deferredPayoutUsdc(bobId),
+            bobDeferred,
+            "later claim must remain untouched until older claim is serviced"
+        );
     }
 
 }
@@ -162,9 +170,9 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
     function test_FullyMarginedCloseCommit_MustStayLiveByUsingPositionMarginBounty() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 bobId = bytes32(uint256(uint160(bob)));
-        _fundTrader(alice, 5_000e6);
+        _fundTrader(alice, 5000e6);
         _fundTrader(bob, 50_000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8);
+        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(bobId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 0, "setup must leave no idle settlement");
