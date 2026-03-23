@@ -36,7 +36,9 @@ contract CashPriorityLibTest is Test {
         CashPriorityLib.SeniorCashReservation memory reservation =
             CashPriorityLib.reserveDeferredHeadClaim(100e6, 100e6, 100e6, 0, 100e6);
 
-        assertEq(reservation.headClaimServiceableUsdc, 100e6, "Head deferred claim should use all available physical cash");
+        assertEq(
+            reservation.headClaimServiceableUsdc, 100e6, "Head deferred claim should use all available physical cash"
+        );
         assertEq(reservation.protocolFeeWithdrawalUsdc, 0, "Fees should wait until deferred head claims are funded");
         assertEq(reservation.freeCashUsdc, 0, "No fresh cash remains while deferred claims consume all liquidity");
     }
