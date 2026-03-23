@@ -3109,7 +3109,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.clearBadDebt(badDebt + 1);
     }
 
-    function test_CheckWithdraw_UsesPoolMarkStalenessLimit() public {
+    function test_CheckWithdraw_UsesEngineMarkStalenessLimit_NotPoolMarkLimit() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -3127,9 +3127,18 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
         engine.checkWithdraw(accountId);
+
+        engine.proposeEngineMarkStalenessLimit(300);
+        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
+        engine.finalizeEngineMarkStalenessLimit();
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        engine.checkWithdraw(accountId);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_UsesPoolMarkStalenessLimit() public {
+    function test_ReserveCloseOrderExecutionBounty_UsesEngineMarkStalenessLimit_NotPoolMarkLimit() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
@@ -3145,6 +3154,21 @@ contract CfdEngineTest is BasePerpTest {
         _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 31);
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+
+        vm.warp(block.timestamp + 270);
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+
+        engine.proposeEngineMarkStalenessLimit(300);
+        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
+        engine.finalizeEngineMarkStalenessLimit();
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }

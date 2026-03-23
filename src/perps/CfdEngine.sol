@@ -179,6 +179,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     mapping(uint256 => bool) public fadDayOverrides;
     uint256 public fadMaxStaleness = 3 days;
     uint256 public fadRunwaySeconds = 3 hours;
+    uint256 public engineMarkStalenessLimit = 60;
 
     uint256 public constant EXECUTION_FEE_BPS = 4;
     uint256 public constant TIMELOCK_DELAY = 48 hours;
@@ -197,6 +198,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     uint256 public pendingFadRunway;
     uint256 public fadRunwayActivationTime;
+
+    uint256 public pendingEngineMarkStalenessLimit;
+    uint256 public engineMarkStalenessActivationTime;
 
     error CfdEngine__Unauthorized();
     error CfdEngine__VaultAlreadySet();
@@ -250,6 +254,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     event FadDaysRemoved(uint256[] timestamps);
     event FadMaxStalenessUpdated(uint256 newStaleness);
     event FadRunwayUpdated(uint256 newRunway);
+    event EngineMarkStalenessLimitProposed(uint256 newStaleness, uint256 activationTime);
+    event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
     event RiskParamsProposed(uint256 activationTime);
     event RiskParamsFinalized();
     event AddFadDaysProposed(uint256[] timestamps, uint256 activationTime);
@@ -514,6 +520,35 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function cancelFadRunwayProposal() external onlyOwner {
         pendingFadRunway = 0;
         fadRunwayActivationTime = 0;
+    }
+
+    function proposeEngineMarkStalenessLimit(
+        uint256 newStaleness
+    ) external onlyOwner {
+        if (newStaleness == 0) {
+            revert CfdEngine__ZeroStaleness();
+        }
+        pendingEngineMarkStalenessLimit = newStaleness;
+        engineMarkStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        emit EngineMarkStalenessLimitProposed(newStaleness, engineMarkStalenessActivationTime);
+    }
+
+    function finalizeEngineMarkStalenessLimit() external onlyOwner {
+        if (engineMarkStalenessActivationTime == 0) {
+            revert CfdEngine__NoProposal();
+        }
+        if (block.timestamp < engineMarkStalenessActivationTime) {
+            revert CfdEngine__TimelockNotReady();
+        }
+        engineMarkStalenessLimit = pendingEngineMarkStalenessLimit;
+        pendingEngineMarkStalenessLimit = 0;
+        engineMarkStalenessActivationTime = 0;
+        emit EngineMarkStalenessLimitUpdated(engineMarkStalenessLimit);
+    }
+
+    function cancelEngineMarkStalenessLimitProposal() external onlyOwner {
+        pendingEngineMarkStalenessLimit = 0;
+        engineMarkStalenessActivationTime = 0;
     }
 
     /// @notice Withdraws accumulated execution fees from the vault to a recipient
@@ -2034,7 +2069,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {
-        return isOracleFrozen() ? fadMaxStaleness : vault.markStalenessLimit();
+        return isOracleFrozen() ? fadMaxStaleness : engineMarkStalenessLimit;
     }
 
     function _consumeDeferredTraderPayout(

@@ -90,7 +90,7 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty into router custody. Opens always source that escrow from free settlement; closes source it from free settlement first and can fall back to active position margin so risk-reducing close intents remain commit-able even when the account has no idle cash. Failed-order rewards therefore remain independent from vault liquidity across the full order lifecycle.
 
-**Freshness Buckets**: Live-market oracle freshness is split across three knobs. `orderExecutionStalenessLimit` on the router gates normal order execution and manual mark refresh. `liquidationStalenessLimit` on the router separately gates live-market liquidations and is intended to stay stricter. `HousePool.markStalenessLimit` remains the LP/accounting freshness knob for reconciliation and withdrawal safety. During genuine frozen-oracle windows, all of these switch to `fadMaxStaleness` for the duration of the freeze.
+**Freshness Buckets**: Live-market oracle freshness is split across four operational uses. `orderExecutionStalenessLimit` on the router gates normal order execution and manual mark refresh. `liquidationStalenessLimit` on the router separately gates live-market liquidations and is intended to stay stricter. `engineMarkStalenessLimit` on the engine gates engine-side mark-sensitive paths such as the trader withdraw guard and close-order bounty backing. `HousePool.markStalenessLimit` remains the LP/accounting freshness knob for reconciliation and withdrawal safety. During genuine frozen-oracle windows, all of these switch to `fadMaxStaleness` for the duration of the freeze.
 
 **Close Bounty Tradeoff**: Letting close intents source their flat keeper bounty from active position margin is an explicit bounded liveness tradeoff. With the per-account pending-order cap, at most `5 USDC` of otherwise reachable margin can sit in router escrow awaiting close execution, slightly reducing immediate liquidation reachability in exchange for keeping fully margined exits live.
 
@@ -316,10 +316,9 @@ Timelocked parameters:
 
 | Contract | Parameters |
 |----------|-----------|
-| CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds` |
+| CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds`, `engineMarkStalenessLimit` |
 | HousePool | `seniorRateBps`, `markStalenessLimit` |
 | OrderRouter | `maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit` |
-| OrderRouter | `maxOrderAge` |
 | MarginClearinghouse | none after one-time `setEngine(address)` |
 
 **Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, `setEngine`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.
@@ -354,7 +353,8 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Close execution bounty | 1.00 USDC | Reserved at commit as router-custodied escrow |
 | Normal oracle staleness | 60s | Max Pyth price age for execution and mark refresh |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
-| `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
+| `engineMarkStalenessLimit` | 60s | Max mark age for engine-side withdraw guard and close bounty backing |
+| `markStalenessLimit` | 60s | Max mark age for HousePool reconciliation |
 | `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, and meaningful third-party top-ups also reset the recipient cooldown |
 | `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
 | `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
