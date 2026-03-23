@@ -208,6 +208,31 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
+    function invariant_TerminalEventsMatchResidualAndBadDebtAccounting() public view {
+        PerpAccountingHandler.TerminalResidualEvent memory eventSnapshot = handler.lastTerminalResidualEventSnapshot();
+        if (!eventSnapshot.active) {
+            return;
+        }
+
+        address trader = address(uint160(uint256(eventSnapshot.accountId)));
+        uint256 actualFinalResidualUsdc = clearinghouse.balanceUsdc(eventSnapshot.accountId)
+            + engine.deferredPayoutUsdc(eventSnapshot.accountId);
+        if (eventSnapshot.walletPayoutExpected) {
+            actualFinalResidualUsdc += usdc.balanceOf(trader) - eventSnapshot.traderWalletBeforeUsdc;
+        }
+
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            eventSnapshot.badDebtBeforeUsdc + eventSnapshot.expectedBadDebtDeltaUsdc,
+            "Terminal event bad debt delta should match previewed accounting"
+        );
+        assertEq(
+            actualFinalResidualUsdc,
+            eventSnapshot.expectedFinalResidualUsdc,
+            "Terminal event residual should match retained settlement plus deferred and any immediate payout"
+        );
+    }
+
     function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));

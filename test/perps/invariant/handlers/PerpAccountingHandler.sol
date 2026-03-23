@@ -38,6 +38,16 @@ contract PerpAccountingHandler is Test {
         uint256 allowedDeferredAfterUsdc;
     }
 
+    struct TerminalResidualEvent {
+        bool active;
+        bytes32 accountId;
+        uint256 badDebtBeforeUsdc;
+        uint256 expectedBadDebtDeltaUsdc;
+        uint256 expectedFinalResidualUsdc;
+        uint256 traderWalletBeforeUsdc;
+        bool walletPayoutExpected;
+    }
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -60,6 +70,7 @@ contract PerpAccountingHandler is Test {
     mapping(bytes32 => ReachabilityTransition) internal reachabilityTransitions;
 
     BadDebtDeferredEvent internal lastBadDebtDeferredEvent;
+    TerminalResidualEvent internal lastTerminalResidualEvent;
 
     bytes32 internal lastTerminalReservationAccountId;
     uint256 internal lastTerminalReservationCount;
@@ -240,6 +251,11 @@ contract PerpAccountingHandler is Test {
             router.orders(orderId);
         uint256 deferredTraderPayoutUsdc;
         uint256 allowedDeferredAfterUsdc;
+        uint256 expectedBadDebtDeltaUsdc;
+        uint256 expectedFinalResidualUsdc;
+        bool terminalClose;
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(accountId);
+        uint256 traderWalletBeforeUsdc = usdc.balanceOf(address(uint160(uint256(accountId))));
         if (isClose && marginDelta == 0) {
             CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice);
             if (preview.valid) {
@@ -247,6 +263,14 @@ contract PerpAccountingHandler is Test {
                 allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
                     ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
                     : 0;
+                if (preview.remainingSize == 0) {
+                    terminalClose = true;
+                    expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
+                    uint256 grossResidualUsdc =
+                        beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+                    expectedFinalResidualUsdc =
+                        grossResidualUsdc > preview.seizedCollateralUsdc ? grossResidualUsdc - preview.seizedCollateralUsdc : 0;
+                }
             }
         }
 
@@ -261,6 +285,16 @@ contract PerpAccountingHandler is Test {
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (isClose && badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
+            }
+            if (terminalClose) {
+                _recordTerminalResidualEvent(
+                    accountId,
+                    badDebtBefore,
+                    expectedBadDebtDeltaUsdc,
+                    expectedFinalResidualUsdc,
+                    traderWalletBeforeUsdc,
+                    false
+                );
             }
         } catch {}
     }
@@ -291,6 +325,9 @@ contract PerpAccountingHandler is Test {
         uint256 allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
             ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
             : 0;
+        uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
+        uint256 expectedFinalResidualUsdc =
+            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
         uint256 committedBefore = _trackedCommittedMargin(accountId);
         _recordTerminalReservationSet(accountId);
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
@@ -309,6 +346,14 @@ contract PerpAccountingHandler is Test {
             if (badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
             }
+            _recordTerminalResidualEvent(
+                accountId,
+                badDebtBefore,
+                preview.badDebtUsdc,
+                expectedFinalResidualUsdc,
+                traderWalletBeforeUsdc,
+                true
+            );
         } catch {}
     }
 
@@ -450,6 +495,10 @@ contract PerpAccountingHandler is Test {
         return lastBadDebtDeferredEvent;
     }
 
+    function lastTerminalResidualEventSnapshot() external view returns (TerminalResidualEvent memory) {
+        return lastTerminalResidualEvent;
+    }
+
     function accountRouterEscrow(
         bytes32 accountId
     ) public view returns (uint256 totalEscrowUsdc) {
@@ -504,6 +553,7 @@ contract PerpAccountingHandler is Test {
 
     function _clearLastBadDebtDeferredEvent() internal {
         delete lastBadDebtDeferredEvent;
+        delete lastTerminalResidualEvent;
     }
 
     function _recordBadDebtDeferredEvent(
@@ -516,6 +566,25 @@ contract PerpAccountingHandler is Test {
             accountId: accountId,
             badDebtAfterUsdc: badDebtAfterUsdc,
             allowedDeferredAfterUsdc: allowedDeferredAfterUsdc
+        });
+    }
+
+    function _recordTerminalResidualEvent(
+        bytes32 accountId,
+        uint256 badDebtBeforeUsdc,
+        uint256 expectedBadDebtDeltaUsdc,
+        uint256 expectedFinalResidualUsdc,
+        uint256 traderWalletBeforeUsdc,
+        bool walletPayoutExpected
+    ) internal {
+        lastTerminalResidualEvent = TerminalResidualEvent({
+            active: true,
+            accountId: accountId,
+            badDebtBeforeUsdc: badDebtBeforeUsdc,
+            expectedBadDebtDeltaUsdc: expectedBadDebtDeltaUsdc,
+            expectedFinalResidualUsdc: expectedFinalResidualUsdc,
+            traderWalletBeforeUsdc: traderWalletBeforeUsdc,
+            walletPayoutExpected: walletPayoutExpected
         });
     }
 

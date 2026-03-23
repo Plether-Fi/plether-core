@@ -172,6 +172,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     uint64 public nextDeferredClaimId = 1;
     uint64 public deferredClaimHeadId;
     uint64 public deferredClaimTailId;
+    mapping(bytes32 => uint64) public accountDeferredClaimHeadId;
+    mapping(bytes32 => uint64) public accountDeferredClaimTailId;
 
     address public orderRouter;
 
@@ -1021,8 +1023,24 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) internal {
         uint64 claimId = nextDeferredClaimId++;
         deferredClaims[claimId] = ICfdEngine.DeferredClaim({
-            claimType: claimType, accountId: accountId, keeper: keeper, remainingUsdc: amountUsdc, nextClaimId: 0
+            claimType: claimType,
+            accountId: accountId,
+            keeper: keeper,
+            remainingUsdc: amountUsdc,
+            prevClaimId: deferredClaimTailId,
+            nextClaimId: 0,
+            accountNextClaimId: 0
         });
+
+        if (claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
+            uint64 accountTailId = accountDeferredClaimTailId[accountId];
+            if (accountTailId == 0) {
+                accountDeferredClaimHeadId[accountId] = claimId;
+            } else {
+                deferredClaims[accountTailId].accountNextClaimId = claimId;
+            }
+            accountDeferredClaimTailId[accountId] = claimId;
+        }
 
         if (deferredClaimTailId == 0) {
             deferredClaimHeadId = claimId;
@@ -1040,12 +1058,42 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        uint64 nextClaimId = deferredClaims[claimId].nextClaimId;
-        delete deferredClaims[claimId];
-        deferredClaimHeadId = nextClaimId;
-        if (nextClaimId == 0) {
-            deferredClaimTailId = 0;
+        _unlinkDeferredClaim(claimId);
+    }
+
+    function _unlinkDeferredClaim(
+        uint64 claimId
+    ) internal {
+        if (claimId == 0) {
+            return;
         }
+
+        ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
+        uint64 prevClaimId = claim.prevClaimId;
+        uint64 nextClaimId = claim.nextClaimId;
+
+        if (prevClaimId == 0) {
+            deferredClaimHeadId = nextClaimId;
+        } else {
+            deferredClaims[prevClaimId].nextClaimId = nextClaimId;
+        }
+
+        if (nextClaimId == 0) {
+            deferredClaimTailId = prevClaimId;
+        } else {
+            deferredClaims[nextClaimId].prevClaimId = prevClaimId;
+        }
+
+        if (claim.claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
+            bytes32 accountId = claim.accountId;
+            uint64 nextAccountClaimId = claim.accountNextClaimId;
+            accountDeferredClaimHeadId[accountId] = nextAccountClaimId;
+            if (nextAccountClaimId == 0) {
+                accountDeferredClaimTailId[accountId] = 0;
+            }
+        }
+
+        delete deferredClaims[claimId];
     }
 
     // ==========================================
@@ -1978,34 +2026,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         totalDeferredPayoutUsdc -= amountUsdc;
 
         uint256 remainingToConsume = amountUsdc;
-        uint64 prevClaimId;
-        uint64 claimId = deferredClaimHeadId;
+        uint64 claimId = accountDeferredClaimHeadId[accountId];
         while (claimId != 0 && remainingToConsume > 0) {
             ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
-            uint64 nextClaimId = claim.nextClaimId;
-            if (claim.claimType == ICfdEngine.DeferredClaimType.TraderPayout && claim.accountId == accountId) {
-                uint256 consumedUsdc =
-                    claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
-                claim.remainingUsdc -= consumedUsdc;
-                remainingToConsume -= consumedUsdc;
+            uint64 nextAccountClaimId = claim.accountNextClaimId;
+            uint256 consumedUsdc = claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
+            claim.remainingUsdc -= consumedUsdc;
+            remainingToConsume -= consumedUsdc;
 
-                if (claim.remainingUsdc == 0) {
-                    if (prevClaimId == 0) {
-                        deferredClaimHeadId = nextClaimId;
-                    } else {
-                        deferredClaims[prevClaimId].nextClaimId = nextClaimId;
-                    }
-                    if (deferredClaimTailId == claimId) {
-                        deferredClaimTailId = prevClaimId;
-                    }
-                    delete deferredClaims[claimId];
-                    claimId = nextClaimId;
-                    continue;
-                }
+            if (claim.remainingUsdc == 0) {
+                _unlinkDeferredClaim(claimId);
+                claimId = nextAccountClaimId;
+                continue;
             }
 
-            prevClaimId = claimId;
-            claimId = nextClaimId;
+            break;
         }
 
         if (remainingToConsume != 0) {

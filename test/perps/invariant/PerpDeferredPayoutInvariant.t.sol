@@ -88,6 +88,113 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         );
     }
 
+    function invariant_AccountDeferredClaimHeadsMatchTrackedTraderPayoutState() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            uint64 claimId = engine.accountDeferredClaimHeadId(accountId);
+            uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+
+            if (deferredPayoutUsdc == 0) {
+                assertEq(claimId, 0, "Accounts without deferred payout must not retain account-local claim heads");
+                continue;
+            }
+
+            assertGt(claimId, 0, "Accounts with deferred payout must have an account-local claim head");
+            (ICfdEngine.DeferredClaimType claimType, bytes32 claimAccountId,,,,,) = engine.deferredClaims(claimId);
+            assertEq(
+                uint8(claimType),
+                uint8(ICfdEngine.DeferredClaimType.TraderPayout),
+                "Account-local deferred head must point to a trader payout node"
+            );
+            assertEq(claimAccountId, accountId, "Account-local deferred head must belong to the tracked account");
+        }
+    }
+
+    function invariant_GlobalDeferredQueueLinksRemainConsistent() public view {
+        uint64 claimId = engine.deferredClaimHeadId();
+        uint64 prevClaimId;
+        uint64 lastClaimId;
+        uint256 traversedClaims;
+        uint256 traderClaimCount;
+
+        while (claimId != 0) {
+            (
+                ICfdEngine.DeferredClaimType claimType,
+                bytes32 claimAccountId,
+                ,
+                uint256 remainingUsdc,
+                uint64 storedPrevClaimId,
+                uint64 nextClaimId,
+                uint64 accountNextClaimId
+            ) = engine.deferredClaims(claimId);
+
+            assertEq(storedPrevClaimId, prevClaimId, "Deferred queue prev-link must match traversal state");
+            assertGt(remainingUsdc, 0, "Deferred queue must not retain zero-amount claims");
+
+            if (claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
+                traderClaimCount++;
+                if (engine.accountDeferredClaimHeadId(claimAccountId) == claimId) {
+                    uint64 accountClaimId = claimId;
+                    while (accountClaimId != 0) {
+                        (
+                            ICfdEngine.DeferredClaimType accountClaimType,
+                            bytes32 accountChainAccountId,
+                            ,
+                            uint256 accountRemainingUsdc,
+                            ,
+                            ,
+                            uint64 nextAccountClaimId
+                        ) = engine.deferredClaims(accountClaimId);
+
+                        assertEq(
+                            uint8(accountClaimType),
+                            uint8(ICfdEngine.DeferredClaimType.TraderPayout),
+                            "Account-local chain must only contain trader payout claims"
+                        );
+                        assertEq(
+                            accountChainAccountId,
+                            claimAccountId,
+                            "Account-local chain must only contain claims for that account"
+                        );
+                        assertGt(accountRemainingUsdc, 0, "Account-local chain must not retain zero-amount claims");
+                        accountClaimId = nextAccountClaimId;
+                    }
+                }
+                if (accountNextClaimId != 0) {
+                    (ICfdEngine.DeferredClaimType nextAccountClaimType, bytes32 nextAccountId,,,,,) =
+                        engine.deferredClaims(accountNextClaimId);
+                    assertEq(
+                        uint8(nextAccountClaimType),
+                        uint8(ICfdEngine.DeferredClaimType.TraderPayout),
+                        "Account-local next link must point to a trader payout claim"
+                    );
+                    assertEq(nextAccountId, claimAccountId, "Account-local next link must stay within the same account");
+                }
+            } else {
+                assertEq(claimAccountId, bytes32(0), "Clearer bounty claims must not carry trader account ids");
+                assertEq(accountNextClaimId, 0, "Clearer bounty claims must not appear in account-local trader chains");
+            }
+
+            prevClaimId = claimId;
+            lastClaimId = claimId;
+            claimId = nextClaimId;
+            traversedClaims++;
+
+            assertLe(traversedClaims, engine.nextDeferredClaimId(), "Deferred queue traversal must remain acyclic");
+        }
+
+        assertEq(engine.deferredClaimTailId(), lastClaimId, "Deferred queue tail must equal the final traversed node");
+        if (lastClaimId == 0) {
+            assertEq(engine.totalDeferredPayoutUsdc(), 0, "Empty deferred queue cannot retain deferred trader payouts");
+            assertEq(
+                engine.totalDeferredClearerBountyUsdc(),
+                0,
+                "Empty deferred queue cannot retain deferred clearer bounties"
+            );
+        }
+        assertLe(traderClaimCount, traversedClaims, "Trader payout claims must be a subset of the global queue");
+    }
+
     function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {
         uint256 oraclePrice = _previewOraclePrice();
 

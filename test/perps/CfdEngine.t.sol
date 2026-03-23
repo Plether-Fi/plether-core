@@ -530,9 +530,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
-        uint256 claimableNow = pool.totalAssets() > engine.accumulatedFeesUsdc()
-            ? pool.totalAssets() - engine.accumulatedFeesUsdc()
-            : 0;
+        uint256 claimableNow = pool.totalAssets();
         if (claimableNow > deferred) claimableNow = deferred;
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
@@ -577,9 +575,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 partialLiquidity = deferred / 2;
         usdc.mint(address(pool), partialLiquidity);
-        uint256 claimableNow = pool.totalAssets() > engine.accumulatedFeesUsdc()
-            ? pool.totalAssets() - engine.accumulatedFeesUsdc()
-            : 0;
+        uint256 claimableNow = pool.totalAssets();
         if (claimableNow > deferred) claimableNow = deferred;
 
         uint256 clearinghouseBefore = clearinghouse.balanceUsdc(accountId);
@@ -1778,8 +1774,14 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
+        uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
+        uint256 traderWalletBefore = usdc.balanceOf(address(uint160(uint256(bearId))));
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bearId, 80_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
+
+        int256 terminalResidual =
+            int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc + preview.fundingUsdc
+                - int256(preview.keeperBountyUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -1801,6 +1803,17 @@ contract CfdEngineTest is BasePerpTest {
             engine.accumulatedBadDebtUsdc() - badDebtBefore,
             preview.badDebtUsdc,
             "Bad debt should only reflect the post-deferred shortfall"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(bearId) + engine.deferredPayoutUsdc(bearId)
+                + (usdc.balanceOf(address(uint160(uint256(bearId)))) - traderWalletBefore),
+            _positivePart(terminalResidual),
+            "Terminal liquidation residual should equal retained settlement plus remaining deferred plus immediate payout"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            _negativePart(terminalResidual),
+            "Terminal liquidation bad debt should equal the negative residual"
         );
     }
 
@@ -1828,6 +1841,7 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
+        uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
         CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 80_000_000, vaultDepth);
         assertGt(preview.existingDeferredConsumedUsdc, 0, "Close preview should seize legacy deferred payout before socializing bad debt");
         assertLt(
@@ -1835,6 +1849,11 @@ contract CfdEngineTest is BasePerpTest {
             deferredBefore,
             "Close preview should show less deferred payout remaining after loss absorption"
         );
+
+        uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(80_000_000)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
+        int256 terminalResidual =
+            int256(settlementReachableBefore + deferredBefore) + preview.realizedPnlUsdc + preview.fundingUsdc
+                - int256(nominalExecutionFeeUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         _close(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth);
@@ -1849,6 +1868,55 @@ contract CfdEngineTest is BasePerpTest {
             preview.badDebtUsdc,
             "Bad debt should only reflect the post-deferred shortfall on close"
         );
+        assertEq(
+            clearinghouse.balanceUsdc(bearId) + engine.deferredPayoutUsdc(bearId),
+            _positivePart(terminalResidual),
+            "Terminal full-close residual should equal retained settlement plus remaining deferred payout"
+        );
+    }
+
+    function test_Close_ConsumesInterleavedDeferredPayoutWithoutTouchingGlobalHead() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD241));
+        bytes32 bearId = bytes32(uint256(0xD242));
+        address keeper = address(0xD243);
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, 1e6);
+
+        uint64 bountyClaimId = engine.deferredClaimHeadId();
+        assertEq(engine.accountDeferredClaimHeadId(bearId), 0, "Bear account should start without trader payout claims");
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint64 bearClaimId = engine.accountDeferredClaimHeadId(bearId);
+        assertGt(bearClaimId, 0, "Bear account should track its deferred trader payout off the global queue");
+        assertGt(bearClaimId, bountyClaimId, "Bear deferred claim should sit behind the unrelated queue head");
+
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
+            .checked_write(reducedSettlement);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth);
+
+        ICfdEngine.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        assertEq(
+            uint8(headClaim.claimType),
+            uint8(ICfdEngine.DeferredClaimType.ClearerBounty),
+            "Consuming a later trader payout must not disturb the unrelated global queue head"
+        );
+        assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
+        assertEq(engine.accountDeferredClaimHeadId(bearId), 0, "Bear account-local deferred chain should be fully consumed");
     }
 
     function test_PreviewLiquidation_ExcludesRouterExecutionEscrowFromReachableCollateral() public {
@@ -2950,6 +3018,18 @@ contract CfdEngineTest is BasePerpTest {
         uint256 roundTripCost = chBeforeOpen - chAfterClose;
         uint256 execFeeRoundTrip = 80 * 1e6;
         assertEq(roundTripCost, execFeeRoundTrip, "Round-trip costs only exec fees, no VPI profit");
+    }
+
+    function _positivePart(
+        int256 value
+    ) internal pure returns (uint256) {
+        return value > 0 ? uint256(value) : 0;
+    }
+
+    function _negativePart(
+        int256 value
+    ) internal pure returns (uint256) {
+        return value < 0 ? uint256(-value) : 0;
     }
 
 }
