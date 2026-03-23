@@ -20,8 +20,9 @@ library MarginClearinghouseAccountingLib {
     }
 
     struct LiquidationResidualPlan {
-        uint256 seizedUsdc;
-        uint256 payoutUsdc;
+        uint256 settlementRetainedUsdc;
+        uint256 settlementSeizedUsdc;
+        uint256 freshTraderPayoutUsdc;
         uint256 badDebtUsdc;
         BucketMutation mutation;
     }
@@ -130,22 +131,20 @@ library MarginClearinghouseAccountingLib {
         uint256 reachableUsdc = getTerminalReachableUsdc(buckets);
 
         if (residualUsdc >= 0) {
-            uint256 targetBalanceUsdc = uint256(residualUsdc);
-            if (reachableUsdc > targetBalanceUsdc) {
-                plan.seizedUsdc = reachableUsdc - targetBalanceUsdc;
-            } else if (targetBalanceUsdc > reachableUsdc) {
-                plan.payoutUsdc = targetBalanceUsdc - reachableUsdc;
-            }
+            plan.settlementRetainedUsdc = reachableUsdc > uint256(residualUsdc) ? uint256(residualUsdc) : reachableUsdc;
+            plan.settlementSeizedUsdc = reachableUsdc - plan.settlementRetainedUsdc;
+            plan.freshTraderPayoutUsdc = uint256(residualUsdc) - plan.settlementRetainedUsdc;
         } else {
-            plan.seizedUsdc = reachableUsdc;
+            plan.settlementRetainedUsdc = 0;
+            plan.settlementSeizedUsdc = reachableUsdc;
             plan.badDebtUsdc = uint256(-residualUsdc);
         }
 
-        plan.mutation.settlementDebitUsdc = plan.seizedUsdc;
+        plan.mutation.settlementDebitUsdc = plan.settlementSeizedUsdc;
         plan.mutation.positionMarginUnlockedUsdc = buckets.activePositionMarginUsdc;
-        plan.mutation.otherLockedMarginUnlockedUsdc = plan.seizedUsdc
+        plan.mutation.otherLockedMarginUnlockedUsdc = plan.settlementSeizedUsdc
             > buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc
-            ? plan.seizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc
+            ? plan.settlementSeizedUsdc - buckets.freeSettlementUsdc - buckets.activePositionMarginUsdc
             : 0;
     }
 

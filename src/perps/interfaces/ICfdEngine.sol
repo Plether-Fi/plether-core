@@ -115,6 +115,10 @@ interface ICfdEngine {
         uint256 reachableCollateralUsdc;
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
+        uint256 settlementRetainedUsdc;
+        uint256 freshTraderPayoutUsdc;
+        uint256 existingDeferredConsumedUsdc;
+        uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;

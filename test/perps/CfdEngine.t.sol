@@ -1433,9 +1433,13 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(delta.keeperBountyUsdc, 5e6, "Setup should use the minimum bounty");
         assertEq(delta.residualUsdc, 13e6, "Residual should include positive pnl above the deferred claim");
-        assertEq(delta.deferredPayoutConsumedUsdc, 10e6, "Planner should consume the full pre-existing deferred claim");
-        assertEq(delta.deferredPayoutRemainingUsdc, 0, "Planner should not underflow while carrying deferred payout");
-        assertEq(delta.residualPlan.payoutUsdc, 13e6, "Excess positive residual should become a fresh trader payout");
+        assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
+        assertEq(
+            delta.existingDeferredConsumedUsdc, 10e6, "Planner should consume the full pre-existing deferred claim"
+        );
+        assertEq(delta.existingDeferredRemainingUsdc, 0, "Planner should not underflow while carrying deferred payout");
+        assertEq(delta.freshTraderPayoutUsdc, 13e6, "Excess positive residual should become a fresh trader payout");
+        assertEq(delta.residualPlan.freshTraderPayoutUsdc, 13e6, "Residual plan should expose the fresh trader payout");
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
@@ -1459,6 +1463,10 @@ contract CfdEngineTest is BasePerpTest {
 
         assertTrue(preview.liquidatable, "Preview should not revert for positive residual above deferred claim");
         assertEq(preview.keeperBountyUsdc, 15e6, "Setup should use the percentage bounty");
+        assertEq(preview.settlementRetainedUsdc, 0, "No settlement should remain when no settlement is reachable");
+        assertEq(preview.freshTraderPayoutUsdc, 25e6, "Preview should surface the fresh liquidation payout explicitly");
+        assertEq(preview.existingDeferredConsumedUsdc, 10e6, "Preview should show the consumed legacy deferred claim");
+        assertEq(preview.existingDeferredRemainingUsdc, 0, "Preview should show no leftover legacy deferred claim");
         assertEq(preview.immediatePayoutUsdc, 0, "Drained vault cash should defer the fresh liquidation payout");
         assertEq(
             preview.deferredPayoutUsdc,

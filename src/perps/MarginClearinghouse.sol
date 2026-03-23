@@ -621,37 +621,27 @@ contract MarginClearinghouse is Ownable2Step {
         emit AssetSeized(accountId, settlementAsset, mutation.settlementDebitUsdc, recipient);
     }
 
-    /// @notice Settles liquidation residual against liquidation-reachable collateral.
-    /// @dev Releases the specified active position margin bucket but leaves unrelated committed margin untouched.
-    function consumeLiquidationResidual(
+    /// @notice Applies a pre-planned liquidation settlement mutation.
+    /// @dev Releases the active position margin bucket and covered committed margin exactly as planned.
+    function applyLiquidationSettlementPlan(
         bytes32 accountId,
         uint64[] calldata reservationOrderIds,
-        uint256,
-        int256 residualUsdc,
+        IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         address recipient
-    ) external onlyOperator returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = _buildAccountUsdcBuckets(accountId);
-        MarginClearinghouseAccountingLib.LiquidationResidualPlan memory plan =
-            MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
-        seizedUsdc = plan.seizedUsdc;
-        payoutUsdc = plan.payoutUsdc;
-        badDebtUsdc = plan.badDebtUsdc;
+    ) external onlyOperator returns (uint256 seizedUsdc) {
+        seizedUsdc = plan.settlementSeizedUsdc;
 
-        if (plan.mutation.positionMarginUnlockedUsdc > 0) {
-            _consumeLockedMargin(
-                accountId, IMarginClearinghouse.MarginBucket.Position, plan.mutation.positionMarginUnlockedUsdc
-            );
+        if (plan.positionMarginUnlockedUsdc > 0) {
+            _consumeLockedMargin(accountId, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginUnlockedUsdc);
         }
-        if (plan.mutation.otherLockedMarginUnlockedUsdc > 0) {
-            _consumeOtherLockedMarginViaReservations(
-                accountId, reservationOrderIds, plan.mutation.otherLockedMarginUnlockedUsdc
-            );
+        if (plan.otherLockedMarginUnlockedUsdc > 0) {
+            _consumeOtherLockedMarginViaReservations(accountId, reservationOrderIds, plan.otherLockedMarginUnlockedUsdc);
         }
 
         if (seizedUsdc > 0) {
-            settlementBalances[accountId] -= plan.mutation.settlementDebitUsdc;
-            IERC20(settlementAsset).safeTransfer(recipient, plan.mutation.settlementDebitUsdc);
-            emit AssetSeized(accountId, settlementAsset, plan.mutation.settlementDebitUsdc, recipient);
+            settlementBalances[accountId] -= plan.settlementSeizedUsdc;
+            IERC20(settlementAsset).safeTransfer(recipient, plan.settlementSeizedUsdc);
+            emit AssetSeized(accountId, settlementAsset, plan.settlementSeizedUsdc, recipient);
         }
     }
 

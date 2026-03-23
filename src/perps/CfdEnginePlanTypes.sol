@@ -213,9 +213,9 @@ library CfdEnginePlanTypes {
 
         SettlementType settlementType;
 
-        uint256 traderPayoutUsdc;
-        bool payoutIsImmediate;
-        bool payoutIsDeferred;
+        uint256 freshTraderPayoutUsdc;
+        bool freshPayoutIsImmediate;
+        bool freshPayoutIsDeferred;
 
         CfdEngineSettlementLib.CloseSettlementResult lossResult;
         MarginClearinghouseAccountingLib.SettlementConsumption lossConsumption;
@@ -267,11 +267,12 @@ library CfdEnginePlanTypes {
         int256 residualUsdc;
         MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;
 
-        uint256 traderPayoutUsdc;
-        bool payoutIsImmediate;
-        bool payoutIsDeferred;
-        uint256 deferredPayoutConsumedUsdc;
-        uint256 deferredPayoutRemainingUsdc;
+        uint256 settlementRetainedUsdc;
+        uint256 freshTraderPayoutUsdc;
+        bool freshPayoutIsImmediate;
+        bool freshPayoutIsDeferred;
+        uint256 existingDeferredConsumedUsdc;
+        uint256 existingDeferredRemainingUsdc;
 
         uint256 syncMarginQueueAmount;
 

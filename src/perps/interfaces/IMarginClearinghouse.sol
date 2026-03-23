@@ -51,6 +51,15 @@ interface IMarginClearinghouse {
         uint256 freeSettlementUsdc;
     }
 
+    struct LiquidationSettlementPlan {
+        uint256 settlementRetainedUsdc;
+        uint256 settlementSeizedUsdc;
+        uint256 freshTraderPayoutUsdc;
+        uint256 badDebtUsdc;
+        uint256 positionMarginUnlockedUsdc;
+        uint256 otherLockedMarginUnlockedUsdc;
+    }
+
     /// @notice Returns the settlement USDC balance for an account.
     function balanceUsdc(
         bytes32 accountId
@@ -163,14 +172,13 @@ interface IMarginClearinghouse {
         bool includeOtherLockedMargin,
         address recipient
     ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc);
-    /// @notice Settles liquidation residual against liquidation-reachable collateral while preserving reserved escrow.
-    function consumeLiquidationResidual(
+    /// @notice Applies a pre-planned liquidation settlement mutation while preserving reserved escrow.
+    function applyLiquidationSettlementPlan(
         bytes32 accountId,
         uint64[] calldata reservationOrderIds,
-        uint256 lockedPositionMarginUsdc,
-        int256 residualUsdc,
+        LiquidationSettlementPlan calldata plan,
         address recipient
-    ) external returns (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc);
+    ) external returns (uint256 seizedUsdc);
     /// @notice Transfers settlement USDC from an account to a recipient (losses, fees, or bad debt)
     function seizeUsdc(
         bytes32 accountId,

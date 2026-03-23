@@ -253,6 +253,17 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             engine.degradedMode(),
             "Liquidation preview degraded-mode flag should match live outcome"
         );
+        assertEq(
+            preview.freshTraderPayoutUsdc,
+            preview.immediatePayoutUsdc + preview.deferredPayoutUsdc,
+            "Explicit fresh liquidation payout should equal total trader payout when no legacy deferred claim exists"
+        );
+        assertEq(
+            preview.existingDeferredConsumedUsdc, 0, "Fresh liquidation path should not consume legacy deferred payout"
+        );
+        assertEq(
+            preview.existingDeferredRemainingUsdc, 0, "Fresh liquidation path should not leave legacy deferred payout"
+        );
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault(
@@ -313,6 +324,21 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.triggersDegradedMode,
             engine.degradedMode(),
             "Illiquid liquidation preview degraded-mode flag should match live outcome"
+        );
+        assertEq(
+            preview.freshTraderPayoutUsdc,
+            preview.immediatePayoutUsdc + preview.deferredPayoutUsdc,
+            "Explicit fresh liquidation payout should equal total trader payout when no legacy deferred claim exists"
+        );
+        assertEq(
+            preview.existingDeferredConsumedUsdc,
+            0,
+            "Fresh illiquid liquidation path should not consume legacy deferred payout"
+        );
+        assertEq(
+            preview.existingDeferredRemainingUsdc,
+            0,
+            "Fresh illiquid liquidation path should not leave legacy deferred payout"
         );
     }
 

@@ -540,9 +540,9 @@ library CfdEnginePlanLib {
 
         if (cs.netSettlementUsdc > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
-            delta.traderPayoutUsdc = uint256(cs.netSettlementUsdc);
-            delta.payoutIsImmediate = availableCashForFreshPayouts >= delta.traderPayoutUsdc;
-            delta.payoutIsDeferred = !delta.payoutIsImmediate;
+            delta.freshTraderPayoutUsdc = uint256(cs.netSettlementUsdc);
+            delta.freshPayoutIsImmediate = availableCashForFreshPayouts >= delta.freshTraderPayoutUsdc;
+            delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
         } else if (cs.netSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
             uint256 lossUsdc = uint256(-cs.netSettlementUsdc);
@@ -599,7 +599,7 @@ library CfdEnginePlanLib {
         );
 
         int256 physicalAssetsDelta = int256(delta.lossResult.seizedUsdc)
-            - int256(delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0)
+            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0)
             - int256(delta.funding.fundingVaultPayoutUsdc);
         if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             physicalAssetsDelta += int256(
@@ -622,7 +622,7 @@ library CfdEnginePlanLib {
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
                 protocolFeesDeltaUsdc: delta.executionFeeUsdc,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: (delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0)
+                deferredTraderPayoutDeltaUsdc: (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0)
                     + (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT
                             ? uint256(delta.funding.pendingFundingUsdc)
                             : 0),
@@ -741,33 +741,32 @@ library CfdEnginePlanLib {
         delta.sideTotalMarginReduction = pos.margin;
 
         delta.residualUsdc = delta.riskState.equityUsdc - int256(delta.keeperBountyUsdc);
+        delta.residualPlan =
+            MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
+        delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
         if (delta.residualUsdc >= 0) {
-            delta.residualPlan =
-                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
-            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount;
-            delta.deferredPayoutRemainingUsdc = 0;
+            delta.existingDeferredConsumedUsdc = snap.deferredPayoutForAccount;
+            delta.existingDeferredRemainingUsdc = 0;
             delta.badDebtUsdc = 0;
         } else {
-            delta.residualPlan =
-                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
-            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount < delta.residualPlan.badDebtUsdc
+            delta.existingDeferredConsumedUsdc = snap.deferredPayoutForAccount < delta.residualPlan.badDebtUsdc
                 ? snap.deferredPayoutForAccount
                 : delta.residualPlan.badDebtUsdc;
-            delta.deferredPayoutRemainingUsdc = snap.deferredPayoutForAccount - delta.deferredPayoutConsumedUsdc;
-            delta.badDebtUsdc = delta.residualPlan.badDebtUsdc - delta.deferredPayoutConsumedUsdc;
+            delta.existingDeferredRemainingUsdc = snap.deferredPayoutForAccount - delta.existingDeferredConsumedUsdc;
+            delta.badDebtUsdc = delta.residualPlan.badDebtUsdc - delta.existingDeferredConsumedUsdc;
         }
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
-        if (delta.residualPlan.payoutUsdc > 0) {
-            delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;
-            delta.payoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
+        if (delta.residualPlan.freshTraderPayoutUsdc > 0) {
+            delta.freshTraderPayoutUsdc = delta.residualPlan.freshTraderPayoutUsdc;
+            delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
                     snap.vaultCashUsdc,
                     snap.accumulatedFeesUsdc,
                     snap.totalDeferredPayoutUsdc,
                     snap.totalDeferredClearerBountyUsdc
                 )
-                .freeCashUsdc >= delta.traderPayoutUsdc;
-            delta.payoutIsDeferred = !delta.payoutIsImmediate;
+                .freeCashUsdc >= delta.freshTraderPayoutUsdc;
+            delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
         }
 
         if (pos.side == CfdTypes.Side.BULL) {
@@ -795,8 +794,8 @@ library CfdEnginePlanLib {
             snap.totalDeferredClearerBountyUsdc
         );
 
-        int256 physicalAssetsDelta =
-            int256(delta.residualPlan.seizedUsdc) - int256(delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0);
+        int256 physicalAssetsDelta = int256(delta.residualPlan.settlementSeizedUsdc)
+            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
@@ -804,7 +803,7 @@ library CfdEnginePlanLib {
                 physicalAssetsDeltaUsdc: physicalAssetsDelta,
                 protocolFeesDeltaUsdc: 0,
                 maxLiabilityAfterUsdc: postMaxLiability,
-                deferredTraderPayoutDeltaUsdc: delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0,
+                deferredTraderPayoutDeltaUsdc: delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0,
                 deferredLiquidationBountyDeltaUsdc: 0,
                 pendingVaultPayoutUsdc: delta.keeperBountyUsdc
             }),

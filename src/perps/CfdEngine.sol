@@ -83,6 +83,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 vpiDeltaUsdc;
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
+        uint256 freshTraderPayoutUsdc;
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 seizedCollateralUsdc;
@@ -105,6 +106,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 reachableCollateralUsdc;
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
+        uint256 settlementRetainedUsdc;
+        uint256 freshTraderPayoutUsdc;
+        uint256 existingDeferredConsumedUsdc;
+        uint256 existingDeferredRemainingUsdc;
         uint256 immediatePayoutUsdc;
         uint256 deferredPayoutUsdc;
         uint256 badDebtUsdc;
@@ -1335,8 +1340,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return preview;
         }
 
-        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
+        preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0;
         if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
             preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
         }
@@ -1401,11 +1407,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.equityUsdc = delta.riskState.equityUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
 
-        preview.seizedCollateralUsdc = delta.residualPlan.seizedUsdc;
-        preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.deferredPayoutRemainingUsdc;
-        if (delta.payoutIsDeferred) {
-            preview.deferredPayoutUsdc += delta.traderPayoutUsdc;
+        preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
+        preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
+        preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
+        preview.existingDeferredConsumedUsdc = delta.existingDeferredConsumedUsdc;
+        preview.existingDeferredRemainingUsdc = delta.existingDeferredRemainingUsdc;
+        preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.existingDeferredRemainingUsdc;
+        if (delta.freshPayoutIsDeferred) {
+            preview.deferredPayoutUsdc += delta.freshTraderPayoutUsdc;
         }
         preview.badDebtUsdc = delta.badDebtUsdc;
 
@@ -1846,7 +1856,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         clearinghouse.unlockPositionMargin(delta.accountId, delta.unlockMarginUsdc);
 
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.GAIN) {
-            _payOrRecordDeferredTraderPayout(delta.accountId, delta.traderPayoutUsdc);
+            _payOrRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
                 IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
@@ -1899,16 +1909,23 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         keeperBountyUsdc = delta.keeperBountyUsdc;
         uint64[] memory reservationOrderIds =
             IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
-        (uint256 seizedUsdc, uint256 payoutUsdc,) = clearinghouse.consumeLiquidationResidual(
-            delta.accountId, reservationOrderIds, delta.posMargin, delta.residualUsdc, address(vault)
-        );
+        IMarginClearinghouse.LiquidationSettlementPlan memory plan = IMarginClearinghouse.LiquidationSettlementPlan({
+            settlementRetainedUsdc: delta.settlementRetainedUsdc,
+            settlementSeizedUsdc: delta.residualPlan.settlementSeizedUsdc,
+            freshTraderPayoutUsdc: delta.freshTraderPayoutUsdc,
+            badDebtUsdc: delta.badDebtUsdc,
+            positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
+            otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
+        });
+        uint256 seizedUsdc =
+            clearinghouse.applyLiquidationSettlementPlan(delta.accountId, reservationOrderIds, plan, address(vault));
         vault.recordTradingRevenueInflow(seizedUsdc);
         _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
-        if (delta.deferredPayoutConsumedUsdc > 0) {
-            _consumeDeferredTraderPayout(delta.accountId, delta.deferredPayoutConsumedUsdc);
+        if (delta.existingDeferredConsumedUsdc > 0) {
+            _consumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
         }
-        if (payoutUsdc > 0) {
-            _payOrRecordDeferredTraderPayout(delta.accountId, payoutUsdc);
+        if (delta.freshTraderPayoutUsdc > 0) {
+            _payOrRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
         }
         accumulatedBadDebtUsdc += delta.badDebtUsdc;
 

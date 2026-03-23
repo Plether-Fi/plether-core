@@ -460,15 +460,20 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.reserveCommittedOrderMargin(aliceId, 41, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](1);
         reservationIds[0] = 41;
-        (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) =
-            clearinghouse.consumeLiquidationResidual(aliceId, reservationIds, 600 * 1e6, int256(200 * 1e6), engine);
+        IMarginClearinghouse.LiquidationSettlementPlan memory plan = IMarginClearinghouse.LiquidationSettlementPlan({
+            settlementRetainedUsdc: 200 * 1e6,
+            settlementSeizedUsdc: 1800 * 1e6,
+            freshTraderPayoutUsdc: 0,
+            badDebtUsdc: 0,
+            positionMarginUnlockedUsdc: 600 * 1e6,
+            otherLockedMarginUnlockedUsdc: 100 * 1e6
+        });
+        uint256 seizedUsdc = clearinghouse.applyLiquidationSettlementPlan(aliceId, reservationIds, plan, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceId);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(41);
         assertEq(seizedUsdc, 1800 * 1e6);
-        assertEq(payoutUsdc, 0);
-        assertEq(badDebtUsdc, 0);
         assertEq(buckets.settlementBalanceUsdc, 200 * 1e6);
         assertEq(buckets.totalLockedMarginUsdc, 200 * 1e6);
         assertEq(buckets.otherLockedMarginUsdc, 200 * 1e6);
@@ -574,8 +579,16 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceId, 600 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceId, 300 * 1e6);
         uint64[] memory reservationIds = new uint64[](0);
+        IMarginClearinghouse.LiquidationSettlementPlan memory plan = IMarginClearinghouse.LiquidationSettlementPlan({
+            settlementRetainedUsdc: 200 * 1e6,
+            settlementSeizedUsdc: 1800 * 1e6,
+            freshTraderPayoutUsdc: 0,
+            badDebtUsdc: 0,
+            positionMarginUnlockedUsdc: 600 * 1e6,
+            otherLockedMarginUnlockedUsdc: 100 * 1e6
+        });
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__IncompleteReservationCoverage.selector);
-        clearinghouse.consumeLiquidationResidual(aliceId, reservationIds, 600 * 1e6, int256(200 * 1e6), engine);
+        clearinghouse.applyLiquidationSettlementPlan(aliceId, reservationIds, plan, engine);
         vm.stopPrank();
     }
 
