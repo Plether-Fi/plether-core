@@ -1945,6 +1945,50 @@ contract CfdEngineTest is BasePerpTest {
         }
     }
 
+    function test_DeferredTraderPayout_CoalescingRetainsExistingQueuePosition() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD261));
+        bytes32 bearId = bytes32(uint256(0xD262));
+        bytes32 laterId = bytes32(uint256(0xD263));
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+        _fundTrader(address(uint160(uint256(laterId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+        _open(laterId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
+        assertGt(bearClaimId, 0, "Initial deferred payout should create a queue node for bearId");
+
+        _close(laterId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint64 laterClaimId = engine.traderDeferredClaimIdByAccount(laterId);
+        assertGt(laterClaimId, bearClaimId, "Later claimant should enter behind the earlier deferred trader node");
+
+        uint256 bearDeferredBefore = engine.deferredPayoutUsdc(bearId);
+        _close(bearId, CfdTypes.Side.BEAR, 2500e18, 1e8, vaultDepth);
+        uint256 bearDeferredAfter = engine.deferredPayoutUsdc(bearId);
+
+        assertEq(
+            engine.traderDeferredClaimIdByAccount(bearId),
+            bearClaimId,
+            "Additional deferred payout for the same account should reuse the existing queue node"
+        );
+        assertGe(bearDeferredAfter, bearDeferredBefore, "Coalescing should not move the account behind later claimants");
+        assertEq(
+            engine.getDeferredClaimHead().accountId,
+            bearId,
+            "The account keeps its existing queue position after deferred payout coalescing"
+        );
+    }
+
     function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredPayout() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD251));
