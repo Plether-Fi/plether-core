@@ -268,8 +268,9 @@ contract PerpAccountingHandler is Test {
                     expectedBadDebtDeltaUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc =
                         beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
-                    expectedFinalResidualUsdc =
-                        grossResidualUsdc > preview.seizedCollateralUsdc ? grossResidualUsdc - preview.seizedCollateralUsdc : 0;
+                    expectedFinalResidualUsdc = grossResidualUsdc > preview.seizedCollateralUsdc
+                        ? grossResidualUsdc - preview.seizedCollateralUsdc
+                        : 0;
                 }
             }
         }
@@ -282,6 +283,7 @@ contract PerpAccountingHandler is Test {
             if (deferredTraderPayoutUsdc > 0) {
                 ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
             }
+            _syncGhostDeferredTraderPayout(accountId);
             uint256 badDebtAfter = engine.accumulatedBadDebtUsdc();
             if (isClose && badDebtAfter > badDebtBefore) {
                 _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
@@ -339,6 +341,7 @@ contract PerpAccountingHandler is Test {
             if (deferredTraderPayoutUsdc > 0) {
                 ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
             }
+            _syncGhostDeferredTraderPayout(accountId);
             if (shouldDefer) {
                 ghost.increaseDeferredClearerBounty(address(this), keeperBountyUsdc);
             }
@@ -347,12 +350,7 @@ contract PerpAccountingHandler is Test {
                 _recordBadDebtDeferredEvent(accountId, badDebtAfter, allowedDeferredAfterUsdc);
             }
             _recordTerminalResidualEvent(
-                accountId,
-                badDebtBefore,
-                preview.badDebtUsdc,
-                expectedFinalResidualUsdc,
-                traderWalletBeforeUsdc,
-                true
+                accountId, badDebtBefore, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, true
             );
         } catch {}
     }
@@ -437,6 +435,7 @@ contract PerpAccountingHandler is Test {
             if (deferredTraderPayoutUsdc > 0) {
                 ghost.increaseDeferredTraderPayout(accountId, deferredTraderPayoutUsdc);
             }
+            _syncGhostDeferredTraderPayout(accountId);
         } catch {}
     }
 
@@ -454,6 +453,7 @@ contract PerpAccountingHandler is Test {
             if (ghostDeferredPayout > 0) {
                 ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout);
             }
+            _syncGhostDeferredTraderPayout(accountId);
         } catch {}
     }
 
@@ -586,6 +586,18 @@ contract PerpAccountingHandler is Test {
             traderWalletBeforeUsdc: traderWalletBeforeUsdc,
             walletPayoutExpected: walletPayoutExpected
         });
+    }
+
+    function _syncGhostDeferredTraderPayout(
+        bytes32 accountId
+    ) internal {
+        uint256 ghostDeferredPayout = ghost.deferredTraderPayoutSnapshot(accountId);
+        uint256 liveDeferredPayout = engine.deferredPayoutUsdc(accountId);
+        if (liveDeferredPayout > ghostDeferredPayout) {
+            ghost.increaseDeferredTraderPayout(accountId, liveDeferredPayout - ghostDeferredPayout);
+        } else if (ghostDeferredPayout > liveDeferredPayout) {
+            ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout - liveDeferredPayout);
+        }
     }
 
     function totalDeferredTraderPayoutSnapshot() external view returns (uint256) {

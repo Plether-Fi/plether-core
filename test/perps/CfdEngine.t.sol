@@ -1931,6 +1931,59 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredPayout() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD251));
+        bytes32 bearId = bytes32(uint256(0xD252));
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
+        assertGt(deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall");
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
+        bytes32 positionMarginSlot = keccak256(abi.encode(bearId, uint256(3)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(1e6)));
+
+        IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(bearId);
+        assertEq(locked.positionMarginUsdc, 1e6, "Test must reduce reachable collateral below the terminal close fee");
+
+        CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 1e8, vaultDepth);
+        uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(1e8)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
+
+        assertEq(preview.badDebtUsdc, 0, "Deferred payout should prevent LP bad debt when the shortfall is fee-only");
+        assertEq(preview.executionFeeUsdc, nominalExecutionFeeUsdc, "Preview should report full fee collection after deferred recovery");
+        assertEq(
+            preview.existingDeferredConsumedUsdc,
+            nominalExecutionFeeUsdc - locked.positionMarginUsdc,
+            "Deferred payout should cover the unpaid execution fee remainder"
+        );
+
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            nominalExecutionFeeUsdc,
+            "Protocol should book the full close execution fee after consuming deferred payout"
+        );
+        assertEq(
+            deferredBefore - engine.deferredPayoutUsdc(bearId),
+            preview.existingDeferredConsumedUsdc,
+            "Live close should extinguish the deferred payout used to fund the fee shortfall"
+        );
+    }
+
     function test_PreviewLiquidation_ExcludesRouterExecutionEscrowFromReachableCollateral() public {
         address trader = address(0xAB1406);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

@@ -215,8 +215,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
 
         address trader = address(uint160(uint256(eventSnapshot.accountId)));
-        uint256 actualFinalResidualUsdc = clearinghouse.balanceUsdc(eventSnapshot.accountId)
-            + engine.deferredPayoutUsdc(eventSnapshot.accountId);
+        uint256 actualFinalResidualUsdc =
+            clearinghouse.balanceUsdc(eventSnapshot.accountId) + engine.deferredPayoutUsdc(eventSnapshot.accountId);
         if (eventSnapshot.walletPayoutExpected) {
             actualFinalResidualUsdc += usdc.balanceOf(trader) - eventSnapshot.traderWalletBeforeUsdc;
         }

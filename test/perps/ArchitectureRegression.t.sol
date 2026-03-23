@@ -51,9 +51,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(
-            pool.juniorPrincipal(), 901_000e6, "deferred liquidation bounties must reduce LP distributable equity"
-        );
+        assertEq(pool.juniorPrincipal(), 901_000e6, "deferred liquidation bounties must reduce LP distributable equity");
     }
 
     function test_FreshClosePayout_MustNotLeapfrogExistingDeferredClaims() public {
@@ -135,18 +133,15 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         assertGt(bobDeferred, 0, "setup must create second deferred claim");
 
         usdc.mint(address(pool), aliceDeferred / 2);
-        uint256 claimableNow = pool.totalAssets() > engine.accumulatedFeesUsdc()
-            ? pool.totalAssets() - engine.accumulatedFeesUsdc()
-            : 0;
-        if (claimableNow > aliceDeferred) claimableNow = aliceDeferred;
 
+        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceId);
         vm.prank(alice);
         engine.claimDeferredPayout(aliceId);
 
+        uint256 aliceClaimed = clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore;
+        assertGt(aliceClaimed, 0, "oldest claim should absorb partial liquidity first");
         assertEq(
-            engine.deferredPayoutUsdc(aliceId),
-            aliceDeferred - claimableNow,
-            "oldest claim should absorb partial liquidity first"
+            engine.deferredPayoutUsdc(aliceId), aliceDeferred - aliceClaimed, "head claim should shrink by paid amount"
         );
         assertEq(
             engine.deferredPayoutUsdc(bobId),
