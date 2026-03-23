@@ -302,6 +302,30 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return isSeedLifecycleComplete() && isTradingActive;
     }
 
+    function canAcceptTrancheDeposits(
+        bool isSenior
+    ) public view override returns (bool) {
+        if (!canAcceptOrdinaryDeposits() || paused() || unassignedAssets > 0) {
+            return false;
+        }
+
+        (
+            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        if (!_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
+            return false;
+        }
+
+        if (!isSenior) {
+            return true;
+        }
+
+        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
+        uint256 pendingSeniorPrincipal = ctx.pendingState.waterfall.seniorPrincipal;
+        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= seniorHighWaterMark;
+    }
+
     function canIncreaseRisk() public view override(ICfdVault, IHousePool) returns (bool) {
         return isSeedLifecycleComplete() && isTradingActive;
     }

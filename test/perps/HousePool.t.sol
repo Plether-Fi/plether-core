@@ -1572,6 +1572,56 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
         juniorVault.deposit(depositAmount, address(this));
     }
 
+    function test_MaxDeposit_ZeroWhilePoolPaused() public {
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+
+        assertTrue(pool.canAcceptTrancheDeposits(false), "Setup should allow junior deposits before pause");
+        pool.pause();
+
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Paused pool should report deposits blocked");
+        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while paused");
+        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while paused");
+    }
+
+    function test_MaxDeposit_ZeroWhileMarkStale() public {
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+
+        _fundJunior(address(0x445), 1_000_000e6);
+        address trader = address(0x444);
+        _fundTrader(trader, 300e6);
+        _open(bytes32(uint256(uint160(trader))), CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.warp(block.timestamp + 2 hours);
+
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Stale mark should report deposits blocked");
+        assertEq(juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while mark is stale");
+        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while mark is stale");
+    }
+
+    function test_MaxDeposit_ZeroWhileBootstrapPending() public {
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
+        pool.activateTrading();
+
+        vm.store(address(pool), bytes32(uint256(10)), bytes32(uint256(1)));
+
+        assertFalse(pool.canAcceptTrancheDeposits(false), "Pending bootstrap should report deposits blocked");
+        assertEq(
+            juniorVault.maxDeposit(address(this)), 0, "ERC4626 maxDeposit should be zero while bootstrap is pending"
+        );
+        assertEq(juniorVault.maxMint(address(this)), 0, "ERC4626 maxMint should be zero while bootstrap is pending");
+    }
+
 }
 
 contract HousePoolUnseededBootstrapTest is BasePerpTest {

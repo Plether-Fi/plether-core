@@ -73,6 +73,10 @@ interface IHousePool {
 
     function canAcceptOrdinaryDeposits() external view returns (bool);
 
+    function canAcceptTrancheDeposits(
+        bool isSenior
+    ) external view returns (bool);
+
     function canIncreaseRisk() external view returns (bool);
 
     function isTradingActive() external view returns (bool);

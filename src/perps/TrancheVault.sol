@@ -286,16 +286,7 @@ contract TrancheVault is ERC4626 {
     }
 
     function _canDepositNow() internal view returns (bool) {
-        if (_isTerminallyWiped() || !_ordinaryDepositsAllowed()) {
-            return false;
-        }
-        if (!IS_SENIOR) {
-            return true;
-        }
-
-        (uint256 pendingSeniorPrincipal,,,) = POOL.getPendingTrancheState();
-        uint256 seniorHighWaterMark = POOL.seniorHighWaterMark();
-        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= seniorHighWaterMark;
+        return !_isTerminallyWiped() && POOL.canAcceptTrancheDeposits(IS_SENIOR);
     }
 
 }
