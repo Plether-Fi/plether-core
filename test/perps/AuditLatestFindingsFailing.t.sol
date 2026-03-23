@@ -244,6 +244,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundJunior(address(this), _initialJuniorDeposit());
 
         _fundTrader(alice, 50_000e6);

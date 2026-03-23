@@ -262,6 +262,7 @@ library CfdEnginePlanTypes {
         uint256 sideTotalMarginReduction;
 
         uint256 keeperBountyUsdc;
+        uint256 liquidationReachableCollateralUsdc;
 
         int256 residualUsdc;
         MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;
@@ -269,6 +270,8 @@ library CfdEnginePlanTypes {
         uint256 traderPayoutUsdc;
         bool payoutIsImmediate;
         bool payoutIsDeferred;
+        uint256 deferredPayoutConsumedUsdc;
+        uint256 deferredPayoutRemainingUsdc;
 
         uint256 syncMarginQueueAmount;
 

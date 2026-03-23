@@ -47,6 +47,13 @@ contract OrderRouterTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
+
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
         usdc.approve(address(juniorVault), type(uint256).max);
@@ -374,6 +381,63 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.executionBountyReserves(1), 1_000_000, "Close orders should still escrow full bounty");
         assertEq(marginAfter, marginBefore - 1_000_000, "Close bounty should fall back to active margin");
         assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the close bounty after fallback");
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_RevertsWhenMarginBackedBountyWouldBreakMaintenance() public {
+        address trader = address(0x336);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x337);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        _fundTrader(trader, 1000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "setup must fully consume free settlement");
+
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+    }
+
+    function test_InvalidClose_DoesNotPayKeeperFromMarginBackedBounty() public {
+        address trader = address(0x338);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address counterparty = address(0x339);
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+
+        uint256 depth = 5_000_000 * 1e6;
+        _fundTrader(trader, 50_000e6);
+        _fundTrader(counterparty, 500_000e6);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+
+        uint256 minNotional = (uint256(5) * 1e6 * 10_000) / 15 + 1e6;
+        uint256 minSize = (minNotional * 1e20) / 1e8;
+        _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
+
+        (, uint256 marginBeforeCommit,,,,,,) = engine.positions(accountId);
+        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "setup must fully consume free settlement");
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
+
+        (, uint256 marginAfterCommit,,,,,,) = engine.positions(accountId);
+        assertEq(marginAfterCommit, marginBeforeCommit - 1e6, "commit should temporarily reserve the bounty from position margin");
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        (, uint256 marginAfterExecute,,,,,,) = engine.positions(accountId);
+        assertEq(marginAfterExecute, marginBeforeCommit, "failed invalid close should refund margin-backed bounty to position margin");
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not receive a refunded margin-backed bounty");
+        assertEq(router.executionBountyReserves(1), 0, "failed close should clear router bounty escrow");
+        assertEq(uint256(router.getOrderRecord(1).status), uint256(OrderRouter.OrderStatus.Failed), "invalid close should finalize as failed");
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
@@ -1004,6 +1068,13 @@ contract OrderRouterPythTest is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);

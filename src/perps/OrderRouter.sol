@@ -41,6 +41,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         CfdTypes.Order core;
         OrderStatus status;
         uint256 executionBountyUsdc;
+        uint256 marginBackedExecutionBountyUsdc;
         uint64 retryAfterTimestamp;
         uint64 nextPendingOrderId;
         uint64 prevPendingOrderId;
@@ -307,10 +308,10 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             if (_isCloseOnlyWindow()) {
                 revert OrderRouter__CloseOnlyMode();
             }
-            if (vault.hasSeedLifecycleStarted() && !vault.isSeedLifecycleComplete()) {
-                revert OrderRouter__SeedLifecycleIncomplete();
-            }
-            if (vault.isSeedLifecycleComplete() && !vault.isTradingActive()) {
+            if (!vault.canIncreaseRisk()) {
+                if (!vault.isSeedLifecycleComplete()) {
+                    revert OrderRouter__SeedLifecycleIncomplete();
+                }
                 revert OrderRouter__TradingNotActive();
             }
         }
@@ -861,6 +862,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         CfdTypes.Order memory order,
         bytes memory revertData
     ) internal pure returns (FailedOrderBountyPolicy) {
+        if (revertData.length >= 4 && bytes4(revertData) == TYPED_ORDER_FAILURE_SELECTOR) {
+            (ICfdEngine.OrderExecutionFailureClass failureClass,, bool isClose) = _decodeTypedOrderFailure(revertData);
+            if (isClose && failureClass == ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid) {
+                return FailedOrderBountyPolicy.RefundUser;
+            }
+        }
         if (_isRefundableProtocolStateFailure(revertData)) {
             return FailedOrderBountyPolicy.RefundUser;
         }
@@ -996,6 +1003,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
+        record.marginBackedExecutionBountyUsdc = 0;
         USDC.safeTransfer(msg.sender, executionBountyUsdc);
     }
 
@@ -1003,11 +1011,19 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
+        uint256 marginBackedBountyUsdc = record.marginBackedExecutionBountyUsdc;
+        if (marginBackedBountyUsdc > 0) {
+            record.marginBackedExecutionBountyUsdc = 0;
+            record.executionBountyUsdc -= marginBackedBountyUsdc;
+            USDC.safeTransfer(address(clearinghouse), marginBackedBountyUsdc);
+            engine.restoreCloseOrderExecutionBounty(record.core.accountId, marginBackedBountyUsdc);
+        }
+
         uint256 bounty = record.executionBountyUsdc;
         if (bounty > 0) {
             record.executionBountyUsdc = 0;
-            address trader = address(uint160(uint256(record.core.accountId)));
-            USDC.safeTransfer(trader, bounty);
+            USDC.safeTransfer(address(clearinghouse), bounty);
+            clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
         }
     }
 
@@ -1198,7 +1214,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
         }
 
         if (isClose) {
-            _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
+            orderRecords[orderId].marginBackedExecutionBountyUsdc =
+                _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
         } else {
             if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
                 revert OrderRouter__InsufficientFreeEquity();
@@ -1212,7 +1229,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
         uint256 executionBountyUsdc
-    ) internal {
+    ) internal returns (uint256 marginBackedBountyUsdc) {
         uint256 freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
@@ -1220,9 +1237,9 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
             clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
         }
 
-        uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
+        marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
         if (marginBackedBountyUsdc == 0) {
-            return;
+            return 0;
         }
 
         try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}

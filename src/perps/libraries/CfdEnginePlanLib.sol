@@ -708,7 +708,9 @@ library CfdEnginePlanLib {
         int256 pendingFunding = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
 
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
-        uint256 reachableCollateralUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
+        uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
+        uint256 reachableCollateralUsdc = settlementReachableUsdc + snap.deferredPayoutForAccount;
+        delta.liquidationReachableCollateralUsdc = reachableCollateralUsdc;
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos, price, snap.capPrice, pendingFunding, reachableCollateralUsdc, maintMarginBps
@@ -739,10 +741,24 @@ library CfdEnginePlanLib {
         delta.sideTotalMarginReduction = pos.margin;
 
         delta.residualUsdc = delta.riskState.equityUsdc - int256(delta.keeperBountyUsdc);
-        delta.residualPlan =
-            MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
+        if (delta.residualUsdc >= 0) {
+            uint256 targetBalanceUsdc = uint256(delta.residualUsdc);
+            uint256 settlementTargetUsdc = targetBalanceUsdc < settlementReachableUsdc ? targetBalanceUsdc : settlementReachableUsdc;
+            delta.residualPlan =
+                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, int256(settlementTargetUsdc));
+            delta.deferredPayoutRemainingUsdc = targetBalanceUsdc > settlementTargetUsdc ? targetBalanceUsdc - settlementTargetUsdc : 0;
+            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount - delta.deferredPayoutRemainingUsdc;
+            delta.badDebtUsdc = 0;
+        } else {
+            delta.residualPlan =
+                MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
+            delta.deferredPayoutConsumedUsdc = snap.deferredPayoutForAccount < delta.residualPlan.badDebtUsdc
+                ? snap.deferredPayoutForAccount
+                : delta.residualPlan.badDebtUsdc;
+            delta.deferredPayoutRemainingUsdc = snap.deferredPayoutForAccount - delta.deferredPayoutConsumedUsdc;
+            delta.badDebtUsdc = delta.residualPlan.badDebtUsdc - delta.deferredPayoutConsumedUsdc;
+        }
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
-        delta.badDebtUsdc = delta.residualPlan.badDebtUsdc;
 
         if (delta.residualPlan.payoutUsdc > 0) {
             delta.traderPayoutUsdc = delta.residualPlan.payoutUsdc;

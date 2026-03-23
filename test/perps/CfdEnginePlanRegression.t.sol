@@ -86,6 +86,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundJunior(address(this), 1_000_000e6);
     }
 

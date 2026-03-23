@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
+import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {HousePoolAccountingLib} from "../../src/perps/libraries/HousePoolAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -32,6 +33,18 @@ contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest 
         return 0;
     }
 
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _autoActivateTrading() internal pure override returns (bool) {
+        return false;
+    }
+
     function test_H1_ZeroPrincipalRecapitalizationCashMustNotBeCapturableByNextJuniorDepositor() public {
         uint256 strandedCash = 1000e6;
         usdc.mint(address(pool), strandedCash);
@@ -43,7 +56,7 @@ contract AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture is BasePerpTest 
         usdc.mint(attacker, strandedCash);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), strandedCash);
-        vm.expectRevert(HousePool.HousePool__PendingBootstrap.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.deposit(strandedCash, attacker);
         vm.stopPrank();
 

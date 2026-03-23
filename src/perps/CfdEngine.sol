@@ -667,9 +667,56 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
+        uint256 price = lastMarkPrice;
+        if (price == 0) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+        uint256 maxStaleness = isOracleFrozen() ? fadMaxStaleness : 30;
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        if (age > maxStaleness) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+
+        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
+        if (reachableUsdc < amountUsdc) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+
+        CfdTypes.Position memory positionAfter = pos;
+        positionAfter.margin -= amountUsdc;
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            positionAfter,
+            price,
+            CAP_PRICE,
+            getPendingFunding(pos),
+            reachableUsdc - amountUsdc,
+            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+        );
+        if (riskState.liquidatable) {
+            revert CfdEngine__InsufficientCloseOrderBountyBacking();
+        }
+
         pos.margin -= amountUsdc;
         _sideState(pos.side).totalMargin -= amountUsdc;
         clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
+    }
+
+    function restoreCloseOrderExecutionBounty(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlyRouter {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        CfdTypes.Position storage pos = positions[accountId];
+        if (pos.size == 0) {
+            revert CfdEngine__NoOpenPosition();
+        }
+
+        clearinghouse.creditSettlementAndLockMargin(accountId, amountUsdc);
+        pos.margin += amountUsdc;
+        _sideState(pos.side).totalMargin += amountUsdc;
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
@@ -731,7 +778,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
+        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             price,
@@ -1098,7 +1145,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             lastMarkPrice,
             CAP_PRICE,
             _getProjectedPendingFunding(accountId, pos),
-            snapshot.terminalReachableUsdc,
+            snapshot.terminalReachableUsdc + snapshot.deferredPayoutUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
 
@@ -1121,7 +1168,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return viewData;
         }
 
-        uint256 reachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
+        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             lastMarkPrice,
@@ -1260,7 +1307,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
-        snap.vaultCashUsdc = vault.totalAssets();
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: sizeDelta,
@@ -1346,11 +1392,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
-        snap.vaultCashUsdc = vault.totalAssets();
         CfdEnginePlanTypes.LiquidationDelta memory delta = CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
 
         preview.liquidatable = delta.liquidatable;
-        preview.reachableCollateralUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
+        preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
         preview.fundingUsdc = delta.riskState.pendingFundingUsdc;
         preview.equityUsdc = delta.riskState.equityUsdc;
@@ -1358,7 +1403,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         preview.seizedCollateralUsdc = delta.residualPlan.seizedUsdc;
         preview.immediatePayoutUsdc = delta.payoutIsImmediate ? delta.traderPayoutUsdc : 0;
-        preview.deferredPayoutUsdc = delta.payoutIsDeferred ? delta.traderPayoutUsdc : 0;
+        preview.deferredPayoutUsdc = delta.deferredPayoutRemainingUsdc;
         preview.badDebtUsdc = delta.badDebtUsdc;
 
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
@@ -1851,15 +1896,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         keeperBountyUsdc = delta.keeperBountyUsdc;
         uint64[] memory reservationOrderIds =
             IOrderRouterAccounting(orderRouter).getMarginReservationIds(delta.accountId);
-        (uint256 seizedUsdc, uint256 payoutUsdc, uint256 badDebtUsdc) = clearinghouse.consumeLiquidationResidual(
+        (uint256 seizedUsdc, uint256 payoutUsdc,) = clearinghouse.consumeLiquidationResidual(
             delta.accountId, reservationOrderIds, delta.posMargin, delta.residualUsdc, address(vault)
         );
         vault.recordTradingRevenueInflow(seizedUsdc);
         _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
+        if (delta.deferredPayoutConsumedUsdc > 0) {
+            _consumeDeferredTraderPayout(delta.accountId, delta.deferredPayoutConsumedUsdc);
+        }
         if (payoutUsdc > 0) {
             _payOrRecordDeferredTraderPayout(delta.accountId, payoutUsdc);
         }
-        accumulatedBadDebtUsdc += badDebtUsdc;
+        accumulatedBadDebtUsdc += delta.badDebtUsdc;
 
         sideState.totalMargin -= delta.posMargin;
 
@@ -1881,6 +1929,55 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (effectiveAssetsAfter < state.maxLiabilityUsdc) {
             degradedMode = true;
             emit DegradedModeEntered(effectiveAssetsAfter, state.maxLiabilityUsdc, accountId);
+        }
+    }
+
+    function _terminalRiskCollateralUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getTerminalReachableUsdc(accountId) + deferredPayoutUsdc[accountId];
+    }
+
+    function _consumeDeferredTraderPayout(bytes32 accountId, uint256 amountUsdc) internal {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        deferredPayoutUsdc[accountId] -= amountUsdc;
+        totalDeferredPayoutUsdc -= amountUsdc;
+
+        uint256 remainingToConsume = amountUsdc;
+        uint64 prevClaimId;
+        uint64 claimId = deferredClaimHeadId;
+        while (claimId != 0 && remainingToConsume > 0) {
+            ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
+            uint64 nextClaimId = claim.nextClaimId;
+            if (claim.claimType == ICfdEngine.DeferredClaimType.TraderPayout && claim.accountId == accountId) {
+                uint256 consumedUsdc = claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
+                claim.remainingUsdc -= consumedUsdc;
+                remainingToConsume -= consumedUsdc;
+
+                if (claim.remainingUsdc == 0) {
+                    if (prevClaimId == 0) {
+                        deferredClaimHeadId = nextClaimId;
+                    } else {
+                        deferredClaims[prevClaimId].nextClaimId = nextClaimId;
+                    }
+                    if (deferredClaimTailId == claimId) {
+                        deferredClaimTailId = prevClaimId;
+                    }
+                    delete deferredClaims[claimId];
+                    claimId = nextClaimId;
+                    continue;
+                }
+            }
+
+            prevClaimId = claimId;
+            claimId = nextClaimId;
+        }
+
+        if (remainingToConsume != 0) {
+            revert CfdEngine__DeferredClaimNotAtHead();
         }
     }
 

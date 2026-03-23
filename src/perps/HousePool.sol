@@ -220,6 +220,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
                 lastReconcileTime = block.timestamp;
             }
             _applyPendingBucketsLive(accountingSnapshot, statusSnapshot);
+            lastSeniorYieldCheckpointTime = block.timestamp;
         }
         seniorRateBps = pendingSeniorRate;
         pendingSeniorRate = 0;
@@ -295,6 +296,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     function hasSeedLifecycleStarted() public view override(ICfdVault, IHousePool) returns (bool) {
         return seniorSeedInitialized || juniorSeedInitialized;
+    }
+
+    function canAcceptOrdinaryDeposits() public view override(ICfdVault, IHousePool) returns (bool) {
+        return isSeedLifecycleComplete() && isTradingActive;
+    }
+
+    function canIncreaseRisk() public view override(ICfdVault, IHousePool) returns (bool) {
+        return isSeedLifecycleComplete() && isTradingActive;
     }
 
     function activateTrading() external onlyOwner {
@@ -474,7 +483,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (targetVault == address(0)) {
             revert HousePool__ZeroAddress();
         }
-        if (IERC20(targetVault).totalSupply() != 0) {
+        if (toSenior ? seniorSeedInitialized : juniorSeedInitialized) {
             revert HousePool__SeedAlreadyInitialized();
         }
 

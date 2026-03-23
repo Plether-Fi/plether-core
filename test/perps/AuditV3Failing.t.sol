@@ -103,13 +103,29 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
 
     address lp = address(0x1111);
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) {
-        return 50_000e6;
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
-    function _initialSeniorDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
     }
+
+    function _autoActivateTrading() internal pure override returns (bool) {
+        return false;
+    }
+
+    function setUp() public override {
+        super.setUp();
+        usdc.mint(address(this), 550_000e6);
+        usdc.approve(address(pool), 550_000e6);
+        pool.initializeSeedPosition(false, 50_000e6, address(this));
+        pool.initializeSeedPosition(true, 500_000e6, address(this));
+        pool.activateTrading();
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) { return 0; }
+    function _initialSeniorDeposit() internal pure override returns (uint256) { return 0; }
 
     function test_4_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit() public {
         bytes32 accountId = bytes32(uint256(uint160(address(0xA11CE))));
@@ -141,13 +157,29 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
 
     address lp = address(0x1111);
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) {
-        return 50_000e6;
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
     }
 
-    function _initialSeniorDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
     }
+
+    function _autoActivateTrading() internal pure override returns (bool) {
+        return false;
+    }
+
+    function setUp() public override {
+        super.setUp();
+        usdc.mint(address(this), 550_000e6);
+        usdc.approve(address(pool), 550_000e6);
+        pool.initializeSeedPosition(false, 50_000e6, address(this));
+        pool.initializeSeedPosition(true, 500_000e6, address(this));
+        pool.activateTrading();
+    }
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) { return 0; }
+    function _initialSeniorDeposit() internal pure override returns (uint256) { return 0; }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({

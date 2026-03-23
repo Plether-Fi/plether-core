@@ -82,6 +82,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundJunior(address(this), 1_000_000e6);
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 10 ether);

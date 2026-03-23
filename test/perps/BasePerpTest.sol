@@ -90,6 +90,26 @@ abstract contract BasePerpTest is Test {
         vm.warp(SETUP_TIMESTAMP);
     }
 
+    function _bootstrapSeededLifecycle() internal {
+        uint256 juniorSeed = _initialJuniorSeedDeposit();
+        if (juniorSeed > 0 && !pool.hasSeedLifecycleStarted()) {
+            usdc.mint(address(this), juniorSeed);
+            usdc.approve(address(pool), juniorSeed);
+            pool.initializeSeedPosition(false, juniorSeed, _juniorSeedReceiver());
+        }
+
+        uint256 seniorSeed = _initialSeniorSeedDeposit();
+        if (seniorSeed > 0 && !pool.isSeedLifecycleComplete()) {
+            usdc.mint(address(this), seniorSeed);
+            usdc.approve(address(pool), seniorSeed);
+            pool.initializeSeedPosition(true, seniorSeed, _seniorSeedReceiver());
+        }
+
+        if (_autoActivateTrading() && pool.isSeedLifecycleComplete() && !pool.isTradingActive()) {
+            pool.activateTrading();
+        }
+    }
+
     // --- Virtual hooks ---
 
     function _riskParams() internal pure virtual returns (CfdTypes.RiskParams memory) {
@@ -115,11 +135,11 @@ abstract contract BasePerpTest is Test {
     }
 
     function _initialJuniorSeedDeposit() internal pure virtual returns (uint256) {
-        return 0;
+        return 1000e6;
     }
 
     function _initialSeniorSeedDeposit() internal pure virtual returns (uint256) {
-        return 0;
+        return 1000e6;
     }
 
     function _juniorSeedReceiver() internal view virtual returns (address) {

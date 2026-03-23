@@ -110,6 +110,14 @@ contract MockInvariantVault is ICfdVault {
         return true;
     }
 
+    function canAcceptOrdinaryDeposits() external pure returns (bool) {
+        return true;
+    }
+
+    function canIncreaseRisk() external pure returns (bool) {
+        return true;
+    }
+
     function isTradingActive() external pure returns (bool) {
         return true;
     }

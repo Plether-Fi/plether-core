@@ -50,6 +50,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundJunior(address(this), 1_000_000e6);
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
@@ -194,6 +195,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
         vm.deal(keeper, 1 ether);
@@ -262,6 +264,10 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
 contract AuditConfirmedFindingsFailing_HwmRouteConsistency is BasePerpTest {
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
         return 0;
     }
 

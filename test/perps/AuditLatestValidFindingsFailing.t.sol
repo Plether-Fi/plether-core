@@ -59,6 +59,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
         _fundJunior(address(this), _initialJuniorDeposit());
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 10 ether);

@@ -41,6 +41,12 @@ interface ICfdVault {
     /// @notice Returns true if bootstrap seeding has started for either tranche.
     function hasSeedLifecycleStarted() external view returns (bool);
 
+    /// @notice Returns true once ordinary LP deposits are allowed.
+    function canAcceptOrdinaryDeposits() external view returns (bool);
+
+    /// @notice Returns true once risk-increasing trader actions are allowed.
+    function canIncreaseRisk() external view returns (bool);
+
     /// @notice Returns true if owner has activated trading after seed completion.
     function isTradingActive() external view returns (bool);
 

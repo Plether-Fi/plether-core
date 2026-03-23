@@ -9,6 +9,8 @@ interface IHousePool {
     function seniorPrincipal() external view returns (uint256);
     /// @notice Total USDC attributed to the junior tranche (6 decimals)
     function juniorPrincipal() external view returns (uint256);
+    /// @notice Senior high-water mark used to block dilutive recapitalizing deposits.
+    function seniorHighWaterMark() external view returns (uint256);
     /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
     function unassignedAssets() external view returns (uint256);
 
@@ -61,6 +63,10 @@ interface IHousePool {
     function isWithdrawalLive() external view returns (bool);
 
     function hasSeedLifecycleStarted() external view returns (bool);
+
+    function canAcceptOrdinaryDeposits() external view returns (bool);
+
+    function canIncreaseRisk() external view returns (bool);
 
     function isTradingActive() external view returns (bool);
 

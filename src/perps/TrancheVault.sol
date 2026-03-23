@@ -106,7 +106,7 @@ contract TrancheVault is ERC4626 {
     function maxDeposit(
         address receiver
     ) public view override returns (uint256) {
-        if (_isTerminallyWiped() || !_ordinaryDepositsAllowed()) {
+        if (!_canDepositNow()) {
             return 0;
         }
         return super.maxDeposit(receiver);
@@ -115,7 +115,7 @@ contract TrancheVault is ERC4626 {
     function maxMint(
         address receiver
     ) public view override returns (uint256) {
-        if (_isTerminallyWiped() || !_ordinaryDepositsAllowed()) {
+        if (!_canDepositNow()) {
             return 0;
         }
         return super.maxMint(receiver);
@@ -282,7 +282,20 @@ contract TrancheVault is ERC4626 {
     }
 
     function _ordinaryDepositsAllowed() internal view returns (bool) {
-        return !POOL.hasSeedLifecycleStarted() || POOL.isTradingActive();
+        return POOL.canAcceptOrdinaryDeposits();
+    }
+
+    function _canDepositNow() internal view returns (bool) {
+        if (_isTerminallyWiped() || !_ordinaryDepositsAllowed()) {
+            return false;
+        }
+        if (!IS_SENIOR) {
+            return true;
+        }
+
+        (uint256 pendingSeniorPrincipal,,,) = POOL.getPendingTrancheState();
+        uint256 seniorHighWaterMark = POOL.seniorHighWaterMark();
+        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= seniorHighWaterMark;
     }
 
 }

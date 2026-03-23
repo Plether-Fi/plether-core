@@ -18,6 +18,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract LiquidationAccountingLibHarness {
 
@@ -48,6 +49,16 @@ contract LiquidationAccountingLibHarness {
 }
 
 contract CfdEngineTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 1000e6;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 1000e6;
+    }
 
     function _cappedFundingAfter(
         int256 bullFunding,
@@ -1595,6 +1606,75 @@ contract CfdEngineTest is BasePerpTest {
             preview.badDebtUsdc,
             "Illiquid liquidation preview should match live bad debt"
         );
+    }
+
+    function test_LiquidationPreview_DeferredPayoutPreventsUnfairLiquidation() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD211));
+        bytes32 bearId = bytes32(uint256(0xD212));
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint256 deferred = engine.deferredPayoutUsdc(bearId);
+        assertGt(deferred, 0, "Setup must create deferred payout while keeping the position open");
+
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(reducedSettlement);
+
+        CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(bearId, 85_000_000);
+        assertFalse(fundedPreview.liquidatable, "Deferred payout should count toward liquidation equity");
+
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
+        CfdEngine.LiquidationPreview memory strippedPreview = engine.previewLiquidation(bearId, 85_000_000);
+        assertTrue(strippedPreview.liquidatable, "Removing deferred payout should expose the same position to liquidation");
+    }
+
+    function test_Liquidation_ConsumesDeferredPayoutBeforeRecordingBadDebt() public {
+        uint256 vaultDepth = 1_000_000 * 1e6;
+        bytes32 bullId = bytes32(uint256(0xD221));
+        bytes32 bearId = bytes32(uint256(0xD222));
+        address keeper = address(0xD223);
+        _fundTrader(address(uint160(uint256(bullId))), 5000e6);
+        _fundTrader(address(uint160(uint256(bearId))), 5000e6);
+
+        _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
+        _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 1);
+
+        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
+        uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
+        assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
+
+        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(reducedSettlement);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bearId, 80_000_000);
+        assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
+
+        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(80_000_000));
+        vm.prank(keeper);
+        router.executeLiquidation(bearId, priceData);
+
+        assertLt(engine.deferredPayoutUsdc(bearId), deferredBefore, "Liquidation should consume deferred payout before socializing loss");
+        assertEq(engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Preview should match remaining deferred payout after liquidation");
+        assertEq(engine.accumulatedBadDebtUsdc() - badDebtBefore, preview.badDebtUsdc, "Bad debt should only reflect the post-deferred shortfall");
     }
 
     function test_PreviewLiquidation_ExcludesRouterExecutionEscrowFromReachableCollateral() public {
@@ -3682,13 +3762,22 @@ contract VpiChunkingTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
+        TrancheVault seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
         engine.setOrderRouter(address(this));
+        pool.setOrderRouter(address(this));
 
         clearinghouse.setEngine(address(engine));
         vm.warp(1_709_532_000);
+
+        usdc.mint(address(this), 2_000e6);
+        usdc.approve(address(pool), 2_000e6);
+        pool.initializeSeedPosition(false, 1_000e6, address(this));
+        pool.initializeSeedPosition(true, 1_000e6, address(this));
+        pool.activateTrading();
 
         usdc.mint(address(this), 10_000_000 * 1e6);
         usdc.approve(address(juniorVault), type(uint256).max);
