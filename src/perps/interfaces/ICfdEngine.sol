@@ -141,7 +141,6 @@ interface ICfdEngine {
         uint256 remainingUsdc;
         uint64 prevClaimId;
         uint64 nextClaimId;
-        uint64 accountNextClaimId;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking

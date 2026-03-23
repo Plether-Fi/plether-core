@@ -172,8 +172,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     uint64 public nextDeferredClaimId = 1;
     uint64 public deferredClaimHeadId;
     uint64 public deferredClaimTailId;
-    mapping(bytes32 => uint64) public accountDeferredClaimHeadId;
-    mapping(bytes32 => uint64) public accountDeferredClaimTailId;
+    mapping(bytes32 => uint64) public traderDeferredClaimIdByAccount;
 
     address public orderRouter;
 
@@ -967,7 +966,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         } else {
             deferredPayoutUsdc[accountId] += amountUsdc;
             totalDeferredPayoutUsdc += amountUsdc;
-            _enqueueDeferredClaim(ICfdEngine.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc);
+            uint64 claimId = traderDeferredClaimIdByAccount[accountId];
+            if (claimId == 0) {
+                claimId = _enqueueDeferredClaim(ICfdEngine.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc);
+                traderDeferredClaimIdByAccount[accountId] = claimId;
+            } else {
+                deferredClaims[claimId].remainingUsdc += amountUsdc;
+            }
             emit DeferredPayoutRecorded(accountId, amountUsdc);
         }
     }
@@ -1020,36 +1025,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         address keeper,
         uint256 amountUsdc
-    ) internal {
-        uint64 claimId = nextDeferredClaimId++;
+    ) internal returns (uint64 claimId) {
+        claimId = nextDeferredClaimId++;
         deferredClaims[claimId] = ICfdEngine.DeferredClaim({
             claimType: claimType,
             accountId: accountId,
             keeper: keeper,
             remainingUsdc: amountUsdc,
             prevClaimId: deferredClaimTailId,
-            nextClaimId: 0,
-            accountNextClaimId: 0
+            nextClaimId: 0
         });
-
-        if (claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
-            uint64 accountTailId = accountDeferredClaimTailId[accountId];
-            if (accountTailId == 0) {
-                accountDeferredClaimHeadId[accountId] = claimId;
-            } else {
-                deferredClaims[accountTailId].accountNextClaimId = claimId;
-            }
-            accountDeferredClaimTailId[accountId] = claimId;
-        }
 
         if (deferredClaimTailId == 0) {
             deferredClaimHeadId = claimId;
             deferredClaimTailId = claimId;
-            return;
+            return claimId;
         }
 
         deferredClaims[deferredClaimTailId].nextClaimId = claimId;
         deferredClaimTailId = claimId;
+        return claimId;
     }
 
     function _popDeferredClaimHead() internal {
@@ -1086,10 +1081,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         if (claim.claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
             bytes32 accountId = claim.accountId;
-            uint64 nextAccountClaimId = claim.accountNextClaimId;
-            accountDeferredClaimHeadId[accountId] = nextAccountClaimId;
-            if (nextAccountClaimId == 0) {
-                accountDeferredClaimTailId[accountId] = 0;
+            if (traderDeferredClaimIdByAccount[accountId] == claimId) {
+                delete traderDeferredClaimIdByAccount[accountId];
             }
         }
 
@@ -2030,26 +2023,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         deferredPayoutUsdc[accountId] -= amountUsdc;
         totalDeferredPayoutUsdc -= amountUsdc;
 
-        uint256 remainingToConsume = amountUsdc;
-        uint64 claimId = accountDeferredClaimHeadId[accountId];
-        while (claimId != 0 && remainingToConsume > 0) {
-            ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
-            uint64 nextAccountClaimId = claim.accountNextClaimId;
-            uint256 consumedUsdc = claim.remainingUsdc > remainingToConsume ? remainingToConsume : claim.remainingUsdc;
-            claim.remainingUsdc -= consumedUsdc;
-            remainingToConsume -= consumedUsdc;
-
-            if (claim.remainingUsdc == 0) {
-                _unlinkDeferredClaim(claimId);
-                claimId = nextAccountClaimId;
-                continue;
-            }
-
-            break;
+        uint64 claimId = traderDeferredClaimIdByAccount[accountId];
+        if (claimId == 0) {
+            revert CfdEngine__DeferredClaimNotAtHead();
         }
 
-        if (remainingToConsume != 0) {
+        ICfdEngine.DeferredClaim storage claim = deferredClaims[claimId];
+        if (claim.remainingUsdc < amountUsdc) {
             revert CfdEngine__DeferredClaimNotAtHead();
+        }
+
+        claim.remainingUsdc -= amountUsdc;
+        if (claim.remainingUsdc == 0) {
+            _unlinkDeferredClaim(claimId);
         }
     }
 

@@ -1493,7 +1493,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 3), bytes32(uint256(10e6)));
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 4), bytes32(uint256(0)));
         vm.store(address(engine), bytes32(uint256(35)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
-        stdstore.target(address(engine)).sig("accountDeferredClaimHeadId(bytes32)").with_key(accountId)
+        stdstore.target(address(engine)).sig("traderDeferredClaimIdByAccount(bytes32)").with_key(accountId)
             .checked_write(uint256(1));
 
         uint256 poolAssets = pool.totalAssets();
@@ -1902,22 +1902,29 @@ contract CfdEngineTest is BasePerpTest {
         engine.recordDeferredClearerBounty(keeper, 1e6);
 
         uint64 bountyClaimId = engine.deferredClaimHeadId();
-        assertEq(engine.accountDeferredClaimHeadId(bearId), 0, "Bear account should start without trader payout claims");
+        assertEq(engine.traderDeferredClaimIdByAccount(bearId), 0, "Bear account should start without trader payout claims");
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
         _close(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth);
-        uint64 bearClaimId = engine.accountDeferredClaimHeadId(bearId);
+        uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
         assertGt(bearClaimId, 0, "Bear account should track its deferred trader payout off the global queue");
         assertGt(bearClaimId, bountyClaimId, "Bear deferred claim should sit behind the unrelated queue head");
+
+        _close(bearId, CfdTypes.Side.BEAR, 2500e18, 1e8, vaultDepth);
+        assertEq(
+            engine.traderDeferredClaimIdByAccount(bearId),
+            bearClaimId,
+            "Additional deferred payout for the same account should coalesce into its existing queue node"
+        );
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
-        _close(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth);
+        _close(bearId, CfdTypes.Side.BEAR, 2500e18, 80_000_000, vaultDepth);
 
         ICfdEngine.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
         assertEq(
@@ -1926,9 +1933,16 @@ contract CfdEngineTest is BasePerpTest {
             "Consuming a later trader payout must not disturb the unrelated global queue head"
         );
         assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
-        assertEq(
-            engine.accountDeferredClaimHeadId(bearId), 0, "Bear account-local deferred chain should be fully consumed"
-        );
+        uint64 bearClaimIdAfter = engine.traderDeferredClaimIdByAccount(bearId);
+        if (engine.deferredPayoutUsdc(bearId) == 0) {
+            assertEq(bearClaimIdAfter, 0, "Claim pointer should clear when the coalesced trader deferred node is exhausted");
+        } else {
+            assertEq(
+                bearClaimIdAfter,
+                bearClaimId,
+                "Partially consumed trader deferred payout should keep using the same coalesced queue node"
+            );
+        }
     }
 
     function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredPayout() public {
