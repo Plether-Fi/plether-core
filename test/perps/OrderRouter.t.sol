@@ -1222,12 +1222,12 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
     }
 
-    function test_OrderExecution_UsesPoolMarkStalenessLimit() public {
+    function test_OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit() public {
         pool.proposeMarkStalenessLimit(300);
         vm.warp(block.timestamp + 48 hours + 1);
         pool.finalizeMarkStalenessLimit();
 
-        vm.warp(1000);
+        vm.warp(1150);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -1235,9 +1235,16 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1200);
         vm.roll(block.number + 1);
 
+        vm.expectRevert(OrderRouter.OrderRouter__OraclePriceTooStale.selector);
         router.executeOrder(1, _pythUpdateData());
 
-        assertEq(router.nextExecuteId(), 0, "Configured pool staleness limit should allow older live-market prices");
+        router.proposeOrderExecutionStalenessLimit(300);
+        vm.warp(1200 + 48 hours + 1);
+        router.finalizeOrderExecutionStalenessLimit();
+
+        router.executeOrder(1, _pythUpdateData());
+
+        assertEq(router.nextExecuteId(), 0, "Router execution staleness limit should control live order execution");
     }
 
     function test_Slippage_CancelsGracefully() public {
@@ -1780,7 +1787,41 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, data);
     }
 
-    function test_LiquidationStaleness_UsesPoolMarkStalenessLimit() public {
+    function test_LiquidationStaleness_IsStricterThanOrderExecution() public {
+        vm.warp(1000);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        vm.warp(1050);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        router.proposeOrderExecutionStalenessLimit(60);
+        router.proposeLiquidationStalenessLimit(15);
+        vm.warp(block.timestamp + 48 hours + 1);
+        router.finalizeOrderExecutionStalenessLimit();
+        router.finalizeLiquidationStalenessLimit();
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2040);
+        vm.warp(2050);
+        router.updateMarkPrice(empty);
+
+        vm.warp(2056);
+        vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
+        router.executeLiquidation(accountId, empty);
+    }
+
+    function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
+        pool.proposeMarkStalenessLimit(300);
+        vm.warp(block.timestamp + 48 hours + 1);
+        pool.finalizeMarkStalenessLimit();
+
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
@@ -1800,7 +1841,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.expectRevert(OrderRouter.OrderRouter__MevOraclePriceTooStale.selector);
         router.executeLiquidation(accountId, empty);
 
-        vm.warp(2060);
+        router.proposeLiquidationStalenessLimit(61);
+        vm.warp(2061 + 48 hours + 1);
+        router.finalizeLiquidationStalenessLimit();
+
+        vm.warp(2061);
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
     }
@@ -2811,7 +2856,7 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
     }
 
-    function test_FridayGap_LiquidationUsesPoolMarkStalenessLimit() public {
+    function test_FridayGap_LiquidationUsesRouterLiquidationStalenessLimit() public {
         uint256 FRIDAY_20UTC = FRIDAY_18UTC + 2 hours;
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), FRIDAY_20UTC);
 

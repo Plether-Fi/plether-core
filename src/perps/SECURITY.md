@@ -23,6 +23,8 @@ All perpetuals contracts are **non-upgradeable**. Once deployed, the bytecode ca
 | `fadRunwaySeconds` | CfdEngine | `onlyOwner`, max 24 hours — 48-hour timelock |
 | `seniorRateBps` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
 | `markStalenessLimit` | HousePool | `onlyOwner` — 48-hour propose-finalize timelock |
+| `orderExecutionStalenessLimit` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
+| `liquidationStalenessLimit` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
 | `maxOrderAge` | OrderRouter | `onlyOwner` — 48-hour propose-finalize timelock |
 **One-time setters** (cannot be changed after initial configuration):
 
@@ -92,7 +94,7 @@ These properties must always hold. Violation indicates a critical bug.
 - **Assumption**: Pyth provides accurate, timely price data for all basket FX pairs (EUR/USD, JPY/USD, GBP/USD, CAD/USD, SEK/USD, CHF/USD)
 - **Architecture**: OrderRouter aggregates multiple Pyth feeds into a weighted basket price replicating the spot BasketOracle formula
 - **Mitigation (MEV)**: Commit-Reveal pipeline with `publishTime > commitTime` check defeats oracle latency arbitrage while the oracle is live. During genuine frozen-oracle windows this ordering check is intentionally bypassed for close execution so traders can still reduce risk against the last valid oracle price.
-- **Mitigation (Staleness)**: 60s max age for order execution, 15s for liquidations. Relaxed to `fadMaxStaleness` (default 3 days) during frozen oracle windows
+- **Mitigation (Staleness)**: Order execution and manual mark refresh use the router's `orderExecutionStalenessLimit` (default 60s), while liquidations use the router's stricter `liquidationStalenessLimit` (default 15s). HousePool reconciliation and withdrawal freshness stay governed by `markStalenessLimit`. All three switch to `fadMaxStaleness` (default 3 days) during frozen oracle windows
 - **Mitigation (Mark Freshness)**: `lastMarkTime` is set from the Pyth VAA `publishTime` (not `block.timestamp`) across all engine paths (`processOrder`, `liquidatePosition`, `updateMarkPrice`). This prevents stale VAAs from appearing fresh to the HousePool's mark staleness checks
 - **Mitigation (Negative/Zero)**: `_normalizePythPrice` reverts on non-positive prices; `_computeBasketPrice` reverts if basket sum is zero
 - **Risk (Weekend Gaps)**: Pyth FX feeds stop publishing Friday ~22:00 UTC. The two-state oracle model (FAD window vs oracle frozen) handles this explicitly, but the frozen-oracle policy is liveness-first: voluntary closes can execute at the last valid Friday price until the oracle resumes publishing.

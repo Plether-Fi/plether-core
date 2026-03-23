@@ -82,13 +82,15 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 1. **Commit** — User submits intent (Size, Side, Target Price) and locks margin. The router assigns a strictly sequential `orderId` and logs `block.timestamp`.
 2. **Reveal** — Keepers push Pyth price payloads. The router aggregates multiple Pyth FX feeds into a weighted basket price (replicating the spot BasketOracle formula) and, while the oracle is live, verifies both weakest-link `publishTime > commitTimestamp` and `publishTime >= engine.lastMarkTime()` so a stale-but-still-fresh oracle update cannot burn a valid queued order. During genuine frozen-oracle windows, closes remain executable against the last valid oracle price instead of being bricked behind an impossible publish-time ordering check. Supports batched multi-order execution for L2 throughput.
 
-**Basket Oracle**: The router is constructed with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to 1e18), and base prices (8-dec). `_computeBasketPrice()` loops over feeds, normalizes each to 8 decimals, and computes `Σ (price × quantity) / (basePrice × 1e10)` — identical to the spot BasketOracle. The minimum `publishTime` across all feeds is used for MEV checks, staleness validation, and as the engine's `lastMarkTime` (ensuring mark freshness reflects actual oracle data age, not transaction execution time).
+**Basket Oracle**: The router is constructed with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to 1e18), and base prices (8-dec). `_computeBasketPrice()` loops over feeds, normalizes each to 8 decimals, and computes `Σ (price × quantity) / (basePrice × 1e10)` — identical to the spot BasketOracle. The minimum `publishTime` across all feeds is used for MEV checks, action-specific staleness validation, and as the engine's `lastMarkTime` (ensuring mark freshness reflects actual oracle data age, not transaction execution time).
 
 **Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check, ensuring users see the same price the CfdEngine will actually use. This prevents orders from passing slippage at an oracle price above CAP but executing at the clamped price.
 
 **Queue Economics**: Execution always starts from the current global queue head. The Engine call is wrapped in `try/catch`. Retryable market-state misses such as slippage do not destroy the order or pay the clearer; instead the router emits `OrderSkipped`, moves that order to the global tail, and applies a short retry cooldown so later queued orders can still progress. Risk-increasing orders reserve an execution bounty at commit time, quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents also reserve a flat `1.00 USDC` router-custodied execution bounty at commit time, sourcing it from free settlement first and then from the live position margin if the account is otherwise fully utilized. Successful, expired, and terminal user-invalid order attempts compensate the clearer from user-funded escrow rather than from vault subsidy, while post-commit protocol-state invalidations on opens refund the trader bounty instead of paying the clearer.
 
 **Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty into router custody. Opens always source that escrow from free settlement; closes source it from free settlement first and can fall back to active position margin so risk-reducing close intents remain commit-able even when the account has no idle cash. Failed-order rewards therefore remain independent from vault liquidity across the full order lifecycle.
+
+**Freshness Buckets**: Live-market oracle freshness is split across three knobs. `orderExecutionStalenessLimit` on the router gates normal order execution and manual mark refresh. `liquidationStalenessLimit` on the router separately gates live-market liquidations and is intended to stay stricter. `HousePool.markStalenessLimit` remains the LP/accounting freshness knob for reconciliation and withdrawal safety. During genuine frozen-oracle windows, all of these switch to `fadMaxStaleness` for the duration of the freeze.
 
 **Close Bounty Tradeoff**: Letting close intents source their flat keeper bounty from active position margin is an explicit bounded liveness tradeoff. With the per-account pending-order cap, at most `5 USDC` of otherwise reachable margin can sit in router escrow awaiting close execution, slightly reducing immediate liquidation reachability in exchange for keeping fully margined exits live.
 
@@ -279,7 +281,7 @@ Traders over 33x leverage must deposit margin before Friday evening, or keepers 
 
 **Two-State Oracle Model**: The router separates two distinct states to avoid conflating risk management with oracle availability:
 
-1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): Enforces **close-only mode** and elevated margins. Open orders are rejected. MEV and staleness checks remain at normal thresholds (60s/15s) since Pyth FX feeds are still publishing until ~22:00 UTC.
+1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): Enforces **close-only mode** and elevated margins. Open orders are rejected. MEV checks stay live and live-market staleness uses the router's normal execution/liquidation thresholds since Pyth FX feeds are still publishing until ~22:00 UTC.
 2. **Oracle frozen** (`isOracleFrozen()`, Friday 22:00 → Sunday 21:00 UTC): Relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses the MEV `commitTime` check for order execution, since Pyth FX feeds have stopped and prices are genuinely frozen. Close orders submitted during the freeze therefore execute at the last valid oracle price rather than being blocked behind an impossible `publishTime > commitTime` requirement. This is an explicit liveness tradeoff, not an accidental loophole: the protocol prefers letting traders de-risk at the last valid frozen price over bricking voluntary closes until Sunday re-open. Asymmetric DST-safe thresholds: Friday uses 22:00 UTC (latest possible close) to avoid freezing while markets may still be open; Sunday uses 21:00 UTC (earliest possible open) to restore MEV protection as soon as markets could resume. In winter, the 21:00 unfreeze causes a safe 1-hour liveness drop (60s staleness rejects the ~47h-old price).
 
 This prevents the Friday 19:00-22:00 gap from being exploitable -- during this period, markets are open and prices are moving, so full MEV protection is required even though close-only mode is active.
@@ -316,6 +318,7 @@ Timelocked parameters:
 |----------|-----------|
 | CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds` |
 | HousePool | `seniorRateBps`, `markStalenessLimit` |
+| OrderRouter | `maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit` |
 | OrderRouter | `maxOrderAge` |
 | MarginClearinghouse | none after one-time `setEngine(address)` |
 
@@ -349,7 +352,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
 | Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
 | Close execution bounty | 1.00 USDC | Reserved at commit as router-custodied escrow |
-| Normal oracle staleness | 60s | Max Pyth price age for execution |
+| Normal oracle staleness | 60s | Max Pyth price age for execution and mark refresh |
 | Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
 | `markStalenessLimit` | 120s | Max mark age for HousePool reconciliation |
 | `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, and meaningful third-party top-ups also reset the recipient cooldown |

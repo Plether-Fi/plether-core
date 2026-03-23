@@ -113,6 +113,12 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
 
     uint256 public pendingMaxOrderAge;
     uint256 public maxOrderAgeActivationTime;
+    uint256 public orderExecutionStalenessLimit = 60;
+    uint256 public pendingOrderExecutionStalenessLimit;
+    uint256 public orderExecutionStalenessActivationTime;
+    uint256 public liquidationStalenessLimit = 15;
+    uint256 public pendingLiquidationStalenessLimit;
+    uint256 public liquidationStalenessActivationTime;
 
     mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(address => uint256) public claimableEth;
@@ -161,6 +167,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     error OrderRouter__TradingNotActive();
     error OrderRouter__RetryCooldownActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
+    error OrderRouter__InvalidStalenessLimit();
 
     enum OrderFailReason {
         Expired,
@@ -272,6 +279,60 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
     function cancelMaxOrderAgeProposal() external onlyOwner {
         pendingMaxOrderAge = 0;
         maxOrderAgeActivationTime = 0;
+    }
+
+    function proposeOrderExecutionStalenessLimit(
+        uint256 limit
+    ) external onlyOwner {
+        if (limit == 0) {
+            revert OrderRouter__InvalidStalenessLimit();
+        }
+        pendingOrderExecutionStalenessLimit = limit;
+        orderExecutionStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+    }
+
+    function finalizeOrderExecutionStalenessLimit() external onlyOwner {
+        if (orderExecutionStalenessActivationTime == 0) {
+            revert OrderRouter__NoProposal();
+        }
+        if (block.timestamp < orderExecutionStalenessActivationTime) {
+            revert OrderRouter__TimelockNotReady();
+        }
+        orderExecutionStalenessLimit = pendingOrderExecutionStalenessLimit;
+        pendingOrderExecutionStalenessLimit = 0;
+        orderExecutionStalenessActivationTime = 0;
+    }
+
+    function cancelOrderExecutionStalenessLimitProposal() external onlyOwner {
+        pendingOrderExecutionStalenessLimit = 0;
+        orderExecutionStalenessActivationTime = 0;
+    }
+
+    function proposeLiquidationStalenessLimit(
+        uint256 limit
+    ) external onlyOwner {
+        if (limit == 0) {
+            revert OrderRouter__InvalidStalenessLimit();
+        }
+        pendingLiquidationStalenessLimit = limit;
+        liquidationStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+    }
+
+    function finalizeLiquidationStalenessLimit() external onlyOwner {
+        if (liquidationStalenessActivationTime == 0) {
+            revert OrderRouter__NoProposal();
+        }
+        if (block.timestamp < liquidationStalenessActivationTime) {
+            revert OrderRouter__TimelockNotReady();
+        }
+        liquidationStalenessLimit = pendingLiquidationStalenessLimit;
+        pendingLiquidationStalenessLimit = 0;
+        liquidationStalenessActivationTime = 0;
+    }
+
+    function cancelLiquidationStalenessLimitProposal() external onlyOwner {
+        pendingLiquidationStalenessLimit = 0;
+        liquidationStalenessActivationTime = 0;
     }
 
     function pause() external onlyOwner {
@@ -557,7 +618,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
-                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
             if (policy.closeOnly && !order.isClose) {
@@ -649,7 +711,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
-                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
@@ -1433,7 +1496,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.MarkRefresh,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
-                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
@@ -1466,7 +1530,8 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 OrderOraclePolicyLib.OracleAction.Liquidation,
                 _isOracleFrozen(),
                 engine.isFadWindow(),
-                vault.markStalenessLimit(),
+                orderExecutionStalenessLimit,
+                liquidationStalenessLimit,
                 engine.fadMaxStaleness()
             );
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {

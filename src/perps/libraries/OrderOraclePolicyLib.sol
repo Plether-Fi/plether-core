@@ -21,7 +21,8 @@ library OrderOraclePolicyLib {
         OracleAction action,
         bool oracleFrozen,
         bool isFad,
-        uint256 liveMarkStaleness,
+        uint256 liveExecutionStaleness,
+        uint256 liveLiquidationStaleness,
         uint256 fadMaxStaleness
     ) internal pure returns (OracleExecutionPolicy memory policy) {
         policy.oracleFrozen = oracleFrozen;
@@ -33,16 +34,16 @@ library OrderOraclePolicyLib {
             // last valid oracle price. Commit-time MEV ordering stays enforced in live/FAD
             // markets but is intentionally bypassed once the oracle has stopped publishing.
             policy.mevChecks = !oracleFrozen;
-            policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveMarkStaleness;
+            policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveExecutionStaleness;
             return policy;
         }
 
         if (action == OracleAction.MarkRefresh) {
-            policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveMarkStaleness;
+            policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveExecutionStaleness;
             return policy;
         }
 
-        policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveMarkStaleness;
+        policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveLiquidationStaleness;
     }
 
     function isStale(
