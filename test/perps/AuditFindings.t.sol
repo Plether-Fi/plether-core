@@ -9,6 +9,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -20,6 +21,8 @@ contract AuditC01_HwmInflation is BasePerpTest {
 
     address alice = address(0x111);
     address attacker = address(0x666);
+
+    uint256 constant SEEDED_SENIOR = 1000e6;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -47,7 +50,7 @@ contract AuditC01_HwmInflation is BasePerpTest {
         _fundSenior(alice, 100_000 * 1e6);
         _fundJunior(alice, 50_000 * 1e6);
 
-        assertEq(pool.seniorHighWaterMark(), 100_000 * 1e6);
+        assertEq(pool.seniorHighWaterMark(), SEEDED_SENIOR + 100_000 * 1e6);
 
         // Open a BEAR position. BEAR profits when oracle price rises.
         // 100k tokens at $1.00, max profit = 100k * ($2 - $1) = $100k
@@ -70,7 +73,10 @@ contract AuditC01_HwmInflation is BasePerpTest {
         usdc.mint(attacker, 1_000_000 * 1e6);
         vm.startPrank(attacker);
         usdc.approve(address(seniorVault), 1_000_000 * 1e6);
-        vm.expectRevert(HousePool.HousePool__SeniorImpaired.selector);
+        assertEq(seniorVault.maxDeposit(attacker), 0, "impaired senior should zero maxDeposit");
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 1_000_000 * 1e6, 0)
+        );
         seniorVault.deposit(1_000_000 * 1e6, attacker);
         vm.stopPrank();
     }

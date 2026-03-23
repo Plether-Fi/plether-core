@@ -141,6 +141,10 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         return 0;
     }
 
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
     function test_H1_StaleSeniorMutationMustNotDestroyAccruedYield() public {
         _fundSenior(seniorLp, 100_000e6);
         _fundJunior(juniorLp, 100_000e6);
@@ -150,7 +154,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 50_000e6, "Setup should impair senior before stale recapitalization");
+        assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before stale recapitalization");
 
         _fundTrader(trader, 50_000e6);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
@@ -174,7 +178,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationYield is BasePerpTes
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 minimumPreservedYield = (50_000e6 * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
+        uint256 minimumPreservedYield = (52_000e6 * 800 * uint256(30 days)) / (10_000 * uint256(365 days));
         assertGe(
             pool.unpaidSeniorYield(),
             minimumPreservedYield,

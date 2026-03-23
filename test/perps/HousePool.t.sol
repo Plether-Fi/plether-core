@@ -155,7 +155,7 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         assertLe(pool.juniorPrincipal(), 300_000 * 1e6, "Junior absorbed loss");
-        assertEq(pool.seniorPrincipal(), 500_000 * 1e6, "Senior untouched when junior covers");
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior untouched when junior covers");
     }
 
     function test_JuniorWipeout_SeniorAbsorbs() public {
@@ -279,7 +279,9 @@ contract HousePoolTest is BasePerpTest {
         pool.reconcile();
 
         uint256 totalBalance = pool.totalAssets();
-        assertEq(pool.juniorPrincipal(), totalBalance - fees, "Reconcile should exclude protocol fees exactly");
+        assertEq(
+            pool.juniorPrincipal(), totalBalance - fees - SEEDED_SENIOR, "Reconcile should exclude protocol fees exactly"
+        );
     }
 
     // ==========================================
@@ -313,7 +315,7 @@ contract HousePoolTest is BasePerpTest {
 
         // Pool paid out ~$20k profit to trader. Junior absorbs first.
         assertLt(pool.juniorPrincipal(), 500_000 * 1e6, "Junior absorbed trader profit payout");
-        assertEq(pool.seniorPrincipal(), 500_000 * 1e6, "Senior untouched");
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR + 500_000 * 1e6, "Senior untouched");
     }
 
     // ==========================================
@@ -334,8 +336,8 @@ contract HousePoolTest is BasePerpTest {
         pool.finalizeSeniorRate();
 
         // Senior should have received 8% for the first year
-        assertEq(pool.seniorPrincipal(), 1_080_000 * 1e6, "Senior got 8% before rate change");
-        assertEq(pool.juniorPrincipal(), 1_120_000 * 1e6, "Junior got surplus");
+        assertEq(pool.seniorPrincipal(), 1_081_080 * 1e6, "Senior got 8% before rate change");
+        assertEq(pool.juniorPrincipal(), 1_120_920 * 1e6, "Junior got surplus");
     }
 
     function test_FinalizeSeniorRate_StaleMarkDoesNotAccrueYield() public {
@@ -868,7 +870,9 @@ contract HousePoolTest is BasePerpTest {
             reconcileBefore,
             "Non-senior stale bucket routing should not reset the senior yield base"
         );
-        assertEq(pool.seniorPrincipal(), 100_000e6, "No senior deficit means recap should not over-credit senior");
+        assertEq(
+            pool.seniorPrincipal(), SEEDED_SENIOR + 100_000e6, "No senior deficit means recap should not over-credit senior"
+        );
         assertEq(
             pool.unassignedAssets(), 50_000e6, "Queued recapitalization should still route into fallback accounting"
         );
@@ -883,8 +887,8 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 50_000e6, "Setup should impair senior before stale recapitalization");
-        assertEq(pool.seniorHighWaterMark(), 100_000e6, "Setup should preserve the pre-loss HWM");
+        assertEq(pool.seniorPrincipal(), 52_000e6, "Setup should impair senior before stale recapitalization");
+        assertEq(pool.seniorHighWaterMark(), 101_000e6, "Setup should preserve the pre-loss HWM");
 
         address trader = address(0x77771);
         _fundTrader(trader, 50_000e6);
@@ -907,7 +911,7 @@ contract HousePoolTest is BasePerpTest {
             pool.lastSeniorYieldCheckpointTime(), block.timestamp, "Stale senior mutation should checkpoint yield time"
         );
         assertEq(pool.unpaidSeniorYield(), 0, "Stale senior mutation should not accrue yield");
-        assertEq(pool.seniorPrincipal(), 100_000e6, "Stale recapitalization should restore senior principal to the HWM");
+        assertEq(pool.seniorPrincipal(), 101_000e6, "Stale recapitalization should restore senior principal to the HWM");
 
         uint256 freshTime = staleTime + 2 days;
         vm.warp(freshTime);
@@ -916,10 +920,10 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 expectedYieldUpperBound = (100_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
+        uint256 expectedYieldUpperBound = (101_000e6 * 800 * uint256(2 days)) / (10_000 * uint256(365 days));
         assertLe(
             pool.seniorPrincipal(),
-            100_000e6 + expectedYieldUpperBound,
+            101_000e6 + expectedYieldUpperBound,
             "Fresh reconcile must not accrue more than the post-checkpoint senior yield interval"
         );
         assertGt(

@@ -80,6 +80,8 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
     address seniorLp = address(0x1111);
     address juniorLp = address(0x2222);
 
+    uint256 constant SEEDED_JUNIOR_SHARES = 1_000_000_000_000;
+
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
     }
@@ -100,13 +102,9 @@ contract AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue is BasePerpTest {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        assertEq(juniorVault.totalSupply(), 0, "Junior supply should be empty after the last LP exits");
-        assertEq(pool.juniorPrincipal(), 0, "Revenue must not accrue to a tranche with zero outstanding shares");
-        assertGt(
-            pool.unassignedAssets(),
-            unassignedBefore,
-            "Revenue that would have gone to an empty junior tranche must be quarantined instead"
-        );
+        assertEq(juniorVault.totalSupply(), SEEDED_JUNIOR_SHARES, "Only the permanent junior seed floor should remain");
+        assertGt(pool.juniorPrincipal(), 1000e6, "Revenue should remain owned by the seeded junior floor");
+        assertEq(pool.unassignedAssets(), unassignedBefore, "Seed-owned junior revenue should not be quarantined");
     }
 
 }

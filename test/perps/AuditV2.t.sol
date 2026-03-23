@@ -10,6 +10,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -287,7 +288,10 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         vm.startPrank(attacker);
         usdc.approve(address(seniorVault), 100_000e6);
 
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        assertEq(seniorVault.maxDeposit(attacker), 0, "stale mark should zero senior maxDeposit");
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 100_000e6, 0)
+        );
         seniorVault.deposit(100_000e6, attacker);
         vm.stopPrank();
     }
@@ -308,7 +312,10 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 100_000e6);
 
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        assertEq(juniorVault.maxDeposit(attacker), 0, "stale mark should zero junior maxDeposit");
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, attacker, 100_000e6, 0)
+        );
         juniorVault.deposit(100_000e6, attacker);
         vm.stopPrank();
     }

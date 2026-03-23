@@ -10,6 +10,7 @@ import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // =====================================================================
@@ -88,7 +89,8 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
         usdc.mint(lp, 1000e6);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), 1000e6);
-        vm.expectRevert(HousePool.HousePool__MarkPriceStale.selector);
+        assertEq(juniorVault.maxDeposit(lp), 0, "stale mark should zero junior maxDeposit during live FAD");
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, lp, 1000e6, 0));
         juniorVault.deposit(1000e6, lp);
         vm.stopPrank();
     }

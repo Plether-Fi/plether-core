@@ -44,6 +44,14 @@ contract OrderRouterTest is BasePerpTest {
         return 0;
     }
 
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
     function setUp() public override {
         super.setUp();
 
@@ -2349,6 +2357,7 @@ contract FadStalenessTest is BasePerpTest {
         pool.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
+        _bootstrapSeededLifecycle();
 
         usdc.mint(bob, 1_000_000 * 1e6);
         vm.startPrank(bob);
@@ -3357,6 +3366,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
+        _bootstrapSeededLifecycle();
     }
 
     function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
@@ -3442,6 +3452,7 @@ contract StalenessGriefTest is BasePerpTest {
 
         clearinghouse.setEngine(address(engine));
         vm.warp(SETUP_TIMESTAMP);
+        _bootstrapSeededLifecycle();
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
@@ -3479,6 +3490,7 @@ contract VpiImrBypassTest is Test {
     MockUSDC usdc;
     CfdEngine engine;
     HousePool pool;
+    TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
     OrderRouter router;
@@ -3490,6 +3502,15 @@ contract VpiImrBypassTest is Test {
 
     function _warpPastTimelock() internal {
         vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function _bootstrapSeededLifecycle() internal {
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
     }
 
     function setUp() public {
@@ -3512,7 +3533,9 @@ contract VpiImrBypassTest is Test {
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
         router = new OrderRouter(
@@ -3529,6 +3552,7 @@ contract VpiImrBypassTest is Test {
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
+        _bootstrapSeededLifecycle();
     }
 
     function _fundJunior(
@@ -3594,6 +3618,7 @@ contract KeeperFeeRefundTest is Test {
     MockUSDC usdc;
     CfdEngine engine;
     HousePool pool;
+    TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
     OrderRouter router;
@@ -3607,6 +3632,15 @@ contract KeeperFeeRefundTest is Test {
 
     function _warpPastTimelock() internal {
         vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function _bootstrapSeededLifecycle() internal {
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
     }
 
     function setUp() public {
@@ -3628,7 +3662,9 @@ contract KeeperFeeRefundTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
         router = new OrderRouter(
@@ -3648,6 +3684,7 @@ contract KeeperFeeRefundTest is Test {
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
         router.finalizeMaxOrderAge();
+        _bootstrapSeededLifecycle();
     }
 
     // Regression: H-01 — fee refunded to user on failure
@@ -3737,6 +3774,7 @@ contract WeekendArbitrageTest is Test {
     MockUSDC usdc;
     CfdEngine engine;
     HousePool pool;
+    TrancheVault seniorVault;
     TrancheVault juniorVault;
     MarginClearinghouse clearinghouse;
     OrderRouter router;
@@ -3758,6 +3796,15 @@ contract WeekendArbitrageTest is Test {
 
     function _warpPastTimelock() internal {
         vm.warp(block.timestamp + 48 hours + 1);
+    }
+
+    function _bootstrapSeededLifecycle() internal {
+        uint256 seedAmount = 1000e6;
+        usdc.mint(address(this), seedAmount * 2);
+        usdc.approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
     }
 
     function _fundJunior(
@@ -3803,7 +3850,9 @@ contract WeekendArbitrageTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params);
         pool = new HousePool(address(usdc), address(engine));
+        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC");
         juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC");
+        pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setVault(address(pool));
 
@@ -3821,6 +3870,7 @@ contract WeekendArbitrageTest is Test {
 
         _warpPastTimelock();
         clearinghouse.setEngine(address(engine));
+        _bootstrapSeededLifecycle();
     }
 
     function test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice() public {

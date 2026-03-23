@@ -131,6 +131,13 @@ contract GasProfileTest is Test {
         clearinghouse.setEngine(address(engine));
         vm.warp(t0 + 144 hours + 3);
 
+        uint256 seedAmount = 1000e6;
+        _mintUsdc(address(this), seedAmount * 2);
+        IERC20(usdc).approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
+
         _mintUsdc(lp, 1_000_000e6);
         vm.startPrank(lp);
         IERC20(usdc).approve(address(juniorVault), type(uint256).max);

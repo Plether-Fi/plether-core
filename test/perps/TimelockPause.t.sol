@@ -7,6 +7,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
@@ -356,7 +357,8 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(seniorVault), 10_000 * 1e6);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
+        assertEq(seniorVault.maxDeposit(alice), 0, "paused pool should zero senior maxDeposit");
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
         seniorVault.deposit(10_000 * 1e6, alice);
         vm.stopPrank();
     }
@@ -367,7 +369,8 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
+        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
         juniorVault.deposit(10_000 * 1e6, alice);
         vm.stopPrank();
     }
@@ -404,7 +407,8 @@ contract TimelockPauseTest is BasePerpTest {
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(juniorVault), 10_000 * 1e6);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
+        assertEq(juniorVault.maxDeposit(alice), 0, "paused pool should zero junior maxDeposit");
+        vm.expectRevert(abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, alice, 10_000 * 1e6, 0));
         juniorVault.deposit(10_000 * 1e6, alice);
         vm.stopPrank();
 
