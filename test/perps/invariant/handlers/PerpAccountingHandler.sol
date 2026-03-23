@@ -613,18 +613,18 @@ contract PerpAccountingHandler is Test {
         }
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (record.status == OrderRouter.OrderStatus.Pending) {
+        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
             return GHOST_ORDER_PENDING;
         }
 
-        return record.status == OrderRouter.OrderStatus.Executed ? GHOST_ORDER_EXECUTED : GHOST_ORDER_FAILED;
+        return uint8(record.status) == uint8(OrderRouter.OrderStatus.Executed) ? GHOST_ORDER_EXECUTED : GHOST_ORDER_FAILED;
     }
 
     function ghostOrderRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (record.status == OrderRouter.OrderStatus.Pending) {
+        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
             return router.committedMargins(orderId);
         }
         return 0;
@@ -763,7 +763,7 @@ contract PerpAccountingHandler is Test {
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-            if (ghostOrderOwner[orderId] == accountId && record.status == OrderRouter.OrderStatus.Pending) {
+            if (ghostOrderOwner[orderId] == accountId && uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
                 count++;
             }
         }
@@ -775,7 +775,8 @@ contract PerpAccountingHandler is Test {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
             if (
-                ghostOrderOwner[orderId] == accountId && record.status == OrderRouter.OrderStatus.Pending
+                ghostOrderOwner[orderId] == accountId
+                    && uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)
                     && record.inMarginQueue && router.committedMargins(orderId) > 0
             ) {
                 count++;
@@ -937,7 +938,7 @@ contract PerpAccountingHandler is Test {
         if (upperBound > startExecuteId) {
             for (uint64 orderId = startExecuteId; orderId < upperBound; orderId++) {
                 OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-                if (record.status == OrderRouter.OrderStatus.Pending) {
+                if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
                     continue;
                 }
 
@@ -1000,7 +1001,7 @@ contract PerpAccountingHandler is Test {
         uint64 orderId
     ) internal view returns (uint8) {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (record.status == OrderRouter.OrderStatus.Executed) {
+        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Executed)) {
             return GHOST_ORDER_EXECUTED;
         }
         return GHOST_ORDER_FAILED;

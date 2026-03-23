@@ -842,7 +842,7 @@ contract AdversarialPerpHandler is Test {
         bool retryableSlippageAtHead;
         if (beforeExecute < router.nextCommitId()) {
             OrderRouter.OrderRecord memory headRecord = router.getOrderRecord(beforeExecute);
-            if (headRecord.status == OrderRouter.OrderStatus.Pending) {
+            if (uint8(headRecord.status) == uint8(OrderRouter.OrderStatus.Pending)) {
                 retryableSlippageAtHead = !_checkSlippage(headRecord.core, oraclePrice);
                 if (retryableSlippageAtHead) {
                     ghost_lastRetryableSlippageOrderId = beforeExecute;
@@ -891,7 +891,7 @@ contract AdversarialPerpHandler is Test {
 
     function _countPendingOrders() internal view returns (uint256 pending) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (router.getOrderRecord(orderId).status == OrderRouter.OrderStatus.Pending) {
+            if (uint8(router.getOrderRecord(orderId).status) == uint8(OrderRouter.OrderStatus.Pending)) {
                 pending++;
             }
         }
@@ -1040,7 +1040,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 pendingCount;
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            if (router.getOrderRecord(orderId).status == OrderRouter.OrderStatus.Pending) {
+            if (uint8(router.getOrderRecord(orderId).status) == uint8(OrderRouter.OrderStatus.Pending)) {
                 pendingCount++;
             }
         }

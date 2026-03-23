@@ -6,6 +6,7 @@ import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpGhostLedger} from "./ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -135,6 +136,31 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             ghostTotalCommittedMargin,
             "Ghost committed margin total must match tracked account sum"
         );
+    }
+
+    function invariant_OrderEscrowModuleSummariesMatchAccountEscrow() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+            OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
+
+            assertEq(summary.pendingOrderCount, escrow.pendingOrderCount, "Escrow summary count must match account escrow");
+            assertEq(
+                summary.committedMarginUsdc,
+                escrow.committedMarginUsdc,
+                "Escrow summary committed margin must match account escrow"
+            );
+            assertEq(
+                summary.executionBountyUsdc,
+                escrow.executionBountyUsdc,
+                "Escrow summary execution bounty must match account escrow"
+            );
+            assertEq(
+                router.pendingCloseSize(accountId),
+                summary.pendingCloseSize,
+                "Pending close size mapping must match escrow summary"
+            );
+        }
     }
 
     function invariant_GhostDeferredClearerBountyMatchesEngine() public view {
