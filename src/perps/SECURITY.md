@@ -232,6 +232,12 @@ When a position goes underwater (equity < 0):
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 
+#### Three-Bucket Liquidation Residual Accounting
+
+- **Behavior**: Liquidation residuals are modeled explicitly in three buckets: settlement retained on-ledger in the clearinghouse, legacy deferred payout consumed/remaining, and any fresh trader payout created by the liquidation itself.
+- **Effect**: Preview and execution no longer infer trader value by subtracting a target residual from `settlement + deferred`. Positive residuals above reachable settlement now become a fresh payout path instead of trying to over-allocate the legacy deferred claim.
+- **Security benefit**: This removes underflow/liveness risk when positive pnl or funding makes residual trader value exceed `settlementReachableUsdc + deferredPayoutForAccount`, and it gives auditors a single end-to-end mental model for liquidation settlement.
+
 #### Terminal Queue Continuity
 
 - **Behavior**: Full closes do not scan the global queue to cancel later intents for the same account, while liquidations perform bounded eager account-local cleanup of that liquidated account's pending orders
@@ -316,6 +322,12 @@ When a position goes underwater (equity < 0):
 
 - **Behavior**: Once bootstrap seeding begins for either tranche, the protocol does not allow new risk-increasing order commits or ordinary tranche deposits until both tranche seed positions exist on-chain. Even after both seeds exist, steady-state trading/liquidity stays disabled until the owner explicitly activates it.
 - **Impact**: This prevents the protocol from drifting into a partially seeded or accidentally live trading state before initialization is intentionally complete, which would otherwise create ambiguous ownership for early revenue and recapitalization flows.
+
+#### ERC-4626 Deposit View Parity
+
+- **Behavior**: `TrancheVault.maxDeposit()` and `maxMint()` now use the same `HousePool.canAcceptTrancheDeposits()` gate as live deposits.
+- **Effect**: ERC-4626 max views return `0` not only when lifecycle or senior-impairment rules block deposits, but also when tranche deposits are paused, mark freshness is required but stale, or bootstrap assignment is pending through `unassignedAssets`.
+- **Integration note**: Offchain routers and frontends can now treat `maxDeposit() == 0` / `maxMint() == 0` as a truthful signal that ordinary tranche deposits would currently revert.
 
 #### Stale Mark Blocks Withdrawals and Yield Accrual
 
