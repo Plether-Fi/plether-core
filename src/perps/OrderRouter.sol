@@ -564,7 +564,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
-                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.RefundUser);
+                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.ClearerFull);
                 return;
             }
 
@@ -691,7 +691,7 @@ contract OrderRouter is Ownable2Step, Pausable, IOrderRouterAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
-                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.RefundUser);
+                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
                 continue;
             }
 

@@ -2518,6 +2518,34 @@ contract FadStalenessTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
+    function test_FadWindow_InvalidOpenOrderPaysClearerAtExecution() public {
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(FRIDAY_18UTC);
+        uint64 orderId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 reservedBounty = router.executionBountyReserves(orderId);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 sizeBefore,,,,,,,) = engine.positions(aliceId);
+        vm.warp(SATURDAY_NOON + 1);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(orderId, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            reservedBounty,
+            "Clearer should still be paid for removing a predictable close-only invalidation"
+        );
+        assertEq(usdc.balanceOf(alice), 0, "Trader should not receive a bounty refund for close-only invalidation");
+    }
+
     function test_FadWindow_MevCheckDisabledDuringFrozen() public {
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
