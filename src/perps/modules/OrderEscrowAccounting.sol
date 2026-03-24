@@ -166,30 +166,14 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         uint64 orderId
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
-        uint256 marginBackedBountyUsdc = record.marginBackedExecutionBountyUsdc;
-        if (marginBackedBountyUsdc > 0) {
-            record.marginBackedExecutionBountyUsdc = 0;
-            record.executionBountyUsdc -= marginBackedBountyUsdc;
-            USDC.safeTransfer(address(clearinghouse), marginBackedBountyUsdc);
-            engine.restoreCloseOrderExecutionBounty(record.core.accountId, marginBackedBountyUsdc);
-        }
-
         uint256 bounty = record.executionBountyUsdc;
         if (bounty == 0) {
             return;
         }
 
         record.executionBountyUsdc = 0;
-        if (record.core.isClose && engine.hasOpenPosition(record.core.accountId)) {
-            USDC.safeTransfer(address(clearinghouse), bounty);
-            clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
-        } else if (record.core.isClose) {
-            address trader = address(uint160(uint256(record.core.accountId)));
-            USDC.safeTransfer(trader, bounty);
-        } else {
-            address trader = address(uint160(uint256(record.core.accountId)));
-            USDC.safeTransfer(trader, bounty);
-        }
+        address trader = address(uint160(uint256(record.core.accountId)));
+        USDC.safeTransfer(trader, bounty);
     }
 
     function _releaseCommittedMargin(
