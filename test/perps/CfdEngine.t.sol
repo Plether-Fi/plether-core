@@ -363,6 +363,33 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
     }
 
+    function test_SyncFunding_DoesNotAdvanceOnStaleLiveMark() public {
+        address trader = address(0xABC2);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+
+        uint64 fundingBefore = engine.lastFundingTime();
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        engine.syncFunding();
+
+        assertEq(engine.lastFundingTime(), fundingBefore, "Funding should not advance while the live mark is stale");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 1);
+
+        engine.syncFunding();
+
+        assertEq(
+            engine.lastFundingTime(),
+            engine.lastMarkTime() + 1,
+            "Funding should resume once a fresh live mark arrives"
+        );
+    }
+
     function test_OpenTradeCost_AccountsVaultInflowCanonically() public {
         bytes32 firstBullId = bytes32(uint256(uint160(address(0xABC2))));
         bytes32 secondBullId = bytes32(uint256(uint160(address(0xABC3))));

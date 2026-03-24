@@ -3491,6 +3491,71 @@ contract StaleOrderExpiryTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Batch advanced past stale + real order and drained to the zero sentinel");
     }
 
+    // Regression: queue liveness hardening
+    function test_PruningExpiredOrdersProgressesHeadInBoundedSlices() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        uint256 traderCount = 7;
+        uint256 ordersPerTrader = 5;
+        uint64 realOrderId;
+
+        for (uint256 traderIndex = 0; traderIndex < traderCount; traderIndex++) {
+            address trader = address(uint160(0xB100 + traderIndex));
+            _fundTrader(trader, 10_000 * 1e6);
+            for (uint256 orderIndex = 0; orderIndex < ordersPerTrader; orderIndex++) {
+                vm.prank(trader);
+                router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+            }
+        }
+
+        _fundTrader(alice, 50_000 * 1e6);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        realOrderId = router.nextCommitId() - 1;
+
+        vm.warp(block.timestamp + 301);
+
+        router.pruneExpiredOrders(realOrderId, 32);
+        assertEq(router.nextExecuteId(), 33, "First prune call should only advance by the bounded slice");
+
+        router.pruneExpiredOrders(realOrderId, 32);
+        assertEq(router.nextExecuteId(), 36, "Second prune call should finish the remaining stale head orders");
+    }
+
+    // Regression: queue liveness hardening
+    function test_BatchExecutionStopsAfterBoundedScanBudget() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        uint256 traderCount = 13;
+        uint256 ordersPerTrader = 5;
+
+        for (uint256 traderIndex = 0; traderIndex < traderCount; traderIndex++) {
+            address trader = address(uint160(0xC100 + traderIndex));
+            _fundTrader(trader, 10_000 * 1e6);
+            for (uint256 orderIndex = 0; orderIndex < ordersPerTrader; orderIndex++) {
+                vm.prank(trader);
+                router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+            }
+        }
+
+        _fundTrader(alice, 50_000 * 1e6);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 301);
+
+        bytes[] memory empty;
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(66, empty);
+
+        assertEq(router.nextExecuteId(), 65, "Batch should stop once it exhausts the bounded global scan budget");
+
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(66, empty);
+
+        assertEq(router.nextExecuteId(), 0, "A second bounded batch call should finish draining the remaining stale orders");
+    }
+
     // Regression: H-03
     function test_SetMaxOrderAge_OnlyOwner() public {
         vm.prank(spammer);

@@ -865,6 +865,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (block.timestamp <= lastFundingTime) {
             return;
         }
+        if (!isOracleFrozen()) {
+            uint256 maxStaleness = _liveMarkStalenessLimit();
+            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+            if (age > maxStaleness) {
+                return;
+            }
+        }
         uint256 timeDelta = block.timestamp - lastFundingTime;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();

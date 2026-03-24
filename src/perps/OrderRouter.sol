@@ -51,6 +51,9 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
+    uint256 internal constant MAX_EXPIRED_ORDER_SKIPS_PER_CALL = 32;
+    uint256 internal constant MAX_BATCH_ORDER_SCANS = 64;
+    uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL = 64;
     uint64 internal constant RETRYABLE_SKIP_COOLDOWN = 5;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
@@ -488,7 +491,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
-        _skipStaleOrders(orderId);
+        _skipStaleOrders(orderId, MAX_EXPIRED_ORDER_SKIPS_PER_CALL);
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
@@ -626,7 +629,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
 
         uint256 scanned;
-        uint256 maxScans = nextCommitId;
+        uint256 maxScans = MAX_BATCH_ORDER_SCANS;
         while (nextExecuteId != 0 && nextExecuteId <= maxOrderId && scanned < maxScans) {
             scanned++;
             uint64 orderId = nextExecuteId;
@@ -702,10 +705,11 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     // ==========================================
 
     function _skipStaleOrders(
-        uint64 upToId
-    ) internal {
+        uint64 upToId,
+        uint256 maxSkips
+    ) internal returns (uint256 skipped) {
         uint256 age = maxOrderAge;
-        while (nextExecuteId != 0 && nextExecuteId <= upToId) {
+        while (nextExecuteId != 0 && nextExecuteId <= upToId && skipped < maxSkips) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
@@ -721,7 +725,22 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
             _cleanupOrder(headId, false, FailedOrderBountyPolicy.ClearerFull);
+            skipped++;
         }
+    }
+
+    function pruneExpiredOrders(
+        uint64 upToId,
+        uint256 maxPrunes
+    ) external {
+        if (nextExecuteId == 0) {
+            revert OrderRouter__NoOrdersToExecute();
+        }
+        uint256 boundedPrunes = maxPrunes > MAX_PRUNE_ORDERS_PER_CALL ? MAX_PRUNE_ORDERS_PER_CALL : maxPrunes;
+        if (boundedPrunes == 0) {
+            return;
+        }
+        _skipStaleOrders(upToId, boundedPrunes);
     }
 
     function _resolveOraclePrice(
