@@ -188,6 +188,7 @@ interface ICfdEngine {
     ) external view returns (uint8 code);
 
     /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
+    /// @dev Deferred keeper bounties are later claimed as clearinghouse credit, not direct wallet transfer.
     function recordDeferredClearerBounty(
         address keeper,
         uint256 amountUsdc

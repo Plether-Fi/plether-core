@@ -871,6 +871,9 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
+    /// @dev Immediate liquidation bounties still pay directly to the executing keeper wallet.
+    ///      If immediate payment is unavailable or direct transfer fails, the bounty is deferred and later
+    ///      settles as clearinghouse credit via `claimDeferredClearerBounty()`.
     function _payOrDeferLiquidationBounty(
         uint256 liquidationBountyUsdc
     ) internal {

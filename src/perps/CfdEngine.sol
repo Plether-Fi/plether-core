@@ -653,6 +653,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     /// @notice Claims a previously deferred clearer bounty when the vault has replenished cash.
+    /// @dev Deferred keeper bounties settle to clearinghouse credit for the recorded keeper address-derived account,
+    ///      rather than attempting a direct USDC wallet transfer.
     function claimDeferredClearerBounty() external nonReentrant {
         _syncFunding();
         uint64 claimId = deferredClaimHeadId;

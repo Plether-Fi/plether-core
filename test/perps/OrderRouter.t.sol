@@ -2237,6 +2237,33 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         });
     }
 
+    function test_ExecuteLiquidation_PaysImmediateKeeperBountyToWallet() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 900e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        uint256 keeperWalletBefore = usdc.balanceOf(address(this));
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(150_000_000));
+
+        router.executeLiquidation(accountId, priceData);
+
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperWalletBefore,
+            preview.keeperBountyUsdc,
+            "Immediate liquidation bounty should pay directly to the keeper wallet"
+        );
+        assertEq(
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperSettlementBefore,
+            0,
+            "Immediate liquidation bounty should not be routed through clearinghouse credit"
+        );
+    }
+
     function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 900e6);
