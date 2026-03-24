@@ -1309,17 +1309,18 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        address eve = address(0xE111);
+        bytes32 eveId = bytes32(uint256(uint160(eve)));
+        _fundTrader(eve, 1000e6);
 
-        vm.prank(alice);
+        vm.prank(eve);
         vm.expectRevert(
             abi.encodeWithSelector(
                 OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
             )
         );
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
     }
 
     function test_CommitOrder_RevertsOnPredictableSkewInvalidation() public {
@@ -3782,17 +3783,18 @@ contract VpiImrBypassTest is Test {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
+        address eve = address(0xE222);
+        bytes32 eveAccount = bytes32(uint256(uint160(eve)));
 
-        vm.startPrank(alice);
-        usdc.mint(alice, 1e6);
+        vm.startPrank(eve);
+        usdc.mint(eve, 1e6);
         usdc.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(aliceAccount, 1e6);
+        clearinghouse.deposit(eveAccount, 1e6);
         vm.stopPrank();
 
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), 1e6, "Alice only funds the reserved execution bounty");
+        assertEq(clearinghouse.balanceUsdc(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
 
-        vm.prank(alice);
+        vm.prank(eve);
         vm.expectRevert(
             abi.encodeWithSelector(
                 OrderRouter.OrderRouter__PredictableOpenInvalid.selector,

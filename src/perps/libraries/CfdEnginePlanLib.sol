@@ -427,7 +427,7 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory projectedPosition = snap.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
-        projectedPosition.margin = delta.posMarginAfter;
+        projectedPosition.margin = OpenAccountingLib.effectiveMarginAfterTradeCost(delta.posMarginAfter, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
@@ -437,9 +437,7 @@ library CfdEnginePlanLib {
         if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             reachableCollateralUsdc -= delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree;
         }
-        if (delta.tradeCostUsdc < 0) {
-            reachableCollateralUsdc += uint256(-delta.tradeCostUsdc);
-        } else if (delta.tradeCostUsdc > 0) {
+        if (delta.tradeCostUsdc > 0) {
             reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);
         }
 
