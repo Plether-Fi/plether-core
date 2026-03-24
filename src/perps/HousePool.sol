@@ -9,6 +9,7 @@ import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "./libraries/HousePoolFreshnessLib.sol";
 import {HousePoolPendingLivePlanLib} from "./libraries/HousePoolPendingLivePlanLib.sol";
 import {HousePoolPendingPreviewLib} from "./libraries/HousePoolPendingPreviewLib.sol";
+import {HousePoolReconcilePlanLib} from "./libraries/HousePoolReconcilePlanLib.sol";
 import {HousePoolSeedLifecycleLib} from "./libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolTrancheGateLib} from "./libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "./libraries/HousePoolWithdrawalPreviewLib.sol";
@@ -747,42 +748,32 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     ) internal {
         uint256 yieldElapsed =
             block.timestamp > lastSeniorYieldCheckpointTime ? block.timestamp - lastSeniorYieldCheckpointTime : 0;
-        if (_markIsFreshForReconcile(accountingSnapshot, _getHousePoolStatusSnapshot())) {
-            HousePoolAccountingLib.ReconcileSnapshot memory snapshot =
-                HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-            uint256 pendingAssets = _pendingBucketAssets();
-            if (pendingAssets > 0) {
-                snapshot.distributable =
-                    snapshot.distributable > pendingAssets ? snapshot.distributable - pendingAssets : 0;
-            }
-            bool juniorSupplyZero = _juniorShareSupply() == 0;
-            unassignedAssets = _normalizeUnassignedAssets(snapshot.distributable);
+        bool markFresh = _markIsFreshForReconcile(accountingSnapshot, _getHousePoolStatusSnapshot());
+        if (markFresh) {
+            HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
+                HousePoolPendingPreviewLib.PendingAccountingState({
+                    waterfall: _getWaterfallState(),
+                    unassignedAssets: unassignedAssets,
+                    seniorSupply: _seniorShareSupply(),
+                    juniorSupply: _juniorShareSupply()
+                }),
+                HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot),
+                _pendingBucketAssets(),
+                seniorRateBps,
+                yieldElapsed,
+                markFresh
+            );
 
             lastReconcileTime = block.timestamp;
             lastSeniorYieldCheckpointTime = block.timestamp;
 
-            uint256 claimedEquity = seniorPrincipal + juniorPrincipal;
-            if (claimedEquity == 0) {
-                unassignedAssets = snapshot.distributable;
-            } else {
-                uint256 distributableToClaims =
-                    snapshot.distributable > unassignedAssets ? snapshot.distributable - unassignedAssets : 0;
-                HousePoolWaterfallAccountingLib.ReconcilePlan memory plan = HousePoolWaterfallAccountingLib.planReconcile(
-                    seniorPrincipal, juniorPrincipal, distributableToClaims, seniorRateBps, yieldElapsed
-                );
-                unpaidSeniorYield += plan.yieldAccrued;
+            _setWaterfallState(plan.state.waterfall);
+            unassignedAssets = plan.state.unassignedAssets;
 
-                if (plan.isRevenue) {
-                    uint256 juniorBefore = juniorPrincipal;
-                    _distributeRevenue(plan.deltaUsdc);
-                    if (juniorSupplyZero && juniorPrincipal > juniorBefore) {
-                        uint256 juniorRevenueWithoutOwners = juniorPrincipal - juniorBefore;
-                        juniorPrincipal = juniorBefore;
-                        unassignedAssets += juniorRevenueWithoutOwners;
-                    }
-                } else if (plan.deltaUsdc > 0) {
-                    _absorbLoss(plan.deltaUsdc);
-                }
+            uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
+            if (juniorRevenueWithoutOwners > 0) {
+                juniorPrincipal -= juniorRevenueWithoutOwners;
+                unassignedAssets += juniorRevenueWithoutOwners;
             }
         }
 
