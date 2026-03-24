@@ -13,7 +13,9 @@ library CfdTypes {
         BEAR
     }
 
-    /// @notice A user's active position in a specific market
+    /// @notice A user's active position in a specific market.
+    /// @dev `margin` is the engine's canonical economic position-margin state used for risk and state transitions.
+    ///      It is intentionally distinct from the clearinghouse custody bucket that holds the locked funds backing it.
     struct Position {
         uint256 size; // [18 dec] Notional size in synthetic tokens
         uint256 margin; // [6 dec] Isolated margin backing this position

@@ -11,6 +11,7 @@ interface IMarginClearinghouse {
     }
 
     struct LockedMarginBuckets {
+        // Canonical custody bucket backing currently live positions.
         uint256 positionMarginUsdc;
         uint256 committedOrderMarginUsdc;
         uint256 reservedSettlementUsdc;

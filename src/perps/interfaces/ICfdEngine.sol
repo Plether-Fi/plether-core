@@ -18,6 +18,8 @@ interface ICfdEngine {
     /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
     /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
     ///      `deferredPayoutUsdc` are trader-owned value or obligations recorded by the protocol.
+    ///      `activePositionMarginUsdc` is the canonical clearinghouse custody bucket for live position backing, while
+    ///      engine economic position margin is exposed separately on `AccountLedgerSnapshot.margin`.
     ///      `executionEscrowUsdc` is router-custodied order bounty escrow attributed to the account.
     ///      `committedMarginUsdc` remains trader-owned settlement reserved for queued orders inside the clearinghouse.
     struct AccountLedgerView {
@@ -34,6 +36,8 @@ interface ICfdEngine {
     /// @notice Expanded per-account ledger snapshot for debugging account health, reachability, and queued-order state.
     /// @dev Extends `AccountLedgerView` with typed clearinghouse locked-margin buckets, terminal settlement reachability,
     ///      equity, buying power, and live position risk.
+    ///      `margin` is the engine's economic position margin, while `positionMarginBucketUsdc` is the clearinghouse
+    ///      custody bucket that should back it.
     struct AccountLedgerSnapshot {
         uint256 settlementBalanceUsdc;
         uint256 freeSettlementUsdc;

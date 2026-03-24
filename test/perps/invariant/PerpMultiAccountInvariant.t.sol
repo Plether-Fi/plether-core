@@ -2,7 +2,9 @@
 pragma solidity 0.8.33;
 
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -94,6 +96,52 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             engine.totalDeferredPayoutUsdc(),
             "Per-account deferred payouts must stay isolated and sum cleanly"
         );
+    }
+
+    function invariant_SideTotalMarginMatchesTrackedEconomicPositionMargins() public view {
+        uint256 bullTotalMargin;
+        uint256 bearTotalMargin;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            if (size == 0) {
+                continue;
+            }
+
+            if (side == CfdTypes.Side.BULL) {
+                bullTotalMargin += margin;
+            } else {
+                bearTotalMargin += margin;
+            }
+        }
+
+        (,,, uint256 liveBullTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BULL));
+        (,,, uint256 liveBearTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BEAR));
+
+        assertEq(bullTotalMargin, liveBullTotalMargin, "Bull side totalMargin must match tracked engine position margins");
+        assertEq(bearTotalMargin, liveBearTotalMargin, "Bear side totalMargin must match tracked engine position margins");
+    }
+
+    function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            (, uint256 margin,,,,,,) = engine.positions(accountId);
+            IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
+
+            assertEq(snapshot.margin, margin, "Account snapshot margin must match engine economic position margin");
+            assertEq(
+                snapshot.positionMarginBucketUsdc,
+                buckets.positionMarginUsdc,
+                "Account snapshot custody bucket must match clearinghouse position-margin bucket"
+            );
+            assertEq(
+                snapshot.activePositionMarginUsdc,
+                buckets.positionMarginUsdc,
+                "Account snapshot active position margin view must reflect the clearinghouse custody bucket"
+            );
+        }
     }
 
     function _livePendingOrderCount() internal view returns (uint256 count) {

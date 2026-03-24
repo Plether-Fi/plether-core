@@ -34,6 +34,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     struct AccountCollateralView {
         uint256 settlementBalanceUsdc;
         uint256 lockedMarginUsdc;
+        // Clearinghouse custody bucket for currently locked live position backing.
         uint256 activePositionMarginUsdc;
         uint256 otherLockedMarginUsdc;
         uint256 freeSettlementUsdc;
@@ -133,6 +134,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 maxProfitUsdc;
         uint256 openInterest;
         uint256 entryNotional;
+        // Cached aggregate of engine economic position margins for this side; not a custody bucket.
         uint256 totalMargin;
         int256 fundingIndex;
         int256 entryFunding;

@@ -100,6 +100,8 @@ Two-step asynchronous **Commit-Reveal** intent pipeline:
 
 **Explicit Order Records**: Each `orderId` now maps to one `OrderRecord` that carries the immutable `CfdTypes.Order`, explicit lifecycle status, reserved execution bounty, and both intrusive queue link sets. Residual committed margin lives in clearinghouse-owned reservation records keyed by `orderId`; router/accounting helpers only expose queue structure and derived summaries over that reservation ledger for compatibility and traversal.
 
+**Engine Margin vs Custody Margin**: `CfdEngine.positions[accountId].margin` is the engine's canonical economic position-margin state used in risk, open/close planning, and side aggregate accounting. `MarginClearinghouse.positionMarginUsdc` / `activePositionMarginUsdc` is the canonical custody bucket holding the locked funds that back that economic state. `sides[*].totalMargin` is a cached aggregate of the engine economic margin, not a custody owner.
+
 **Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is a derived condition (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not a stored enum member. `Expired` is represented as `Failed` plus the expiry failure path/reason rather than its own stored status.
 
 ![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
