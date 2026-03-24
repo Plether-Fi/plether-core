@@ -245,6 +245,17 @@ abstract contract BasePerpTest is Test {
         uint256 price,
         uint256 depth
     ) internal {
+        _closeAt(accountId, side, size, price, depth, uint64(block.timestamp));
+    }
+
+    function _closeAt(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 price,
+        uint256 depth,
+        uint64 publishTime
+    ) internal {
         vm.prank(address(router));
         engine.processOrder(
             CfdTypes.Order({
@@ -252,7 +263,7 @@ abstract contract BasePerpTest is Test {
                 sizeDelta: size,
                 marginDelta: 0,
                 targetPrice: 0,
-                commitTime: uint64(block.timestamp),
+                commitTime: publishTime,
                 commitBlock: uint64(block.number),
                 orderId: 0,
                 side: side,
@@ -260,7 +271,7 @@ abstract contract BasePerpTest is Test {
             }),
             price,
             depth,
-            uint64(block.timestamp)
+            publishTime
         );
     }
 
