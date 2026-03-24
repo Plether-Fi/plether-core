@@ -1779,6 +1779,10 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         helper_RecordTradingRevenueInflow_AttachesToSeededJuniorWhenNoLivePrincipalExists();
     }
 
+    function test_OpenExecutionFee_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout() public {
+        helper_OpenExecutionFee_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout();
+    }
+
     function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets();
     }
@@ -2013,6 +2017,49 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         assertEq(pool.juniorPrincipal(), 7000e6);
         assertEq(pool.unassignedAssets(), 0);
+    }
+
+    function helper_OpenExecutionFee_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout() public {
+        uint256 juniorSeedAssets = 20_000e6;
+        uint256 seniorSeedAssets = 1_000e6;
+        usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
+        usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
+        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
+        pool.initializeSeedPosition(false, juniorSeedAssets, address(this));
+        pool.activateTrading();
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.juniorPrincipal(), 0);
+        assertGt(juniorVault.totalSupply(), 0);
+
+        usdc.mint(address(pool), 1_000_000e6);
+        pool.accountExcess();
+
+        address trader = address(0xAB1717);
+        _fundTrader(trader, 50_000e6);
+
+        uint256 assetsBefore = pool.totalAssets();
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        uint256 assetsDelta = pool.totalAssets() - assetsBefore;
+        uint256 feesDelta = engine.accumulatedFeesUsdc() - feesBefore;
+        (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
+
+        assertEq(feesDelta, 40_000_000, "Open should still accrue the full execution fee as protocol revenue");
+        assertEq(
+            pendingJunior,
+            expectedLpTradingRevenue,
+            "Seeded pending LP revenue should exclude the execution fee portion"
+        );
     }
 
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {

@@ -828,12 +828,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos,
-            price,
-            CAP_PRICE,
-            getPendingFunding(pos),
-            reachableUsdc,
-            requiredBps
+            pos, price, CAP_PRICE, getPendingFunding(pos), reachableUsdc, requiredBps
         );
 
         uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * requiredBps * 15) / (10_000 * 10);
@@ -990,7 +985,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _applyDirectPositionMarginDelta(CfdTypes.Position storage pos, int256 marginDeltaUsdc) internal {
+    function _applyDirectPositionMarginDelta(
+        CfdTypes.Position storage pos,
+        int256 marginDeltaUsdc
+    ) internal {
         _applyPositionMarginDeltaForSide(pos, pos.side, marginDeltaUsdc);
     }
 
@@ -1012,7 +1010,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _syncTotalSideMargin(side, marginBefore, pos.margin);
     }
 
-    function _setPositionMarginForSide(CfdTypes.Position storage pos, CfdTypes.Side side, uint256 marginAfter) internal {
+    function _setPositionMarginForSide(
+        CfdTypes.Position storage pos,
+        CfdTypes.Side side,
+        uint256 marginAfter
+    ) internal {
         uint256 marginBefore = pos.margin;
         pos.margin = marginAfter;
         _syncTotalSideMargin(side, marginBefore, marginAfter);
@@ -1044,7 +1046,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             totalDeferredPayoutUsdc += amountUsdc;
             uint64 claimId = traderDeferredClaimIdByAccount[accountId];
             if (claimId == 0) {
-                claimId = _enqueueDeferredClaim(ICfdEngine.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc);
+                claimId =
+                    _enqueueDeferredClaim(ICfdEngine.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc);
                 traderDeferredClaimIdByAccount[accountId] = claimId;
             } else {
                 deferredClaims[claimId].remainingUsdc += amountUsdc;
@@ -1381,7 +1384,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 oraclePrice,
         uint64 publishTime
     ) external view returns (uint8 code) {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: sizeDelta,
@@ -1952,7 +1956,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 netMarginChange =
             clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
         if (delta.tradeCostUsdc > 0) {
-            vault.recordTradingRevenueInflow(uint256(delta.tradeCostUsdc));
+            uint256 lpTradingRevenueUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
+                ? uint256(delta.tradeCostUsdc) - delta.executionFeeUsdc
+                : 0;
+            if (lpTradingRevenueUsdc > 0) {
+                vault.recordTradingRevenueInflow(lpTradingRevenueUsdc);
+            }
         }
 
         _applyPositionMarginDeltaForSide(pos, marginSide, netMarginChange);
@@ -2008,7 +2017,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
                 delta.deletePosition,
                 address(vault)
             );
-            vault.recordTradingRevenueInflow(seizedUsdc);
+            uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
+                ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
+                : 0;
+            uint256 lpTradingRevenueUsdc = seizedUsdc > cashCollectedExecutionFeeUsdc
+                ? seizedUsdc - cashCollectedExecutionFeeUsdc
+                : 0;
+            if (lpTradingRevenueUsdc > 0) {
+                vault.recordTradingRevenueInflow(lpTradingRevenueUsdc);
+            }
             _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
             if (delta.existingDeferredConsumedUsdc > 0) {
                 _consumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
