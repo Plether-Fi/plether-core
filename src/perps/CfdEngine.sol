@@ -2147,6 +2147,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return (bullFundingIndex, bearFundingIndex);
         }
 
+        if (!isOracleFrozen()) {
+            uint256 maxStaleness = _liveMarkStalenessLimit();
+            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+            if (age > maxStaleness) {
+                return (bullFundingIndex, bearFundingIndex);
+            }
+        }
+
         PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
             PositionRiskAccountingLib.FundingStepInputs({
                 price: lastMarkPrice,

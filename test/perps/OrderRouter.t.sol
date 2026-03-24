@@ -1310,8 +1310,10 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
         address eve = address(0xE111);
-        bytes32 eveId = bytes32(uint256(uint160(eve)));
         _fundTrader(eve, 1000e6);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.prank(eve);
         vm.expectRevert(
@@ -1323,9 +1325,27 @@ contract OrderRouterPythTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
     }
 
+    function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
+        address eve = address(0xE112);
+        bytes32 eveId = bytes32(uint256(uint160(eve)));
+        _fundTrader(eve, 1000e6);
+
+        vm.warp(block.timestamp + router.orderExecutionStalenessLimit() + 1);
+
+        vm.prank(eve);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
+
+        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(eveId);
+        assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
+        assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
+    }
+
     function test_CommitOrder_RevertsOnPredictableSkewInvalidation() public {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.prank(alice);
         vm.expectRevert(

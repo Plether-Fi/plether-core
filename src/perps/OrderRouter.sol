@@ -324,7 +324,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             revert OrderRouter__CloseMarginDeltaNotAllowed();
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
-        if (!isClose) {
+        if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
             uint8 revertCode =
                 engine.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime());
             if (
@@ -981,6 +981,23 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
         uint256 capPrice = engine.CAP_PRICE();
         return price > capPrice ? capPrice : price;
+    }
+
+    function _canUseCommitMarkForOpenPrefilter() internal view returns (bool) {
+        uint64 lastMarkTime = engine.lastMarkTime();
+        if (lastMarkTime == 0) {
+            return false;
+        }
+
+        OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+            OrderOraclePolicyLib.OracleAction.OrderExecution,
+            _isOracleFrozen(),
+            engine.isFadWindow(),
+            orderExecutionStalenessLimit,
+            liquidationStalenessLimit,
+            engine.fadMaxStaleness()
+        );
+        return !OrderOraclePolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
     function _linkPendingOrder(

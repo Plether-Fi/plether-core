@@ -63,7 +63,7 @@ These inflow entrypoints must not mutate LP principal through ad hoc, path-speci
 Current policy nuance:
 
 - fresh-mark reconcile math and pending-bucket application share the same HousePool settlement entrypoint,
-- the senior-yield checkpoint still respects mark freshness and must not destroy elapsed accrual time when a stale mark forces the yield math to be skipped,
+- the senior-yield checkpoint still respects mark freshness, but `finalizeSeniorRate()` is allowed to truncate stale-window elapsed accrual time when it applies a new rate without running fresh-mark reconcile math,
 - senior-yield accrual time and reconcile time are tracked separately, and any principal-changing stale-path mutation must checkpoint the senior-yield clock before mutating principal,
 - but pending recapitalization / pending zero-principal trading buckets may still be applied when stale marks cause reconcile waterfall math to be skipped, because those buckets represent already-funded cash events rather than mark-dependent LP repricing.
 
