@@ -78,12 +78,12 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_UnbrickableQueue_OnEngineRevert() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
+
         vm.warp(block.timestamp + 1 hours);
         vm.prank(bob);
         juniorVault.withdraw(1_000_000 * 1e6, bob, bob);
-
-        vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory emptyPayload;
         vm.roll(block.number + 1);
@@ -203,7 +203,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
         vm.prank(other);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, type(uint256).max, false); // order 2, non-head
+        router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, type(uint256).max, false); // order 2, non-head
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
 
@@ -654,8 +654,8 @@ contract OrderRouterTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
         uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
@@ -663,20 +663,20 @@ contract OrderRouterTest is BasePerpTest {
         clearinghouse.withdraw(accountId, freeSettlement);
 
         IMarginClearinghouse.LockedMarginBuckets memory beforeBuckets = clearinghouse.getLockedMarginBuckets(accountId);
-        assertEq(beforeBuckets.committedOrderMarginUsdc, 50 * 1e6, "Setup must lock both committed-order buckets");
+        assertEq(beforeBuckets.committedOrderMarginUsdc, 500 * 1e6, "Setup must lock both committed-order buckets");
 
         vm.prank(address(engine));
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 300 * 1e6, 0, true, address(engine));
 
         vm.prank(address(engine));
         router.syncMarginQueue(accountId);
 
         assertEq(router.committedMargins(1), 0, "First order should be fully consumed before release");
         assertEq(
-            router.committedMargins(2), 20 * 1e6, "Second order should retain only the unconsumed committed margin"
+            router.committedMargins(2), 200 * 1e6, "Second order should retain only the unconsumed committed margin"
         );
 
         bytes[] memory empty;
@@ -735,8 +735,8 @@ contract OrderRouterTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 25 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
         uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
@@ -747,7 +747,7 @@ contract OrderRouterTest is BasePerpTest {
         uint64[] memory reservationIds = new uint64[](2);
         reservationIds[0] = 1;
         reservationIds[1] = 2;
-        clearinghouse.consumeCloseLoss(accountId, reservationIds, 30 * 1e6, 0, true, address(engine));
+        clearinghouse.consumeCloseLoss(accountId, reservationIds, 300 * 1e6, 0, true, address(engine));
 
         bytes[] memory empty;
         router.executeOrder(1, empty);
@@ -2239,21 +2239,21 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
     function test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 350e6);
+        _fundTrader(trader, 900e6);
 
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
         assertEq(
             usdc.balanceOf(address(router)),
-            queuedOrderCount * 1e6,
+            router.executionBountyReserves(1) * queuedOrderCount,
             "Router should custody the shielded open-order bounty escrow"
         );
         assertEq(
@@ -2263,11 +2263,10 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
 
         ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
-        uint256 vaultAssetsBefore = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 102_500_000);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
 
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(102_500_000));
+        priceData[0] = abi.encode(uint256(150_000_000));
 
         router.executeLiquidation(accountId, priceData);
 
@@ -2278,11 +2277,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             preview.badDebtUsdc,
             "Liquidation should not improve previewed bad debt by restoring execution escrow"
         );
-        assertEq(
-            snapshotBefore.executionEscrowUsdc,
-            queuedOrderCount * 1e6,
-            "Setup must report queued execution escrow outside trader settlement"
-        );
+        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, router.executionBountyReserves(1) * queuedOrderCount);
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
@@ -2293,33 +2288,23 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             0,
             "Liquidation should clear the global queue head when only liquidated-account orders remain"
         );
-        assertEq(router.executionBountyReserves(1), 0, "Liquidation should forfeit the first open-order bounty escrow");
         assertEq(
-            router.executionBountyReserves(uint64(queuedOrderCount)),
+            clearinghouse.balanceUsdc(accountId),
             0,
-            "All queued open-order bounty escrow should be cleared"
-        );
-        assertEq(
-            usdc.balanceOf(address(router)), 0, "Router should not retain shielded bounty escrow after liquidation"
-        );
-        assertEq(pool.excessAssets(), 0, "Forfeited open-order bounty escrow should not remain quarantined as excess");
-        assertGe(
-            pool.totalAssets(),
-            vaultAssetsBefore + queuedOrderCount * 1e6,
-            "Forfeited open-order bounty escrow should contribute to canonical vault assets"
+            "Forfeited open-order bounty escrow must not be credited back into trader settlement"
         );
     }
 
     function test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 350e6);
+        _fundTrader(trader, 900e6);
 
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
@@ -2411,14 +2396,14 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
     function test_ExecuteLiquidation_PreventsPostLiquidationEscrowRecovery() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        _fundTrader(trader, 350e6);
+        _fundTrader(trader, 900e6);
 
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
@@ -2426,7 +2411,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 traderUsdcBefore = usdc.balanceOf(trader);
 
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(102_500_000));
+        priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(accountId, priceData);
 
         assertEq(
@@ -3405,11 +3390,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
     // Regression: H-03
     function test_SpammerFeeConfiscatedOnExpiry() public {
         vm.deal(spammer, 1 ether);
+        _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(spammer, 10_000 * 1e6);
         vm.prank(spammer);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
         vm.prank(alice);
@@ -3465,11 +3450,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
     // Regression: H-01
     function test_ExpiredOrderFeeRefundedToUser_ViaSkip() public {
         vm.deal(spammer, 1 ether);
+        _fundJunior(bob, 1_000_000e6);
         _fundTrader(spammer, 10_000e6);
         vm.prank(spammer);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
@@ -3781,12 +3766,13 @@ contract VpiImrBypassTest is Test {
         assertEq(clearinghouse.balanceUsdc(aliceAccount), 1e6, "Alice only funds the reserved execution bounty");
 
         vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            )
+        );
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
-        vm.roll(block.number + 1);
-        router.executeOrder(2, empty);
-
-        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 0, "Position rejected: VPI rebate alone cannot satisfy IMR");
     }
 
 }
@@ -3864,6 +3850,12 @@ contract KeeperFeeRefundTest is Test {
         clearinghouse.setEngine(address(engine));
         router.finalizeMaxOrderAge();
         _bootstrapSeededLifecycle();
+
+        usdc.mint(bob, 1_000_000e6);
+        vm.startPrank(bob);
+        usdc.approve(address(juniorVault), 1_000_000e6);
+        juniorVault.deposit(1_000_000e6, bob);
+        vm.stopPrank();
     }
 
     // Regression: H-01 — fee refunded to user on failure

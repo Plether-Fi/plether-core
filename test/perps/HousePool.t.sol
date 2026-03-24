@@ -1540,6 +1540,8 @@ contract HousePoolSeedLifecycleGateTest is BasePerpTest {
 
         pool.activateTrading();
 
+        _fundJunior(address(0x222), 1_000_000e6);
+
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
     }

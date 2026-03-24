@@ -8,6 +8,7 @@ import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
+import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -343,7 +344,11 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         if (!isClose) {
             uint8 revertCode =
                 engine.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime());
-            if (revertCode != 0) {
+            if (
+                revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
+                    || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
+                    || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            ) {
                 revert OrderRouter__PredictableOpenInvalid(revertCode);
             }
         }

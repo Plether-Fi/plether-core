@@ -2055,7 +2055,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.startPrank(trader);
         uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
@@ -3414,28 +3414,37 @@ contract CfdEngineAuditTest is BasePerpTest {
 
     // Regression: Finding-4
     function test_AsyncFundingDoesNotBlockLegitOrders() public {
-        _fundJunior(bob, 210_000 * 1e6);
+        _fundJunior(bob, 1_000_000 * 1e6);
 
         address dave = address(0x444);
-        _fundTrader(carol, 50_001 * 1e6);
-        _fundTrader(dave, 200_001 * 1e6);
+        _fundTrader(carol, 15_001 * 1e6);
+        _fundTrader(dave, 60_001 * 1e6);
 
         vm.prank(dave);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000 * 1e18, 200_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 60_000 * 1e18, 60_000 * 1e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 5000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 15_000 * 1e18, 1500 * 1e6, 1e8, false);
         router.executeOrder(2, empty);
 
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
         (uint256 sizeBefore,,,,,,,) = engine.positions(carolAccount);
 
-        vm.warp(block.timestamp + 91 days);
+        router.proposeMaxOrderAge(0);
+        vm.warp(block.timestamp + router.TIMELOCK_DELAY() + 1);
+        router.finalizeMaxOrderAge();
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+
+        vm.warp(block.timestamp + 91 days);
+
+        uint8 revertCode =
+            engine.previewOpenRevertCode(carolAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp));
+        assertEq(revertCode, 0, "Preview should keep the increase executable after async funding accrual");
+
         router.executeOrder(3, empty);
 
         (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);

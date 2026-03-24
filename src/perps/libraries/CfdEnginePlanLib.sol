@@ -316,6 +316,11 @@ library CfdEnginePlanLib {
 
         uint256 posMarginAfterFunding =
             snap.position.margin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
+        uint256 effectivePosMarginAfterFunding = posMarginAfterFunding;
+        if (delta.funding.pendingFundingUsdc > 0 && delta.funding.payoutType != CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT)
+        {
+            effectivePosMarginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
+        }
         delta.totalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
         delta.totalMarginAfterFunding =
             delta.totalMarginBefore + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
@@ -356,14 +361,14 @@ library CfdEnginePlanLib {
         int256 totalMarginDelta = marginChangeFromFunding + delta.netMarginChange;
         uint256 computedMarginAfter;
         if (totalMarginDelta >= 0) {
-            computedMarginAfter = snap.position.margin + uint256(totalMarginDelta);
+            computedMarginAfter = effectivePosMarginAfterFunding + uint256(delta.netMarginChange);
         } else {
             uint256 deficit = uint256(-totalMarginDelta);
-            if (snap.position.margin < deficit) {
+            if (effectivePosMarginAfterFunding < deficit) {
                 delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
                 return delta;
             }
-            computedMarginAfter = snap.position.margin - deficit;
+            computedMarginAfter = effectivePosMarginAfterFunding - deficit;
         }
 
         delta.newPosSize = openState.newSize;
@@ -383,8 +388,12 @@ library CfdEnginePlanLib {
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
         delta.totalMarginAfterOpen = delta.totalMarginAfterFunding
-            + (computedMarginAfter > posMarginAfterFunding ? computedMarginAfter - posMarginAfterFunding : 0)
-            - (posMarginAfterFunding > computedMarginAfter ? posMarginAfterFunding - computedMarginAfter : 0);
+            + (computedMarginAfter > effectivePosMarginAfterFunding ? computedMarginAfter - effectivePosMarginAfterFunding : 0)
+            - (
+                effectivePosMarginAfterFunding > computedMarginAfter
+                    ? effectivePosMarginAfterFunding - computedMarginAfter
+                    : 0
+            );
 
         if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
