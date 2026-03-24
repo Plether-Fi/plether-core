@@ -2020,9 +2020,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
                 : 0;
-            uint256 lpTradingRevenueUsdc = seizedUsdc > cashCollectedExecutionFeeUsdc
-                ? seizedUsdc - cashCollectedExecutionFeeUsdc
-                : 0;
+            uint256 lpTradingRevenueUsdc =
+                seizedUsdc > cashCollectedExecutionFeeUsdc ? seizedUsdc - cashCollectedExecutionFeeUsdc : 0;
             if (lpTradingRevenueUsdc > 0) {
                 vault.recordTradingRevenueInflow(lpTradingRevenueUsdc);
             }

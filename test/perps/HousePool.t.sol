@@ -2021,7 +2021,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function helper_OpenExecutionFee_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout() public {
         uint256 juniorSeedAssets = 20_000e6;
-        uint256 seniorSeedAssets = 1_000e6;
+        uint256 seniorSeedAssets = 1000e6;
         usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
         usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
         pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
@@ -2045,7 +2045,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
