@@ -53,6 +53,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 margin;
         uint256 entryPrice;
         uint256 entryNotionalUsdc;
+        uint256 physicalReachableCollateralUsdc;
+        uint256 nettableDeferredPayoutUsdc;
         int256 unrealizedPnlUsdc;
         int256 pendingFundingUsdc;
         int256 netEquityUsdc;
@@ -724,7 +726,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
+        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         if (reachableUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
@@ -823,7 +825,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
+        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             price,
@@ -1258,7 +1260,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             lastMarkPrice,
             CAP_PRICE,
             _getProjectedPendingFunding(accountId, pos),
-            snapshot.terminalReachableUsdc + snapshot.deferredPayoutUsdc,
+            snapshot.terminalReachableUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
 
@@ -1281,7 +1283,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return viewData;
         }
 
-        uint256 reachableUsdc = _terminalRiskCollateralUsdc(accountId);
+        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             lastMarkPrice,
@@ -1297,6 +1299,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         viewData.margin = pos.margin;
         viewData.entryPrice = pos.entryPrice;
         viewData.entryNotionalUsdc = (pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
+        viewData.physicalReachableCollateralUsdc = reachableUsdc;
+        viewData.nettableDeferredPayoutUsdc = deferredPayoutUsdc[accountId];
         viewData.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
         viewData.pendingFundingUsdc = riskState.pendingFundingUsdc;
         viewData.netEquityUsdc = riskState.equityUsdc;
@@ -2080,10 +2084,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _terminalRiskCollateralUsdc(
+    function _physicalReachableCollateralUsdc(
         bytes32 accountId
     ) internal view returns (uint256) {
-        return clearinghouse.getTerminalReachableUsdc(accountId) + deferredPayoutUsdc[accountId];
+        return clearinghouse.getTerminalReachableUsdc(accountId);
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {

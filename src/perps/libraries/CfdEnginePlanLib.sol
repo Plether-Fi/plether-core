@@ -430,12 +430,9 @@ library CfdEnginePlanLib {
         projectedPosition.margin = delta.posMarginAfter;
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
-        uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc + snap.deferredPayoutForAccount;
+        uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
         if (delta.funding.fundingClearinghouseCreditUsdc > 0) {
             reachableCollateralUsdc += delta.funding.fundingClearinghouseCreditUsdc;
-        }
-        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
-            reachableCollateralUsdc += uint256(delta.funding.pendingFundingUsdc);
         }
         if (_isCollectedFundingLoss(delta.funding.payoutType)) {
             reachableCollateralUsdc -= delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree;

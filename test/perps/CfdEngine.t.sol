@@ -889,8 +889,26 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.size, 100_000 * 1e18);
         assertEq(viewData.entryPrice, 1e8);
         assertEq(viewData.entryNotionalUsdc, 100_000 * 1e6);
+        assertEq(viewData.physicalReachableCollateralUsdc, clearinghouse.getTerminalReachableUsdc(accountId));
+        assertEq(viewData.nettableDeferredPayoutUsdc, engine.deferredPayoutUsdc(accountId));
         assertGt(viewData.unrealizedPnlUsdc, 0);
         assertEq(viewData.maxProfitUsdc, 100_000 * 1e6);
+    }
+
+    function test_GetPositionView_DoesNotCountDeferredPayoutAsPhysicalCollateral() public {
+        address trader = address(0xAB1101);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+
+        CfdEngine.PositionView memory viewData = engine.getPositionView(accountId);
+        assertEq(viewData.physicalReachableCollateralUsdc, 0, "View should expose physical reachable collateral only");
+        assertEq(viewData.nettableDeferredPayoutUsdc, 200e6, "View should expose deferred payout separately");
+        assertEq(viewData.netEquityUsdc, 0, "Deferred payout should not inflate generic position equity views");
+        assertTrue(viewData.liquidatable, "Position should remain liquidatable when only deferred payout exists");
     }
 
     function test_GetProtocolAccountingView_ReflectsDeferredLiabilities() public {
@@ -3183,6 +3201,33 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
         engine.checkWithdraw(accountId);
+    }
+
+    function test_CheckWithdraw_DoesNotCountDeferredPayoutAsReachableCollateral() public {
+        address trader = address(0x51581);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        engine.checkWithdraw(accountId);
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_DoesNotCountDeferredPayoutAsReachableCollateral() public {
+        address trader = address(0x51582);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
