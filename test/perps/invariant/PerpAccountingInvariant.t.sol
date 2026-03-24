@@ -229,6 +229,11 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 handler.accountActiveReservationCommittedMargin(accountId),
                 "Committed reservation remaining sum must match clearinghouse account summary"
             );
+            assertEq(
+                handler.accountReservationRemainingSum(accountId),
+                router.getAccountOrderSummary(accountId).committedMarginUsdc,
+                "Order summary committed margin must derive from the same clearinghouse reservation source"
+            );
         }
     }
 

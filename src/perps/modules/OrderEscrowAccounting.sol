@@ -47,6 +47,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function getAccountEscrow(
         bytes32 accountId
     ) public view override returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
+        // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
         escrow.committedMarginUsdc = clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
@@ -60,6 +61,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function getAccountOrderSummary(
         bytes32 accountId
     ) public view returns (IOrderRouterAccounting.AccountOrderSummary memory summary) {
+        // Use the clearinghouse reservation summary as the primary committed-margin source rather than re-summing queue links.
+        summary.committedMarginUsdc = clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
@@ -69,7 +72,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
                 summary.pendingCloseSize += order.sizeDelta;
                 summary.hasTerminalCloseQueued = true;
             }
-            summary.committedMarginUsdc += clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
             summary.executionBountyUsdc += record.executionBountyUsdc;
             orderId = record.nextPendingOrderId;
         }
@@ -78,6 +80,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function getMarginReservationIds(
         bytes32 accountId
     ) public view override returns (uint64[] memory orderIds) {
+        // Router queue links expose reservation traversal order only; remaining reservation value lives in MarginClearinghouse.
         uint64 cursor = marginHeadOrderId[accountId];
         uint256 count;
         while (cursor != 0) {

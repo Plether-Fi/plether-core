@@ -414,6 +414,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     function committedMargins(
         uint64 orderId
     ) external view returns (uint256) {
+        // Compatibility getter only: remaining committed margin is owned by the clearinghouse reservation ledger.
         return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
     }
 

@@ -13,8 +13,8 @@ interface IOrderRouterAccounting {
         Failed
     }
 
-    /// @notice Router-custodied order escrow attributed to an account.
-    /// @dev `committedMarginUsdc` remains trader-owned but temporarily reserved inside MarginClearinghouse.
+    /// @notice Router/accounting view of queued order escrow attributed to an account.
+    /// @dev `committedMarginUsdc` is derived from canonical MarginClearinghouse reservation state.
     ///      `executionBountyUsdc` is router-custodied bounty escrow reserved for queued orders.
     struct AccountEscrowView {
         uint256 committedMarginUsdc;
@@ -55,6 +55,7 @@ interface IOrderRouterAccounting {
     ) external view returns (AccountEscrowView memory escrow);
 
     /// @notice Returns aggregate queued order state attributed to an account.
+    /// @dev Committed margin value is derived from the clearinghouse reservation summary; the router only owns queue structure.
     function getAccountOrderSummary(
         bytes32 accountId
     ) external view returns (AccountOrderSummary memory summary);
@@ -69,7 +70,8 @@ interface IOrderRouterAccounting {
         bytes32 accountId
     ) external view returns (uint256);
 
-    /// @notice Returns the current margin-queue order ids for an account in FIFO order.
+    /// @notice Returns the current router-maintained margin-queue order ids for an account in FIFO order.
+    /// @dev This is a structural traversal helper; committed-margin value remains owned by the clearinghouse reservation ledger.
     function getMarginReservationIds(
         bytes32 accountId
     ) external view returns (uint64[] memory orderIds);
