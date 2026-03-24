@@ -361,6 +361,12 @@ Funding freshness policy:
 - once the live mark is stale, funding freezes until a fresh mark update arrives,
 - frozen/FAD oracle policy may still permit broader staleness according to the dedicated frozen-window rules.
 
+Margin-threshold policy:
+
+- maintenance, initial, and FAD margin thresholds should be modeled as separate explicit config surfaces,
+- withdraw gating should use `initMarginBps`, not `maintMarginBps`,
+- implementation may temporarily derive IMR from a legacy policy ratio, but the intended steady state is an explicit `initMarginBps` parameter rather than hidden `1.5x` math.
+
 Global queue cleanup policy:
 
 - expired-order cleanup work must be bounded per call,
@@ -406,6 +412,7 @@ Definition:
 Rules:
 
 - `PositionView` and withdraw-facing health checks must not silently add deferred payout into generic net equity,
+- withdraw-facing health checks should preserve initial-margin headroom rather than only bare maintenance margin,
 - deferred payout may still be shown to integrators, but as a distinct bucket with explicit terminal-netting semantics.
 
 ### E. Pending-Order Escrow View

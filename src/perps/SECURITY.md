@@ -59,7 +59,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Single Direction** | An `accountId` holds at most one directional position (BULL or BEAR). Opening the opposite side requires closing first |
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
-| **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR = max(1.5 × MMR, minBountyUsdc)` |
+| **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR` should come from an explicit `initMarginBps` policy surface rather than being implicitly derived from `MMR` |
 | **Queue Execution** | Execution always starts from the current global queue head. Retryable slippage misses are requeued behind the global tail with cooldown instead of being terminally failed, while terminal invalid / expired orders still consume escrow according to policy. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders also reserve a flat `1.00 USDC` bounty upfront at commit time, sourcing it from free settlement first and then active position margin if needed, so head-of-queue execution stays economically backed even for fully margined accounts |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
@@ -240,6 +240,12 @@ When a position goes underwater (equity < 0):
 - **Behavior**: Existing `deferredPayoutUsdc[accountId]` is no longer treated as generic collateral in withdraw checks, close-bounty backing, or generic position views.
 - **Effect**: `getPositionView()` now reports physically reachable collateral separately from same-account deferred payout. Generic account-health paths only use the physical clearinghouse bucket, while terminal close/liquidation settlement can still net the same-account deferred payout explicitly.
 - **Security benefit**: This removes a hidden abstraction leak where a vault IOU could accidentally be reused as if it were immediately reachable account cash.
+
+#### Explicit Initial Margin Policy
+
+- **Behavior**: Withdraw-facing risk checks now target initial-margin headroom rather than only maintenance margin.
+- **Effect**: Traders cannot withdraw themselves to the liquidation cliff and then become liquidatable from a trivial adverse move.
+- **Design note**: The intended policy surface is an explicit `initMarginBps` parameter distinct from `maintMarginBps` / `fadMarginBps`; deriving IMR from a hard-coded ratio should be treated as legacy compatibility rather than the long-term spec.
 
 #### Failed Open Bounty Policy
 

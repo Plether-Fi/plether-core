@@ -826,16 +826,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
+        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos,
             price,
             CAP_PRICE,
             getPendingFunding(pos),
             reachableUsdc,
-            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+            requiredBps
         );
 
-        if (riskState.equityUsdc < int256(riskState.maintenanceMarginUsdc)) {
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * requiredBps * 15) / (10_000 * 10);
+        if (riskState.equityUsdc < int256(initialMarginRequirementUsdc)) {
             revert CfdEngine__WithdrawBlockedByOpenPosition();
         }
     }

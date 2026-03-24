@@ -3515,6 +3515,8 @@ contract CfdEngineFundingTest is BasePerpTest {
 
 contract CfdEngineAuditTest is BasePerpTest {
 
+    using stdStorage for StdStorage;
+
     address alice = address(0x111);
     address bob = address(0x222);
     address carol = address(0x333);
@@ -3811,6 +3813,26 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.prank(alice);
         clearinghouse.withdraw(accountId, free);
         assertEq(usdc.balanceOf(alice), balBefore + free, "Free equity withdrawn");
+    }
+
+    function test_CheckWithdraw_BlocksWhenPostWithdrawEquityFallsBelowImr() public {
+        _fundJunior(bob, 500_000 * 1e6);
+        _fundTrader(alice, 50_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertGt(size, 0, "Setup must leave an open position");
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(100 * 1e6));
+
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        engine.checkWithdraw(accountId);
     }
 
 }
