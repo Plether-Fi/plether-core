@@ -7,8 +7,10 @@ import {IHousePool} from "./interfaces/IHousePool.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "./libraries/HousePoolFreshnessLib.sol";
+import {HousePoolPendingPreviewLib} from "./libraries/HousePoolPendingPreviewLib.sol";
 import {HousePoolSeedLifecycleLib} from "./libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolTrancheGateLib} from "./libraries/HousePoolTrancheGateLib.sol";
+import {HousePoolWithdrawalPreviewLib} from "./libraries/HousePoolWithdrawalPreviewLib.sol";
 import {HousePoolWaterfallAccountingLib} from "./libraries/HousePoolWaterfallAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -654,8 +656,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
             return 0;
         }
-        uint256 free = getFreeUSDC();
-        return free < seniorPrincipal ? free : seniorPrincipal;
+        return HousePoolWithdrawalPreviewLib.seniorWithdrawCap(getFreeUSDC(), seniorPrincipal);
     }
 
     /// @notice Max USDC the junior tranche can withdraw (subordinated behind senior)
@@ -664,9 +665,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
             return 0;
         }
-        uint256 free = getFreeUSDC();
-        uint256 subordinated = free > seniorPrincipal ? free - seniorPrincipal : 0;
-        return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
+        return HousePoolWithdrawalPreviewLib.juniorWithdrawCap(getFreeUSDC(), seniorPrincipal, juniorPrincipal);
     }
 
     /// @notice Returns tranche principals and withdrawal caps as if reconcile ran right now.
@@ -692,11 +691,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         seniorPrincipalUsdc = ctx.pendingState.waterfall.seniorPrincipal;
         juniorPrincipalUsdc = ctx.pendingState.waterfall.juniorPrincipal;
 
-        uint256 free = withdrawalSnapshot.freeUsdc;
-        maxSeniorWithdrawUsdc = free < seniorPrincipalUsdc ? free : seniorPrincipalUsdc;
-
-        uint256 subordinated = free > seniorPrincipalUsdc ? free - seniorPrincipalUsdc : 0;
-        maxJuniorWithdrawUsdc = subordinated < juniorPrincipalUsdc ? subordinated : juniorPrincipalUsdc;
+        maxSeniorWithdrawUsdc =
+            HousePoolWithdrawalPreviewLib.seniorWithdrawCap(withdrawalSnapshot.freeUsdc, seniorPrincipalUsdc);
+        maxJuniorWithdrawUsdc = HousePoolWithdrawalPreviewLib.juniorWithdrawCap(
+            withdrawalSnapshot.freeUsdc, seniorPrincipalUsdc, juniorPrincipalUsdc
+        );
     }
 
     function isWithdrawalLive() external view returns (bool) {
@@ -920,16 +919,9 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         snapshot = HousePoolAccountingLib.buildWithdrawalSnapshot(accountingSnapshot);
         if (!isProjected) {
             uint256 pendingAssets = _pendingBucketAssets();
-            if (pendingAssets > 0) {
-                snapshot.reserved += pendingAssets;
-                snapshot.freeUsdc = snapshot.freeUsdc > pendingAssets ? snapshot.freeUsdc - pendingAssets : 0;
-            }
+            snapshot = HousePoolWithdrawalPreviewLib.reserveAssets(snapshot, pendingAssets);
         }
-        if (reservedUnassignedAssets > 0) {
-            snapshot.reserved += reservedUnassignedAssets;
-            snapshot.freeUsdc =
-                snapshot.freeUsdc > reservedUnassignedAssets ? snapshot.freeUsdc - reservedUnassignedAssets : 0;
-        }
+        snapshot = HousePoolWithdrawalPreviewLib.reserveAssets(snapshot, reservedUnassignedAssets);
     }
 
     function _checkpointSeniorYieldBeforePrincipalMutation(
@@ -991,68 +983,44 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function _applyPendingBucketsPreview(
         PendingAccountingState memory state
     ) internal view {
-        if (pendingRecapitalizationUsdc > 0) {
-            _applyRecapitalizationIntent(state, pendingRecapitalizationUsdc);
-        }
-        if (pendingTradingRevenueUsdc > 0) {
-            _routeSeededRevenue(state, pendingTradingRevenueUsdc);
-        }
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
+            .PendingAccountingState({
+            waterfall: state.waterfall,
+            unassignedAssets: state.unassignedAssets,
+            seniorSupply: state.seniorSupply,
+            juniorSupply: state.juniorSupply
+        });
+        HousePoolPendingPreviewLib.applyPendingBucketsPreview(
+            previewState, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
+        );
+        state.waterfall = previewState.waterfall;
+        state.unassignedAssets = previewState.unassignedAssets;
     }
 
-    function _applyRecapitalizationIntent(
-        PendingAccountingState memory state,
-        uint256 amount
-    ) internal pure {
-        uint256 remaining = amount;
-        if (state.seniorSupply > 0) {
-            if (state.waterfall.seniorPrincipal == 0 && state.waterfall.juniorPrincipal == 0) {
-                state.waterfall.seniorPrincipal += remaining;
-                state.waterfall.seniorHighWaterMark = remaining;
-                remaining = 0;
-            } else {
-                uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
-                    ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
-                    : 0;
-                if (gap > 0) {
-                    uint256 seniorAssignedUsdc = remaining > gap ? gap : remaining;
-                    state.waterfall.seniorPrincipal += seniorAssignedUsdc;
-                    remaining -= seniorAssignedUsdc;
-                }
-            }
-        }
-        if (remaining > 0) {
-            state.unassignedAssets += remaining;
-        }
+    function _applyRecapitalizationIntent(PendingAccountingState memory state, uint256 amount) internal pure {
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
+            .PendingAccountingState({
+            waterfall: state.waterfall,
+            unassignedAssets: state.unassignedAssets,
+            seniorSupply: state.seniorSupply,
+            juniorSupply: state.juniorSupply
+        });
+        HousePoolPendingPreviewLib.applyRecapitalizationIntent(previewState, amount);
+        state.waterfall = previewState.waterfall;
+        state.unassignedAssets = previewState.unassignedAssets;
     }
 
-    function _routeSeededRevenue(
-        PendingAccountingState memory state,
-        uint256 amount
-    ) internal pure {
-        if (state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal != 0) {
-            return;
-        }
-
-        uint256 remaining = amount;
-        if (state.seniorSupply > 0) {
-            uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
-                ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
-                : 0;
-            if (gap > 0) {
-                uint256 seniorAssignedUsdc = remaining > gap ? gap : remaining;
-                state.waterfall.seniorPrincipal += seniorAssignedUsdc;
-                remaining -= seniorAssignedUsdc;
-            }
-        }
-
-        if (remaining > 0 && state.juniorSupply > 0) {
-            state.waterfall.juniorPrincipal += remaining;
-            remaining = 0;
-        }
-
-        if (remaining > 0) {
-            state.unassignedAssets += remaining;
-        }
+    function _routeSeededRevenue(PendingAccountingState memory state, uint256 amount) internal pure {
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
+            .PendingAccountingState({
+            waterfall: state.waterfall,
+            unassignedAssets: state.unassignedAssets,
+            seniorSupply: state.seniorSupply,
+            juniorSupply: state.juniorSupply
+        });
+        HousePoolPendingPreviewLib.routeSeededRevenue(previewState, amount);
+        state.waterfall = previewState.waterfall;
+        state.unassignedAssets = previewState.unassignedAssets;
     }
 
     function _pendingBucketAssets() internal view returns (uint256) {
