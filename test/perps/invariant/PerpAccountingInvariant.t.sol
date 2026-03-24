@@ -142,7 +142,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-            OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
+            IOrderRouterAccounting.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
 
             assertEq(summary.pendingOrderCount, escrow.pendingOrderCount, "Escrow summary count must match account escrow");
             assertEq(
@@ -371,7 +371,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(record.core.accountId, accountId, "Pending queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
-                    uint256(OrderRouter.OrderStatus.Pending),
+                    uint256(IOrderRouterAccounting.OrderStatus.Pending),
                     "Pending queue may only contain pending orders"
                 );
                 assertEq(record.prevPendingOrderId, previous, "Pending prev pointer must match traversal");
@@ -414,7 +414,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(record.core.accountId, accountId, "Margin queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
-                    uint256(OrderRouter.OrderStatus.Pending),
+                    uint256(IOrderRouterAccounting.OrderStatus.Pending),
                     "Margin queue may only contain pending orders"
                 );
                 assertTrue(record.inMarginQueue, "Margin queue traversal must only include in-queue orders");

@@ -842,7 +842,7 @@ contract AdversarialPerpHandler is Test {
         bool retryableSlippageAtHead;
         if (beforeExecute < router.nextCommitId()) {
             OrderRouter.OrderRecord memory headRecord = router.getOrderRecord(beforeExecute);
-            if (uint8(headRecord.status) == uint8(OrderRouter.OrderStatus.Pending)) {
+            if (uint8(headRecord.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 retryableSlippageAtHead = !_checkSlippage(headRecord.core, oraclePrice);
                 if (retryableSlippageAtHead) {
                     ghost_lastRetryableSlippageOrderId = beforeExecute;
@@ -891,7 +891,7 @@ contract AdversarialPerpHandler is Test {
 
     function _countPendingOrders() internal view returns (uint256 pending) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (uint8(router.getOrderRecord(orderId).status) == uint8(OrderRouter.OrderStatus.Pending)) {
+            if (uint8(router.getOrderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 pending++;
             }
         }
@@ -1013,7 +1013,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
 
         assertEq(
             handler.ghost_lastRetryableSlippageOrderStatus(),
-            uint8(OrderRouter.OrderStatus.Pending),
+            uint8(IOrderRouterAccounting.OrderStatus.Pending),
             "Retryable slippage head must remain pending immediately after the batch attempt"
         );
         assertGt(
@@ -1040,7 +1040,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 pendingCount;
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            if (uint8(router.getOrderRecord(orderId).status) == uint8(OrderRouter.OrderStatus.Pending)) {
+            if (uint8(router.getOrderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 pendingCount++;
             }
         }
@@ -1056,7 +1056,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(cursor);
             assertEq(
                 uint8(record.status),
-                uint8(OrderRouter.OrderStatus.Pending),
+                uint8(IOrderRouterAccounting.OrderStatus.Pending),
                 "Global queue must only traverse pending orders"
             );
             assertEq(record.prevGlobalOrderId, expectedPrev, "Global queue prev links must remain consistent");

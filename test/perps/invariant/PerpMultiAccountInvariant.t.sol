@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
@@ -59,7 +60,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint256[] memory liveCounts = new uint256[](handler.actorCount());
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-            if (uint256(record.status) != uint256(OrderRouter.OrderStatus.Pending)) {
+            if (uint256(record.status) != uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 continue;
             }
             liveCounts[_actorIndex(record.core.accountId)]++;
@@ -98,7 +99,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function _livePendingOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-            if (uint256(record.status) == uint256(OrderRouter.OrderStatus.Pending)) {
+            if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 count++;
             }
         }
@@ -107,7 +108,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function _liveMarginOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-            if (uint256(record.status) == uint256(OrderRouter.OrderStatus.Pending) && record.inMarginQueue) {
+            if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue) {
                 count++;
             }
         }

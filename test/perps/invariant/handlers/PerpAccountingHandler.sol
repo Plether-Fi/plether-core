@@ -7,6 +7,7 @@ import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
 import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {MockUSDC} from "../../../mocks/MockUSDC.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {MockInvariantVault} from "../mocks/MockInvariantVault.sol";
@@ -613,18 +614,18 @@ contract PerpAccountingHandler is Test {
         }
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
+        if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
             return GHOST_ORDER_PENDING;
         }
 
-        return uint8(record.status) == uint8(OrderRouter.OrderStatus.Executed) ? GHOST_ORDER_EXECUTED : GHOST_ORDER_FAILED;
+        return uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed) ? GHOST_ORDER_EXECUTED : GHOST_ORDER_FAILED;
     }
 
     function ghostOrderRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
+        if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
             return router.committedMargins(orderId);
         }
         return 0;
@@ -763,7 +764,7 @@ contract PerpAccountingHandler is Test {
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-            if (ghostOrderOwner[orderId] == accountId && uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
+            if (ghostOrderOwner[orderId] == accountId && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 count++;
             }
         }
@@ -776,7 +777,7 @@ contract PerpAccountingHandler is Test {
             OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
             if (
                 ghostOrderOwner[orderId] == accountId
-                    && uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)
+                    && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)
                     && record.inMarginQueue && router.committedMargins(orderId) > 0
             ) {
                 count++;
@@ -938,7 +939,7 @@ contract PerpAccountingHandler is Test {
         if (upperBound > startExecuteId) {
             for (uint64 orderId = startExecuteId; orderId < upperBound; orderId++) {
                 OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-                if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Pending)) {
+                if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                     continue;
                 }
 
@@ -1001,7 +1002,7 @@ contract PerpAccountingHandler is Test {
         uint64 orderId
     ) internal view returns (uint8) {
         OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
-        if (uint8(record.status) == uint8(OrderRouter.OrderStatus.Executed)) {
+        if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed)) {
             return GHOST_ORDER_EXECUTED;
         }
         return GHOST_ORDER_FAILED;

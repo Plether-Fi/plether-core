@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdTypes} from "../CfdTypes.sol";
+
 /// @notice Shared accounting-facing subset of OrderRouter used by engine views and margin bookkeeping.
 interface IOrderRouterAccounting {
+
+    enum OrderStatus {
+        None,
+        Pending,
+        Executed,
+        Failed
+    }
 
     /// @notice Router-custodied order escrow attributed to an account.
     /// @dev `committedMarginUsdc` remains trader-owned but temporarily reserved inside MarginClearinghouse.
@@ -11,6 +20,28 @@ interface IOrderRouterAccounting {
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
         uint256 pendingOrderCount;
+    }
+
+    struct AccountOrderSummary {
+        uint256 pendingOrderCount;
+        uint256 pendingCloseSize;
+        uint256 committedMarginUsdc;
+        uint256 executionBountyUsdc;
+        bool hasTerminalCloseQueued;
+    }
+
+    struct PendingOrderView {
+        uint64 orderId;
+        bool isClose;
+        CfdTypes.Side side;
+        uint256 sizeDelta;
+        uint256 marginDelta;
+        uint256 targetPrice;
+        uint64 commitTime;
+        uint64 commitBlock;
+        uint64 retryAfterTimestamp;
+        uint256 committedMarginUsdc;
+        uint256 executionBountyUsdc;
     }
 
     /// @notice Prunes any zero-remaining committed-order reservations out of the router's margin queue for an account.
@@ -22,6 +53,16 @@ interface IOrderRouterAccounting {
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (AccountEscrowView memory escrow);
+
+    /// @notice Returns aggregate queued order state attributed to an account.
+    function getAccountOrderSummary(
+        bytes32 accountId
+    ) external view returns (AccountOrderSummary memory summary);
+
+    /// @notice Returns pending orders for an account with escrow-aware queue details.
+    function getPendingOrdersForAccount(
+        bytes32 accountId
+    ) external view returns (PendingOrderView[] memory pending);
 
     /// @notice Returns the number of pending orders currently attributed to an account.
     function pendingOrderCounts(

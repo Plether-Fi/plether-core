@@ -323,7 +323,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
-        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Pending));
+        assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Pending));
         assertEq(record.core.orderId, 1);
         assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
         assertEq(router.committedMargins(1), 1000 * 1e6);
@@ -344,7 +344,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
-        assertEq(uint256(record.status), uint256(OrderRouter.OrderStatus.Executed));
+        assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(record.core.orderId, 1, "Terminal record should keep immutable order metadata");
         assertEq(router.committedMargins(1), 0, "Executed order should clear committed margin escrow");
         assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty escrow");
@@ -359,7 +359,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        OrderRouter.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
+        IOrderRouterAccounting.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
         assertEq(summary.pendingOrderCount, 2);
         assertEq(summary.committedMarginUsdc, 1000 * 1e6);
         assertEq(summary.executionBountyUsdc, 2_000_000);
@@ -468,7 +468,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.executionBountyReserves(1), 0, "failed close should clear router bounty escrow");
         assertEq(
             uint256(router.getOrderRecord(1).status),
-            uint256(OrderRouter.OrderStatus.Failed),
+            uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "invalid close should finalize as failed"
         );
     }
@@ -523,7 +523,7 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        OrderRouter.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
         assertEq(pending.length, 2);
         assertEq(pending[0].orderId, 1);
         assertFalse(pending[0].isClose);
@@ -554,7 +554,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.pendingHeadOrderId(bobId), 2, "Bob head should be isolated from Alice queue state");
         assertEq(router.pendingTailOrderId(bobId), 2, "Bob tail should equal his only queued order");
 
-        OrderRouter.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
         assertEq(alicePending[0].orderId, 1, "Alice queue should preserve per-account FIFO order");
         assertEq(alicePending[1].orderId, 3, "Alice tail should remain reachable after foreign inserts");
@@ -809,7 +809,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.pendingHeadOrderId(bobId), 2, "Foreign account head should stay unchanged");
         assertEq(router.pendingTailOrderId(bobId), 2, "Foreign account tail should stay unchanged");
 
-        OrderRouter.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
+        IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
         assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
         assertEq(alicePending[0].orderId, 3, "Alice residual queue should still be reachable after execution");
     }

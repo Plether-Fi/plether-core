@@ -6,6 +6,7 @@ import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
@@ -29,31 +30,10 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngine.CfdEngine__TypedOrderFailure.selector;
     bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngine.CfdEngine__MarkPriceOutOfOrder.selector;
 
-    enum OrderStatus {
-        None,
-        Pending,
-        Executed,
-        Failed
-    }
-
     struct QueuedPositionView {
         bool exists;
         CfdTypes.Side side;
         uint256 size;
-    }
-
-    struct PendingOrderView {
-        uint64 orderId;
-        bool isClose;
-        CfdTypes.Side side;
-        uint256 sizeDelta;
-        uint256 marginDelta;
-        uint256 targetPrice;
-        uint64 commitTime;
-        uint64 commitBlock;
-        uint64 retryAfterTimestamp;
-        uint256 committedMarginUsdc;
-        uint256 executionBountyUsdc;
     }
 
     ICfdVault internal immutable vault;
@@ -388,7 +368,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             side: side,
             isClose: isClose
         });
-        record.status = OrderEscrowAccounting.OrderRouterStatus.Pending;
+        record.status = IOrderRouterAccounting.OrderStatus.Pending;
         if (isClose) {
             pendingCloseSize[accountId] += sizeDelta;
         }
@@ -464,14 +444,14 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
     function getPendingOrdersForAccount(
         bytes32 accountId
-    ) external view returns (PendingOrderView[] memory pending) {
-        pending = new PendingOrderView[](pendingOrderCounts[accountId]);
+    ) external view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
+        pending = new IOrderRouterAccounting.PendingOrderView[](pendingOrderCounts[accountId]);
         uint256 index;
         uint64 orderId = pendingHeadOrderId[accountId];
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             CfdTypes.Order memory order = record.core;
-            pending[index] = PendingOrderView({
+            pending[index] = IOrderRouterAccounting.PendingOrderView({
                 orderId: orderId,
                 isClose: order.isClose,
                 side: order.side,
@@ -652,7 +632,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             OrderRecord storage record = _orderRecord(orderId);
             CfdTypes.Order memory order = record.core;
 
-            if (record.status != OrderEscrowAccounting.OrderRouterStatus.Pending) {
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
                 nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
@@ -727,7 +707,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         while (nextExecuteId != 0 && nextExecuteId <= upToId) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
-            if (record.status != OrderEscrowAccounting.OrderRouterStatus.Pending) {
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
                 nextExecuteId = record.nextGlobalOrderId;
                 continue;
             }
@@ -788,7 +768,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         uint64 orderId
     ) internal view returns (OrderRecord storage record, CfdTypes.Order memory order) {
         record = _orderRecord(orderId);
-        if (record.status != OrderEscrowAccounting.OrderRouterStatus.Pending) {
+        if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
             revert OrderRouter__OrderNotPending();
         }
         order = record.core;
@@ -877,7 +857,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
-        _deleteOrder(orderId, true, success ? OrderStatus.Executed : OrderStatus.Failed);
+        _deleteOrder(orderId, true, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
     }
 
     function _finalizeExecution(
@@ -887,7 +867,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         FailedOrderBountyPolicy failedPolicy
     ) internal {
         _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
-        _deleteOrder(orderId, true, success ? OrderStatus.Executed : OrderStatus.Failed);
+        _deleteOrder(orderId, true, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
@@ -947,7 +927,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             uint64 nextOrderId = orderRecords[orderId].nextPendingOrderId;
             _releaseCommittedMargin(orderId);
             emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
-            _deleteOrder(orderId, orderId == nextExecuteId, OrderStatus.Failed);
+            _deleteOrder(orderId, orderId == nextExecuteId, IOrderRouterAccounting.OrderStatus.Failed);
             orderId = nextOrderId;
         }
     }
@@ -1108,7 +1088,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     function _deleteOrder(
         uint64 orderId,
         bool advanceHead,
-        OrderStatus terminalStatus
+        IOrderRouterAccounting.OrderStatus terminalStatus
     ) internal {
         OrderRecord storage record = _orderRecord(orderId);
         bytes32 accountId = record.core.accountId;
@@ -1117,7 +1097,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             _unlinkMarginOrder(accountId, orderId);
         }
         _unlinkGlobalOrder(orderId);
-        record.status = OrderEscrowAccounting.OrderRouterStatus(uint8(terminalStatus));
+        record.status = terminalStatus;
         record.retryAfterTimestamp = 0;
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;

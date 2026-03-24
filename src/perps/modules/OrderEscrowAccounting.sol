@@ -13,7 +13,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
     struct OrderRecord {
         CfdTypes.Order core;
-        OrderRouterStatus status;
+        IOrderRouterAccounting.OrderStatus status;
         uint256 executionBountyUsdc;
         uint256 marginBackedExecutionBountyUsdc;
         uint64 retryAfterTimestamp;
@@ -24,21 +24,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         uint64 nextMarginOrderId;
         uint64 prevMarginOrderId;
         bool inMarginQueue;
-    }
-
-    struct AccountOrderSummary {
-        uint256 pendingOrderCount;
-        uint256 pendingCloseSize;
-        uint256 committedMarginUsdc;
-        uint256 executionBountyUsdc;
-        bool hasTerminalCloseQueued;
-    }
-
-    enum OrderRouterStatus {
-        None,
-        Pending,
-        Executed,
-        Failed
     }
 
     ICfdEngine public immutable engine;
@@ -74,7 +59,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
     function getAccountOrderSummary(
         bytes32 accountId
-    ) public view returns (AccountOrderSummary memory summary) {
+    ) public view returns (IOrderRouterAccounting.AccountOrderSummary memory summary) {
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
