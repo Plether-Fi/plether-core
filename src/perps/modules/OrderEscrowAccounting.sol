@@ -181,7 +181,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             USDC.safeTransfer(address(clearinghouse), bounty);
             clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
         } else if (record.core.isClose) {
-            USDC.safeTransfer(msg.sender, bounty);
+            address trader = address(uint160(uint256(record.core.accountId)));
+            USDC.safeTransfer(trader, bounty);
         } else {
             address trader = address(uint160(uint256(record.core.accountId)));
             USDC.safeTransfer(trader, bounty);
