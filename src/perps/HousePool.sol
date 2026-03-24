@@ -6,6 +6,9 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
+import {HousePoolFreshnessLib} from "./libraries/HousePoolFreshnessLib.sol";
+import {HousePoolSeedLifecycleLib} from "./libraries/HousePoolSeedLifecycleLib.sol";
+import {HousePoolTrancheGateLib} from "./libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "./libraries/HousePoolWaterfallAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -291,52 +294,45 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function isSeedLifecycleComplete() public view returns (bool) {
-        return seniorSeedInitialized && juniorSeedInitialized;
+        return HousePoolSeedLifecycleLib.isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized);
     }
 
     function hasSeedLifecycleStarted() public view override(ICfdVault, IHousePool) returns (bool) {
-        return seniorSeedInitialized || juniorSeedInitialized;
+        return HousePoolSeedLifecycleLib.hasSeedLifecycleStarted(seniorSeedInitialized, juniorSeedInitialized);
     }
 
     function canAcceptOrdinaryDeposits() public view override(ICfdVault, IHousePool) returns (bool) {
-        return isSeedLifecycleComplete() && isTradingActive;
+        return HousePoolSeedLifecycleLib.canAcceptOrdinaryDeposits(
+            seniorSeedInitialized, juniorSeedInitialized, isTradingActive
+        );
     }
 
     function canAcceptTrancheDeposits(
         bool isSenior
     ) public view override returns (bool) {
-        if (!canAcceptOrdinaryDeposits() || paused() || unassignedAssets > 0) {
-            return false;
-        }
-
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
-        if (!_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
-            return false;
-        }
-
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
-        if (ctx.pendingState.unassignedAssets > 0) {
-            return false;
-        }
-
-        if (!isSenior) {
-            return true;
-        }
-
-        uint256 pendingSeniorPrincipal = ctx.pendingState.waterfall.seniorPrincipal;
-        uint256 pendingSeniorHighWaterMark = ctx.pendingState.waterfall.seniorHighWaterMark;
-        return pendingSeniorPrincipal == 0 || pendingSeniorPrincipal >= pendingSeniorHighWaterMark;
+        return HousePoolTrancheGateLib.trancheDepositsAllowed(
+            canAcceptOrdinaryDeposits(),
+            paused(),
+            unassignedAssets,
+            _markIsFreshForReconcile(accountingSnapshot, statusSnapshot),
+            ctx.pendingState.unassignedAssets,
+            isSenior,
+            ctx.pendingState.waterfall.seniorPrincipal,
+            ctx.pendingState.waterfall.seniorHighWaterMark
+        );
     }
 
     function canIncreaseRisk() public view override(ICfdVault, IHousePool) returns (bool) {
-        return isSeedLifecycleComplete() && isTradingActive;
+        return HousePoolSeedLifecycleLib.canIncreaseRisk(seniorSeedInitialized, juniorSeedInitialized, isTradingActive);
     }
 
     function activateTrading() external onlyOwner {
-        if (!isSeedLifecycleComplete()) {
+        if (!HousePoolSeedLifecycleLib.tradingActivationReady(seniorSeedInitialized, juniorSeedInitialized)) {
             revert HousePool__TradingActivationNotReady();
         }
         isTradingActive = true;
@@ -714,9 +710,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
             _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, false);
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
-            HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
-
         viewData.totalAssetsUsdc = totalAssets();
         viewData.freeUsdc = withdrawalSnapshot.freeUsdc;
         viewData.withdrawalReservedUsdc = withdrawalSnapshot.reserved;
@@ -724,8 +717,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         viewData.juniorPrincipalUsdc = juniorPrincipal;
         viewData.unpaidSeniorYieldUsdc = unpaidSeniorYield;
         viewData.seniorHighWaterMarkUsdc = seniorHighWaterMark;
-        viewData.markFresh = !policy.required
-            || HousePoolAccountingLib.isMarkFresh(statusSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp);
+        viewData.markFresh = HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp);
         viewData.oracleFrozen = statusSnapshot.oracleFrozen;
         viewData.degradedMode = statusSnapshot.degradedMode;
     }
@@ -745,12 +737,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view {
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
-            HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
-        if (!policy.required) {
-            return;
-        }
-        if (!HousePoolAccountingLib.isMarkFresh(statusSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp)) {
+        if (!HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp)) {
             revert HousePool__MarkPriceStale();
         }
     }
@@ -886,33 +873,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
-            HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
-        if (!policy.required) {
-            return true;
-        }
-
-        return HousePoolAccountingLib.isMarkFresh(statusSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp);
+        return HousePoolFreshnessLib.markIsFreshForReconcile(accountingSnapshot, statusSnapshot, block.timestamp);
     }
 
     function _withdrawalsLive(
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
-        if (statusSnapshot.degradedMode) {
-            return false;
-        }
-        HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
-            HousePoolAccountingLib.getMarkFreshnessPolicy(accountingSnapshot);
-        if (
-            policy.required
-                && !HousePoolAccountingLib.isMarkFresh(
-                    statusSnapshot.lastMarkTime, policy.maxStaleness, block.timestamp
-                )
-        ) {
-            return false;
-        }
-        return true;
+        return HousePoolFreshnessLib.withdrawalsLive(accountingSnapshot, statusSnapshot, block.timestamp);
     }
 
     function _normalizeUnassignedAssets(
@@ -939,7 +907,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireNoPendingBootstrap() internal view {
-        if (unassignedAssets > 0) {
+        if (HousePoolSeedLifecycleLib.hasPendingBootstrap(unassignedAssets)) {
             revert HousePool__PendingBootstrap();
         }
     }
