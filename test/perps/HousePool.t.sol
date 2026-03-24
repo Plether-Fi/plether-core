@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
@@ -1783,6 +1784,43 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         helper_OpenExecutionFee_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout();
     }
 
+    function test_LiquidationKeeperBounty_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout() public {
+        uint256 juniorSeedAssets = 20_000e6;
+        uint256 seniorSeedAssets = 1_000e6;
+        usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
+        usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
+        pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
+        pool.initializeSeedPosition(false, juniorSeedAssets, address(this));
+        pool.activateTrading();
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 1_000_000e6);
+        pool.accountExcess();
+
+        address trader = address(0xAB1719);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 900e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        uint256 assetsBefore = pool.totalAssets();
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(150_000_000));
+        router.executeLiquidation(accountId, priceData);
+
+        uint256 assetsDelta = pool.totalAssets() - assetsBefore;
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+
+        assertEq(
+            pendingSenior + pendingJunior,
+            assetsDelta,
+            "Seeded pending LP revenue should exclude the keeper bounty portion paid out after liquidation"
+        );
+        assertEq(pool.excessAssets(), 0, "Keeper bounty inflow should be canonically accounted, not stranded as excess");
+    }
+
     function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets();
     }
@@ -2055,11 +2093,17 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 expectedLpTradingRevenue = assetsDelta > feesDelta ? assetsDelta - feesDelta : 0;
 
         assertEq(feesDelta, 40_000_000, "Open should still accrue the full execution fee as protocol revenue");
+        assertEq(pool.excessAssets(), 0, "Execution fee inflow should be canonically accounted, not stranded as excess");
         assertEq(
             pendingJunior,
             expectedLpTradingRevenue,
             "Seeded pending LP revenue should exclude the execution fee portion"
         );
+
+        uint256 juniorBeforeFeeWithdrawal = pool.juniorPrincipal();
+        address feeRecipient = address(0xAB1718);
+        engine.withdrawFees(feeRecipient);
+        assertEq(pool.juniorPrincipal(), juniorBeforeFeeWithdrawal, "Fee withdrawal should not drain seeded LP principal");
     }
 
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {

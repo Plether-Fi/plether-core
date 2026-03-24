@@ -356,7 +356,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.absorbRouterCancellationFee(25e6);
 
-        assertGe(engine.lastFundingTime(), engine.lastMarkTime(), "Absorbing router fees must sync funding after refreshing the live mark");
+        assertGe(
+            engine.lastFundingTime(),
+            engine.lastMarkTime(),
+            "Absorbing router fees must sync funding after refreshing the live mark"
+        );
         assertGt(engine.lastFundingTime(), fundingBefore, "Funding timestamp should advance before fee absorption");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
@@ -392,9 +396,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.syncFunding();
 
         assertEq(
-            engine.lastFundingTime(),
-            engine.lastMarkTime() + 1,
-            "Funding should resume once a fresh live mark arrives"
+            engine.lastFundingTime(), engine.lastMarkTime() + 1, "Funding should resume once a fresh live mark arrives"
         );
     }
 
@@ -407,11 +409,12 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(bullTrader, 50_000e6);
         _fundTrader(bearTrader, 10_000e6);
         _open(bullId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
 
         uint256 fundingLiabilityBefore = engine.getLiabilityOnlyFundingPnl();
         ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engine.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseBefore = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -795,13 +798,42 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(fees, 40_000_000, "Exec fee should be 4bps of $100k notional");
 
         address treasury = address(0xBEEF);
+        uint256 assetsBeforeWithdrawal = pool.totalAssets();
         engine.withdrawFees(treasury);
 
         assertEq(engine.accumulatedFeesUsdc(), 0, "Fees should reset to zero");
         assertEq(usdc.balanceOf(treasury), fees, "Treasury receives exact fee amount");
+        assertEq(
+            pool.totalAssets(),
+            assetsBeforeWithdrawal - fees,
+            "Fee withdrawal should reduce canonical assets only by the already-accounted fee amount"
+        );
+        assertEq(pool.excessAssets(), 0, "Fee inflows should not remain stranded as excess before or after withdrawal");
 
         vm.expectRevert(CfdEngine.CfdEngine__NoFeesToWithdraw.selector);
         engine.withdrawFees(treasury);
+    }
+
+    function test_CloseProtocolFeeInflow_IsBoundedByPhysicalCashReceived() public {
+        _fundJunior(address(0xB0B), 1_000_000e6);
+
+        address trader = address(0xAB1720);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+
+        uint256 assetsBeforeClose = pool.totalAssets();
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 100_030_000);
+        uint256 assetsAfterClose = pool.totalAssets();
+
+        usdc.mint(address(pool), 5e6);
+
+        assertEq(
+            pool.totalAssets(),
+            assetsAfterClose,
+            "Unsolicited donations should remain quarantined instead of filling an over-credited fee-accounting gap"
+        );
+        assertEq(pool.excessAssets(), 5e6, "Donation should stay sweepable as excess when protocol inflow is capped by cash received");
     }
 
     function test_WithdrawFees_RespectsSeniorCashReservation() public {
@@ -978,8 +1010,10 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 10_000 * 1e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(200e6));
 
         CfdEngine.PositionView memory viewData = engine.getPositionView(accountId);
         assertEq(viewData.physicalReachableCollateralUsdc, 0, "View should expose physical reachable collateral only");
@@ -2011,7 +2045,9 @@ contract CfdEngineTest is BasePerpTest {
         engine.recordDeferredClearerBounty(keeper, 1e6);
 
         uint64 bountyClaimId = engine.deferredClaimHeadId();
-        assertEq(engine.traderDeferredClaimIdByAccount(bearId), 0, "Bear account should start without trader payout claims");
+        assertEq(
+            engine.traderDeferredClaimIdByAccount(bearId), 0, "Bear account should start without trader payout claims"
+        );
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -2044,7 +2080,9 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
         uint64 bearClaimIdAfter = engine.traderDeferredClaimIdByAccount(bearId);
         if (engine.deferredPayoutUsdc(bearId) == 0) {
-            assertEq(bearClaimIdAfter, 0, "Claim pointer should clear when the coalesced trader deferred node is exhausted");
+            assertEq(
+                bearClaimIdAfter, 0, "Claim pointer should clear when the coalesced trader deferred node is exhausted"
+            );
         } else {
             assertEq(
                 bearClaimIdAfter,
@@ -2124,7 +2162,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
-        assertGt(deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall");
+        assertGt(
+            deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
+        );
 
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
         bytes32 positionMarginSlot = keccak256(abi.encode(bearId, uint256(3)));
@@ -2138,8 +2178,16 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 1e8, vaultDepth);
         uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(1e8)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
 
-        assertEq(preview.badDebtUsdc, 0, "Deferred payout should prevent LP bad debt when close shortfall includes unpaid fees");
-        assertEq(preview.executionFeeUsdc, nominalExecutionFeeUsdc, "Preview should report full fee collection after deferred recovery");
+        assertEq(
+            preview.badDebtUsdc,
+            0,
+            "Deferred payout should prevent LP bad debt when close shortfall includes unpaid fees"
+        );
+        assertEq(
+            preview.executionFeeUsdc,
+            nominalExecutionFeeUsdc,
+            "Preview should report full fee collection after deferred recovery"
+        );
         assertGe(
             preview.existingDeferredConsumedUsdc,
             nominalExecutionFeeUsdc - locked.positionMarginUsdc,
@@ -3314,8 +3362,10 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(200e6));
 
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         engine.checkWithdraw(accountId);
@@ -3327,8 +3377,10 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(0));
-        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId).checked_write(uint256(200e6));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(200e6));
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
@@ -3686,8 +3738,9 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 91 days);
 
-        uint8 revertCode =
-            engine.previewOpenRevertCode(carolAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp));
+        uint8 revertCode = engine.previewOpenRevertCode(
+            carolAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp)
+        );
         assertEq(revertCode, 0, "Preview should keep the increase executable after async funding accrual");
 
         router.executeOrder(3, empty);
@@ -3829,7 +3882,8 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Setup must leave an open position");
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId).checked_write(uint256(100 * 1e6));
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(100 * 1e6));
 
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         engine.checkWithdraw(accountId);
