@@ -613,8 +613,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         clearinghouse.lockPositionMargin(accountId, amount);
-        pos.margin += amount;
-        _sideState(pos.side).totalMargin += amount;
+        _applyDirectPositionMarginDelta(pos, int256(amount));
         pos.lastUpdateTime = uint64(block.timestamp);
 
         emit MarginAdded(accountId, amount);
@@ -744,8 +743,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        pos.margin -= amountUsdc;
-        _sideState(pos.side).totalMargin -= amountUsdc;
+        _applyDirectPositionMarginDelta(pos, -int256(amountUsdc));
         clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
     }
 
@@ -763,8 +761,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         clearinghouse.creditSettlementAndLockMargin(accountId, amountUsdc);
-        pos.margin += amountUsdc;
-        _sideState(pos.side).totalMargin += amountUsdc;
+        _applyDirectPositionMarginDelta(pos, int256(amountUsdc));
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
@@ -980,6 +977,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 delta = marginBefore - marginAfter;
             _sideState(side).totalMargin -= delta;
         }
+    }
+
+    function _applyDirectPositionMarginDelta(CfdTypes.Position storage pos, int256 marginDeltaUsdc) internal {
+        if (marginDeltaUsdc == 0) {
+            return;
+        }
+
+        uint256 marginBefore = pos.margin;
+        if (marginDeltaUsdc > 0) {
+            pos.margin += uint256(marginDeltaUsdc);
+        } else {
+            pos.margin -= uint256(-marginDeltaUsdc);
+        }
+        _syncTotalSideMargin(pos.side, marginBefore, pos.margin);
     }
 
     function _syncMarginQueue(
