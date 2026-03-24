@@ -7,6 +7,7 @@ import {IHousePool} from "./interfaces/IHousePool.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "./libraries/HousePoolFreshnessLib.sol";
+import {HousePoolPendingLivePlanLib} from "./libraries/HousePoolPendingLivePlanLib.sol";
 import {HousePoolPendingPreviewLib} from "./libraries/HousePoolPendingPreviewLib.sol";
 import {HousePoolSeedLifecycleLib} from "./libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolTrancheGateLib} from "./libraries/HousePoolTrancheGateLib.sol";
@@ -956,28 +957,27 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             return;
         }
 
-        PendingAccountingState memory state;
-        state.waterfall = _getWaterfallState();
-        state.unassignedAssets = unassignedAssets;
-        state.seniorSupply = _seniorShareSupply();
-        state.juniorSupply = _juniorShareSupply();
+        HousePoolPendingLivePlanLib.PendingLivePlan memory plan = HousePoolPendingLivePlanLib.planApplyPendingBuckets(
+            HousePoolPendingPreviewLib.PendingAccountingState({
+                waterfall: _getWaterfallState(),
+                unassignedAssets: unassignedAssets,
+                seniorSupply: _seniorShareSupply(),
+                juniorSupply: _juniorShareSupply()
+            }),
+            seniorPrincipal,
+            pendingRecapitalizationUsdc,
+            pendingTradingRevenueUsdc
+        );
+        pendingRecapitalizationUsdc = 0;
+        pendingTradingRevenueUsdc = 0;
 
-        if (pendingRecapitalizationUsdc > 0) {
-            _applyRecapitalizationIntent(state, pendingRecapitalizationUsdc);
-            pendingRecapitalizationUsdc = 0;
-        }
-        if (pendingTradingRevenueUsdc > 0) {
-            _routeSeededRevenue(state, pendingTradingRevenueUsdc);
-            pendingTradingRevenueUsdc = 0;
-        }
-
-        if (state.waterfall.seniorPrincipal != seniorPrincipal) {
+        if (plan.seniorPrincipalChanged) {
             _checkpointSeniorYieldBeforePrincipalMutation(accountingSnapshot, statusSnapshot);
-            state.waterfall.unpaidSeniorYield = unpaidSeniorYield;
+            plan.state.waterfall.unpaidSeniorYield = unpaidSeniorYield;
         }
 
-        _setWaterfallState(state.waterfall);
-        unassignedAssets = state.unassignedAssets;
+        _setWaterfallState(plan.state.waterfall);
+        unassignedAssets = plan.state.unassignedAssets;
     }
 
     function _applyPendingBucketsPreview(
