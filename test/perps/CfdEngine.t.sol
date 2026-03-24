@@ -3412,6 +3412,99 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertEq(sizeAfterSecond, sizeAfterOpen, "Order on underwater position should be cancelled");
     }
 
+    function test_ProcessOrderTyped_RevertsWhenTruePostTradeEquityFailsImr() public {
+        address trader = address(0xABCD1234);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(trader, 1020 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
+
+        uint8 revertCode = engine.previewOpenRevertCode(
+            accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 101_800_000, uint64(block.timestamp)
+        );
+        assertEq(
+            revertCode,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "Preview should reject increases backed only by stale stored margin"
+        );
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 101_800_000,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        uint256 vaultDepth = pool.totalAssets();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(order, 101_800_000, vaultDepth, uint64(block.timestamp));
+    }
+
+    function test_ProcessOrderTyped_RevertsWhenAccountAlreadyLiquidatableBeforeIncrease() public {
+        address trader = address(0xABCD5678);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(trader, 1020 * 1e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
+
+        CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+        assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
+
+        uint8 revertCode = engine.previewOpenRevertCode(
+            accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
+        );
+        assertEq(
+            revertCode,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "Preview should reject a same-side increase when the account is already liquidatable"
+        );
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 10_000 * 1e18,
+            marginDelta: 0,
+            targetPrice: 102_000_000,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        uint256 vaultDepth = pool.totalAssets();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngine.CfdEngine__TypedOrderFailure.selector,
+                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                false
+            )
+        );
+        vm.prank(address(router));
+        engine.processOrderTyped(order, 102_000_000, vaultDepth, uint64(block.timestamp));
+    }
+
     // Regression: Finding-4
     function test_AsyncFundingDoesNotBlockLegitOrders() public {
         _fundJunior(bob, 1_000_000 * 1e6);

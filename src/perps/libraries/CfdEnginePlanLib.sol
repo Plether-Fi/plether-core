@@ -400,9 +400,10 @@ library CfdEnginePlanLib {
             return delta;
         }
 
+        PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState = _buildPostOpenRiskState(snap, delta);
         if (
-            OpenAccountingLib.effectiveMarginAfterTradeCost(computedMarginAfter, openState.tradeCostUsdc)
-                < openState.initialMarginRequirementUsdc
+            postOpenRiskState.liquidatable
+                || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
             return delta;
@@ -417,6 +418,42 @@ library CfdEnginePlanLib {
         }
 
         delta.valid = true;
+    }
+
+    function _buildPostOpenRiskState(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) private pure returns (PositionRiskAccountingLib.PositionRiskState memory riskState) {
+        CfdTypes.Position memory projectedPosition = snap.position;
+        projectedPosition.side = delta.posSide;
+        projectedPosition.size = delta.newPosSize;
+        projectedPosition.margin = delta.posMarginAfter;
+        projectedPosition.entryPrice = delta.newPosEntryPrice;
+
+        uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc + snap.deferredPayoutForAccount;
+        if (delta.funding.fundingClearinghouseCreditUsdc > 0) {
+            reachableCollateralUsdc += delta.funding.fundingClearinghouseCreditUsdc;
+        }
+        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
+            reachableCollateralUsdc += uint256(delta.funding.pendingFundingUsdc);
+        }
+        if (_isCollectedFundingLoss(delta.funding.payoutType)) {
+            reachableCollateralUsdc -= delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree;
+        }
+        if (delta.tradeCostUsdc < 0) {
+            reachableCollateralUsdc += uint256(-delta.tradeCostUsdc);
+        } else if (delta.tradeCostUsdc > 0) {
+            reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);
+        }
+
+        riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            projectedPosition,
+            delta.price,
+            snap.capPrice,
+            0,
+            reachableCollateralUsdc,
+            snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps
+        );
     }
 
     function _isOpenInsolventAfterPlan(
