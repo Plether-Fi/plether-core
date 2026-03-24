@@ -2672,7 +2672,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_MarginDrained_ByFees_Reverts() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 1000 * 1e6);
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -2781,12 +2781,12 @@ contract CfdEngineTest is BasePerpTest {
     function test_C2_InsufficientInitialMargin_Reverts() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 1000 * 1e6);
 
         // notional = 100k * $1 = $100k. execFee = $60, VPI ~= $2.50
         // MMR = 1% of $100k = $1000
-        // marginDelta = $100 covers fees but leaves pos.margin ~= $37, far below MMR
-        // Without initial margin check, this succeeds and creates an instantly-liquidatable position
+        // Even using full cross-margin equity, $1000 account collateral is below the $1500 initial margin requirement.
+        // Without the initial margin check, this would create an instantly-liquidatable position.
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,

@@ -86,7 +86,7 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
             fd.newLastMarkPrice,
             fd.newLastMarkTime
         );
-        _applyFundingSettlement(fd, order.accountId, pos);
+        _applyFundingSettlement(fd, order.accountId, pos, marginSide);
 
         uint256 marginAfter = pos.margin;
         uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
