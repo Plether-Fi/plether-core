@@ -159,7 +159,7 @@ library CfdEnginePlanLib {
         uint256 timeDelta =
             snap.currentTimestamp > snap.lastFundingTime ? snap.currentTimestamp - snap.lastFundingTime : 0;
 
-        if (timeDelta > 0) {
+        if (timeDelta > 0 && snap.liveMarkFreshForFunding) {
             PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
                 PositionRiskAccountingLib.FundingStepInputs({
                     price: snap.lastMarkPrice,
@@ -198,7 +198,7 @@ library CfdEnginePlanLib {
             snap.currentTimestamp > snap.lastFundingTime ? snap.currentTimestamp - snap.lastFundingTime : 0;
         fd.newLastFundingTime = uint64(snap.currentTimestamp);
 
-        if (timeDelta > 0) {
+        if (timeDelta > 0 && snap.liveMarkFreshForFunding) {
             PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
                 PositionRiskAccountingLib.FundingStepInputs({
                     price: snap.lastMarkPrice,

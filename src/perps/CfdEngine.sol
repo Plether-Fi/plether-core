@@ -1742,6 +1742,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = riskParams;
         snap.isFadWindow = isFadWindow();
+        uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        snap.liveMarkFreshForFunding = snap.isFadWindow || liveMarkAge <= _liveMarkStalenessLimit();
     }
 
     function _copySideSnapshot(

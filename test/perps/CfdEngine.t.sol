@@ -341,6 +341,10 @@ contract CfdEngineTest is BasePerpTest {
         uint256 vaultAssetsBefore = pool.totalAssets();
         vm.warp(block.timestamp + 1 days);
 
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 1);
+
         usdc.mint(address(router), 25e6);
         vm.prank(address(router));
         usdc.approve(address(engine), 25e6);
@@ -348,7 +352,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.absorbRouterCancellationFee(25e6);
 
-        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "Absorbing router fees must sync funding first");
+        assertGe(engine.lastFundingTime(), engine.lastMarkTime(), "Absorbing router fees must sync funding after refreshing the live mark");
         assertGt(engine.lastFundingTime(), fundingBefore, "Funding timestamp should advance before fee absorption");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
@@ -1694,7 +1698,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
     }
 
-    function test_LiquidationPreview_ProjectsFundingAccrualLikeLiveUpdate() public {
+    function test_LiquidationPreview_SkipsFundingAccrualUntilFreshMarkUpdate() public {
         address trader = address(0xAB1403);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
@@ -1705,34 +1709,22 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1 days);
 
-        CfdEngine.LiquidationPreview memory projectedPreview = engine.previewLiquidation(accountId, 110_000_000);
+        CfdEngine.LiquidationPreview memory stalePreview = engine.previewLiquidation(accountId, 110_000_000);
 
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
 
         CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(accountId, 110_000_000);
 
-        assertApproxEqAbs(
-            projectedPreview.fundingUsdc,
+        assertLt(
             fundedPreview.fundingUsdc,
-            1,
-            "Preview should include accrued funding before live update"
+            stalePreview.fundingUsdc,
+            "Preview should defer funding accrual until a fresh live mark arrives"
         );
-        assertApproxEqAbs(
-            projectedPreview.equityUsdc,
+        assertLt(
             fundedPreview.equityUsdc,
-            1,
-            "Projected funding should flow through liquidation equity"
-        );
-        assertEq(
-            projectedPreview.keeperBountyUsdc,
-            fundedPreview.keeperBountyUsdc,
-            "Projected funding should align keeper bounty with live state"
-        );
-        assertEq(
-            projectedPreview.liquidatable,
-            fundedPreview.liquidatable,
-            "Preview liquidatability should match the accrued live state"
+            stalePreview.equityUsdc,
+            "Accrued funding after a fresh live mark should reduce liquidation equity"
         );
     }
 

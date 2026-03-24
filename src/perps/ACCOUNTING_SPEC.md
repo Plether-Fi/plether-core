@@ -349,6 +349,24 @@ Close-order bounty policy:
 - the maximum margin parked in router escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - liquidation / collateral reachability analysis should treat that escrowed amount as temporarily unavailable until the queued close is executed, expired, or cleaned up.
 
+Failed-open bounty policy:
+
+- user-invalid open failures should pay the clearer from user escrow,
+- only genuine post-commit protocol-state invalidations should refund the trader bounty,
+- execution-time insufficiency such as `MARGIN_DRAINED_BY_FEES` is treated as user-invalid unless governance intentionally defines a narrower drift-specific subtype later.
+
+Funding freshness policy:
+
+- weekday/live funding accrual may only advance while the live mark remains within the engine freshness limit,
+- once the live mark is stale, funding freezes until a fresh mark update arrives,
+- frozen/FAD oracle policy may still permit broader staleness according to the dedicated frozen-window rules.
+
+Global queue cleanup policy:
+
+- expired-order cleanup work must be bounded per call,
+- batch execution must use a fixed scan budget rather than `O(total queued orders)` work,
+- the system should expose an explicit bounded prune path so keepers can advance expired queue heads in slices.
+
 Seed lifecycle policy:
 
 - once bootstrap seeding begins, new risk-increasing trading intents and ordinary LP deposits may only resume after both senior and junior seed positions exist on-chain and owner activation has occurred,
@@ -371,6 +389,24 @@ Definition:
 Rule:
 
 - liquidation bounty and residual recovery must be capped by physically reachable account value, not by stale accounting notions of margin or equity
+- same-account deferred payout is a separate explicit netting bucket, not generic reachable collateral; only terminal settlement kernels may consume it
+
+### D1. Generic Position / Withdraw View
+
+Question answered:
+
+- what collateral is immediately reachable for generic health checks, views, and withdraw gating?
+
+Definition:
+
+- use only physically reachable clearinghouse collateral,
+- exclude deferred payout IOUs,
+- surface same-account deferred payout separately when a view needs to expose both concepts.
+
+Rules:
+
+- `PositionView` and withdraw-facing health checks must not silently add deferred payout into generic net equity,
+- deferred payout may still be shown to integrators, but as a distinct bucket with explicit terminal-netting semantics.
 
 ### E. Pending-Order Escrow View
 

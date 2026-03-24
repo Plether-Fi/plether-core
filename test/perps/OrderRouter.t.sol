@@ -2365,45 +2365,45 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
+        engine.proposeEngineMarkStalenessLimit(90 days);
+        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
+        engine.finalizeEngineMarkStalenessLimit();
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 25e6);
+
         vm.warp(block.timestamp + 60 days);
         uint64 fundingBefore = engine.lastFundingTime();
+        uint256 canonicalDepthBefore = pool.totalAssets();
+        uint256 forfeitedEscrowUsdc = router.executionBountyReserves(1) * queuedOrderCount;
+
+        CfdEngine.LiquidationPreview memory expectedPreview = engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+        engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore + forfeitedEscrowUsdc);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
 
-        vm.recordLogs();
+        uint256 keeperBefore = usdc.balanceOf(address(this));
         router.executeLiquidation(accountId, priceData);
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 fundingUpdatedSig = keccak256("FundingUpdated(int256,int256,uint256)");
-        bytes32 protocolInflowSig = keccak256("ProtocolInflowAccounted(address,uint256,uint256)");
-        uint256 fundingLogIndex = type(uint256).max;
-        uint256 inflowLogIndex = type(uint256).max;
-
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == fundingUpdatedSig && fundingLogIndex == type(uint256).max) {
-                fundingLogIndex = i;
-            }
-            if (
-                logs[i].topics[0] == protocolInflowSig && logs[i].emitter == address(pool)
-                    && inflowLogIndex == type(uint256).max
-            ) {
-                inflowLogIndex = i;
-            }
-        }
 
         assertEq(
             engine.lastFundingTime(),
             uint64(block.timestamp),
-            "liquidation path should sync funding for the elapsed interval"
+            "liquidation path should settle the funding clock for the elapsed interval"
         );
         assertGt(
-            engine.lastFundingTime(), fundingBefore, "liquidation must materialize pending funding before fee booking"
+            engine.lastFundingTime(), fundingBefore, "liquidation should advance the funding clock"
         );
-        assertLt(
-            fundingLogIndex,
-            inflowLogIndex,
-            "funding must sync before forfeited escrow is recognized as canonical vault inflow"
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            expectedPreview.keeperBountyUsdc,
+            "Liquidation bounty should use the pre-forfeiture vault depth for funding"
+        );
+        assertEq(
+            engine.accumulatedBadDebtUsdc(),
+            expectedPreview.badDebtUsdc,
+            "Liquidation bad debt should use the pre-forfeiture vault depth for funding"
         );
     }
 

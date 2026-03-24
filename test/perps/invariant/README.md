@@ -17,6 +17,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies empty positions preview as inactive
   - Verifies liquidation reachable collateral previews match clearinghouse accounting
   - Verifies liquidation previews exclude router-custodied execution escrow from reachable collateral
+  - Verifies generic position views expose physical reachable collateral separately from deferred payout netting
   - Verifies degraded-mode trigger flags behave as transition flags rather than persistent state flags
 
 - `PerpDeferredPayoutInvariant.t.sol`
@@ -30,6 +31,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies oracle-frozen boundary logic matches the intended weekend/admin-day formula
   - Verifies house-pool freshness limits switch correctly between weekday and frozen-oracle modes
   - Verifies maintenance margin switches cleanly between weekday and FAD settings
+  - Verifies stale live marks do not silently keep advancing weekday funding policy
 
 - `PerpMultiAccountInvariant.t.sol`
   - Catches cross-account contamination bugs under overlapping commits, cancels, executions, liquidations, and claims

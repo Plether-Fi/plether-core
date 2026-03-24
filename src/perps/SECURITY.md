@@ -235,6 +235,30 @@ When a position goes underwater (equity < 0):
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 
+#### Deferred Payout as Explicit Netting, Not Generic Collateral
+
+- **Behavior**: Existing `deferredPayoutUsdc[accountId]` is no longer treated as generic collateral in withdraw checks, close-bounty backing, or generic position views.
+- **Effect**: `getPositionView()` now reports physically reachable collateral separately from same-account deferred payout. Generic account-health paths only use the physical clearinghouse bucket, while terminal close/liquidation settlement can still net the same-account deferred payout explicitly.
+- **Security benefit**: This removes a hidden abstraction leak where a vault IOU could accidentally be reused as if it were immediately reachable account cash.
+
+#### Failed Open Bounty Policy
+
+- **Behavior**: Typed open-order failures now distinguish user-invalid insufficiency from genuine post-commit protocol-state invalidation. `MARGIN_DRAINED_BY_FEES` is treated as user-invalid, so the clearer receives the reserved bounty instead of refunding it to the trader.
+- **Effect**: Keepers do not need to guess whether executing a fee-drained open will pay them; only true protocol-state invalidations on opens refund the trader bounty.
+- **Trade-off**: Some execution-time failures still depend on post-commit state drift, so bounty routing is intentionally tied to the engine's typed failure class rather than a blanket refund rule.
+
+#### Stale-Mark Funding Policy
+
+- **Behavior**: Outside genuine frozen/FAD oracle mode, funding accrual stops once the live mark becomes older than the engine's live staleness limit. Funding resumes only after a fresh mark update arrives.
+- **Effect**: Funding can no longer keep advancing off stale weekday marks while other protocol paths are already freshness-gated.
+- **Trade-off**: Tests and integrations must not assume long stale intervals keep accumulating funding during ordinary live-market operation.
+
+#### Bounded Queue Cleanup
+
+- **Behavior**: Global expired-order cleanup is bounded per call. `executeOrder()` only auto-skips a fixed number of expired head orders, `executeOrderBatch()` stops after a fixed global scan budget, and `pruneExpiredOrders()` lets keepers advance the expired head in explicit bounded slices.
+- **Effect**: Queue liveness no longer depends on a potentially unbounded scan across stale sybil orders.
+- **Trade-off**: Draining a heavily expired queue may now take multiple keeper calls by design, but each call has predictable bounded work.
+
 #### Three-Bucket Liquidation Residual Accounting
 
 - **Behavior**: Liquidation residuals are modeled explicitly in three buckets: settlement retained on-ledger in the clearinghouse, legacy deferred payout consumed/remaining, and any fresh trader payout created by the liquidation itself.

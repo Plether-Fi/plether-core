@@ -59,6 +59,7 @@ library CfdEnginePlanTypes {
         uint256 capPrice;
         CfdTypes.RiskParams riskParams;
         bool isFadWindow;
+        bool liveMarkFreshForFunding;
     }
 
     // ──────────────────────────────────────────────

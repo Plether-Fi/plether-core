@@ -1296,9 +1296,8 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             }
         }
 
-        _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
-
         uint256 vaultDepth = vault.totalAssets();
+        _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
         uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
 
         _clearLiquidatedAccountOrders(accountId);
