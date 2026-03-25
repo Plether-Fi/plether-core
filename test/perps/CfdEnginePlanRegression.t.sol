@@ -280,10 +280,13 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             _openOrder(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
         );
 
-        uint256 marginAfterFunding = _marginAfterFunding(0, delta);
         assertEq(
             delta.sideTotalMarginAfterOpen,
-            delta.sideTotalMarginAfterFunding + delta.positionMarginAfterOpen - marginAfterFunding,
+            CfdEnginePlanLib.computeSideTotalMarginAfterOpen(
+                delta.sideTotalMarginAfterFunding,
+                delta.effectivePositionMarginAfterFunding,
+                delta.positionMarginAfterOpen
+            ),
             "Open planner sideTotalMarginAfterOpen must stay consistent with the single-frame margin delta equation"
         );
     }

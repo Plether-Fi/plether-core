@@ -39,6 +39,16 @@ library CfdEnginePlanLib {
         return (false, uint256(computedMarginAfterSigned));
     }
 
+    function computeSideTotalMarginAfterOpen(
+        uint256 sideTotalMarginAfterFunding,
+        uint256 effectivePositionMarginAfterFunding,
+        uint256 positionMarginAfterOpen
+    ) internal pure returns (uint256 sideTotalMarginAfterOpen) {
+        return uint256(
+            int256(sideTotalMarginAfterFunding) + int256(positionMarginAfterOpen) - int256(effectivePositionMarginAfterFunding)
+        );
+    }
+
     function _selectedAndOpposite(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side
@@ -333,6 +343,7 @@ library CfdEnginePlanLib {
         ) {
             effectivePosMarginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
         }
+        delta.effectivePositionMarginAfterFunding = effectivePosMarginAfterFunding;
         delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
         delta.sideTotalMarginAfterFunding =
             delta.sideTotalMarginBefore + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
@@ -391,9 +402,10 @@ library CfdEnginePlanLib {
         delta.sideMaxProfitIncrease = openState.addedMaxProfitUsdc;
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
-        delta.sideTotalMarginAfterOpen = uint256(
-            int256(delta.sideTotalMarginAfterFunding) + int256(computedMarginAfter)
-                - int256(effectivePosMarginAfterFunding)
+        delta.sideTotalMarginAfterOpen = computeSideTotalMarginAfterOpen(
+            delta.sideTotalMarginAfterFunding,
+            delta.effectivePositionMarginAfterFunding,
+            delta.positionMarginAfterOpen
         );
 
         if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {

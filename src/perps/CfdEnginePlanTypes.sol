@@ -169,6 +169,7 @@ library CfdEnginePlanTypes {
         bytes32 accountId;
         uint256 sizeDelta;
         uint256 price;
+        uint256 effectivePositionMarginAfterFunding;
     }
 
     // ──────────────────────────────────────────────
