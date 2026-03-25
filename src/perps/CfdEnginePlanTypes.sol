@@ -148,7 +148,7 @@ library CfdEnginePlanTypes {
         uint256 newPosEntryPrice;
         int256 posVpiAccruedDelta;
         uint256 posMaxProfitIncrease;
-        uint256 posMarginAfter;
+        uint256 positionMarginAfterOpen;
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
@@ -162,9 +162,9 @@ library CfdEnginePlanTypes {
 
         uint256 executionFeeUsdc;
 
-        uint256 totalMarginBefore;
-        uint256 totalMarginAfterFunding;
-        uint256 totalMarginAfterOpen;
+        uint256 sideTotalMarginBefore;
+        uint256 sideTotalMarginAfterFunding;
+        uint256 sideTotalMarginAfterOpen;
 
         bytes32 accountId;
         uint256 sizeDelta;

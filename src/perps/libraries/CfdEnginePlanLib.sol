@@ -333,9 +333,9 @@ library CfdEnginePlanLib {
         ) {
             effectivePosMarginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
         }
-        delta.totalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
-        delta.totalMarginAfterFunding =
-            delta.totalMarginBefore + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
+        delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
+        delta.sideTotalMarginAfterFunding =
+            delta.sideTotalMarginBefore + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
 
         uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
         uint256 postSkewUsdc = _postOpenSkewUsdc(bull, bear, order.side, order.sizeDelta, price);
@@ -379,7 +379,7 @@ library CfdEnginePlanLib {
         delta.newPosEntryPrice = openState.newEntryPrice;
         delta.posVpiAccruedDelta = openState.vpiUsdc;
         delta.posMaxProfitIncrease = openState.addedMaxProfitUsdc;
-        delta.posMarginAfter = computedMarginAfter;
+        delta.positionMarginAfterOpen = computedMarginAfter;
 
         delta.sideOiIncrease = order.sizeDelta;
         if (openState.newEntryNotional >= openState.oldEntryNotional) {
@@ -391,8 +391,9 @@ library CfdEnginePlanLib {
         delta.sideMaxProfitIncrease = openState.addedMaxProfitUsdc;
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
-        delta.totalMarginAfterOpen = uint256(
-            int256(delta.totalMarginAfterFunding) + int256(computedMarginAfter) - int256(effectivePosMarginAfterFunding)
+        delta.sideTotalMarginAfterOpen = uint256(
+            int256(delta.sideTotalMarginAfterFunding) + int256(computedMarginAfter)
+                - int256(effectivePosMarginAfterFunding)
         );
 
         if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
@@ -427,8 +428,9 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory projectedPosition = snap.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
-        projectedPosition.margin =
-            OpenAccountingLib.effectiveMarginAfterTradeCost(delta.posMarginAfter, delta.tradeCostUsdc);
+        projectedPosition.margin = OpenAccountingLib.effectiveMarginAfterTradeCost(
+            delta.positionMarginAfterOpen, delta.tradeCostUsdc
+        );
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
@@ -463,12 +465,12 @@ library CfdEnginePlanLib {
         if (side == CfdTypes.Side.BULL) {
             bull.openInterest += delta.sideOiIncrease;
             bull.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            bull.totalMargin = delta.totalMarginAfterOpen;
+            bull.totalMargin = delta.sideTotalMarginAfterOpen;
             bull.entryFunding += delta.funding.sideEntryFundingDelta + delta.sideEntryFundingContribution;
         } else {
             bear.openInterest += delta.sideOiIncrease;
             bear.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            bear.totalMargin = delta.totalMarginAfterOpen;
+            bear.totalMargin = delta.sideTotalMarginAfterOpen;
             bear.entryFunding += delta.funding.sideEntryFundingDelta + delta.sideEntryFundingContribution;
         }
 

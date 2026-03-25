@@ -220,7 +220,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
 
         assertEq(
-            delta.totalMarginBefore, _sideTotalMargin(CfdTypes.Side.BULL), "Fresh open must inherit current side margin"
+            delta.sideTotalMarginBefore,
+            _sideTotalMargin(CfdTypes.Side.BULL),
+            "Fresh open must inherit current side margin"
         );
         assertEq(
             uint8(delta.revertCode),
@@ -280,9 +282,9 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         uint256 marginAfterFunding = _marginAfterFunding(0, delta);
         assertEq(
-            delta.totalMarginAfterOpen,
-            delta.totalMarginAfterFunding + delta.posMarginAfter - marginAfterFunding,
-            "Open planner totalMarginAfterOpen must stay consistent with the single-frame margin delta equation"
+            delta.sideTotalMarginAfterOpen,
+            delta.sideTotalMarginAfterFunding + delta.positionMarginAfterOpen - marginAfterFunding,
+            "Open planner sideTotalMarginAfterOpen must stay consistent with the single-frame margin delta equation"
         );
     }
 
