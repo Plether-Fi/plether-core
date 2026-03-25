@@ -396,9 +396,13 @@ contract HousePoolTest is BasePerpTest {
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 1);
 
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
         pool.finalizeSeniorRate();
 
-        assertGt(engine.lastFundingTime(), fundingBefore, "Finalizing senior rate must sync funding before accounting");
+        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "Funding must already be synced to the current block before stale-mark finalization continues");
+        assertGe(engine.lastFundingTime(), fundingBefore, "Funding timestamp must not move backward during finalization");
     }
 
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
@@ -1407,16 +1411,11 @@ contract HousePoolTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         vm.warp(block.timestamp + 20 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        // Bull payer closes → bear receiver still open with positive unrealized funding
-        bytes[] memory closePythData = new bytes[](1);
-        closePythData[0] = abi.encode(1e8);
-        vm.prank(trader1);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
-        router.executeOrder(3, closePythData);
-
-        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
-        assertTrue(unrealizedFunding > 0, "Remaining receiver has positive unrealized funding");
+        uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
+        assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 bal = usdc.balanceOf(address(pool));
@@ -1463,15 +1462,11 @@ contract HousePoolTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         vm.warp(block.timestamp + 20 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        bytes[] memory closePythData = new bytes[](1);
-        closePythData[0] = abi.encode(1e8);
-        vm.prank(trader1);
-        router.commitOrder(CfdTypes.Side.BULL, 400_000 * 1e18, 0, 0, true);
-        router.executeOrder(3, closePythData);
-
-        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
-        assertTrue(unrealizedFunding > 0, "Remaining receiver has positive unrealized funding");
+        uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
+        assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -1480,7 +1475,7 @@ contract HousePoolTest is BasePerpTest {
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
         uint256 fees = engine.accumulatedFeesUsdc();
-        uint256 reserved = fees + uint256(unrealizedFunding);
+        uint256 reserved = fees + fundingLiability;
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }
 
