@@ -471,6 +471,20 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
     }
 
+    function _outsideSpotDeviationBounds(
+        uint256 spotValue,
+        uint256 emaValue
+    ) private pure returns (bool) {
+        return spotValue * BPS < emaValue * (BPS - MAX_SPOT_DEVIATION_BPS)
+            || spotValue * BPS > emaValue * (BPS + MAX_SPOT_DEVIATION_BPS);
+    }
+
+    function _fairValueMinOut(
+        uint256 emaValue
+    ) private pure returns (uint256) {
+        return Math.mulDiv(emaValue, BPS - MAX_SPOT_DEVIATION_BPS, BPS);
+    }
+
     function _reduceLpAccounting(
         uint256 lpReduced,
         uint256 totalLp
@@ -912,7 +926,8 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
     /// @notice Permissionless keeper function: deploys excess USDC buffer into Curve as single-sided liquidity.
     /// @dev Maintains a 2% USDC buffer (BUFFER_TARGET_BPS). Only deploys if excess exceeds DEPLOY_THRESHOLD ($1000).
-    ///      Spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during pool manipulation.
+    ///      Symmetric spot-vs-EMA deviation check (MAX_SPOT_DEVIATION_BPS = 0.5%) blocks deployment during
+    ///      pool manipulation, and the min-LP bound is derived from EMA fair value rather than spot.
     /// @param maxUsdc Cap on USDC to deploy (0 = no cap, deploy entire excess).
     /// @return lpMinted Amount of Curve LP tokens minted.
     function deployToCurve(
@@ -936,17 +951,18 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         uint256[2] memory amounts = [usdcToDeploy, uint256(0)];
         uint256 calcLp = CURVE_POOL.calc_token_amount(amounts, true);
         uint256 emaExpectedLp = (usdcToDeploy * 1e30) / CURVE_POOL.lp_price();
-        if (calcLp * BPS < emaExpectedLp * (BPS - MAX_SPOT_DEVIATION_BPS)) {
+        if (_outsideSpotDeviationBounds(calcLp, emaExpectedLp)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
-        lpMinted = CURVE_POOL.add_liquidity(amounts, calcLp > 0 ? calcLp - 1 : 0);
+        lpMinted = CURVE_POOL.add_liquidity(amounts, _fairValueMinOut(emaExpectedLp));
         _recordLpDeployment(lpMinted);
 
         emit DeployedToCurve(msg.sender, usdcToDeploy, 0, lpMinted);
     }
 
     /// @notice Permissionless keeper function: restores USDC buffer by burning Curve LP (single-sided to USDC).
-    /// @dev Inverse of deployToCurve. Uses same spot-vs-EMA deviation check for sandwich protection.
+    /// @dev Inverse of deployToCurve. Uses same symmetric spot-vs-EMA deviation check for sandwich protection,
+    ///      with the min-USDC bound derived from EMA fair value rather than spot.
     ///      The maxLpToBurn parameter allows chunked replenishment when the full withdrawal would
     ///      exceed the 0.5% spot deviation limit due to price impact.
     /// @param maxLpToBurn Cap on LP tokens to burn (0 = no cap, burn entire deficit).
@@ -982,11 +998,11 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
 
         uint256 calcOut = CURVE_POOL.calc_withdraw_one_coin(lpToBurn, USDC_INDEX);
         uint256 emaExpectedUsdc = (lpToBurn * lpPrice) / 1e30;
-        if (calcOut * BPS < emaExpectedUsdc * (BPS - MAX_SPOT_DEVIATION_BPS)) {
+        if (_outsideSpotDeviationBounds(calcOut, emaExpectedUsdc)) {
             revert InvarCoin__SpotDeviationTooHigh();
         }
         _ensureUnstakedLp(lpToBurn);
-        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, calcOut * (BPS - 5) / BPS);
+        CURVE_POOL.remove_liquidity_one_coin(lpToBurn, USDC_INDEX, _fairValueMinOut(emaExpectedUsdc));
         _reduceLpAccounting(lpToBurn, lpBalBefore);
 
         usdcRecovered = USDC.balanceOf(address(this)) - usdcBefore;
