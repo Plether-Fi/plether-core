@@ -3316,6 +3316,29 @@ contract InvarCoinGaugeTest is Test {
         assertEq(rewardToken.balanceOf(rewardReceiver), 123e6);
     }
 
+    function test_ProtectRewardToken_RevertsForUsdc() public {
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.protectRewardToken(address(usdc));
+    }
+
+    function test_ProtectRewardToken_RevertsForBear() public {
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.protectRewardToken(address(bearToken));
+    }
+
+    function test_ProtectRewardToken_RevertsForCurveLp() public {
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.protectRewardToken(address(curveLp));
+    }
+
+    function test_SweepGaugeRewards_RevertsForProtectedCoreAsset() public {
+        bytes32 slot = keccak256(abi.encode(address(usdc), uint256(14)));
+        vm.store(address(ic), slot, bytes32(uint256(1)));
+
+        vm.expectRevert(InvarCoin.InvarCoin__CannotRescueCoreAsset.selector);
+        ic.sweepGaugeRewards(address(usdc));
+    }
+
     function test_SweepGaugeRewards_RevertsWithoutConfiguredReceiver() public {
         InvarCoin fresh = new InvarCoin(
             address(usdc), address(bearToken), address(curveLp), address(curve), address(oracle), address(0), address(0)
