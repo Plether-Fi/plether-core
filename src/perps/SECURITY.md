@@ -155,7 +155,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Bounded close-margin tradeoff**: Close intents may source that flat `1.00 USDC` escrow from active position margin when free settlement is exhausted. This is an intentional bounded liveness tradeoff: with the `MAX_PENDING_ORDERS = 5` cap, at most `5 USDC` of live position margin can be parked in router custody before execution/liquidation cleanup
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices in live markets. Frozen-oracle windows are an intentional exception: no fresh oracle publish exists, so the protocol preserves close liveness at the last valid oracle price instead of enforcing an impossible publish-time ordering check.
-- **Failed Orders**: Retryable market-state misses such as slippage do not burn the order or pay the clearer; they emit `OrderSkipped`, keep the order pending with its escrow intact, and requeue it behind the current tail with a short retry cooldown. A shared order-failure policy now classifies both router-local pre-execution failures and engine-typed reverts, and the engine/planner expose semantic policy categories for open previews plus typed execution failures so the router no longer maintains raw revert-code ownership rules. Commit-time open rejection is intentionally limited to deterministic current-state failures, while execution-time protocol-state-invalidated opens (including close-only transitions detected in the router) refund the trader bounty. Expired and otherwise terminal user-invalid orders pay their reserved execution bounty to the executor from router escrow. Because close orders now prefund the flat clearer bounty in router escrow, terminal invalid and expired closes no longer tax LP equity or depend on vault liquidity, even when the bounty was sourced from active position margin rather than idle free settlement.
+- **Failed Orders**: Retryable market-state misses such as slippage do not burn the order or pay the clearer; they emit `OrderSkipped`, keep the order pending with its escrow intact, and requeue it behind the current tail with a short retry cooldown. A shared order-failure policy now classifies both router-local pre-execution failures and engine-typed reverts, and the engine/planner expose semantic policy categories rather than router-owned raw code lists: `previewOpenFailurePolicyCategory(...)` returns `CfdEnginePlanTypes.OpenFailurePolicyCategory`, while `processOrderTyped()` reverts with `CfdEngine__TypedOrderFailure(CfdEnginePlanTypes.ExecutionFailurePolicyCategory, uint8, bool)`. Commit-time open rejection is intentionally limited to `CommitTimeRejectable` current-state failures, while execution-time `ProtocolStateInvalidated` opens (including close-only transitions detected in the router) refund the trader bounty. Expired and otherwise terminal `UserInvalid` orders pay their reserved execution bounty to the executor from router escrow. Because close orders now prefund the flat clearer bounty in router escrow, terminal invalid and expired closes no longer tax LP equity or depend on vault liquidity, even when the bounty was sourced from active position margin rather than idle free settlement.
 
 #### Engine / Router Trust Boundary
 
@@ -169,7 +169,7 @@ These actors **cannot**:
 - Use `seizeUsdc()` to withdraw user funds to arbitrary addresses (the seize recipient must equal `msg.sender`)
 - Create negative balances (seizure reverts if balance insufficient)
 
-`OrderRouter` now uses the typed `processOrderTyped()` boundary and `CfdEngine__TypedOrderFailure(...)` to classify expected execution failures into router-visible categories instead of matching raw engine revert selectors. This keeps bounty routing policy explicit at the engine/router boundary.
+`OrderRouter` now uses the semantic `previewOpenFailurePolicyCategory(...)` and `processOrderTyped()` boundaries instead of maintaining its own raw engine revert-code taxonomy. `CfdEngine__TypedOrderFailure(...)` carries `CfdEnginePlanTypes.ExecutionFailurePolicyCategory`, so the router only decides policy from semantic categories plus router-local close-only / expiry events.
 
 ## Known Limitations
 
@@ -251,7 +251,12 @@ When a position goes underwater (equity < 0):
 
 - **Behavior**: Typed open-order failures now distinguish user-invalid insufficiency from genuine post-commit protocol-state invalidation. `MARGIN_DRAINED_BY_FEES` is treated as user-invalid, so the clearer receives the reserved bounty instead of refunding it to the trader.
 - **Effect**: Keepers do not need to guess whether executing a fee-drained open will pay them; only true protocol-state invalidations on opens refund the trader bounty.
-- **Trade-off**: Some execution-time failures still depend on post-commit state drift, so bounty routing is intentionally tied to the engine's typed failure class rather than a blanket refund rule.
+- **Trade-off**: Some execution-time failures still depend on post-commit state drift, so bounty routing is intentionally tied to the engine's semantic execution failure category rather than a blanket refund rule.
+
+#### Liquidation Preview / Live Consistency
+
+- **Behavior**: Before liquidation, the router forfeits any queued execution-bounty escrow for the liquidated account into the vault. Liquidation preview and live execution now both use the same post-forfeiture vault-depth view.
+- **Impact**: Keeper tooling and live liquidation agree on keeper bounty, deferred payout, bad debt, and post-op solvency outputs instead of mixing pre-sweep and post-sweep depth.
 
 #### Stale-Mark Funding Policy
 
