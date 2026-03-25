@@ -1484,7 +1484,9 @@ contract OrderRouterPythTest is BasePerpTest {
             1e6,
             "Batch clearer should receive bounty on post-commit margin-drain invalidation"
         );
-        assertEq(usdc.balanceOf(alice), 0, "Batch execution should not refund trader bounty on margin-drain invalidation");
+        assertEq(
+            usdc.balanceOf(alice), 0, "Batch execution should not refund trader bounty on margin-drain invalidation"
+        );
     }
 
     function test_BatchPostCommitSkewInvalidationRefundsUserBounty() public {
@@ -2353,7 +2355,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             preview.badDebtUsdc,
             "Liquidation should not improve previewed bad debt by restoring execution escrow"
         );
-        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, router.executionBountyReserves(1) * queuedOrderCount);
+        assertEq(
+            router.getAccountEscrow(accountId).executionBountyUsdc, router.executionBountyReserves(1) * queuedOrderCount
+        );
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
@@ -2398,7 +2402,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 canonicalDepthBefore = pool.totalAssets();
         uint256 forfeitedEscrowUsdc = router.executionBountyReserves(1) * queuedOrderCount;
 
-        CfdEngine.LiquidationPreview memory expectedPreview = engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+        CfdEngine.LiquidationPreview memory expectedPreview =
+            engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
         engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore + forfeitedEscrowUsdc);
 
         bytes[] memory priceData = new bytes[](1);
@@ -2412,9 +2417,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             uint64(block.timestamp),
             "liquidation path should settle the funding clock for the elapsed interval"
         );
-        assertGt(
-            engine.lastFundingTime(), fundingBefore, "liquidation should advance the funding clock"
-        );
+        assertGt(engine.lastFundingTime(), fundingBefore, "liquidation should advance the funding clock");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
@@ -3573,7 +3576,9 @@ contract StaleOrderExpiryTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(66, empty);
 
-        assertEq(router.nextExecuteId(), 0, "A second bounded batch call should finish draining the remaining stale orders");
+        assertEq(
+            router.nextExecuteId(), 0, "A second bounded batch call should finish draining the remaining stale orders"
+        );
     }
 
     // Regression: H-03

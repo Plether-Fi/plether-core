@@ -2,19 +2,18 @@
 pragma solidity 0.8.33;
 
 library HousePoolSeedLifecycleLib {
-    function isSeedLifecycleComplete(bool seniorSeedInitialized, bool juniorSeedInitialized)
-        internal
-        pure
-        returns (bool)
-    {
+
+    function isSeedLifecycleComplete(
+        bool seniorSeedInitialized,
+        bool juniorSeedInitialized
+    ) internal pure returns (bool) {
         return seniorSeedInitialized && juniorSeedInitialized;
     }
 
-    function hasSeedLifecycleStarted(bool seniorSeedInitialized, bool juniorSeedInitialized)
-        internal
-        pure
-        returns (bool)
-    {
+    function hasSeedLifecycleStarted(
+        bool seniorSeedInitialized,
+        bool juniorSeedInitialized
+    ) internal pure returns (bool) {
         return seniorSeedInitialized || juniorSeedInitialized;
     }
 
@@ -26,19 +25,18 @@ library HousePoolSeedLifecycleLib {
         return isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized) && isTradingActive;
     }
 
-    function canIncreaseRisk(bool seniorSeedInitialized, bool juniorSeedInitialized, bool isTradingActive)
-        internal
-        pure
-        returns (bool)
-    {
+    function canIncreaseRisk(
+        bool seniorSeedInitialized,
+        bool juniorSeedInitialized,
+        bool isTradingActive
+    ) internal pure returns (bool) {
         return canAcceptOrdinaryDeposits(seniorSeedInitialized, juniorSeedInitialized, isTradingActive);
     }
 
-    function tradingActivationReady(bool seniorSeedInitialized, bool juniorSeedInitialized)
-        internal
-        pure
-        returns (bool)
-    {
+    function tradingActivationReady(
+        bool seniorSeedInitialized,
+        bool juniorSeedInitialized
+    ) internal pure returns (bool) {
         return isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized);
     }
 
@@ -47,4 +45,5 @@ library HousePoolSeedLifecycleLib {
     ) internal pure returns (bool) {
         return unassignedAssets > 0;
     }
+
 }

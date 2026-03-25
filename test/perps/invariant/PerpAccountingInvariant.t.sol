@@ -144,7 +144,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
             IOrderRouterAccounting.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
 
-            assertEq(summary.pendingOrderCount, escrow.pendingOrderCount, "Escrow summary count must match account escrow");
+            assertEq(
+                summary.pendingOrderCount, escrow.pendingOrderCount, "Escrow summary count must match account escrow"
+            );
             assertEq(
                 summary.committedMarginUsdc,
                 escrow.committedMarginUsdc,

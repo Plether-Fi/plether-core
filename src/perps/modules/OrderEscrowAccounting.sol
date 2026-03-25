@@ -9,6 +9,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
+
     using SafeERC20 for IERC20;
 
     struct OrderRecord {
@@ -36,7 +37,9 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
 
-    constructor(address _engine) {
+    constructor(
+        address _engine
+    ) {
         engine = ICfdEngine(_engine);
         clearinghouse = _engine.code.length == 0
             ? IMarginClearinghouse(address(0))
@@ -48,7 +51,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         bytes32 accountId
     ) public view override returns (IOrderRouterAccounting.AccountEscrowView memory escrow) {
         // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
-        escrow.committedMarginUsdc = clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
+        escrow.committedMarginUsdc =
+        clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
@@ -62,7 +66,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         bytes32 accountId
     ) public view returns (IOrderRouterAccounting.AccountOrderSummary memory summary) {
         // Use the clearinghouse reservation summary as the primary committed-margin source rather than re-summing queue links.
-        summary.committedMarginUsdc = clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
+        summary.committedMarginUsdc =
+        clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
@@ -259,14 +264,17 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         return orderRecords[orderId];
     }
 
-    function _pendingHeadOrderId(bytes32 accountId) internal view virtual returns (uint64);
+    function _pendingHeadOrderId(
+        bytes32 accountId
+    ) internal view virtual returns (uint64);
 
-    function _reserveCloseExecutionBounty(bytes32 accountId, uint256 executionBountyUsdc)
-        internal
-        virtual
-        returns (uint256 marginBackedBountyUsdc);
+    function _reserveCloseExecutionBounty(
+        bytes32 accountId,
+        uint256 executionBountyUsdc
+    ) internal virtual returns (uint256 marginBackedBountyUsdc);
 
     function _revertInsufficientFreeEquity() internal pure virtual;
 
     function _revertMarginOrderLinkCorrupted() internal pure virtual;
+
 }

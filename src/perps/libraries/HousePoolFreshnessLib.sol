@@ -5,6 +5,7 @@ import {ICfdEngine} from "../interfaces/ICfdEngine.sol";
 import {HousePoolAccountingLib} from "./HousePoolAccountingLib.sol";
 
 library HousePoolFreshnessLib {
+
     function markIsFreshForReconcile(
         ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
         ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot,
@@ -38,4 +39,5 @@ library HousePoolFreshnessLib {
     ) internal pure returns (bool) {
         return markIsFreshForReconcile(accountingSnapshot, statusSnapshot, currentTimestamp);
     }
+
 }

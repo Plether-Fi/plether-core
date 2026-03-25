@@ -108,7 +108,9 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 "Trader deferred claim pointer must point to a trader payout node"
             );
             assertEq(claimAccountId, accountId, "Trader deferred claim pointer must belong to the tracked account");
-            assertEq(remainingUsdc, deferredPayoutUsdc, "Coalesced trader deferred node must equal tracked deferred payout");
+            assertEq(
+                remainingUsdc, deferredPayoutUsdc, "Coalesced trader deferred node must equal tracked deferred payout"
+            );
         }
     }
 
@@ -120,7 +122,13 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         uint256 traderClaimCount;
 
         while (claimId != 0) {
-            (ICfdEngine.DeferredClaimType claimType, bytes32 claimAccountId,, uint256 remainingUsdc, uint64 storedPrevClaimId, uint64 nextClaimId) = engine.deferredClaims(claimId);
+            (
+                ICfdEngine.DeferredClaimType claimType,
+                bytes32 claimAccountId,,
+                uint256 remainingUsdc,
+                uint64 storedPrevClaimId,
+                uint64 nextClaimId
+            ) = engine.deferredClaims(claimId);
 
             assertEq(storedPrevClaimId, prevClaimId, "Deferred queue prev-link must match traversal state");
             assertGt(remainingUsdc, 0, "Deferred queue must not retain zero-amount claims");
@@ -132,7 +140,11 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                     claimId,
                     "Each trader account should have exactly one coalesced deferred claim node"
                 );
-                assertEq(remainingUsdc, engine.deferredPayoutUsdc(claimAccountId), "Trader deferred node amount must match account state");
+                assertEq(
+                    remainingUsdc,
+                    engine.deferredPayoutUsdc(claimAccountId),
+                    "Trader deferred node amount must match account state"
+                );
             } else {
                 assertEq(claimAccountId, bytes32(0), "Clearer bounty claims must not carry trader account ids");
             }

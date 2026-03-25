@@ -253,9 +253,10 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 2_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
-        uint8 code = engine.previewOpenRevertCode(bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+        uint8 code =
+            engine.previewOpenRevertCode(bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp));
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
@@ -277,7 +278,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 2_000e6);
+        usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
         bytes[] memory empty;
@@ -286,9 +287,12 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(bobId);
         assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
-        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation"
+        );
         assertEq(usdc.balanceOf(bob), 1e6, "user should receive the reserved bounty refund");
     }
+
 }
 
 contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {

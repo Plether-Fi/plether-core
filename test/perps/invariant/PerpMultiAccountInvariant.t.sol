@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -119,8 +119,12 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         (,,, uint256 liveBullTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BULL));
         (,,, uint256 liveBearTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BEAR));
 
-        assertEq(bullTotalMargin, liveBullTotalMargin, "Bull side totalMargin must match tracked engine position margins");
-        assertEq(bearTotalMargin, liveBearTotalMargin, "Bear side totalMargin must match tracked engine position margins");
+        assertEq(
+            bullTotalMargin, liveBullTotalMargin, "Bull side totalMargin must match tracked engine position margins"
+        );
+        assertEq(
+            bearTotalMargin, liveBearTotalMargin, "Bear side totalMargin must match tracked engine position margins"
+        );
     }
 
     function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {

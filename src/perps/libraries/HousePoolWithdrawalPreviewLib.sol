@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {HousePoolAccountingLib} from "./HousePoolAccountingLib.sol";
 
 library HousePoolWithdrawalPreviewLib {
+
     function reserveAssets(
         HousePoolAccountingLib.WithdrawalSnapshot memory snapshot,
         uint256 reservedAssets
@@ -32,4 +33,5 @@ library HousePoolWithdrawalPreviewLib {
         uint256 subordinated = freeUsdc > seniorPrincipal ? freeUsdc - seniorPrincipal : 0;
         return subordinated < juniorPrincipal ? subordinated : juniorPrincipal;
     }
+
 }

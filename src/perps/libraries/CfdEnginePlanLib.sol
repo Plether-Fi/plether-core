@@ -120,12 +120,11 @@ library CfdEnginePlanLib {
     function _planCloseDeferredPayoutConsumption(
         uint256 deferredPayoutUsdc,
         CfdEngineSettlementLib.CloseSettlementResult memory lossResult
-    ) private pure returns (
-        uint256 consumedUsdc,
-        uint256 remainingUsdc,
-        uint256 feeRecoveredUsdc,
-        uint256 badDebtUsdc
-    ) {
+    )
+        private
+        pure
+        returns (uint256 consumedUsdc, uint256 remainingUsdc, uint256 feeRecoveredUsdc, uint256 badDebtUsdc)
+    {
         if (deferredPayoutUsdc == 0 || lossResult.shortfallUsdc == 0) {
             return (0, deferredPayoutUsdc, 0, lossResult.badDebtUsdc);
         }
@@ -133,9 +132,8 @@ library CfdEnginePlanLib {
         consumedUsdc = deferredPayoutUsdc < lossResult.shortfallUsdc ? deferredPayoutUsdc : lossResult.shortfallUsdc;
         remainingUsdc = deferredPayoutUsdc - consumedUsdc;
 
-        uint256 feeShortfallUsdc = lossResult.shortfallUsdc > lossResult.badDebtUsdc
-            ? lossResult.shortfallUsdc - lossResult.badDebtUsdc
-            : 0;
+        uint256 feeShortfallUsdc =
+            lossResult.shortfallUsdc > lossResult.badDebtUsdc ? lossResult.shortfallUsdc - lossResult.badDebtUsdc : 0;
         feeRecoveredUsdc = consumedUsdc < feeShortfallUsdc ? consumedUsdc : feeShortfallUsdc;
 
         uint256 badDebtRecoveredUsdc = consumedUsdc - feeRecoveredUsdc;
@@ -317,8 +315,10 @@ library CfdEnginePlanLib {
         uint256 posMarginAfterFunding =
             snap.position.margin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
         uint256 effectivePosMarginAfterFunding = posMarginAfterFunding;
-        if (delta.funding.pendingFundingUsdc > 0 && delta.funding.payoutType != CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT)
-        {
+        if (
+            delta.funding.pendingFundingUsdc > 0
+                && delta.funding.payoutType != CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT
+        ) {
             effectivePosMarginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
         }
         delta.totalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
@@ -388,12 +388,12 @@ library CfdEnginePlanLib {
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
         delta.totalMarginAfterOpen = delta.totalMarginAfterFunding
-            + (computedMarginAfter > effectivePosMarginAfterFunding ? computedMarginAfter - effectivePosMarginAfterFunding : 0)
-            - (
-                effectivePosMarginAfterFunding > computedMarginAfter
+            + (computedMarginAfter > effectivePosMarginAfterFunding
+                    ? computedMarginAfter - effectivePosMarginAfterFunding
+                    : 0)
+            - (effectivePosMarginAfterFunding > computedMarginAfter
                     ? effectivePosMarginAfterFunding - computedMarginAfter
-                    : 0
-            );
+                    : 0);
 
         if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
@@ -427,7 +427,8 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory projectedPosition = snap.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
-        projectedPosition.margin = OpenAccountingLib.effectiveMarginAfterTradeCost(delta.posMarginAfter, delta.tradeCostUsdc);
+        projectedPosition.margin =
+            OpenAccountingLib.effectiveMarginAfterTradeCost(delta.posMarginAfter, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
@@ -435,7 +436,8 @@ library CfdEnginePlanLib {
             reachableCollateralUsdc += delta.funding.fundingClearinghouseCreditUsdc;
         }
         if (_isCollectedFundingLoss(delta.funding.payoutType)) {
-            reachableCollateralUsdc -= delta.funding.fundingLossConsumedFromMargin + delta.funding.fundingLossConsumedFromFree;
+            reachableCollateralUsdc -= delta.funding.fundingLossConsumedFromMargin
+            + delta.funding.fundingLossConsumedFromFree;
         }
         if (delta.tradeCostUsdc > 0) {
             reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);

@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 library HousePoolTrancheGateLib {
+
     function trancheDepositsAllowed(
         bool ordinaryDepositsAllowed,
         bool paused,
@@ -26,4 +27,5 @@ library HousePoolTrancheGateLib {
 
         return projectedSeniorPrincipal == 0 || projectedSeniorPrincipal >= projectedSeniorHighWaterMark;
     }
+
 }

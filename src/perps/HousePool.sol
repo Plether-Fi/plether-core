@@ -12,8 +12,8 @@ import {HousePoolPendingPreviewLib} from "./libraries/HousePoolPendingPreviewLib
 import {HousePoolReconcilePlanLib} from "./libraries/HousePoolReconcilePlanLib.sol";
 import {HousePoolSeedLifecycleLib} from "./libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolTrancheGateLib} from "./libraries/HousePoolTrancheGateLib.sol";
-import {HousePoolWithdrawalPreviewLib} from "./libraries/HousePoolWithdrawalPreviewLib.sol";
 import {HousePoolWaterfallAccountingLib} from "./libraries/HousePoolWaterfallAccountingLib.sol";
+import {HousePoolWithdrawalPreviewLib} from "./libraries/HousePoolWithdrawalPreviewLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -974,13 +974,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function _applyPendingBucketsPreview(
         PendingAccountingState memory state
     ) internal view {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
-            .PendingAccountingState({
-            waterfall: state.waterfall,
-            unassignedAssets: state.unassignedAssets,
-            seniorSupply: state.seniorSupply,
-            juniorSupply: state.juniorSupply
-        });
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
+            HousePoolPendingPreviewLib.PendingAccountingState({
+                waterfall: state.waterfall,
+                unassignedAssets: state.unassignedAssets,
+                seniorSupply: state.seniorSupply,
+                juniorSupply: state.juniorSupply
+            });
         HousePoolPendingPreviewLib.applyPendingBucketsPreview(
             previewState, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
         );
@@ -988,27 +988,33 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         state.unassignedAssets = previewState.unassignedAssets;
     }
 
-    function _applyRecapitalizationIntent(PendingAccountingState memory state, uint256 amount) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
-            .PendingAccountingState({
-            waterfall: state.waterfall,
-            unassignedAssets: state.unassignedAssets,
-            seniorSupply: state.seniorSupply,
-            juniorSupply: state.juniorSupply
-        });
+    function _applyRecapitalizationIntent(
+        PendingAccountingState memory state,
+        uint256 amount
+    ) internal pure {
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
+            HousePoolPendingPreviewLib.PendingAccountingState({
+                waterfall: state.waterfall,
+                unassignedAssets: state.unassignedAssets,
+                seniorSupply: state.seniorSupply,
+                juniorSupply: state.juniorSupply
+            });
         HousePoolPendingPreviewLib.applyRecapitalizationIntent(previewState, amount);
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;
     }
 
-    function _routeSeededRevenue(PendingAccountingState memory state, uint256 amount) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = HousePoolPendingPreviewLib
-            .PendingAccountingState({
-            waterfall: state.waterfall,
-            unassignedAssets: state.unassignedAssets,
-            seniorSupply: state.seniorSupply,
-            juniorSupply: state.juniorSupply
-        });
+    function _routeSeededRevenue(
+        PendingAccountingState memory state,
+        uint256 amount
+    ) internal pure {
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
+            HousePoolPendingPreviewLib.PendingAccountingState({
+                waterfall: state.waterfall,
+                unassignedAssets: state.unassignedAssets,
+                seniorSupply: state.seniorSupply,
+                juniorSupply: state.juniorSupply
+            });
         HousePoolPendingPreviewLib.routeSeededRevenue(previewState, amount);
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;

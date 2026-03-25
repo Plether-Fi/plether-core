@@ -6,6 +6,7 @@ import {HousePoolPendingPreviewLib} from "./HousePoolPendingPreviewLib.sol";
 import {HousePoolWaterfallAccountingLib} from "./HousePoolWaterfallAccountingLib.sol";
 
 library HousePoolReconcilePlanLib {
+
     struct ReconcilePlan {
         HousePoolPendingPreviewLib.PendingAccountingState state;
         uint256 yieldAccrued;
@@ -35,12 +36,12 @@ library HousePoolReconcilePlanLib {
         }
 
         if (pendingBucketAssets > 0) {
-            snapshot.distributable = snapshot.distributable > pendingBucketAssets
-                ? snapshot.distributable - pendingBucketAssets
-                : 0;
+            snapshot.distributable =
+                snapshot.distributable > pendingBucketAssets ? snapshot.distributable - pendingBucketAssets : 0;
         }
 
-        plan.state.unassignedAssets = state.unassignedAssets > snapshot.distributable ? snapshot.distributable : state.unassignedAssets;
+        plan.state.unassignedAssets =
+            state.unassignedAssets > snapshot.distributable ? snapshot.distributable : state.unassignedAssets;
 
         if (plan.claimedEquityZero) {
             plan.state.unassignedAssets = snapshot.distributable;
@@ -50,13 +51,14 @@ library HousePoolReconcilePlanLib {
         uint256 distributableToClaims = snapshot.distributable > plan.state.unassignedAssets
             ? snapshot.distributable - plan.state.unassignedAssets
             : 0;
-        HousePoolWaterfallAccountingLib.ReconcilePlan memory waterfallPlan = HousePoolWaterfallAccountingLib.planReconcile(
-            state.waterfall.seniorPrincipal,
-            state.waterfall.juniorPrincipal,
-            distributableToClaims,
-            seniorRateBps,
-            yieldElapsed
-        );
+        HousePoolWaterfallAccountingLib.ReconcilePlan memory waterfallPlan =
+            HousePoolWaterfallAccountingLib.planReconcile(
+                state.waterfall.seniorPrincipal,
+                state.waterfall.juniorPrincipal,
+                distributableToClaims,
+                seniorRateBps,
+                yieldElapsed
+            );
 
         plan.yieldAccrued = waterfallPlan.yieldAccrued;
         plan.revenue = waterfallPlan.isRevenue;
@@ -65,7 +67,8 @@ library HousePoolReconcilePlanLib {
         if (plan.revenue) {
             plan.juniorPrincipalBeforeRevenue = plan.state.waterfall.juniorPrincipal;
             plan.state.waterfall.unpaidSeniorYield += plan.yieldAccrued;
-            plan.state.waterfall = HousePoolWaterfallAccountingLib.distributeRevenue(plan.state.waterfall, plan.deltaUsdc);
+            plan.state.waterfall =
+                HousePoolWaterfallAccountingLib.distributeRevenue(plan.state.waterfall, plan.deltaUsdc);
             return plan;
         }
 
@@ -89,4 +92,5 @@ library HousePoolReconcilePlanLib {
             ? plan.state.waterfall.juniorPrincipal - plan.juniorPrincipalBeforeRevenue
             : 0;
     }
+
 }

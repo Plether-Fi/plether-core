@@ -3,13 +3,13 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
+import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
-import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -325,8 +325,9 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
-            uint8 revertCode =
-                engine.previewOpenRevertCode(accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime());
+            uint8 revertCode = engine.previewOpenRevertCode(
+                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+            );
             if (
                 revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
                     || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
@@ -877,7 +878,11 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
-        _deleteOrder(orderId, true, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
+        _deleteOrder(
+            orderId,
+            true,
+            success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
+        );
     }
 
     function _finalizeExecution(
@@ -887,7 +892,11 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         FailedOrderBountyPolicy failedPolicy
     ) internal {
         _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
-        _deleteOrder(orderId, true, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed);
+        _deleteOrder(
+            orderId,
+            true,
+            success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
+        );
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
@@ -1324,7 +1333,9 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         _sendEth(msg.sender, msg.value - pythFee);
     }
 
-    function _pendingHeadOrderId(bytes32 accountId) internal view override returns (uint64) {
+    function _pendingHeadOrderId(
+        bytes32 accountId
+    ) internal view override returns (uint64) {
         return pendingHeadOrderId[accountId];
     }
 

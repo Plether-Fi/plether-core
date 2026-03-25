@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {HousePoolPendingPreviewLib} from "./HousePoolPendingPreviewLib.sol";
 
 library HousePoolPendingLivePlanLib {
+
     struct PendingLivePlan {
         HousePoolPendingPreviewLib.PendingAccountingState state;
         bool seniorPrincipalChanged;
@@ -26,4 +27,5 @@ library HousePoolPendingLivePlanLib {
 
         plan.seniorPrincipalChanged = plan.state.waterfall.seniorPrincipal != currentSeniorPrincipal;
     }
+
 }

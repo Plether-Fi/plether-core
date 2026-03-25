@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {HousePoolWaterfallAccountingLib} from "./HousePoolWaterfallAccountingLib.sol";
 
 library HousePoolPendingPreviewLib {
+
     struct PendingAccountingState {
         HousePoolWaterfallAccountingLib.WaterfallState waterfall;
         uint256 unassignedAssets;
@@ -79,4 +80,5 @@ library HousePoolPendingPreviewLib {
             state.unassignedAssets += remaining;
         }
     }
+
 }
