@@ -241,6 +241,11 @@ contract StakedTokenTest is Test {
     }
 
     function test_DonateYield_FreshDonation_FullDuration() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 1 ether);
+        stakedToken.deposit(1 ether, alice);
+        vm.stopPrank();
+
         underlying.mint(address(this), 100 ether);
         underlying.approve(address(stakedToken), 100 ether);
 
@@ -251,6 +256,11 @@ contract StakedTokenTest is Test {
     }
 
     function test_DonateYield_ZeroAmountNoStream_NoOp() public {
+        vm.startPrank(alice);
+        underlying.approve(address(stakedToken), 1 ether);
+        stakedToken.deposit(1 ether, alice);
+        vm.stopPrank();
+
         uint256 endBefore = stakedToken.streamEndTime();
         uint256 rateBefore = stakedToken.rewardRate();
 
@@ -259,6 +269,14 @@ contract StakedTokenTest is Test {
 
         assertEq(stakedToken.streamEndTime(), endBefore);
         assertEq(stakedToken.rewardRate(), rateBefore);
+    }
+
+    function test_DonateYield_RevertWhenNoStakers() public {
+        underlying.mint(address(this), 100 ether);
+        underlying.approve(address(stakedToken), 100 ether);
+
+        vm.expectRevert(StakedToken.StakedToken__NoStakers.selector);
+        stakedToken.donateYield(100 ether);
     }
 
     function test_DonateYield_RepeatedZeroGriefing_RewardsStillVest() public {

@@ -30,6 +30,7 @@ contract StakedToken is ERC4626 {
     /// @notice Emitted when yield is donated and streaming begins/extends.
     event YieldDonated(address indexed donor, uint256 amount, uint256 newStreamEndTime);
 
+    error StakedToken__NoStakers();
     error StakedToken__PermitFailed();
 
     /// @notice Creates a new staking vault for a synthetic token.
@@ -55,6 +56,10 @@ contract StakedToken is ERC4626 {
     function donateYield(
         uint256 amount
     ) external {
+        if (totalSupply() == 0) {
+            revert StakedToken__NoStakers();
+        }
+
         uint256 remaining = _unvestedRewards();
 
         IERC20(asset()).safeTransferFrom(msg.sender, address(this), amount);
