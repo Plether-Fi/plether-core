@@ -69,8 +69,8 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
             uint256 syncedSideMargin
         )
     {
-        CfdTypes.Position storage pos = positions[order.accountId];
-        uint256 marginBefore = pos.margin;
+        StoredPosition storage pos = _positions[order.accountId];
+        uint256 marginBefore = _positionMarginBucketUsdc(order.accountId);
         CfdTypes.Side marginSide = pos.side;
 
         CfdEnginePlanTypes.RawSnapshot memory snap =
@@ -88,7 +88,7 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         );
         _applyFundingSettlement(fd, order.accountId, pos, marginSide);
 
-        uint256 marginAfter = pos.margin;
+        uint256 marginAfter = _positionMarginBucketUsdc(order.accountId);
         uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
         uint256 provisionalBearMargin = sides[uint256(CfdTypes.Side.BEAR)].totalMargin;
         if (marginAfter > marginBefore) {

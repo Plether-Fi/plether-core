@@ -1438,8 +1438,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        bytes32 positionSlot = keccak256(abi.encode(aliceId, uint256(29)));
-        vm.store(address(engine), bytes32(uint256(positionSlot) + 1), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1450,7 +1449,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Order should fail once post-commit margin is drained");
-        assertEq(margin, 1e6, "Post-commit state mutation should leave the original position untouched");
+        assertEq(margin, 1e6, "Post-commit state mutation should leave the custody-backed margin state untouched");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             1e6,
@@ -1466,8 +1465,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, false);
 
-        bytes32 positionSlot = keccak256(abi.encode(aliceId, uint256(29)));
-        vm.store(address(engine), bytes32(uint256(positionSlot) + 1), bytes32(uint256(1e6)));
+        vm.store(address(clearinghouse), keccak256(abi.encode(aliceId, uint256(3))), bytes32(uint256(1e6)));
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1478,7 +1476,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Batch execution should leave the original position untouched");
-        assertEq(margin, 1e6, "Batch execution should preserve the drained margin state");
+        assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             1e6,

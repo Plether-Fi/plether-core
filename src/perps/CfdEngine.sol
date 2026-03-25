@@ -148,6 +148,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 lpOwnedUsdc;
     }
 
+    struct StoredPosition {
+        uint256 size;
+        uint256 entryPrice;
+        uint256 maxProfitUsdc;
+        int256 entryFundingIndex;
+        CfdTypes.Side side;
+        uint64 lastUpdateTime;
+        int256 vpiAccrued;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -173,7 +183,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     uint64 public lastFundingTime;
 
     CfdTypes.RiskParams public riskParams;
-    mapping(bytes32 => CfdTypes.Position) public positions;
+    mapping(bytes32 => StoredPosition) internal _positions;
     mapping(bytes32 => uint256) public deferredPayoutUsdc;
     uint256 public totalDeferredPayoutUsdc;
     mapping(address => uint256) public deferredClearerBountyUsdc;
@@ -616,13 +626,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__PositionTooSmall();
         }
 
-        CfdTypes.Position storage pos = positions[accountId];
+        StoredPosition storage pos = _positions[accountId];
         if (pos.size == 0) {
             revert CfdEngine__NoOpenPosition();
         }
 
+        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
         clearinghouse.lockPositionMargin(accountId, amount);
-        _applyDirectPositionMarginDelta(pos, int256(amount));
+        _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(accountId));
         pos.lastUpdateTime = uint64(block.timestamp);
 
         emit MarginAdded(accountId, amount);
@@ -718,8 +729,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        CfdTypes.Position storage pos = positions[accountId];
-        if (pos.size == 0 || pos.margin < amountUsdc) {
+        StoredPosition storage pos = _positions[accountId];
+        uint256 positionMarginUsdc = _positionMarginBucketUsdc(accountId);
+        if (pos.size == 0 || positionMarginUsdc < amountUsdc) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
@@ -738,13 +750,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        CfdTypes.Position memory positionAfter = pos;
-        positionAfter.margin -= amountUsdc;
+        CfdTypes.Position memory positionAfter = _loadPosition(accountId);
+        positionAfter.margin = positionMarginUsdc - amountUsdc;
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
             positionAfter,
             price,
             CAP_PRICE,
-            getPendingFunding(pos),
+            getPendingFunding(positionAfter),
             reachableUsdc - amountUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
@@ -752,7 +764,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        _applyDirectPositionMarginDelta(pos, -int256(amountUsdc));
+        _syncTotalSideMargin(pos.side, positionMarginUsdc, positionMarginUsdc - amountUsdc);
         clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
     }
 
@@ -764,13 +776,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        CfdTypes.Position storage pos = positions[accountId];
+        StoredPosition storage pos = _positions[accountId];
         if (pos.size == 0) {
             revert CfdEngine__NoOpenPosition();
         }
 
+        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
         clearinghouse.creditSettlementAndLockMargin(accountId, amountUsdc);
-        _applyDirectPositionMarginDelta(pos, int256(amountUsdc));
+        _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(accountId));
     }
 
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
@@ -813,7 +826,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function checkWithdraw(
         bytes32 accountId
     ) external view override {
-        CfdTypes.Position memory pos = positions[accountId];
+        CfdTypes.Position memory pos = _loadPosition(accountId);
         if (pos.size == 0) {
             return;
         }
@@ -990,41 +1003,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 delta = marginBefore - marginAfter;
             _sideState(side).totalMargin -= delta;
         }
-    }
-
-    function _applyDirectPositionMarginDelta(
-        CfdTypes.Position storage pos,
-        int256 marginDeltaUsdc
-    ) internal {
-        _applyPositionMarginDeltaForSide(pos, pos.side, marginDeltaUsdc);
-    }
-
-    function _applyPositionMarginDeltaForSide(
-        CfdTypes.Position storage pos,
-        CfdTypes.Side side,
-        int256 marginDeltaUsdc
-    ) internal {
-        if (marginDeltaUsdc == 0) {
-            return;
-        }
-
-        uint256 marginBefore = pos.margin;
-        if (marginDeltaUsdc > 0) {
-            pos.margin += uint256(marginDeltaUsdc);
-        } else {
-            pos.margin -= uint256(-marginDeltaUsdc);
-        }
-        _syncTotalSideMargin(side, marginBefore, pos.margin);
-    }
-
-    function _setPositionMarginForSide(
-        CfdTypes.Position storage pos,
-        CfdTypes.Side side,
-        uint256 marginAfter
-    ) internal {
-        uint256 marginBefore = pos.margin;
-        pos.margin = marginAfter;
-        _syncTotalSideMargin(side, marginBefore, marginAfter);
     }
 
     function _syncMarginQueue(
@@ -1215,13 +1193,42 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function hasOpenPosition(
         bytes32 accountId
     ) external view returns (bool) {
-        return positions[accountId].size > 0;
+        return _positions[accountId].size > 0;
+    }
+
+    function positions(
+        bytes32 accountId
+    )
+        external
+        view
+        returns (
+            uint256 size,
+            uint256 margin,
+            uint256 entryPrice,
+            uint256 maxProfitUsdc,
+            int256 entryFundingIndex,
+            CfdTypes.Side side,
+            uint64 lastUpdateTime
+            ,int256 vpiAccrued
+        )
+    {
+        CfdTypes.Position memory pos = _loadPosition(accountId);
+        return (
+            pos.size,
+            pos.margin,
+            pos.entryPrice,
+            pos.maxProfitUsdc,
+            pos.entryFundingIndex,
+            pos.side,
+            pos.lastUpdateTime,
+            pos.vpiAccrued
+        );
     }
 
     function getPositionSize(
         bytes32 accountId
     ) external view returns (uint256) {
-        return positions[accountId].size;
+        return _positions[accountId].size;
     }
 
     function getAccountCollateralView(
@@ -1265,7 +1272,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _buildAccountLedgerSnapshot(
         bytes32 accountId
     ) internal view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
-        CfdTypes.Position memory pos = positions[accountId];
+        CfdTypes.Position memory pos = _loadPosition(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow =
@@ -1303,7 +1310,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.hasPosition = true;
         snapshot.side = pos.side;
         snapshot.size = pos.size;
-        snapshot.margin = pos.margin;
+        snapshot.margin = _positionMarginBucketUsdc(accountId);
         snapshot.entryPrice = pos.entryPrice;
         snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
         snapshot.pendingFundingUsdc = riskState.pendingFundingUsdc;
@@ -1314,7 +1321,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function getPositionView(
         bytes32 accountId
     ) external view returns (PositionView memory viewData) {
-        CfdTypes.Position memory pos = positions[accountId];
+        CfdTypes.Position memory pos = _loadPosition(accountId);
         if (pos.size == 0) {
             return viewData;
         }
@@ -1332,7 +1339,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         viewData.exists = true;
         viewData.side = pos.side;
         viewData.size = pos.size;
-        viewData.margin = pos.margin;
+        viewData.margin = _positionMarginBucketUsdc(accountId);
         viewData.entryPrice = pos.entryPrice;
         viewData.entryNotionalUsdc = (pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         viewData.physicalReachableCollateralUsdc = reachableUsdc;
@@ -1474,7 +1481,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.executionPrice = price;
         preview.sizeDelta = sizeDelta;
 
-        CfdTypes.Position memory pos = positions[accountId];
+        CfdTypes.Position memory pos = _loadPosition(accountId);
         if (pos.size == 0) {
             preview.invalidReason = CfdTypes.CloseInvalidReason.NoPosition;
             return preview;
@@ -1569,7 +1576,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 price = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
         preview.oraclePrice = price;
 
-        if (positions[accountId].size == 0) {
+        if (_positions[accountId].size == 0) {
             return preview;
         }
 
@@ -1605,7 +1612,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function getPositionSide(
         bytes32 accountId
     ) external view returns (CfdTypes.Side) {
-        return positions[accountId].side;
+        return _positions[accountId].side;
     }
 
     /// @notice Returns the maintenance margin requirement in USDC (6 decimals).
@@ -1638,7 +1645,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
-        if (positions[accountId].size == 0) {
+        if (_positions[accountId].size == 0) {
             revert CfdEngine__NoPositionToLiquidate();
         }
 
@@ -1745,7 +1752,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint64
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap.accountId = accountId;
-        snap.position = positions[accountId];
+        snap.position = _loadPosition(accountId);
 
         snap.currentTimestamp = block.timestamp;
         snap.lastFundingTime = lastFundingTime;
@@ -1761,6 +1768,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(accountId);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
+        snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
 
         snap.accumulatedFeesUsdc = accumulatedFeesUsdc;
         snap.accumulatedBadDebtUsdc = accumulatedBadDebtUsdc;
@@ -1910,13 +1918,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _applyFundingSettlement(
         CfdEnginePlanTypes.FundingDelta memory fd,
         bytes32 accountId,
-        CfdTypes.Position storage pos,
+        StoredPosition storage pos,
         CfdTypes.Side marginSide
-    ) internal {
+    ) internal returns (uint256 marginAfterFunding) {
+        uint256 marginBeforeFunding = _positionMarginBucketUsdc(accountId);
+        marginAfterFunding = marginBeforeFunding;
         if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT) {
-            _applyPositionMarginDeltaForSide(pos, marginSide, int256(fd.posMarginIncrease));
             vault.payOut(address(clearinghouse), fd.fundingVaultPayoutUsdc);
             clearinghouse.creditSettlementAndLockMargin(accountId, fd.fundingClearinghouseCreditUsdc);
+            marginAfterFunding = marginBeforeFunding + fd.posMarginIncrease;
         } else if (fd.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
             _payOrRecordDeferredTraderPayout(accountId, uint256(fd.pendingFundingUsdc));
         } else if (
@@ -1925,7 +1935,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         ) {
             uint256 loss = uint256(-fd.pendingFundingUsdc);
             (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc,) =
-                clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
+                clearinghouse.consumeFundingLoss(accountId, _positionMarginBucketUsdc(accountId), loss, address(vault));
             _accountVaultCashInflow(
                 VaultCashInflow({
                     physicalCashReceivedUsdc: marginConsumedUsdc + freeSettlementConsumedUsdc,
@@ -1933,8 +1943,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
                     lpOwnedUsdc: marginConsumedUsdc + freeSettlementConsumedUsdc
                 })
             );
-            _applyPositionMarginDeltaForSide(pos, marginSide, -int256(fd.posMarginDecrease));
+            marginAfterFunding = marginBeforeFunding - fd.posMarginDecrease;
         }
+
+        _syncTotalSideMargin(marginSide, marginBeforeFunding, marginAfterFunding);
 
         if (pos.size > 0) {
             _sideState(pos.side).entryFunding += fd.sideEntryFundingDelta;
@@ -1945,7 +1957,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _applyOpen(
         CfdEnginePlanTypes.OpenDelta memory delta
     ) internal {
-        CfdTypes.Position storage pos = positions[delta.accountId];
+        StoredPosition storage pos = _positions[delta.accountId];
         CfdTypes.Side marginSide = pos.size > 0 ? pos.side : delta.posSide;
 
         CfdEnginePlanTypes.FundingDelta memory fd = delta.funding;
@@ -1957,7 +1969,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             fd.newLastMarkPrice,
             fd.newLastMarkTime
         );
-        _applyFundingSettlement(fd, delta.accountId, pos, marginSide);
+        uint256 marginAfterFunding = _applyFundingSettlement(fd, delta.accountId, pos, marginSide);
 
         SideState storage sideState = _sideState(delta.posSide);
         sideState.maxProfitUsdc += delta.sideMaxProfitIncrease;
@@ -1998,7 +2010,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             );
         }
 
-        _applyPositionMarginDeltaForSide(pos, marginSide, netMarginChange);
+        uint256 marginAfterOpen = netMarginChange >= 0
+            ? marginAfterFunding + uint256(netMarginChange)
+            : marginAfterFunding - uint256(-netMarginChange);
+        _syncTotalSideMargin(marginSide, marginAfterFunding, marginAfterOpen);
 
         accumulatedFeesUsdc += delta.executionFeeUsdc;
         pos.lastUpdateTime = uint64(block.timestamp);
@@ -2010,7 +2025,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _applyClose(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) internal {
-        CfdTypes.Position storage pos = positions[delta.accountId];
+        StoredPosition storage pos = _positions[delta.accountId];
         CfdTypes.Side marginSide = pos.side;
 
         CfdEnginePlanTypes.FundingDelta memory fd = delta.funding;
@@ -2022,9 +2037,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             fd.newLastMarkPrice,
             fd.newLastMarkTime
         );
-        _applyFundingSettlement(fd, delta.accountId, pos, marginSide);
+        uint256 marginAfterFunding = _applyFundingSettlement(fd, delta.accountId, pos, marginSide);
 
-        _setPositionMarginForSide(pos, marginSide, delta.posMarginAfter);
+        _syncTotalSideMargin(marginSide, marginAfterFunding, delta.posMarginAfter);
         pos.maxProfitUsdc -= delta.posMaxProfitReduction;
 
         SideState storage sideState = _sideState(marginSide);
@@ -2076,7 +2091,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit PositionClosed(delta.accountId, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
         if (delta.deletePosition) {
-            delete positions[delta.accountId];
+            delete _positions[delta.accountId];
         } else {
             pos.lastUpdateTime = uint64(block.timestamp);
         }
@@ -2136,7 +2151,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         sideState.totalMargin -= delta.posMargin;
 
         emit PositionLiquidated(delta.accountId, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
-        delete positions[delta.accountId];
+        delete _positions[delta.accountId];
         _enterDegradedModeIfInsolvent(delta.accountId, keeperBountyUsdc);
     }
 
@@ -2160,6 +2175,26 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId
     ) internal view returns (uint256) {
         return clearinghouse.getTerminalReachableUsdc(accountId);
+    }
+
+    function _positionMarginBucketUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getLockedMarginBuckets(accountId).positionMarginUsdc;
+    }
+
+    function _loadPosition(
+        bytes32 accountId
+    ) internal view returns (CfdTypes.Position memory pos) {
+        StoredPosition storage stored = _positions[accountId];
+        pos.size = stored.size;
+        pos.margin = _positionMarginBucketUsdc(accountId);
+        pos.entryPrice = stored.entryPrice;
+        pos.maxProfitUsdc = stored.maxProfitUsdc;
+        pos.entryFundingIndex = stored.entryFundingIndex;
+        pos.side = stored.side;
+        pos.lastUpdateTime = stored.lastUpdateTime;
+        pos.vpiAccrued = stored.vpiAccrued;
     }
 
     function _liveMarkStalenessLimit() internal view returns (uint256) {

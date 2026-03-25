@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
@@ -194,7 +195,13 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 preview.deferredPayoutUsdc > 0,
                 "Close preview must choose immediate or deferred payout"
             );
-            if (vault.totalAssets() >= totalPayoutUsdc) {
+            uint256 freeCashForFreshPayouts = CashPriorityLib.reserveFreshPayouts(
+                vault.totalAssets(),
+                engine.accumulatedFeesUsdc(),
+                engine.totalDeferredPayoutUsdc(),
+                engine.totalDeferredClearerBountyUsdc()
+            ).freeCashUsdc;
+            if (freeCashForFreshPayouts >= totalPayoutUsdc) {
                 assertEq(preview.deferredPayoutUsdc, 0, "Close preview must not defer when vault is liquid");
             } else {
                 assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when vault is illiquid");
