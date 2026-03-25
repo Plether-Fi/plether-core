@@ -768,24 +768,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         clearinghouse.seizePositionMarginUsdc(accountId, amountUsdc, recipient);
     }
 
-    function restoreCloseOrderExecutionBounty(
-        bytes32 accountId,
-        uint256 amountUsdc
-    ) external onlyRouter {
-        if (amountUsdc == 0) {
-            return;
-        }
-
-        StoredPosition storage pos = _positions[accountId];
-        if (pos.size == 0) {
-            revert CfdEngine__NoOpenPosition();
-        }
-
-        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
-        clearinghouse.creditSettlementAndLockMargin(accountId, amountUsdc);
-        _syncTotalSideMargin(pos.side, marginBefore, _positionMarginBucketUsdc(accountId));
-    }
-
     /// @notice Reduces accumulated bad debt after governance-confirmed recapitalization
     /// @param amount USDC amount of bad debt to clear (6 decimals)
     function clearBadDebt(

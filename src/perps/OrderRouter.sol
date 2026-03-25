@@ -1115,7 +1115,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
         uint256 executionBountyUsdc
-    ) internal override returns (uint256 marginBackedBountyUsdc) {
+    ) internal override {
         uint256 freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
@@ -1123,9 +1123,9 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             clearinghouse.seizeUsdc(accountId, freeBackedBountyUsdc, address(this));
         }
 
-        marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
+        uint256 marginBackedBountyUsdc = executionBountyUsdc - freeBackedBountyUsdc;
         if (marginBackedBountyUsdc == 0) {
-            return 0;
+            return;
         }
 
         try engine.reserveCloseOrderExecutionBounty(accountId, marginBackedBountyUsdc, address(this)) {}

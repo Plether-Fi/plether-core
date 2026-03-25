@@ -16,7 +16,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         CfdTypes.Order core;
         IOrderRouterAccounting.OrderStatus status;
         uint256 executionBountyUsdc;
-        uint256 marginBackedExecutionBountyUsdc;
         uint64 retryAfterTimestamp;
         uint64 nextPendingOrderId;
         uint64 prevPendingOrderId;
@@ -112,8 +111,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         if (isClose) {
-            orderRecords[orderId].marginBackedExecutionBountyUsdc =
-                _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
+            _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
         } else {
             if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
                 _revertInsufficientFreeEquity();
@@ -163,7 +161,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
-        record.marginBackedExecutionBountyUsdc = 0;
         USDC.safeTransfer(msg.sender, executionBountyUsdc);
     }
 
@@ -271,7 +268,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
         uint256 executionBountyUsdc
-    ) internal virtual returns (uint256 marginBackedBountyUsdc);
+    ) internal virtual;
 
     function _revertInsufficientFreeEquity() internal pure virtual;
 
