@@ -873,6 +873,49 @@ contract InvarCoinTest is Test {
         assertApproxEqRel(yieldValue, expectedFeeYield, 0.1e18, "Yield should reflect fees only, not price moves");
     }
 
+    function test_HarvestMath_MixedBasisIsOutlier() public view {
+        uint256 localUsdc = 200e6;
+        uint256 lpBal = 1000e18;
+        uint256 pessimisticLpPrice = 1.80e18;
+        uint256 optimisticLpPrice = 1.836e18;
+        uint256 supply = 10_000e18;
+
+        uint256 pessimisticLpValue = (lpBal * pessimisticLpPrice) / 1e30;
+        uint256 optimisticLpValue = (lpBal * optimisticLpPrice) / 1e30;
+
+        uint256 pessimisticYield = 50e6;
+        uint256 optimisticYield = Math.mulDiv(optimisticLpValue, pessimisticYield, pessimisticLpValue);
+
+        uint256 pessimisticAssetsBeforeYield = localUsdc + pessimisticLpValue - pessimisticYield;
+        uint256 optimisticAssetsBeforeYield = localUsdc + optimisticLpValue - optimisticYield;
+        uint256 mixedAssetsBeforeYield = localUsdc + optimisticLpValue - pessimisticYield;
+
+        uint256 pessimisticShares = Math.mulDiv(
+            pessimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            pessimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+        uint256 optimisticShares = Math.mulDiv(
+            optimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            optimisticAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+        uint256 mixedShares = Math.mulDiv(
+            pessimisticYield,
+            supply + ic.VIRTUAL_SHARES(),
+            mixedAssetsBeforeYield + ic.VIRTUAL_ASSETS()
+        );
+
+        assertApproxEqRel(
+            pessimisticShares,
+            optimisticShares,
+            0.003e18,
+            "Consistent harvest pricing should be nearly basis-invariant"
+        );
+        assertLt(mixedShares, pessimisticShares, "Mixed pricing under-mints versus current harvest math");
+        assertLt(mixedShares, optimisticShares, "Mixed pricing under-mints versus all-optimistic math");
+    }
+
     function test_Harvest_IgnoresDonatedLpTokens() public {
         vm.prank(alice);
         ic.deposit(20_000e6, alice, 0);
