@@ -9,7 +9,7 @@ import {OrderFailurePolicyLib} from "src/perps/libraries/OrderFailurePolicyLib.s
 contract OrderFailurePolicyLibTest is Test {
 
     struct PredictableOpenCase {
-        uint8 revertCode;
+        CfdEnginePlanTypes.OpenFailurePolicyCategory category;
         bool expected;
     }
 
@@ -19,23 +19,48 @@ contract OrderFailurePolicyLibTest is Test {
     }
 
     function test_IsPredictablyInvalidOpen_Matrix() public pure {
-        PredictableOpenCase[7] memory cases = [
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING), true),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL), true),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH), true),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN), true),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED), true),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES), false),
-            PredictableOpenCase(uint8(CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE), false)
+        PredictableOpenCase[3] memory cases = [
+            PredictableOpenCase(CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable, true),
+            PredictableOpenCase(CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeUserInvalid, false),
+            PredictableOpenCase(
+                CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeProtocolStateInvalidated, false
+            )
         ];
 
         for (uint256 i = 0; i < cases.length; i++) {
             assertEq(
-                OrderFailurePolicyLib.isPredictablyInvalidOpen(cases[i].revertCode),
+                OrderFailurePolicyLib.isPredictablyInvalidOpen(cases[i].category),
                 cases[i].expected,
                 "predictable-open classification mismatch"
             );
         }
+    }
+
+    function test_FailureDomainForExecutionCategory_Matrix() public pure {
+        assertEq(
+            uint256(
+                OrderFailurePolicyLib.failureDomainForExecutionCategory(
+                    CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid
+                )
+            ),
+            uint256(OrderFailurePolicyLib.FailureDomain.UserInvalid)
+        );
+        assertEq(
+            uint256(
+                OrderFailurePolicyLib.failureDomainForExecutionCategory(
+                    CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated
+                )
+            ),
+            uint256(OrderFailurePolicyLib.FailureDomain.ProtocolStateInvalidated)
+        );
+        assertEq(
+            uint256(
+                OrderFailurePolicyLib.failureDomainForExecutionCategory(
+                    CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None
+                )
+            ),
+            uint256(OrderFailurePolicyLib.FailureDomain.Retryable)
+        );
     }
 
     function test_BountyPolicyForFailure_Matrix() public pure {

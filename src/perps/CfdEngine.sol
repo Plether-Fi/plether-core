@@ -1457,6 +1457,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return uint8(delta.revertCode);
     }
 
+    function previewOpenFailurePolicyCategory(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, oraclePrice, publishTime);
+        return CfdEnginePlanLib.getOpenFailurePolicyCategory(delta.revertCode);
+    }
+
     function getDeferredPayoutStatus(
         bytes32 accountId,
         address keeper
@@ -1880,13 +1905,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        ICfdEngine.OrderExecutionFailureClass failureClass = code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
-            || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-            || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-            ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
-            : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
-
-        revert ICfdEngine.CfdEngine__TypedOrderFailure(failureClass, uint8(code), false);
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(
+            CfdEnginePlanLib.getExecutionFailurePolicyCategory(code), uint8(code), false
+        );
     }
 
     function _revertIfCloseInvalid(
@@ -1917,7 +1938,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         revert ICfdEngine.CfdEngine__TypedOrderFailure(
-            ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid, uint8(code), true
+            CfdEnginePlanLib.getExecutionFailurePolicyCategory(code), uint8(code), true
         );
     }
 

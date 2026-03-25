@@ -27,6 +27,61 @@ library CfdEnginePlanLib {
     //  HELPERS
     // ──────────────────────────────────────────────
 
+    function getOpenFailurePolicyCategory(
+        CfdEnginePlanTypes.OpenRevertCode code
+    ) internal pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory) {
+        if (
+            code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+                || code == CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL
+                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
+                || code == CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN
+                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+        ) {
+            return CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable;
+        }
+
+        if (code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE) {
+            return CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeProtocolStateInvalidated;
+        }
+
+        if (
+            code == CfdEnginePlanTypes.OpenRevertCode.FUNDING_EXCEEDS_MARGIN
+                || code == CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES
+        ) {
+            return CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeUserInvalid;
+        }
+
+        return CfdEnginePlanTypes.OpenFailurePolicyCategory.None;
+    }
+
+    function getExecutionFailurePolicyCategory(
+        CfdEnginePlanTypes.OpenRevertCode code
+    ) internal pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {
+        if (code == CfdEnginePlanTypes.OpenRevertCode.OK) {
+            return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
+        }
+
+        if (
+            code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
+                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
+                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+        ) {
+            return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated;
+        }
+
+        return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid;
+    }
+
+    function getExecutionFailurePolicyCategory(
+        CfdEnginePlanTypes.CloseRevertCode code
+    ) internal pure returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory) {
+        if (code == CfdEnginePlanTypes.CloseRevertCode.OK) {
+            return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
+        }
+
+        return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid;
+    }
+
     function _selectedAndOpposite(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side

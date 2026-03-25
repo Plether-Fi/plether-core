@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
 interface ICfdEngine {
 
-    enum OrderExecutionFailureClass {
-        UserOrderInvalid,
-        ProtocolStateInvalidated
-    }
-
-    error CfdEngine__TypedOrderFailure(OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose);
+    error CfdEngine__TypedOrderFailure(
+        CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
+    );
     error CfdEngine__MarkPriceOutOfOrder();
 
     /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
@@ -190,6 +188,16 @@ interface ICfdEngine {
         uint256 oraclePrice,
         uint64 publishTime
     ) external view returns (uint8 code);
+
+    /// @notice Returns the semantic commit-time policy category for the current open-path invalidation, if any.
+    function previewOpenFailurePolicyCategory(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
     /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
     /// @dev Deferred keeper bounties are later claimed as clearinghouse credit, not direct wallet transfer.

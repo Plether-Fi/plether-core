@@ -352,6 +352,7 @@ Close-order bounty policy:
 Failed-open bounty policy:
 
 - commit-time rejection is narrower than execution-time ownership: only deterministic current-state open failures should be rejected before queueing,
+- planner/engine semantic policy categories now drive that split: open previews expose `CommitTimeRejectable` vs execution-time-only categories, and typed execution failures expose `UserInvalid` vs `ProtocolStateInvalidated`,
 - the centralized policy helper currently treats `MUST_CLOSE_OPPOSING`, `POSITION_TOO_SMALL`, `SKEW_TOO_HIGH`, `INSUFFICIENT_INITIAL_MARGIN`, and `SOLVENCY_EXCEEDED` as commit-time rejectable when the cached mark is still fresh,
 - user-invalid open failures should pay the clearer from user escrow,
 - only genuine post-commit protocol-state invalidations should refund the trader bounty,

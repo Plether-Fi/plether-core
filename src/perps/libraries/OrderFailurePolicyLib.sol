@@ -47,13 +47,23 @@ library OrderFailurePolicyLib {
     }
 
     function isPredictablyInvalidOpen(
-        uint8 revertCode
+        CfdEnginePlanTypes.OpenFailurePolicyCategory category
     ) internal pure returns (bool) {
-        return revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
-            || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL)
-            || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
-            || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
-            || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED);
+        return category == CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable;
+    }
+
+    function failureDomainForExecutionCategory(
+        CfdEnginePlanTypes.ExecutionFailurePolicyCategory category
+    ) internal pure returns (FailureDomain) {
+        if (category == CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated) {
+            return FailureDomain.ProtocolStateInvalidated;
+        }
+
+        if (category == CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid) {
+            return FailureDomain.UserInvalid;
+        }
+
+        return FailureDomain.Retryable;
     }
 
     function bountyPolicyForFailure(

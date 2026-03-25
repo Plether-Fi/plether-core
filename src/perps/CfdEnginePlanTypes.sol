@@ -16,6 +16,19 @@ import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.s
 ///         Apply functions consume deltas to perform state mutations and external calls.
 library CfdEnginePlanTypes {
 
+    enum OpenFailurePolicyCategory {
+        None,
+        CommitTimeRejectable,
+        ExecutionTimeUserInvalid,
+        ExecutionTimeProtocolStateInvalidated
+    }
+
+    enum ExecutionFailurePolicyCategory {
+        None,
+        UserInvalid,
+        ProtocolStateInvalidated
+    }
+
     // ──────────────────────────────────────────────
     //  SNAPSHOT (input to all plan functions)
     // ──────────────────────────────────────────────

@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
+import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
@@ -319,10 +320,13 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
+            CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engine.previewOpenFailurePolicyCategory(
+                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+            );
             uint8 revertCode = engine.previewOpenRevertCode(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             );
-            if (OrderFailurePolicyLib.isPredictablyInvalidOpen(revertCode)) {
+            if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                 revert OrderRouter__PredictableOpenInvalid(revertCode);
             }
         }
@@ -880,9 +884,13 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
     function _decodeTypedOrderFailure(
         bytes memory revertData
-    ) internal pure returns (ICfdEngine.OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose) {
+    )
+        internal
+        pure
+        returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose)
+    {
         assembly {
-            failureClass := mload(add(revertData, 36))
+            failureCategory := mload(add(revertData, 36))
             failureCode := mload(add(revertData, 68))
             isClose := mload(add(revertData, 100))
         }
@@ -960,12 +968,10 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         OrderFailurePolicyLib.FailureSource source;
 
         if (revertData.length >= 4 && bytes4(revertData) == TYPED_ORDER_FAILURE_SELECTOR) {
-            (ICfdEngine.OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose) =
+            (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose) =
                 _decodeTypedOrderFailure(revertData);
             failure = OrderFailurePolicyLib.RoutedFailure({
-                domain: failureClass == ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
-                    ? OrderFailurePolicyLib.FailureDomain.ProtocolStateInvalidated
-                    : OrderFailurePolicyLib.FailureDomain.UserInvalid,
+                domain: OrderFailurePolicyLib.failureDomainForExecutionCategory(failureCategory),
                 code: failureCode,
                 isClose: isClose
             });
