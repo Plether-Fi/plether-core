@@ -402,7 +402,7 @@ library CfdEnginePlanLib {
 
         PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState = _buildPostOpenRiskState(snap, delta);
         if (
-            postOpenRiskState.liquidatable
+            computedMarginAfter < openState.initialMarginRequirementUsdc || postOpenRiskState.liquidatable
                 || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;

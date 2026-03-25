@@ -875,6 +875,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _updateFunding(lastMarkPrice, vault.totalAssets());
     }
 
+    function _syncFundingForMarkUpdate() internal {
+        if (block.timestamp <= lastFundingTime || lastMarkPrice == 0) {
+            return;
+        }
+
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: block.timestamp - lastFundingTime,
+                vaultDepthUsdc: vault.totalAssets(),
+                riskParams: riskParams
+            })
+        );
+
+        bullState.fundingIndex += step.bullFundingIndexDelta;
+        bearState.fundingIndex += step.bearFundingIndexDelta;
+        lastFundingTime = uint64(block.timestamp);
+        emit FundingUpdated(bullState.fundingIndex, bearState.fundingIndex, step.absSkewUsdc);
+    }
+
     function _updateFunding(
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
@@ -1041,7 +1064,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _accountVaultCashInflow(VaultCashInflow memory inflow) internal {
+    function _accountVaultCashInflow(
+        VaultCashInflow memory inflow
+    ) internal {
         if (inflow.physicalCashReceivedUsdc == 0) {
             return;
         }
@@ -1208,8 +1233,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 maxProfitUsdc,
             int256 entryFundingIndex,
             CfdTypes.Side side,
-            uint64 lastUpdateTime
-            ,int256 vpiAccrued
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
         )
     {
         CfdTypes.Position memory pos = _loadPosition(accountId);
@@ -2069,9 +2094,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
                 : 0;
-            uint256 protocolFeeInflowUsdc = seizedUsdc > cashCollectedExecutionFeeUsdc
-                ? cashCollectedExecutionFeeUsdc
-                : seizedUsdc;
+            uint256 protocolFeeInflowUsdc =
+                seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
             _accountVaultCashInflow(
                 VaultCashInflow({
                     physicalCashReceivedUsdc: seizedUsdc,
@@ -2362,7 +2386,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
-        _syncFunding();
+        _syncFundingForMarkUpdate();
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
     }

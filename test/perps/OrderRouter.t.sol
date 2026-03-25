@@ -197,13 +197,13 @@ contract OrderRouterTest is BasePerpTest {
         address other = address(0x333);
         bytes32 otherId = bytes32(uint256(uint160(other)));
 
-        _fundTrader(other, 350e6);
+        _fundTrader(other, 1000e6);
         _open(otherId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
         vm.prank(other);
-        router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, type(uint256).max, false); // order 2, non-head
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false); // order 2, non-head
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
 
@@ -217,7 +217,7 @@ contract OrderRouterTest is BasePerpTest {
         router.finalizeMaxOrderAge();
 
         bytes[] memory pythPrice = new bytes[](1);
-        pythPrice[0] = abi.encode(uint256(102_500_000));
+        pythPrice[0] = abi.encode(uint256(150_000_000));
         vm.deal(other, 10 ether);
         vm.prank(other);
         router.executeLiquidation{value: 0}(otherId, pythPrice);
@@ -984,7 +984,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         _fundTrader(alice, 2 * 1e6);
-        _fundTrader(bob, 200 * 1e6);
+        _fundTrader(bob, 1000 * 1e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
@@ -1037,7 +1037,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 spamCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 1000 * 1e18, 100 * 1e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 2e8, false);
         }
 
         vm.roll(block.number + 1);
@@ -1073,13 +1073,13 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         _fundTrader(alice, 2 * 1e6);
-        _fundTrader(bob, 200 * 1e6);
+        _fundTrader(bob, 5000 * 1e6);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 2e8, false);
 
         vm.prank(carol);
         router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -1092,7 +1092,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             executorReward,
             1_000_000,
-            "Retryable invalid heads should not pay the executor while the valid tail still executes"
+            "Retryable non-marketable heads should not pay the executor while the valid tail still executes"
         );
         assertEq(
             router.nextExecuteId(),
@@ -1323,6 +1323,44 @@ contract OrderRouterPythTest is BasePerpTest {
             )
         );
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnPredictableMustCloseOpposing() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.BEAR, 5000e18, 500e6, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnPredictablePositionTooSmall() public {
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint8 revertCode =
+            engine.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 1e18, 5000e6, 1e8, uint64(block.timestamp));
+        assertEq(
+            revertCode,
+            uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL),
+            "Setup must hit the typed too-small open failure"
+        );
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.BULL, 1e18, 5000e6, 1e8, false);
     }
 
     function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
@@ -2676,6 +2714,10 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_InvalidOpenOrderPaysClearerAtExecution() public {
+        router.proposeMaxOrderAge(7 days);
+        vm.warp(block.timestamp + router.TIMELOCK_DELAY());
+        router.finalizeMaxOrderAge();
+
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
 
@@ -2697,10 +2739,48 @@ contract FadStalenessTest is BasePerpTest {
         assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
-            reservedBounty,
-            "Clearer should still be paid for removing a predictable close-only invalidation"
+            0,
+            "Clearer should not be paid for post-commit close-only invalidation"
         );
-        assertEq(usdc.balanceOf(alice), 0, "Trader should not receive a bounty refund for close-only invalidation");
+        assertEq(
+            usdc.balanceOf(alice), reservedBounty, "Trader should receive the bounty refund for close-only invalidation"
+        );
+    }
+
+    function test_FadWindow_BatchInvalidOpenOrderRefundsUserAtExecution() public {
+        router.proposeMaxOrderAge(7 days);
+        vm.warp(block.timestamp + router.TIMELOCK_DELAY());
+        router.finalizeMaxOrderAge();
+
+        uint256 fridayClose = FRIDAY_18UTC + 4 hours;
+        mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
+
+        vm.warp(FRIDAY_18UTC);
+        uint64 orderId = router.nextCommitId();
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        uint256 reservedBounty = router.executionBountyReserves(orderId);
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        (uint256 sizeBefore,,,,,,,) = engine.positions(aliceId);
+        vm.warp(SATURDAY_NOON + 1);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrderBatch(orderId, empty);
+
+        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
+        assertEq(
+            usdc.balanceOf(address(this)) - keeperBefore,
+            0,
+            "Batch clearer should not be paid for post-commit close-only invalidation"
+        );
+        assertEq(
+            usdc.balanceOf(alice),
+            reservedBounty,
+            "Batch execution should refund the trader bounty on close-only invalidation"
+        );
     }
 
     function test_FadWindow_MevCheckDisabledDuringFrozen() public {
