@@ -142,6 +142,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 entryFunding;
     }
 
+    struct VaultCashInflow {
+        uint256 physicalCashReceivedUsdc;
+        uint256 protocolOwnedUsdc;
+        uint256 lpOwnedUsdc;
+    }
+
     uint256 public immutable CAP_PRICE;
 
     IERC20 public immutable USDC;
@@ -244,6 +250,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__StillInsolvent();
     error CfdEngine__ZeroAddress();
     error CfdEngine__InsufficientCloseOrderBountyBacking();
+    error CfdEngine__InvalidVaultCashInflow();
 
     event FundingUpdated(int256 bullIndex, int256 bearIndex, uint256 absSkewUsdc);
     event PositionOpened(
@@ -1056,21 +1063,20 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _accountVaultCashInflow(uint256 physicalCashReceivedUsdc, uint256 protocolOwnedUsdc) internal {
-        if (physicalCashReceivedUsdc == 0) {
+    function _accountVaultCashInflow(VaultCashInflow memory inflow) internal {
+        if (inflow.physicalCashReceivedUsdc == 0) {
             return;
         }
 
-        uint256 protocolInflowUsdc = protocolOwnedUsdc > physicalCashReceivedUsdc
-            ? physicalCashReceivedUsdc
-            : protocolOwnedUsdc;
-        uint256 lpTradingRevenueUsdc = physicalCashReceivedUsdc - protocolInflowUsdc;
-
-        if (protocolInflowUsdc > 0) {
-            vault.recordProtocolInflow(protocolInflowUsdc);
+        if (inflow.protocolOwnedUsdc + inflow.lpOwnedUsdc > inflow.physicalCashReceivedUsdc) {
+            revert CfdEngine__InvalidVaultCashInflow();
         }
-        if (lpTradingRevenueUsdc > 0) {
-            vault.recordTradingRevenueInflow(lpTradingRevenueUsdc);
+
+        if (inflow.protocolOwnedUsdc > 0) {
+            vault.recordProtocolInflow(inflow.protocolOwnedUsdc);
+        }
+        if (inflow.lpOwnedUsdc > 0) {
+            vault.recordTradingRevenueInflow(inflow.lpOwnedUsdc);
         }
     }
 
@@ -1920,7 +1926,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 loss = uint256(-fd.pendingFundingUsdc);
             (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc,) =
                 clearinghouse.consumeFundingLoss(accountId, pos.margin, loss, address(vault));
-            _accountVaultCashInflow(marginConsumedUsdc + freeSettlementConsumedUsdc, 0);
+            _accountVaultCashInflow(
+                VaultCashInflow({
+                    physicalCashReceivedUsdc: marginConsumedUsdc + freeSettlementConsumedUsdc,
+                    protocolOwnedUsdc: 0,
+                    lpOwnedUsdc: marginConsumedUsdc + freeSettlementConsumedUsdc
+                })
+            );
             _applyPositionMarginDeltaForSide(pos, marginSide, -int256(fd.posMarginDecrease));
         }
 
@@ -1974,7 +1986,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 netMarginChange =
             clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
         if (delta.tradeCostUsdc > 0) {
-            _accountVaultCashInflow(uint256(delta.tradeCostUsdc), delta.executionFeeUsdc);
+            uint256 protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
+                ? delta.executionFeeUsdc
+                : uint256(delta.tradeCostUsdc);
+            _accountVaultCashInflow(
+                VaultCashInflow({
+                    physicalCashReceivedUsdc: uint256(delta.tradeCostUsdc),
+                    protocolOwnedUsdc: protocolFeeInflowUsdc,
+                    lpOwnedUsdc: uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc
+                })
+            );
         }
 
         _applyPositionMarginDeltaForSide(pos, marginSide, netMarginChange);
@@ -2033,7 +2054,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
                 : 0;
-            _accountVaultCashInflow(seizedUsdc, cashCollectedExecutionFeeUsdc);
+            uint256 protocolFeeInflowUsdc = seizedUsdc > cashCollectedExecutionFeeUsdc
+                ? cashCollectedExecutionFeeUsdc
+                : seizedUsdc;
+            _accountVaultCashInflow(
+                VaultCashInflow({
+                    physicalCashReceivedUsdc: seizedUsdc,
+                    protocolOwnedUsdc: protocolFeeInflowUsdc,
+                    lpOwnedUsdc: seizedUsdc - protocolFeeInflowUsdc
+                })
+            );
             _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
             if (delta.existingDeferredConsumedUsdc > 0) {
                 _consumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
@@ -2086,7 +2116,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         });
         uint256 seizedUsdc =
             clearinghouse.applyLiquidationSettlementPlan(delta.accountId, reservationOrderIds, plan, address(vault));
-        _accountVaultCashInflow(seizedUsdc, delta.keeperBountyUsdc);
+        uint256 keeperBountyInflowUsdc = seizedUsdc > delta.keeperBountyUsdc ? delta.keeperBountyUsdc : seizedUsdc;
+        _accountVaultCashInflow(
+            VaultCashInflow({
+                physicalCashReceivedUsdc: seizedUsdc,
+                protocolOwnedUsdc: keeperBountyInflowUsdc,
+                lpOwnedUsdc: seizedUsdc - keeperBountyInflowUsdc
+            })
+        );
         _syncMarginQueue(delta.accountId, delta.syncMarginQueueAmount);
         if (delta.existingDeferredConsumedUsdc > 0) {
             _consumeDeferredTraderPayout(delta.accountId, delta.existingDeferredConsumedUsdc);
