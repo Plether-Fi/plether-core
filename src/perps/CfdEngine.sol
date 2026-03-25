@@ -1606,7 +1606,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, vault.totalAssets());
+        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vault.totalAssets()));
     }
 
     /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
@@ -1615,7 +1615,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vaultDepthUsdc));
     }
 
     function _previewLiquidation(
@@ -1657,6 +1657,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
         preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
+    }
+
+    function _liquidationVaultDepthUsdc(
+        bytes32 accountId,
+        uint256 baseVaultDepthUsdc
+    ) internal view returns (uint256 vaultDepthUsdc) {
+        vaultDepthUsdc = baseVaultDepthUsdc;
+        if (orderRouter == address(0)) {
+            return vaultDepthUsdc;
+        }
+
+        vaultDepthUsdc += IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId).executionBountyUsdc;
     }
 
     function getPositionSide(

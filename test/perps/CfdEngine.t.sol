@@ -1898,6 +1898,46 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewLiquidation_IncludesForfeitableOrderEscrowInVaultDepth() public {
+        address trader = address(0xAB1405);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 900e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        uint256 canonicalDepthBefore = pool.totalAssets();
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 195_000_000);
+        CfdEngine.LiquidationPreview memory simulated =
+            engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+
+        assertEq(preview.keeperBountyUsdc, simulated.keeperBountyUsdc, "preview should include forfeitable escrow");
+        assertEq(preview.badDebtUsdc, simulated.badDebtUsdc, "preview bad debt should use post-forfeiture depth");
+        assertEq(
+            preview.immediatePayoutUsdc,
+            simulated.immediatePayoutUsdc,
+            "preview immediate payout should use post-forfeiture depth"
+        );
+        assertEq(
+            preview.deferredPayoutUsdc,
+            simulated.deferredPayoutUsdc,
+            "preview deferred payout should use post-forfeiture depth"
+        );
+        assertEq(
+            preview.effectiveAssetsAfterUsdc,
+            simulated.effectiveAssetsAfterUsdc,
+            "preview solvency should use post-forfeiture depth"
+        );
+    }
+
     function test_Liquidation_ConsumesDeferredPayoutBeforeRecordingBadDebt() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD221));

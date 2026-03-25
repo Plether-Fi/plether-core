@@ -2411,7 +2411,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
     }
 
-    function test_ExecuteLiquidation_ForfeitedEscrowDoesNotRetroactivelySoftenFunding() public {
+    function test_ExecuteLiquidation_ForfeitedEscrowFeedsPostForfeitureVaultDepth() public {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 900e6);
 
@@ -2436,11 +2436,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         vm.warp(block.timestamp + 60 days);
         uint64 fundingBefore = engine.lastFundingTime();
         uint256 canonicalDepthBefore = pool.totalAssets();
-        uint256 forfeitedEscrowUsdc = router.executionBountyReserves(1) * queuedOrderCount;
 
         CfdEngine.LiquidationPreview memory expectedPreview =
             engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
-        engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore + forfeitedEscrowUsdc);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
@@ -2457,12 +2455,12 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
-            "Liquidation bounty should use the pre-forfeiture vault depth for funding"
+            "Liquidation bounty should use the post-forfeiture vault depth for funding"
         );
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             expectedPreview.badDebtUsdc,
-            "Liquidation bad debt should use the pre-forfeiture vault depth for funding"
+            "Liquidation bad debt should use the post-forfeiture vault depth for funding"
         );
     }
 
