@@ -33,6 +33,14 @@ contract CfdEnginePlanHarness is CfdEngine {
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
 
+    function computeOpenMarginAfter(uint256 marginAfterFunding, int256 netMarginChange)
+        external
+        pure
+        returns (bool drained, uint256 marginAfter)
+    {
+        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterFunding, netMarginChange);
+    }
+
 }
 
 contract CfdEnginePlanRegressionTest is BasePerpTest {
@@ -125,6 +133,25 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
     }
 
+    function _expectedOpenMarginAfter(
+        uint256 currentMargin,
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) internal pure returns (bool drained, uint256 expectedMarginAfter) {
+        uint256 marginAfterFunding = currentMargin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
+        if (
+            delta.funding.pendingFundingUsdc > 0
+                && delta.funding.payoutType != CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT
+        ) {
+            marginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
+        }
+
+        int256 signedMarginAfter = int256(marginAfterFunding) + delta.netMarginChange;
+        if (signedMarginAfter < 0) {
+            return (true, 0);
+        }
+        return (false, uint256(signedMarginAfter));
+    }
+
     function test_PreviewClose_UncoveredFundingMatchesLiveFeeAndSolvencyState() public {
         bytes32 bullId = bytes32(uint256(uint160(bullTraderA)));
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
@@ -196,6 +223,27 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         _open(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
         assertEq(engine.getPositionSize(freshBullId), 10_000e18, "Live open should succeed for the fresh account");
+    }
+
+    function test_ComputeOpenMarginAfter_PositiveOffsetDoesNotPanic() public view {
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(200e6, -50e6);
+        assertFalse(drained, "Positive offset path should remain nonnegative");
+        assertEq(marginAfter, 150e6, "Single-frame margin should equal base plus net change");
+    }
+
+    function test_ComputeOpenMarginAfter_NegativePathSubtractsOnce() public view {
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(900e6, -50e6);
+        assertFalse(drained, "Healthy negative-net path should remain above zero");
+        assertEq(marginAfter, 850e6, "Single-frame margin should subtract the negative net change exactly once");
+    }
+
+    function test_ComputeOpenMarginAfter_PositiveBaseCannotDoubleCredit() public view {
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(100e6, -150e6);
+        assertTrue(drained, "Single-frame margin must drain when the negative net change exceeds the base");
+        assertEq(marginAfter, 0, "Drained path should return zero margin");
     }
 
 }
