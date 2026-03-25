@@ -137,6 +137,19 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 currentMargin,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) internal pure returns (bool drained, uint256 expectedMarginAfter) {
+        uint256 marginAfterFunding = _marginAfterFunding(currentMargin, delta);
+        int256 signedMarginAfter = int256(marginAfterFunding) + delta.netMarginChange;
+        if (signedMarginAfter < 0) {
+            return (true, 0);
+        }
+        return (false, uint256(signedMarginAfter));
+    }
+
+    function _marginAfterFunding(uint256 currentMargin, CfdEnginePlanTypes.OpenDelta memory delta)
+        internal
+        pure
+        returns (uint256)
+    {
         uint256 marginAfterFunding = currentMargin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
         if (
             delta.funding.pendingFundingUsdc > 0
@@ -144,12 +157,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         ) {
             marginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
         }
-
-        int256 signedMarginAfter = int256(marginAfterFunding) + delta.netMarginChange;
-        if (signedMarginAfter < 0) {
-            return (true, 0);
-        }
-        return (false, uint256(signedMarginAfter));
+        return marginAfterFunding;
     }
 
     function test_PreviewClose_UncoveredFundingMatchesLiveFeeAndSolvencyState() public {
@@ -244,6 +252,44 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(100e6, -150e6);
         assertTrue(drained, "Single-frame margin must drain when the negative net change exceeds the base");
         assertEq(marginAfter, 0, "Drained path should return zero margin");
+    }
+
+    function test_PlanOpen_TotalMarginAfterOpenMatchesSingleFrameEquation() public {
+        bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
+        bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 freshBullId = bytes32(uint256(uint160(freshBullTrader)));
+
+        _fundTrader(bullTraderA, 15_000e6);
+        _fundTrader(bullTraderB, 400_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(freshBullTrader, 15_000e6);
+
+        _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
+        _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+
+        vm.warp(block.timestamp + 180 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(
+            _openOrder(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
+        );
+
+        uint256 marginAfterFunding = _marginAfterFunding(0, delta);
+        assertEq(
+            delta.totalMarginAfterOpen,
+            delta.totalMarginAfterFunding + delta.posMarginAfter - marginAfterFunding,
+            "Open planner totalMarginAfterOpen must stay consistent with the single-frame margin delta equation"
+        );
+    }
+
+    function test_ComputeOpenMarginAfter_DrainedPathMatchesPlannerRevert() public {
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        (bool drained,) = harness.computeOpenMarginAfter(100e6, -150e6);
+        assertTrue(drained, "Canonical helper should signal margin drain when net change exceeds the base");
     }
 
 }
