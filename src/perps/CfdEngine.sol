@@ -862,6 +862,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
+        if (!isOracleFrozen()) {
+            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+            if (age > _liveMarkStalenessLimit()) {
+                lastFundingTime = uint64(block.timestamp);
+                return;
+            }
+        }
+
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
         PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
             PositionRiskAccountingLib.FundingStepInputs({
@@ -1588,7 +1596,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vault.totalAssets()));
+        return _previewLiquidation(accountId, oraclePrice, vault.totalAssets());
     }
 
     /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
@@ -1597,7 +1605,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vaultDepthUsdc));
+        return _previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
     }
 
     function _previewLiquidation(
@@ -1613,6 +1621,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(accountId, oraclePrice, vaultDepthUsdc, 0);
+        _applyLiquidationPreviewForfeiture(accountId, snap);
         CfdEnginePlanTypes.LiquidationDelta memory delta = CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
 
         preview.liquidatable = delta.liquidatable;
@@ -1641,16 +1650,22 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
     }
 
-    function _liquidationVaultDepthUsdc(
+    function _applyLiquidationPreviewForfeiture(
         bytes32 accountId,
-        uint256 baseVaultDepthUsdc
-    ) internal view returns (uint256 vaultDepthUsdc) {
-        vaultDepthUsdc = baseVaultDepthUsdc;
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) internal view {
         if (orderRouter == address(0)) {
-            return vaultDepthUsdc;
+            return;
         }
 
-        vaultDepthUsdc += IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId).executionBountyUsdc;
+        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId).executionBountyUsdc;
+        if (forfeitedUsdc == 0) {
+            return;
+        }
+
+        snap.vaultAssetsUsdc += forfeitedUsdc;
+        snap.vaultCashUsdc += forfeitedUsdc;
+        snap.accumulatedFeesUsdc += forfeitedUsdc;
     }
 
     function getPositionSide(
@@ -1807,6 +1822,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.bullSide = _copySideSnapshot(bullState);
         snap.bearSide = _copySideSnapshot(bearState);
 
+        snap.fundingVaultDepthUsdc = vaultDepthUsdc;
         snap.vaultAssetsUsdc = vaultDepthUsdc;
         snap.vaultCashUsdc = vaultDepthUsdc;
 

@@ -377,6 +377,20 @@ Review:
 - [x] Keep `OrderFailurePolicyLib` focused on commit-time rejection and bounty ownership over semantic categories
 - [x] Extend tests to assert semantic-category behavior and rerun router/audit coverage
 
+## Canonical State Transition Refactor (Mar 26 2026)
+
+- [x] Replace mark-refresh funding backfill with a canonical stale-aware checkpoint path in `src/perps/CfdEngine.sol`
+- [x] Prevent open planning from treating deferred funding IOUs as physically unlockable trade-cost margin in `src/perps/libraries/CfdEnginePlanLib.sol`
+- [x] Make liquidation preview stage funding on pre-forfeit depth and solvency/payout checks on post-forfeit depth+fees
+- [x] Add targeted regressions for stale mark refresh, illiquid deferred-funding opens, and liquidation preview/live parity
+- [x] Update `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` to describe the staged transition model explicitly
+
+Review:
+- `src/perps/CfdEngine.sol` now checkpoints `lastFundingTime` instead of backfilling stale live-mark windows when `updateMarkPrice()` refreshes a stale mark, and liquidation preview explicitly applies queued-order escrow forfeiture as a post-funding vault-cash/protocol-fee mutation.
+- `src/perps/CfdEnginePlanTypes.sol` adds `fundingVaultDepthUsdc` so planner funding can use pre-mutation depth while payout/solvency math reads the post-mutation asset/cash state.
+- `src/perps/libraries/CfdEnginePlanLib.sol` now rejects opens that only pass because deferred funding is counted as equity even though the physical position-margin bucket cannot pay the negative trade-cost delta.
+- Added targeted regressions in `test/perps/CfdEngine.t.sol` and `test/perps/CfdEnginePlanRegression.t.sol`, then verified them with focused `forge test` runs plus `forge fmt --check` on the changed Solidity files.
+
 Review:
 - Added semantic planner enums in `src/perps/CfdEnginePlanTypes.sol` for commit-time open policy (`CommitTimeRejectable`, `ExecutionTimeUserInvalid`, `ExecutionTimeProtocolStateInvalidated`) and typed execution ownership (`UserInvalid`, `ProtocolStateInvalidated`).
 - Added canonical semantic mapping helpers in `src/perps/libraries/CfdEnginePlanLib.sol`, so the engine now owns how raw `OpenRevertCode` / `CloseRevertCode` values collapse into policy categories instead of leaving that mapping in `src/perps/OrderRouter.sol`.

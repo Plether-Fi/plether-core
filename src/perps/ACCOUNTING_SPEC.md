@@ -354,6 +354,7 @@ Failed-open bounty policy:
 - commit-time rejection is narrower than execution-time ownership: only deterministic current-state open failures should be rejected before queueing,
 - planner/engine semantic policy categories now drive that split: `previewOpenFailurePolicyCategory(...)` exposes `CfdEnginePlanTypes.OpenFailurePolicyCategory` (`CommitTimeRejectable`, `ExecutionTimeUserInvalid`, `ExecutionTimeProtocolStateInvalidated`), and typed execution failures expose `CfdEnginePlanTypes.ExecutionFailurePolicyCategory` (`UserInvalid`, `ProtocolStateInvalidated`),
 - the centralized policy helper currently treats `MUST_CLOSE_OPPOSING`, `POSITION_TOO_SMALL`, `SKEW_TOO_HIGH`, `INSUFFICIENT_INITIAL_MARGIN`, and `SOLVENCY_EXCEEDED` as commit-time rejectable when the cached mark is still fresh,
+- open planning may count deferred receivables toward equity/risk, but it must separately reject any negative net-margin change that cannot be paid from physically unlockable position margin,
 - user-invalid open failures should pay the clearer from user escrow,
 - only genuine post-commit protocol-state invalidations should refund the trader bounty,
 - router-detected close-only invalidations on queued opens are protocol-state-invalidated and therefore refund the trader rather than paying the clearer,
@@ -361,14 +362,15 @@ Failed-open bounty policy:
 
 Liquidation preview/live depth policy:
 
-- queued execution-bounty escrow forfeited during liquidation is part of the same effective post-forfeiture vault-depth view for both preview and live execution,
-- canonical liquidation preview and hypothetical liquidation simulation should therefore include the liquidated account's forfeitable queued execution-bounty escrow when modeling keeper bounty, fresh/deferred trader payout, bad debt, and post-op solvency,
-- live liquidation should perform the forfeiture before sourcing the vault depth passed into the engine, so preview and execution do not mix pre-sweep and post-sweep cash views.
+- queued execution-bounty escrow forfeited during liquidation belongs to a staged transition: funding runs first on pre-forfeiture depth, then the escrow transfer increases physical vault assets/cash and protocol fees, then payout and solvency classification run on that post-forfeiture state,
+- canonical liquidation preview and hypothetical liquidation simulation should mirror that same two-stage model so preview/live parity does not depend on whether the fee-tagged escrow is injected too early or too late,
+- live liquidation should not mix pre-sweep funding depth with post-sweep payout/solvency state, and preview should not collapse those stages into one synthetic balance.
 
 Funding freshness policy:
 
 - weekday/live funding accrual may only advance while the live mark remains within the engine freshness limit,
 - once the live mark is stale, funding freezes until a fresh mark update arrives,
+- the first fresh mark update after a stale live window must checkpoint the funding clock instead of retroactively accruing over the stale interval,
 - frozen/FAD oracle policy may still permit broader staleness according to the dedicated frozen-window rules.
 
 Margin-threshold policy:

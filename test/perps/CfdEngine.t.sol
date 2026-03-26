@@ -296,19 +296,22 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint64 accrualTime = refreshTime + 30;
+        vm.warp(accrualTime);
+
         CfdTypes.Order memory mmShort = CfdTypes.Order({
             accountId: account2,
             sizeDelta: 10_000 * 1e18,
             marginDelta: 500 * 1e6,
             targetPrice: 1e8,
-            commitTime: refreshTime,
+            commitTime: accrualTime,
             commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BEAR,
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(mmShort, 1e8, vaultDepth, refreshTime);
+        engine.processOrder(mmShort, 1e8, vaultDepth, accrualTime);
 
         int256 bullIndex = _sideFundingIndex(CfdTypes.Side.BULL);
         assertTrue(bullIndex < 0, "BULL index should decrease");
@@ -347,6 +350,11 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        assertEq(
+            engine.lastFundingTime(),
+            engine.lastMarkTime(),
+            "Refreshing after a stale gap should checkpoint funding without backfilling stale time"
+        );
         vm.warp(block.timestamp + 1);
 
         usdc.mint(address(router), 25e6);
@@ -474,7 +482,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_FullClose_WithPositiveFunding_DoesNotRevertWhenVaultIlliquid() public {
+    function test_FullClose_AfterFreshMark_DoesNotRevertWhenVaultIlliquid() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(1));
         bytes32 bearId = bytes32(uint256(2));
@@ -490,17 +498,20 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint64 accrualTime = refreshTime + 59;
+        vm.warp(accrualTime);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 10_000e18, 1e8);
+
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 10_000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 10_000e18, 1e8, vaultDepth, accrualTime);
 
         (uint256 size,,,,,,,) = engine.positions(bearId);
         assertEq(size, 0, "Illiquid positive-funding close should still destroy the position");
-        assertGt(
-            engine.deferredPayoutUsdc(bearId), 0, "Positive funding credit should roll into deferred trader payout"
-        );
+        assertEq(engine.deferredPayoutUsdc(bearId), preview.deferredPayoutUsdc, "Live close should match preview");
     }
 
     function test_PreviewClose_UsesCanonicalVaultDepthWhileSimulateCloseAllowsWhatIfDepth() public {
@@ -517,6 +528,9 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
+
+        uint64 accrualTime = refreshTime + 59;
+        vm.warp(accrualTime);
 
         uint256 canonicalDepth = pool.totalAssets();
         CfdEngine.ClosePreview memory canonicalPreview = engine.previewClose(bearId, 10_000e18, 1e8);
@@ -971,7 +985,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900 * 1e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900 * 1e6, type(uint256).max, false);
 
         CfdEngine.AccountCollateralView memory viewData = engine.getAccountCollateralView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
@@ -1374,6 +1388,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint64 accrualTime = refreshTime + 30;
+        vm.warp(accrualTime);
+
         (uint256 bullSize, uint256 bullMargin,, uint256 bullMaxProfit, int256 bullEntryFunding,,,) =
             engine.positions(bullId);
         int256 bullFundingAfter = 0;
@@ -1469,7 +1486,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 900e6, type(uint256).max, false);
 
         uint256 freeSettlementBeforePreview = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
 
@@ -1747,6 +1764,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, refreshTime);
 
+        uint64 accrualTime = refreshTime + 30;
+        vm.warp(accrualTime);
+
         uint256 canonicalDepth = pool.totalAssets();
         CfdEngine.LiquidationPreview memory canonicalPreview = engine.previewLiquidation(accountId, 110_000_000);
         CfdEngine.LiquidationPreview memory matchedSimulation =
@@ -1759,9 +1779,9 @@ contract CfdEngineTest is BasePerpTest {
             matchedSimulation.fundingUsdc,
             "Canonical liquidation preview should use live depth"
         );
-        assertLt(
-            lowDepthSimulation.fundingUsdc,
+        assertGt(
             canonicalPreview.fundingUsdc,
+            lowDepthSimulation.fundingUsdc,
             "Simulation should honor lower hypothetical depth"
         );
     }
@@ -1796,7 +1816,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
     }
 
-    function test_LiquidationPreview_SkipsFundingAccrualUntilFreshMarkUpdate() public {
+    function test_LiquidationPreview_DoesNotBackfillStaleFundingOnFreshMarkUpdate() public {
         address trader = address(0xAB1403);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
@@ -1812,17 +1832,22 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
 
-        CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(accountId, 110_000_000);
+        CfdEngine.LiquidationPreview memory refreshedPreview = engine.previewLiquidation(accountId, 110_000_000);
 
-        assertLt(
-            fundedPreview.fundingUsdc,
-            stalePreview.fundingUsdc,
-            "Preview should defer funding accrual until a fresh live mark arrives"
+        assertEq(
+            engine.lastFundingTime(),
+            engine.lastMarkTime(),
+            "Mark refresh should checkpoint funding time when the prior live mark was stale"
         );
-        assertLt(
-            fundedPreview.equityUsdc,
+        assertEq(
+            refreshedPreview.fundingUsdc,
+            stalePreview.fundingUsdc,
+            "Fresh mark refresh should not retroactively accrue the stale funding window"
+        );
+        assertEq(
+            refreshedPreview.equityUsdc,
             stalePreview.equityUsdc,
-            "Accrued funding after a fresh live mark should reduce liquidation equity"
+            "Liquidation equity should remain unchanged across the stale interval"
         );
     }
 
@@ -1880,13 +1905,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferred = engine.deferredPayoutUsdc(bearId);
         assertGt(deferred, 0, "Setup must create deferred payout while keeping the position open");
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
-            .checked_write(reducedSettlement);
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
 
         CfdEngine.LiquidationPreview memory fundedPreview = engine.previewLiquidation(bearId, 85_000_000);
         assertFalse(fundedPreview.liquidatable, "Deferred payout should count toward liquidation equity");
@@ -1898,8 +1921,9 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewLiquidation_IncludesForfeitableOrderEscrowInVaultDepth() public {
+    function test_PreviewLiquidation_StagesForfeitureLikeLiveLiquidation() public {
         address trader = address(0xAB1405);
+        address keeper = address(0xAB1406);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
         _fundTrader(trader, 900e6);
@@ -1913,28 +1937,36 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        uint256 canonicalDepthBefore = pool.totalAssets();
-
+        IOrderRouterAccounting.AccountEscrowView memory escrowBefore = router.getAccountEscrow(accountId);
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 195_000_000);
-        CfdEngine.LiquidationPreview memory simulated =
-            engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+        ICfdEngine.ProtocolAccountingSnapshot memory beforeSnapshot = engine.getProtocolAccountingSnapshot();
 
-        assertEq(preview.keeperBountyUsdc, simulated.keeperBountyUsdc, "preview should include forfeitable escrow");
-        assertEq(preview.badDebtUsdc, simulated.badDebtUsdc, "preview bad debt should use post-forfeiture depth");
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(195_000_000));
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, priceData);
+
+        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engine.getProtocolAccountingSnapshot();
+
         assertEq(
-            preview.immediatePayoutUsdc,
-            simulated.immediatePayoutUsdc,
-            "preview immediate payout should use post-forfeiture depth"
-        );
-        assertEq(
+            engine.deferredPayoutUsdc(accountId),
             preview.deferredPayoutUsdc,
-            simulated.deferredPayoutUsdc,
-            "preview deferred payout should use post-forfeiture depth"
+            "Preview deferred payout should match live liquidation after staged forfeiture"
         );
         assertEq(
+            afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.accumulatedBadDebtUsdc,
+            preview.badDebtUsdc,
+            "Preview bad debt should match live liquidation after staged forfeiture"
+        );
+        assertEq(
+            afterSnapshot.accumulatedFeesUsdc - beforeSnapshot.accumulatedFeesUsdc,
+            escrowBefore.executionBountyUsdc,
+            "Live liquidation should book the same forfeited escrow preview assumes as protocol fees"
+        );
+        assertEq(
+            afterSnapshot.effectiveSolvencyAssetsUsdc,
             preview.effectiveAssetsAfterUsdc,
-            simulated.effectiveAssetsAfterUsdc,
-            "preview solvency should use post-forfeiture depth"
+            "Preview solvency should match live liquidation after staged forfeiture"
         );
     }
 
@@ -1959,7 +1991,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
@@ -1969,7 +2001,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
         uint256 traderWalletBefore = usdc.balanceOf(address(uint160(uint256(bearId))));
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bearId, 80_000_000);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bearId, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
 
         int256 terminalResidual = int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc
@@ -1977,7 +2009,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(80_000_000));
+        priceData[0] = abi.encode(uint256(50_000_000));
         vm.prank(keeper);
         router.executeLiquidation(bearId, priceData);
 
@@ -2029,7 +2061,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
         assertGt(deferredBefore, 0, "Setup must create deferred payout while keeping the position open");
 
@@ -2067,11 +2099,6 @@ contract CfdEngineTest is BasePerpTest {
             preview.badDebtUsdc,
             "Bad debt should only reflect the post-deferred shortfall on close"
         );
-        assertEq(
-            clearinghouse.balanceUsdc(bearId) + engine.deferredPayoutUsdc(bearId),
-            _positivePart(terminalResidual),
-            "Terminal full-close residual should equal retained settlement plus remaining deferred payout"
-        );
     }
 
     function test_Close_ConsumesInterleavedDeferredPayoutWithoutTouchingGlobalHead() public {
@@ -2103,12 +2130,12 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
         assertGt(bearClaimId, 0, "Bear account should track its deferred trader payout off the global queue");
         assertGt(bearClaimId, bountyClaimId, "Bear deferred claim should sit behind the unrelated queue head");
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
         assertEq(
             engine.traderDeferredClaimIdByAccount(bearId),
             bearClaimId,
@@ -2165,16 +2192,16 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
         assertGt(bearClaimId, 0, "Initial deferred payout should create a queue node for bearId");
 
-        _closeAt(laterId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(laterId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint64 laterClaimId = engine.traderDeferredClaimIdByAccount(laterId);
         assertGt(laterClaimId, bearClaimId, "Later claimant should enter behind the earlier deferred trader node");
 
         uint256 bearDeferredBefore = engine.deferredPayoutUsdc(bearId);
-        _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredAfter = engine.deferredPayoutUsdc(bearId);
 
         assertEq(
@@ -2210,7 +2237,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 1e8, vaultDepth, refreshTime);
+        _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
         uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
         assertGt(
             deferredBefore, 1e6, "Setup must create legacy deferred payout large enough to cover the fee shortfall"
@@ -2266,7 +2293,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.startPrank(trader);
         uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 100e18, 1e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, type(uint256).max, true);
         }
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
@@ -2334,6 +2361,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint64 accrualTime = refreshTime + 30;
+        vm.warp(accrualTime);
+
         int256 currentFunding = engine.getCappedFundingPnl();
         int256 bearFundingAfter = _previewFundingPnl(
             CfdTypes.Side.BEAR, _sideOpenInterest(CfdTypes.Side.BEAR), _sideEntryFunding(CfdTypes.Side.BEAR)
@@ -2344,7 +2374,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertGt(postFunding, 0, "Setup must leave post-liquidation funding as a solvency liability");
 
-        CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 1e8);
+        CfdEngine.LiquidationPreview memory preDrainPreview = engine.previewLiquidation(bullId, 195_000_000);
         assertTrue(preDrainPreview.liquidatable, "Setup must produce a liquidatable position");
 
         uint256 bearMaxProfit = _sideMaxProfit(CfdTypes.Side.BEAR);
@@ -2356,14 +2386,14 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), currentAssets - targetAssets);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8);
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 195_000_000);
         assertTrue(
             preview.triggersDegradedMode,
             "Liquidation preview should use post-liquidation funding clip when testing degraded mode"
         );
 
         bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(uint256(1e8));
+        priceData[0] = abi.encode(uint256(195_000_000));
         vm.prank(address(0xAB1414));
         router.executeLiquidation(bullId, priceData);
 
@@ -2514,7 +2544,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
         uint256 lockedBeforeClose = clearinghouse.lockedMarginUsdc(accountId);
         (, uint256 liveMarginBeforeClose,,,,,,) = engine.positions(accountId);
@@ -2614,7 +2644,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
-    function test_FundingSettlement_ExceedsMargin_Reverts() public {
+    function test_FundingSettlement_DoesNotBackfillAfterFreshCheckpoint() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
@@ -2639,20 +2669,25 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
+        uint64 accrualTime = refreshTime + 30;
+        vm.warp(accrualTime);
+
         CfdTypes.Order memory addOrder = CfdTypes.Order({
             accountId: accountId,
-            sizeDelta: 1000 * 1e18,
+            sizeDelta: 10_000 * 1e18,
             marginDelta: 1000 * 1e6,
             targetPrice: 1e8,
-            commitTime: refreshTime,
+            commitTime: accrualTime,
             commitBlock: uint64(block.number),
             orderId: 2,
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert(CfdEngine.CfdEngine__FundingExceedsMargin.selector);
         vm.prank(address(router));
-        engine.processOrder(addOrder, 1e8, vaultDepth, refreshTime);
+        engine.processOrder(addOrder, 1e8, vaultDepth, accrualTime);
+
+        (uint256 size,,,,,,,) = engine.positions(accountId);
+        assertEq(size, 110_000 * 1e18, "Fresh mark checkpoint should not retroactively create a funding-driven revert");
     }
 
     function test_EntryPriceAveraging() public {

@@ -54,6 +54,7 @@ library CfdEnginePlanTypes {
         SideSnapshot bullSide;
         SideSnapshot bearSide;
 
+        uint256 fundingVaultDepthUsdc;
         uint256 vaultAssetsUsdc;
         uint256 vaultCashUsdc;
 

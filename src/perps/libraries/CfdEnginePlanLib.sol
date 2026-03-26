@@ -27,11 +27,10 @@ library CfdEnginePlanLib {
     //  HELPERS
     // ──────────────────────────────────────────────
 
-    function computeOpenMarginAfter(uint256 marginAfterFunding, int256 netMarginChange)
-        internal
-        pure
-        returns (bool drained, uint256 marginAfter)
-    {
+    function computeOpenMarginAfter(
+        uint256 marginAfterFunding,
+        int256 netMarginChange
+    ) internal pure returns (bool drained, uint256 marginAfter) {
         int256 computedMarginAfterSigned = int256(marginAfterFunding) + netMarginChange;
         if (computedMarginAfterSigned < 0) {
             return (true, 0);
@@ -45,7 +44,8 @@ library CfdEnginePlanLib {
         uint256 positionMarginAfterOpen
     ) internal pure returns (uint256 sideTotalMarginAfterOpen) {
         return uint256(
-            int256(sideTotalMarginAfterFunding) + int256(positionMarginAfterOpen) - int256(effectivePositionMarginAfterFunding)
+            int256(sideTotalMarginAfterFunding) + int256(positionMarginAfterOpen)
+                - int256(effectivePositionMarginAfterFunding)
         );
     }
 
@@ -241,7 +241,7 @@ library CfdEnginePlanLib {
                     bullOi: snap.bullSide.openInterest,
                     bearOi: snap.bearSide.openInterest,
                     timeDelta: timeDelta,
-                    vaultDepthUsdc: snap.vaultAssetsUsdc,
+                    vaultDepthUsdc: snap.fundingVaultDepthUsdc,
                     riskParams: snap.riskParams
                 })
             );
@@ -280,7 +280,7 @@ library CfdEnginePlanLib {
                     bullOi: bull.openInterest,
                     bearOi: bear.openInterest,
                     timeDelta: timeDelta,
-                    vaultDepthUsdc: snap.vaultAssetsUsdc,
+                    vaultDepthUsdc: snap.fundingVaultDepthUsdc,
                     riskParams: snap.riskParams
                 })
             );
@@ -440,6 +440,10 @@ library CfdEnginePlanLib {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
             return delta;
         }
+        if (delta.netMarginChange < 0 && uint256(-delta.netMarginChange) > posMarginAfterFunding) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
+            return delta;
+        }
 
         delta.newPosSize = openState.newSize;
         delta.newPosEntryPrice = openState.newEntryPrice;
@@ -458,9 +462,7 @@ library CfdEnginePlanLib {
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
         delta.sideTotalMarginAfterOpen = computeSideTotalMarginAfterOpen(
-            delta.sideTotalMarginAfterFunding,
-            delta.effectivePositionMarginAfterFunding,
-            delta.positionMarginAfterOpen
+            delta.sideTotalMarginAfterFunding, delta.effectivePositionMarginAfterFunding, delta.positionMarginAfterOpen
         );
 
         if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
@@ -495,9 +497,8 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory projectedPosition = snap.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
-        projectedPosition.margin = OpenAccountingLib.effectiveMarginAfterTradeCost(
-            delta.positionMarginAfterOpen, delta.tradeCostUsdc
-        );
+        projectedPosition.margin =
+            OpenAccountingLib.effectiveMarginAfterTradeCost(delta.positionMarginAfterOpen, delta.tradeCostUsdc);
         projectedPosition.entryPrice = delta.newPosEntryPrice;
 
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;

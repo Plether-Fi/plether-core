@@ -8,6 +8,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -33,11 +34,10 @@ contract CfdEnginePlanHarness is CfdEngine {
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
 
-    function computeOpenMarginAfter(uint256 marginAfterFunding, int256 netMarginChange)
-        external
-        pure
-        returns (bool drained, uint256 marginAfter)
-    {
+    function computeOpenMarginAfter(
+        uint256 marginAfterFunding,
+        int256 netMarginChange
+    ) external pure returns (bool drained, uint256 marginAfter) {
         return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterFunding, netMarginChange);
     }
 
@@ -145,11 +145,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         return (false, uint256(signedMarginAfter));
     }
 
-    function _marginAfterFunding(uint256 currentMargin, CfdEnginePlanTypes.OpenDelta memory delta)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _marginAfterFunding(
+        uint256 currentMargin,
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) internal pure returns (uint256) {
         uint256 marginAfterFunding = currentMargin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
         if (
             delta.funding.pendingFundingUsdc > 0
@@ -295,6 +294,83 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         (bool drained,) = harness.computeOpenMarginAfter(100e6, -150e6);
         assertTrue(drained, "Canonical helper should signal margin drain when net change exceeds the base");
+    }
+
+    function test_PlanOpen_RejectsDeferredFundingThatIsNotPhysicallySpendable() public view {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0;
+
+        bytes32 accountId = bytes32(uint256(0xBEEF));
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.accountId = accountId;
+        snap.position = CfdTypes.Position({
+            size: 100_000e18,
+            margin: 1e6,
+            entryPrice: 1e8,
+            maxProfitUsdc: 10_000e6,
+            entryFundingIndex: 0,
+            side: CfdTypes.Side.BEAR,
+            lastUpdateTime: 0,
+            vpiAccrued: 0
+        });
+        snap.currentTimestamp = 365 days;
+        snap.lastFundingTime = 0;
+        snap.lastMarkPrice = 1e8;
+        snap.lastMarkTime = uint64(block.timestamp);
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 1_000_000e18,
+            entryNotional: 1_000_000e18 * 1e8,
+            totalMargin: 50_000e6,
+            fundingIndex: 0,
+            entryFunding: 0
+        });
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 10_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e18 * 1e8,
+            totalMargin: 1e6,
+            fundingIndex: 0,
+            entryFunding: 0
+        });
+        snap.fundingVaultDepthUsdc = 50_000_000e6;
+        snap.vaultAssetsUsdc = 50_000_000e6;
+        snap.vaultCashUsdc = 0;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 0,
+            totalLockedMarginUsdc: 1e6,
+            activePositionMarginUsdc: 1e6,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: 0
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: 1e6, committedOrderMarginUsdc: 0, reservedSettlementUsdc: 0, totalLockedMarginUsdc: 1e6
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = params;
+        snap.liveMarkFreshForFunding = true;
+
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
+            snap, _openOrder(accountId, CfdTypes.Side.BEAR, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
+        );
+
+        assertEq(
+            uint8(delta.funding.payoutType),
+            uint8(CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT),
+            "Setup must route positive funding through deferred payout"
+        );
+        assertGt(delta.funding.pendingFundingUsdc, 0, "Setup must create positive pending funding");
+        assertLt(delta.netMarginChange, 0, "Open must require physical margin to pay trade costs");
+        assertEq(
+            uint256(-delta.netMarginChange),
+            4e6,
+            "Execution fee on the incremental open should exceed the physical margin bucket"
+        );
+        assertEq(
+            uint8(delta.revertCode),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "Planner should reject opens that rely on deferred funding IOUs for physically unlockable trade-cost margin"
+        );
     }
 
 }

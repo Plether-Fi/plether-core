@@ -20,7 +20,7 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 - `MarginClearinghouse` now exposes clearer balance semantics for free settlement USDC and liquidation-reachable USDC, reducing dependence on raw balance reads in settlement logic.
 - Close, liquidation, solvency, and withdrawal views in `CfdEngine` now route through dedicated accounting libraries instead of re-embedding those kernels inline.
 - Oracle and mark freshness policy is now centralized around action-specific helpers, and the invariant suite now checks accounting-boundary properties such as reserve backing, liability signaling, and withdrawal-reserve consistency.
-- `CfdEngine.syncFunding()` materializes accrued funding into storage only while the live mark is still fresh for weekday trading. All vault-balance-mutating paths (HousePool deposits/withdrawals/reconcile, CfdEngine fee withdrawals, deferred claims, bad debt clearing, degraded mode clearing) and `MarginClearinghouse.withdraw()` now sync funding first, but stale live marks no longer keep advancing funding until a fresh mark arrives or the oracle genuinely enters frozen/FAD policy.
+- `CfdEngine.syncFunding()` materializes accrued funding into storage only while the live mark is still fresh for weekday trading. All vault-balance-mutating paths (HousePool deposits/withdrawals/reconcile, CfdEngine fee withdrawals, deferred claims, bad debt clearing, degraded mode clearing) and `MarginClearinghouse.withdraw()` now sync funding first, stale live marks no longer keep advancing funding, and a fresh `updateMarkPrice()` after a stale gap checkpoints funding time instead of backfilling the frozen interval.
 - `OrderRouter.commitOrder()` now rejects risk-increasing opens during degraded mode and close-only windows (FAD/frozen oracle), and a shared order-failure policy helper consumes planner/engine semantic categories so router-local close-only checks and engine-typed failures cannot drift.
 - `TrancheVault.maxWithdraw()`/`maxRedeem()` now return 0 during deposit cooldown, degraded mode, and stale mark — matching ERC-4626 semantics where `maxX` must not exceed what `X` will accept.
 - `CfdEngine` liquidation planning now uses an explicit three-bucket residual model: settlement retained in the clearinghouse ledger, legacy deferred payout consumed/remaining, and any fresh trader payout created by the liquidation itself.
@@ -33,6 +33,8 @@ For the target accounting model that should govern future refactors, see [`ACCOU
 - `LiquidationAccountingLib`: shared kernel for preview/live liquidation settlement, including reachable collateral, keeper bounty, residual payout, and bad debt.
 - `SolvencyAccountingLib`: protocol-level balance-sheet view used for max-liability checks, effective-asset construction, and degraded-mode decisions.
 - `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees, deferred liabilities, and withdrawal-only funding liabilities.
+- Planner previews now follow the same staged transition model as live execution: funding first on pre-mutation depth, then protocol/router cash mutations, then payout and solvency classification on the post-mutation state.
+- Deferred funding receivables may count toward trader equity/risk, but opens cannot rely on deferred IOUs as if they were already-unlockable position margin for paying physical trade costs.
 
 These domains intentionally answer different questions and should not silently share assumptions.
 
