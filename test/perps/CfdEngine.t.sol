@@ -259,7 +259,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdEngine.CfdEngine__TypedOrderFailure.selector,
-                ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
                 uint8(7),
                 false
             )
@@ -820,7 +820,7 @@ contract CfdEngineTest is BasePerpTest {
         address trader = address(0xAB1720);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 10_000e6);
-        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2_000e6, 1e8);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         uint256 assetsBeforeClose = pool.totalAssets();
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 100_030_000);
@@ -833,7 +833,11 @@ contract CfdEngineTest is BasePerpTest {
             assetsAfterClose,
             "Unsolicited donations should remain quarantined instead of filling an over-credited fee-accounting gap"
         );
-        assertEq(pool.excessAssets(), 5e6, "Donation should stay sweepable as excess when protocol inflow is capped by cash received");
+        assertEq(
+            pool.excessAssets(),
+            5e6,
+            "Donation should stay sweepable as excess when protocol inflow is capped by cash received"
+        );
     }
 
     function test_WithdrawFees_RespectsSeniorCashReservation() public {
@@ -1388,8 +1392,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory preDrainPreview = engine.previewClose(bullId, bullSize, 1e8);
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
-        uint256 grossTargetAssets = _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc()
-            + uint256(postFunding);
+        uint256 grossTargetAssets = _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit)
+            + engine.accumulatedFeesUsdc() + uint256(postFunding);
         assertGt(
             grossTargetAssets,
             preDrainPreview.seizedCollateralUsdc + 1,
@@ -1891,6 +1895,46 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory strippedPreview = engine.previewLiquidation(bearId, 85_000_000);
         assertTrue(
             strippedPreview.liquidatable, "Removing deferred payout should expose the same position to liquidation"
+        );
+    }
+
+    function test_PreviewLiquidation_IncludesForfeitableOrderEscrowInVaultDepth() public {
+        address trader = address(0xAB1405);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 900e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
+        for (uint256 i = 0; i < queuedOrderCount; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        }
+        clearinghouse.withdraw(accountId, 70e6);
+        vm.stopPrank();
+
+        uint256 canonicalDepthBefore = pool.totalAssets();
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 195_000_000);
+        CfdEngine.LiquidationPreview memory simulated =
+            engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+
+        assertEq(preview.keeperBountyUsdc, simulated.keeperBountyUsdc, "preview should include forfeitable escrow");
+        assertEq(preview.badDebtUsdc, simulated.badDebtUsdc, "preview bad debt should use post-forfeiture depth");
+        assertEq(
+            preview.immediatePayoutUsdc,
+            simulated.immediatePayoutUsdc,
+            "preview immediate payout should use post-forfeiture depth"
+        );
+        assertEq(
+            preview.deferredPayoutUsdc,
+            simulated.deferredPayoutUsdc,
+            "preview deferred payout should use post-forfeiture depth"
+        );
+        assertEq(
+            preview.effectiveAssetsAfterUsdc,
+            simulated.effectiveAssetsAfterUsdc,
+            "preview solvency should use post-forfeiture depth"
         );
     }
 
@@ -2561,7 +2605,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdEngine.CfdEngine__TypedOrderFailure.selector,
-                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
                 uint8(1),
                 false
             )
@@ -3656,7 +3700,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdEngine.CfdEngine__TypedOrderFailure.selector,
-                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
                 false
             )
@@ -3682,10 +3726,18 @@ contract CfdEngineAuditTest is BasePerpTest {
         uint8 revertCode = engine.previewOpenRevertCode(
             accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
         );
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engine.previewOpenFailurePolicyCategory(
+            accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
+        );
         assertEq(
             revertCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
             "Preview should reject a same-side increase when the account is already liquidatable"
+        );
+        assertEq(
+            uint256(failureCategory),
+            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable),
+            "Preview should expose the semantic commit-time rejection category"
         );
 
         CfdTypes.Order memory order = CfdTypes.Order({
@@ -3704,7 +3756,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdEngine.CfdEngine__TypedOrderFailure.selector,
-                ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
                 false
             )

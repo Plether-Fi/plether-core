@@ -351,9 +351,19 @@ Close-order bounty policy:
 
 Failed-open bounty policy:
 
+- commit-time rejection is narrower than execution-time ownership: only deterministic current-state open failures should be rejected before queueing,
+- planner/engine semantic policy categories now drive that split: `previewOpenFailurePolicyCategory(...)` exposes `CfdEnginePlanTypes.OpenFailurePolicyCategory` (`CommitTimeRejectable`, `ExecutionTimeUserInvalid`, `ExecutionTimeProtocolStateInvalidated`), and typed execution failures expose `CfdEnginePlanTypes.ExecutionFailurePolicyCategory` (`UserInvalid`, `ProtocolStateInvalidated`),
+- the centralized policy helper currently treats `MUST_CLOSE_OPPOSING`, `POSITION_TOO_SMALL`, `SKEW_TOO_HIGH`, `INSUFFICIENT_INITIAL_MARGIN`, and `SOLVENCY_EXCEEDED` as commit-time rejectable when the cached mark is still fresh,
 - user-invalid open failures should pay the clearer from user escrow,
 - only genuine post-commit protocol-state invalidations should refund the trader bounty,
+- router-detected close-only invalidations on queued opens are protocol-state-invalidated and therefore refund the trader rather than paying the clearer,
 - execution-time insufficiency such as `MARGIN_DRAINED_BY_FEES` is treated as user-invalid unless governance intentionally defines a narrower drift-specific subtype later.
+
+Liquidation preview/live depth policy:
+
+- queued execution-bounty escrow forfeited during liquidation is part of the same effective post-forfeiture vault-depth view for both preview and live execution,
+- canonical liquidation preview and hypothetical liquidation simulation should therefore include the liquidated account's forfeitable queued execution-bounty escrow when modeling keeper bounty, fresh/deferred trader payout, bad debt, and post-op solvency,
+- live liquidation should perform the forfeiture before sourcing the vault depth passed into the engine, so preview and execution do not mix pre-sweep and post-sweep cash views.
 
 Funding freshness policy:
 

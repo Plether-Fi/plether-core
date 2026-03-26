@@ -857,6 +857,29 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         _updateFunding(lastMarkPrice, vault.totalAssets());
     }
 
+    function _syncFundingForMarkUpdate() internal {
+        if (block.timestamp <= lastFundingTime || lastMarkPrice == 0) {
+            return;
+        }
+
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: lastMarkPrice,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: block.timestamp - lastFundingTime,
+                vaultDepthUsdc: vault.totalAssets(),
+                riskParams: riskParams
+            })
+        );
+
+        bullState.fundingIndex += step.bullFundingIndexDelta;
+        bearState.fundingIndex += step.bearFundingIndexDelta;
+        lastFundingTime = uint64(block.timestamp);
+        emit FundingUpdated(bullState.fundingIndex, bearState.fundingIndex, step.absSkewUsdc);
+    }
+
     function _updateFunding(
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc
@@ -1023,7 +1046,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    function _accountVaultCashInflow(VaultCashInflow memory inflow) internal {
+    function _accountVaultCashInflow(
+        VaultCashInflow memory inflow
+    ) internal {
         if (inflow.physicalCashReceivedUsdc == 0) {
             return;
         }
@@ -1190,8 +1215,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 maxProfitUsdc,
             int256 entryFundingIndex,
             CfdTypes.Side side,
-            uint64 lastUpdateTime
-            ,int256 vpiAccrued
+            uint64 lastUpdateTime,
+            int256 vpiAccrued
         )
     {
         CfdTypes.Position memory pos = _loadPosition(accountId);
@@ -1414,6 +1439,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return uint8(delta.revertCode);
     }
 
+    function previewOpenFailurePolicyCategory(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, oraclePrice, publishTime);
+        return CfdEnginePlanLib.getOpenFailurePolicyCategory(delta.revertCode);
+    }
+
     function getDeferredPayoutStatus(
         bytes32 accountId,
         address keeper
@@ -1538,7 +1588,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bytes32 accountId,
         uint256 oraclePrice
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, vault.totalAssets());
+        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vault.totalAssets()));
     }
 
     /// @notice Hypothetical liquidation simulation at a caller-supplied vault depth.
@@ -1547,7 +1597,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 oraclePrice,
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview) {
-        return _previewLiquidation(accountId, oraclePrice, vaultDepthUsdc);
+        return _previewLiquidation(accountId, oraclePrice, _liquidationVaultDepthUsdc(accountId, vaultDepthUsdc));
     }
 
     function _previewLiquidation(
@@ -1589,6 +1639,18 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
         preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
+    }
+
+    function _liquidationVaultDepthUsdc(
+        bytes32 accountId,
+        uint256 baseVaultDepthUsdc
+    ) internal view returns (uint256 vaultDepthUsdc) {
+        vaultDepthUsdc = baseVaultDepthUsdc;
+        if (orderRouter == address(0)) {
+            return vaultDepthUsdc;
+        }
+
+        vaultDepthUsdc += IOrderRouterAccounting(orderRouter).getAccountEscrow(accountId).executionBountyUsdc;
     }
 
     function getPositionSide(
@@ -1837,13 +1899,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        ICfdEngine.OrderExecutionFailureClass failureClass = code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
-            || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-            || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-            ? ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated
-            : ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid;
-
-        revert ICfdEngine.CfdEngine__TypedOrderFailure(failureClass, uint8(code), false);
+        revert ICfdEngine.CfdEngine__TypedOrderFailure(
+            CfdEnginePlanLib.getExecutionFailurePolicyCategory(code), uint8(code), false
+        );
     }
 
     function _revertIfCloseInvalid(
@@ -1874,7 +1932,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         revert ICfdEngine.CfdEngine__TypedOrderFailure(
-            ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid, uint8(code), true
+            CfdEnginePlanLib.getExecutionFailurePolicyCategory(code), uint8(code), true
         );
     }
 
@@ -2051,9 +2109,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 cashCollectedExecutionFeeUsdc = delta.executionFeeUsdc > delta.deferredFeeRecoveryUsdc
                 ? delta.executionFeeUsdc - delta.deferredFeeRecoveryUsdc
                 : 0;
-            uint256 protocolFeeInflowUsdc = seizedUsdc > cashCollectedExecutionFeeUsdc
-                ? cashCollectedExecutionFeeUsdc
-                : seizedUsdc;
+            uint256 protocolFeeInflowUsdc =
+                seizedUsdc > cashCollectedExecutionFeeUsdc ? cashCollectedExecutionFeeUsdc : seizedUsdc;
             _accountVaultCashInflow(
                 VaultCashInflow({
                     physicalCashReceivedUsdc: seizedUsdc,
@@ -2344,7 +2401,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceOutOfOrder();
         }
         uint256 clamped = price > CAP_PRICE ? CAP_PRICE : price;
-        _syncFunding();
+        _syncFundingForMarkUpdate();
         lastMarkPrice = clamped;
         lastMarkTime = publishTime;
     }

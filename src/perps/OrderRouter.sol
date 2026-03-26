@@ -10,6 +10,7 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
+import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
 import {OrderOraclePolicyLib} from "./libraries/OrderOraclePolicyLib.sol";
 import {OrderEscrowAccounting} from "./modules/OrderEscrowAccounting.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -129,12 +130,6 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
     event OrderSkipped(uint64 indexed orderId, OrderFailReason reason, uint64 retryAfterTimestamp);
-
-    enum FailedOrderBountyPolicy {
-        None,
-        ClearerFull,
-        RefundUser
-    }
 
     modifier onlyEngine() {
         if (msg.sender != address(engine)) {
@@ -325,14 +320,13 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
+            CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engine.previewOpenFailurePolicyCategory(
+                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+            );
             uint8 revertCode = engine.previewOpenRevertCode(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             );
-            if (
-                revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
-                    || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
-                    || revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
-            ) {
+            if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
                 revert OrderRouter__PredictableOpenInvalid(revertCode);
             }
         }
@@ -505,7 +499,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
-            _finalizeExecution(orderId, 0, false, FailedOrderBountyPolicy.ClearerFull);
+            _finalizeExecution(orderId, 0, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
             return;
         }
         if (_orderRecord(orderId).retryAfterTimestamp > block.timestamp) {
@@ -515,11 +509,15 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
             _resolveOraclePrice(pythUpdateData, order.targetPrice);
 
+        bool oracleFrozen;
+        bool isFadWindow;
         if (address(pyth) != address(0)) {
+            oracleFrozen = _isOracleFrozen();
+            isFadWindow = engine.isFadWindow();
             OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
-                _isOracleFrozen(),
-                engine.isFadWindow(),
+                oracleFrozen,
+                isFadWindow,
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
@@ -528,7 +526,23 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
-                _finalizeExecution(orderId, pythFee, false, FailedOrderBountyPolicy.ClearerFull);
+                _finalizeExecution(
+                    orderId,
+                    pythFee,
+                    false,
+                    _failedOrderBountyPolicy(
+                        _routedRouterPolicyFailure(
+                            order,
+                            policy.oracleFrozen
+                                ? OrderFailurePolicyLib.RouterFailureCode.CloseOnlyOracleFrozen
+                                : OrderFailurePolicyLib.RouterFailureCode.CloseOnlyFad,
+                            policy.oracleFrozen,
+                            isFadWindow,
+                            engine.degradedMode(),
+                            policy.closeOnly
+                        )
+                    )
+                );
                 return;
             }
 
@@ -579,11 +593,18 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             OrderFailReason reason =
                 selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
             emit OrderFailed(orderId, reason);
-            _finalizeExecution(orderId, pythFee, false, _failedOrderBountyPolicy(order, revertData));
+            _finalizeExecution(
+                orderId,
+                pythFee,
+                false,
+                _failedOrderBountyPolicy(
+                    _routedFailureFromEngineRevert(order, revertData, oracleFrozen, isFadWindow, engine.degradedMode())
+                )
+            );
             return;
         }
 
-        _finalizeExecution(orderId, pythFee, true, FailedOrderBountyPolicy.ClearerFull);
+        _finalizeExecution(orderId, pythFee, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
     }
 
     /// @notice Executes queued pending orders against a single Pyth price tick.
@@ -608,11 +629,17 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
         OrderOraclePolicyLib.OracleExecutionPolicy memory policy;
+        bool oracleFrozen;
+        bool isFadWindow;
+        bool degradedMode;
         if (address(pyth) != address(0)) {
+            oracleFrozen = _isOracleFrozen();
+            isFadWindow = engine.isFadWindow();
+            degradedMode = engine.degradedMode();
             policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
                 OrderOraclePolicyLib.OracleAction.OrderExecution,
-                _isOracleFrozen(),
-                engine.isFadWindow(),
+                oracleFrozen,
+                isFadWindow,
                 orderExecutionStalenessLimit,
                 liquidationStalenessLimit,
                 engine.fadMaxStaleness()
@@ -648,7 +675,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
             if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
                 emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
                 continue;
             }
 
@@ -656,7 +683,22 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
                 emit OrderFailed(
                     orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
                 );
-                _cleanupOrder(orderId, false, FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(
+                    orderId,
+                    false,
+                    _failedOrderBountyPolicy(
+                        _routedRouterPolicyFailure(
+                            order,
+                            policy.oracleFrozen
+                                ? OrderFailurePolicyLib.RouterFailureCode.CloseOnlyOracleFrozen
+                                : OrderFailurePolicyLib.RouterFailureCode.CloseOnlyFad,
+                            policy.oracleFrozen,
+                            isFadWindow,
+                            degradedMode,
+                            policy.closeOnly
+                        )
+                    )
+                );
                 continue;
             }
 
@@ -685,7 +727,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
             try engine.processOrderTyped(order, clampedPrice, vaultDepth, oraclePublishTime) {
                 emit OrderExecuted(orderId, clampedPrice);
-                _cleanupOrder(orderId, true, FailedOrderBountyPolicy.ClearerFull);
+                _cleanupOrder(orderId, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
             } catch (bytes memory revertData) {
                 bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
                 if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
@@ -694,7 +736,13 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
                 OrderFailReason reason =
                     selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
                 emit OrderFailed(orderId, reason);
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(order, revertData));
+                _cleanupOrder(
+                    orderId,
+                    false,
+                    _failedOrderBountyPolicy(
+                        _routedFailureFromEngineRevert(order, revertData, oracleFrozen, isFadWindow, degradedMode)
+                    )
+                );
             }
         }
 
@@ -725,7 +773,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, FailedOrderBountyPolicy.ClearerFull);
+            _cleanupOrder(headId, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
             skipped++;
         }
     }
@@ -829,44 +877,20 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     }
 
     function _failedOrderBountyPolicy(
-        CfdTypes.Order memory order
-    ) internal pure returns (FailedOrderBountyPolicy) {
-        order;
-        return FailedOrderBountyPolicy.ClearerFull;
-    }
-
-    function _failedOrderBountyPolicy(
-        CfdTypes.Order memory order,
-        bytes memory revertData
-    ) internal pure returns (FailedOrderBountyPolicy) {
-        if (revertData.length >= 4 && bytes4(revertData) == TYPED_ORDER_FAILURE_SELECTOR) {
-            (ICfdEngine.OrderExecutionFailureClass failureClass,, bool isClose) = _decodeTypedOrderFailure(revertData);
-            if (isClose && failureClass == ICfdEngine.OrderExecutionFailureClass.UserOrderInvalid) {
-                return FailedOrderBountyPolicy.ClearerFull;
-            }
-        }
-        if (_isRefundableProtocolStateFailure(revertData)) {
-            return FailedOrderBountyPolicy.RefundUser;
-        }
-        return _failedOrderBountyPolicy(order);
-    }
-
-    function _isRefundableProtocolStateFailure(
-        bytes memory revertData
-    ) internal pure returns (bool) {
-        if (revertData.length < 4 || bytes4(revertData) != TYPED_ORDER_FAILURE_SELECTOR) {
-            return false;
-        }
-
-        (ICfdEngine.OrderExecutionFailureClass failureClass,, bool isClose) = _decodeTypedOrderFailure(revertData);
-        return !isClose && failureClass == ICfdEngine.OrderExecutionFailureClass.ProtocolStateInvalidated;
+        OrderFailurePolicyLib.FailureContext memory context
+    ) internal pure returns (OrderFailurePolicyLib.FailedOrderBountyPolicy) {
+        return OrderFailurePolicyLib.bountyPolicyForFailure(context);
     }
 
     function _decodeTypedOrderFailure(
         bytes memory revertData
-    ) internal pure returns (ICfdEngine.OrderExecutionFailureClass failureClass, uint8 failureCode, bool isClose) {
+    )
+        internal
+        pure
+        returns (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose)
+    {
         assembly {
-            failureClass := mload(add(revertData, 36))
+            failureCategory := mload(add(revertData, 36))
             failureCode := mload(add(revertData, 68))
             isClose := mload(add(revertData, 100))
         }
@@ -875,7 +899,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
     function _cleanupOrder(
         uint64 orderId,
         bool success,
-        FailedOrderBountyPolicy failedPolicy
+        OrderFailurePolicyLib.FailedOrderBountyPolicy failedPolicy
     ) internal returns (uint256 executionBountyUsdc) {
         executionBountyUsdc = _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
         _deleteOrder(
@@ -889,7 +913,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         uint64 orderId,
         uint256 pythFee,
         bool success,
-        FailedOrderBountyPolicy failedPolicy
+        OrderFailurePolicyLib.FailedOrderBountyPolicy failedPolicy
     ) internal {
         _consumeOrderEscrow(orderId, success, uint8(failedPolicy));
         _deleteOrder(
@@ -898,6 +922,73 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
         );
         _sendEth(msg.sender, msg.value - pythFee);
+    }
+
+    function _routedExpiryFailure(
+        CfdTypes.Order memory order
+    ) internal view returns (OrderFailurePolicyLib.FailureContext memory context) {
+        context.failure = OrderFailurePolicyLib.RoutedFailure({
+            domain: OrderFailurePolicyLib.FailureDomain.Expired, code: 0, isClose: order.isClose
+        });
+        context.source = OrderFailurePolicyLib.FailureSource.Expired;
+        context.oracleFrozen = _isOracleFrozen();
+        context.isFad = engine.isFadWindow();
+        context.degradedMode = engine.degradedMode();
+        context.closeOnly = context.oracleFrozen || context.isFad;
+    }
+
+    function _routedRouterPolicyFailure(
+        CfdTypes.Order memory order,
+        OrderFailurePolicyLib.RouterFailureCode failureCode,
+        bool oracleFrozen,
+        bool isFad,
+        bool degradedMode,
+        bool closeOnly
+    ) internal pure returns (OrderFailurePolicyLib.FailureContext memory context) {
+        context.failure = OrderFailurePolicyLib.RoutedFailure({
+            domain: OrderFailurePolicyLib.FailureDomain.ProtocolStateInvalidated,
+            code: uint8(failureCode),
+            isClose: order.isClose
+        });
+        context.source = OrderFailurePolicyLib.FailureSource.RouterPolicy;
+        context.oracleFrozen = oracleFrozen;
+        context.isFad = isFad;
+        context.degradedMode = degradedMode;
+        context.closeOnly = closeOnly;
+    }
+
+    function _routedFailureFromEngineRevert(
+        CfdTypes.Order memory order,
+        bytes memory revertData,
+        bool oracleFrozen,
+        bool isFad,
+        bool degradedMode
+    ) internal pure returns (OrderFailurePolicyLib.FailureContext memory context) {
+        OrderFailurePolicyLib.RoutedFailure memory failure;
+        OrderFailurePolicyLib.FailureSource source;
+
+        if (revertData.length >= 4 && bytes4(revertData) == TYPED_ORDER_FAILURE_SELECTOR) {
+            (CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose) =
+                _decodeTypedOrderFailure(revertData);
+            failure = OrderFailurePolicyLib.RoutedFailure({
+                domain: OrderFailurePolicyLib.failureDomainForExecutionCategory(failureCategory),
+                code: failureCode,
+                isClose: isClose
+            });
+            source = OrderFailurePolicyLib.FailureSource.EngineTyped;
+        } else {
+            failure = OrderFailurePolicyLib.RoutedFailure({
+                domain: OrderFailurePolicyLib.FailureDomain.UserInvalid, code: 0, isClose: order.isClose
+            });
+            source = OrderFailurePolicyLib.FailureSource.UntypedRevert;
+        }
+
+        context.failure = failure;
+        context.source = source;
+        context.oracleFrozen = oracleFrozen;
+        context.isFad = isFad;
+        context.degradedMode = degradedMode;
+        context.closeOnly = oracleFrozen || isFad;
     }
 
     /// @dev Immediate liquidation bounties still pay directly to the executing keeper wallet.
@@ -1322,8 +1413,8 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             }
         }
 
-        uint256 vaultDepth = vault.totalAssets();
         _forfeitEscrowedOrderBountiesOnLiquidation(accountId);
+        uint256 vaultDepth = vault.totalAssets();
         uint256 keeperBountyUsdc = engine.liquidatePosition(accountId, executionPrice, vaultDepth, oraclePublishTime);
 
         _clearLiquidatedAccountOrders(accountId);
