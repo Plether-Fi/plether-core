@@ -21,6 +21,7 @@ contract CfdMathTest is Test {
             baseApy: 0.15e18, // 15% APY at the kink
             maxApy: 3.0e18, // 300% APY at the wall
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15

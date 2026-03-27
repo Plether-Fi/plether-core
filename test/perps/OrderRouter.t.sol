@@ -35,6 +35,7 @@ contract OrderRouterTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -1128,6 +1129,7 @@ contract OrderRouterPythTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -2318,6 +2320,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 1e6,
             bountyBps: 9
@@ -2573,6 +2576,7 @@ contract FadStalenessTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3349,6 +3353,7 @@ contract OrderRouterAuditTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3484,6 +3489,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3713,6 +3719,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3799,6 +3806,7 @@ contract StalenessGriefTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3908,6 +3916,7 @@ contract VpiImrBypassTest is Test {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4040,6 +4049,7 @@ contract KeeperFeeRefundTest is Test {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4234,6 +4244,7 @@ contract WeekendArbitrageTest is Test {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15

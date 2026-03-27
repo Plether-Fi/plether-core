@@ -377,7 +377,7 @@ Margin-threshold policy:
 
 - maintenance, initial, and FAD margin thresholds should be modeled as separate explicit config surfaces,
 - withdraw gating should use `initMarginBps`, not `maintMarginBps`,
-- implementation may temporarily derive IMR from a legacy policy ratio, but the intended steady state is an explicit `initMarginBps` parameter rather than hidden `1.5x` math.
+- open and withdraw IMR checks should read the configured `initMarginBps` value directly rather than deriving it from any other margin threshold.
 
 Global queue cleanup policy:
 

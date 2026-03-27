@@ -142,7 +142,7 @@ Core state machine. **Holds zero physical funds.** Receives validated intents, e
 
 **Position View Semantics**: `getPositionView()` now separates `physicalReachableCollateralUsdc` from `nettableDeferredPayoutUsdc`. Generic position health and withdraw-facing views use only physically reachable clearinghouse collateral. Existing deferred payout is shown separately so UIs and audits can reason about the same-account terminal netting path without treating that IOU as instantly withdrawable or generally reachable collateral.
 
-**Withdraw Guard Policy**: Open-position withdrawals are blocked once post-withdraw equity would fall below initial margin, not just maintenance margin. The intended configuration surface is a dedicated `initMarginBps` parameter distinct from `maintMarginBps` / `fadMarginBps`, even though the current code still applies the historical `1.5x` ratio.
+**Withdraw Guard Policy**: Open-position withdrawals are blocked once post-withdraw equity would fall below the explicit `initMarginBps` threshold, not just maintenance margin. `initMarginBps`, `maintMarginBps`, and `fadMarginBps` are separate configuration surfaces.
 
 **Key Invariants**:
 
@@ -353,7 +353,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `maintMarginBps` | 100 (1%) | Maintenance margin requirement |
-| `initMarginBps` | 150 (1.5%) | Initial margin requirement; should be configured explicitly rather than inferred from MMR |
+| `initMarginBps` | 150 (1.5%) | Initial margin requirement configured explicitly in risk params |
 | `fadMarginBps` | 300 (3%) | FAD window maintenance margin |
 | `bountyBps` | 15 (0.15%) | Liquidation keeper bounty |
 | `minBountyUsdc` | 5,000,000 ($5) | Keeper bounty floor |
@@ -362,7 +362,7 @@ Only the owner can pause/unpause. Protective actions (closes, liquidations, with
 | `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
 | `baseApy` | 0.15e18 (15%) | Funding rate at kink |
 | `maxApy` | 3.00e18 (300%) | Funding rate at wall |
-| IMR | `initMarginBps` (currently 1.5%) | Initial margin requirement |
+| IMR | `initMarginBps` | Initial margin requirement |
 | Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
 | Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
 | Close execution bounty | 1.00 USDC | Reserved at commit as router-custodied escrow |

@@ -256,6 +256,7 @@ contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15

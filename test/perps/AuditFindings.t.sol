@@ -40,6 +40,7 @@ contract AuditC01_HwmInflation is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -135,7 +136,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         // Open 200k BULL tokens at $1.00
-        // Notional = $200k, MMR = 1% = $2000, IMR = 1.5x = $3000
+        // Notional = $200k, MMR = 1% = $2000, explicit IMR = 1.5% = $3000
         // marginDelta = $3070 → pre-fee passes IMR ($3070 >= $3000)
         // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
         // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
@@ -275,6 +276,7 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15

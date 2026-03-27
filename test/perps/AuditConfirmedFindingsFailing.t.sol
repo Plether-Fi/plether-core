@@ -393,6 +393,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             baseApy: 1e18,
             maxApy: 5e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -488,6 +489,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 1,
             bountyBps: 15
@@ -549,6 +551,7 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15

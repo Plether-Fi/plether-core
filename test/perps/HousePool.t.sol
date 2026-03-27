@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
@@ -43,6 +43,7 @@ contract HousePoolTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -401,8 +402,14 @@ contract HousePoolTest is BasePerpTest {
 
         pool.finalizeSeniorRate();
 
-        assertEq(engine.lastFundingTime(), uint64(block.timestamp), "Funding must already be synced to the current block before stale-mark finalization continues");
-        assertGe(engine.lastFundingTime(), fundingBefore, "Funding timestamp must not move backward during finalization");
+        assertEq(
+            engine.lastFundingTime(),
+            uint64(block.timestamp),
+            "Funding must already be synced to the current block before stale-mark finalization continues"
+        );
+        assertGe(
+            engine.lastFundingTime(), fundingBefore, "Funding timestamp must not move backward during finalization"
+        );
     }
 
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
@@ -1345,6 +1352,7 @@ contract HousePoolTest is BasePerpTest {
                 baseApy: 1e18,
                 maxApy: 5e18,
                 maintMarginBps: 100,
+                initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
@@ -1387,6 +1395,7 @@ contract HousePoolTest is BasePerpTest {
                 baseApy: 1e18,
                 maxApy: 5e18,
                 maintMarginBps: 100,
+                initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
@@ -1439,6 +1448,7 @@ contract HousePoolTest is BasePerpTest {
                 baseApy: 1e18,
                 maxApy: 5e18,
                 maintMarginBps: 100,
+                initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
@@ -1721,6 +1731,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -1781,7 +1792,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
 
     function test_LiquidationKeeperBounty_DoesNotDoubleCountIntoSeededTradingRevenueAfterWipeout() public {
         uint256 juniorSeedAssets = 20_000e6;
-        uint256 seniorSeedAssets = 1_000e6;
+        uint256 seniorSeedAssets = 1000e6;
         usdc.mint(address(this), juniorSeedAssets + seniorSeedAssets);
         usdc.approve(address(pool), juniorSeedAssets + seniorSeedAssets);
         pool.initializeSeedPosition(true, seniorSeedAssets, address(this));
@@ -2098,7 +2109,9 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         uint256 juniorBeforeFeeWithdrawal = pool.juniorPrincipal();
         address feeRecipient = address(0xAB1718);
         engine.withdrawFees(feeRecipient);
-        assertEq(pool.juniorPrincipal(), juniorBeforeFeeWithdrawal, "Fee withdrawal should not drain seeded LP principal");
+        assertEq(
+            pool.juniorPrincipal(), juniorBeforeFeeWithdrawal, "Fee withdrawal should not drain seeded LP principal"
+        );
     }
 
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
@@ -2325,6 +2338,7 @@ contract HousePoolAuditTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15

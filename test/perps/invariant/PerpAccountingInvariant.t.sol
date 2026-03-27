@@ -23,6 +23,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 1e6,
             bountyBps: 9

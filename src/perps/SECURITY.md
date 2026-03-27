@@ -247,7 +247,7 @@ When a position goes underwater (equity < 0):
 
 - **Behavior**: Withdraw-facing risk checks now target initial-margin headroom rather than only maintenance margin.
 - **Effect**: Traders cannot withdraw themselves to the liquidation cliff and then become liquidatable from a trivial adverse move.
-- **Design note**: The intended policy surface is an explicit `initMarginBps` parameter distinct from `maintMarginBps` / `fadMarginBps`; deriving IMR from a hard-coded ratio should be treated as legacy compatibility rather than the long-term spec.
+- **Design note**: `initMarginBps` is an explicit policy surface distinct from `maintMarginBps` / `fadMarginBps`, and open / withdraw margin checks should read that configured value directly.
 
 #### Failed Open Bounty Policy
 

@@ -100,6 +100,7 @@ contract PerpsForkTest is Test {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -230,6 +231,7 @@ contract PerpsForkTest is Test {
             uint256 baseApy,
             uint256 maxApy,
             uint256 maintMarginBps,
+            uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 minBountyUsdc,
             uint256 bountyBps
@@ -241,6 +243,7 @@ contract PerpsForkTest is Test {
             baseApy: baseApy,
             maxApy: maxApy,
             maintMarginBps: maintMarginBps,
+            initMarginBps: initMarginBps,
             fadMarginBps: fadMarginBps,
             minBountyUsdc: minBountyUsdc,
             bountyBps: bountyBps

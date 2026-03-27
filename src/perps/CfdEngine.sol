@@ -828,12 +828,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
-        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, CAP_PRICE, getPendingFunding(pos), reachableUsdc, requiredBps
+            pos, price, CAP_PRICE, getPendingFunding(pos), reachableUsdc, riskParams.initMarginBps
         );
 
-        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * requiredBps * 15) / (10_000 * 10);
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
         if (riskState.equityUsdc < int256(initialMarginRequirementUsdc)) {
             revert CfdEngine__WithdrawBlockedByOpenPosition();
         }
@@ -2343,10 +2342,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function _validateRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) internal pure {
-        if (_riskParams.maintMarginBps == 0 || _riskParams.fadMarginBps < _riskParams.maintMarginBps) {
+        if (_riskParams.maintMarginBps == 0 || _riskParams.initMarginBps < _riskParams.maintMarginBps) {
             revert CfdEngine__InvalidRiskParams();
         }
-        if (_riskParams.fadMarginBps > 10_000) {
+        if (_riskParams.fadMarginBps < _riskParams.maintMarginBps) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        if (_riskParams.initMarginBps > 10_000 || _riskParams.fadMarginBps > 10_000) {
             revert CfdEngine__InvalidRiskParams();
         }
         if (_riskParams.minBountyUsdc == 0 || _riskParams.bountyBps == 0) {

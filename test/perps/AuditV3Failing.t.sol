@@ -201,6 +201,7 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15

@@ -195,12 +195,14 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 preview.deferredPayoutUsdc > 0,
                 "Close preview must choose immediate or deferred payout"
             );
-            uint256 freeCashForFreshPayouts = CashPriorityLib.reserveFreshPayouts(
+            uint256 freeCashForFreshPayouts =
+                CashPriorityLib.reserveFreshPayouts(
                 vault.totalAssets(),
                 engine.accumulatedFeesUsdc(),
                 engine.totalDeferredPayoutUsdc(),
                 engine.totalDeferredClearerBountyUsdc()
-            ).freeCashUsdc;
+            )
+            .freeCashUsdc;
             if (freeCashForFreshPayouts >= totalPayoutUsdc) {
                 assertEq(preview.deferredPayoutUsdc, 0, "Close preview must not defer when vault is liquid");
             } else {

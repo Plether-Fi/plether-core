@@ -82,6 +82,7 @@ contract AuditRemainingCoverageFindingsFailing_LiquidationBounty is BasePerpTest
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 10,
+            initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
             minBountyUsdc: 1e6,
             bountyBps: 1000

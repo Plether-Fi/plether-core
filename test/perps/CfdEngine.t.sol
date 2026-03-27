@@ -94,6 +94,7 @@ contract CfdEnginePlanLibHarness {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -181,6 +182,7 @@ contract CfdEngineTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -238,6 +240,31 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(size, 100_000 * 1e18, "Size mismatch");
         // With the explicit $200k depth passed to processOrder, the current VPI + fee path leaves $1,947.5 margin.
         assertEq(margin, 1_947_500_000, "Margin should equal deposit minus VPI and exec fee");
+    }
+
+    function test_OpenPosition_UsesExplicitInitMarginBps() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.initMarginBps = 400;
+        engine.proposeRiskParams(params);
+        vm.warp(block.timestamp + 7 days);
+        engine.finalizeRiskParams();
+
+        (,,,,,, uint256 initMarginBps,,,) = engine.riskParams();
+        assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        bytes32 accountId = bytes32(uint256(0xBEEF1));
+        _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
+
+        assertEq(
+            engine.previewOpenRevertCode(
+                accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "Planner should use the explicit init margin config"
+        );
     }
 
     function test_ProcessOrderTyped_ProtocolStateFailureUsesTypedTaxonomy() public {
@@ -1644,17 +1671,17 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
             .checked_write(uint256(0));
 
-        bytes32 deferredPayoutSlot = keccak256(abi.encode(accountId, uint256(30)));
+        bytes32 deferredPayoutSlot = keccak256(abi.encode(accountId, uint256(31)));
         vm.store(address(engine), deferredPayoutSlot, bytes32(uint256(10e6)));
-        vm.store(address(engine), bytes32(uint256(31)), bytes32(uint256(10e6)));
+        vm.store(address(engine), bytes32(uint256(32)), bytes32(uint256(10e6)));
 
-        bytes32 claimBaseSlot = keccak256(abi.encode(uint256(1), uint256(34)));
+        bytes32 claimBaseSlot = keccak256(abi.encode(uint256(1), uint256(35)));
         vm.store(address(engine), claimBaseSlot, bytes32(uint256(0)));
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 1), accountId);
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 2), bytes32(uint256(0)));
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 3), bytes32(uint256(10e6)));
         vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 4), bytes32(uint256(0)));
-        vm.store(address(engine), bytes32(uint256(35)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
+        vm.store(address(engine), bytes32(uint256(36)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
         stdstore.target(address(engine)).sig("traderDeferredClaimIdByAccount(bytes32)").with_key(accountId)
             .checked_write(uint256(1));
 
@@ -2809,6 +2836,7 @@ contract CfdEngineTest is BasePerpTest {
                 baseApy: 0.15e18,
                 maxApy: 3.0e18,
                 maintMarginBps: 300,
+                initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
@@ -2851,6 +2879,22 @@ contract CfdEngineTest is BasePerpTest {
     function test_ProposeRiskParams_RevertsOnZeroMaintMargin() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maintMarginBps = 0;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsOnZeroInitMargin() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.initMarginBps = 0;
+
+        vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
+        engine.proposeRiskParams(params);
+    }
+
+    function test_ProposeRiskParams_RevertsWhenInitMarginBelowMaint() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.initMarginBps = params.maintMarginBps - 1;
 
         vm.expectRevert(CfdEngine.CfdEngine__InvalidRiskParams.selector);
         engine.proposeRiskParams(params);
@@ -2957,6 +3001,7 @@ contract CfdEngineTest is BasePerpTest {
                 baseApy: 0.15e18,
                 maxApy: 3.0e18,
                 maintMarginBps: 100,
+                initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
@@ -2987,7 +3032,7 @@ contract CfdEngineTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 10_000 * 1e6);
 
-        // Open BULL 100k tokens at $1.00 with $1600 margin (meets 1.5x initial margin)
+        // Open BULL 100k tokens at $1.00 with $1600 margin (meets explicit 1.5% init margin)
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 100_000 * 1e18,
@@ -3039,7 +3084,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // notional = 100k * $1 = $100k. execFee = $60, VPI ~= $2.50
         // MMR = 1% of $100k = $1000
-        // Even using full cross-margin equity, $1000 account collateral is below the $1500 initial margin requirement.
+        // Even using full cross-margin equity, $1000 account collateral is below the configured $1500 initial margin requirement.
         // Without the initial margin check, this would create an instantly-liquidatable position.
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -3299,6 +3344,7 @@ contract CfdEngineTest is BasePerpTest {
                 baseApy: 0.15e18,
                 maxApy: 3.0e18,
                 maintMarginBps: 10,
+                initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 100
@@ -3454,6 +3500,29 @@ contract CfdEngineTest is BasePerpTest {
         engine.checkWithdraw(accountId);
     }
 
+    function test_CheckWithdraw_UsesExplicitInitMarginBps() public {
+        address trader = address(0x515815);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 3200e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 3000e6, 1e8);
+
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.initMarginBps = 300;
+        engine.proposeRiskParams(params);
+        vm.warp(block.timestamp + 7 days);
+        engine.finalizeRiskParams();
+
+        (,,,,,, uint256 initMarginBps,,,) = engine.riskParams();
+        assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, 200e6);
+    }
+
     function test_ReserveCloseOrderExecutionBounty_DoesNotCountDeferredPayoutAsReachableCollateral() public {
         address trader = address(0x51582);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -3547,6 +3616,7 @@ contract CfdEngineFundingTest is BasePerpTest {
             baseApy: 0.5e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3664,6 +3734,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -3908,6 +3979,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             baseApy: 3.0e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4000,6 +4072,7 @@ contract MarginCappedMtmTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4183,6 +4256,7 @@ contract PhantomExecFeeTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4249,6 +4323,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4333,6 +4408,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -4449,6 +4525,7 @@ contract ProtocolPhaseTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -4549,6 +4626,7 @@ contract VpiDepthTest is BasePerpTest {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4675,6 +4753,7 @@ contract VpiChunkingTest is Test {
             baseApy: 0.15e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -4857,6 +4936,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
             baseApy: 0.5e18,
             maxApy: 3.0e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15

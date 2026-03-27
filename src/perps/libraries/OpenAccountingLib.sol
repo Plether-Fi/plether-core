@@ -64,7 +64,8 @@ library OpenAccountingLib {
         state.tradeCostUsdc = state.vpiUsdc + int256(state.executionFeeUsdc);
         state.maintenanceMarginUsdc =
             (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE) * inputs.riskParams.maintMarginBps) / 10_000;
-        state.initialMarginRequirementUsdc = (state.maintenanceMarginUsdc * 150) / 100;
+        state.initialMarginRequirementUsdc =
+            (((state.newSize * inputs.price) / CfdMath.USDC_TO_TOKEN_SCALE) * inputs.riskParams.initMarginBps) / 10_000;
         if (state.initialMarginRequirementUsdc < inputs.riskParams.minBountyUsdc) {
             state.initialMarginRequirementUsdc = inputs.riskParams.minBountyUsdc;
         }

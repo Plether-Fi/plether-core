@@ -37,6 +37,7 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
             baseApy: 1e18,
             maxApy: 5e18,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -98,6 +99,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -127,6 +129,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -255,6 +258,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15
@@ -368,6 +372,7 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 10,
+            initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5e6,
             bountyBps: 15

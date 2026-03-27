@@ -47,6 +47,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0.2e18,
             maxApy: 4e18,
             maintMarginBps: 200,
+            initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
@@ -64,6 +65,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0.2e18,
             maxApy: 4e18,
             maintMarginBps: 200,
+            initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
@@ -83,6 +85,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0.2e18,
             maxApy: 4e18,
             maintMarginBps: 200,
+            initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
@@ -92,7 +95,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         engine.finalizeRiskParams();
 
-        (,,,,, uint256 maintMarginBps,,,) = engine.riskParams();
+        (,,,,, uint256 maintMarginBps,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.riskParamsActivationTime(), 0);
     }
@@ -110,6 +113,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0.2e18,
             maxApy: 4e18,
             maintMarginBps: 200,
+            initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             minBountyUsdc: 10 * 1e6,
             bountyBps: 20
@@ -131,6 +135,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -149,6 +154,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 200,
+            initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 300,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
@@ -166,6 +172,7 @@ contract TimelockPauseTest is BasePerpTest {
             baseApy: 0,
             maxApy: 0,
             maintMarginBps: 300,
+            initMarginBps: ((300) * 15) / 10,
             fadMarginBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
