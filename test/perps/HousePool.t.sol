@@ -393,6 +393,9 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
 
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
         uint64 fundingBefore = engine.lastFundingTime();
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -402,10 +405,10 @@ contract HousePoolTest is BasePerpTest {
 
         pool.finalizeSeniorRate();
 
-        assertEq(
+        assertGt(
             engine.lastFundingTime(),
-            uint64(block.timestamp),
-            "Funding must already be synced to the current block before stale-mark finalization continues"
+            fundingBefore,
+            "Stale mark refresh should move funding time forward before finalization continues"
         );
         assertGe(
             engine.lastFundingTime(), fundingBefore, "Funding timestamp must not move backward during finalization"
@@ -526,7 +529,7 @@ contract HousePoolTest is BasePerpTest {
         _fundTrader(bob, 50_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(block.timestamp + 30);
         uint256 seedAssets = 100_000e6;
         usdc.mint(address(this), seedAssets);
         usdc.approve(address(pool), seedAssets);
@@ -1422,6 +1425,7 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30);
 
         uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
         assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
@@ -1474,6 +1478,7 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 20 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30);
 
         uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
         assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");

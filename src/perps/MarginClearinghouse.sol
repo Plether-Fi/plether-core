@@ -292,16 +292,7 @@ contract MarginClearinghouse is Ownable2Step {
         uint64 orderId
     ) external onlyOperator returns (uint256 releasedUsdc) {
         IMarginClearinghouse.OrderReservation storage reservation = _activeReservation(orderId);
-        releasedUsdc = reservation.remainingAmountUsdc;
-        if (releasedUsdc > 0) {
-            _consumeReservationBucket(reservation.accountId, reservation.bucket, releasedUsdc);
-            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-                activeCommittedOrderReservationUsdc[reservation.accountId] -= releasedUsdc;
-            } else {
-                activeReservedSettlementReservationUsdc[reservation.accountId] -= releasedUsdc;
-            }
-        }
-        _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Released);
+        releasedUsdc = _releaseReservation(reservation, true);
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
 
@@ -313,17 +304,7 @@ contract MarginClearinghouse is Ownable2Step {
             return 0;
         }
 
-        releasedUsdc = reservation.remainingAmountUsdc;
-        if (releasedUsdc > 0) {
-            _consumeReservationBucket(reservation.accountId, reservation.bucket, releasedUsdc);
-            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-                activeCommittedOrderReservationUsdc[reservation.accountId] -= releasedUsdc;
-            } else {
-                activeReservedSettlementReservationUsdc[reservation.accountId] -= releasedUsdc;
-            }
-        }
-
-        _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Released);
+        releasedUsdc = _releaseReservation(reservation, true);
         emit ReservationReleased(orderId, reservation.accountId, releasedUsdc);
     }
 
@@ -337,17 +318,7 @@ contract MarginClearinghouse is Ownable2Step {
             return 0;
         }
 
-        reservation.remainingAmountUsdc -= _toUint96(consumedUsdc);
-        _consumeReservationBucket(reservation.accountId, reservation.bucket, consumedUsdc);
-        if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-            activeCommittedOrderReservationUsdc[reservation.accountId] -= consumedUsdc;
-        } else {
-            activeReservedSettlementReservationUsdc[reservation.accountId] -= consumedUsdc;
-        }
-
-        if (reservation.remainingAmountUsdc == 0) {
-            _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Consumed);
-        }
+        _consumeReservation(reservation, consumedUsdc, true, IMarginClearinghouse.ReservationStatus.Consumed);
 
         emit ReservationConsumed(orderId, reservation.accountId, consumedUsdc, reservation.remainingAmountUsdc);
     }
@@ -387,17 +358,9 @@ contract MarginClearinghouse is Ownable2Step {
                 continue;
             }
 
-            reservation.remainingAmountUsdc -= _toUint96(reservationConsumedUsdc);
-            _consumeReservationBucket(reservation.accountId, reservation.bucket, reservationConsumedUsdc);
-            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-                activeCommittedOrderReservationUsdc[reservation.accountId] -= reservationConsumedUsdc;
-            } else {
-                activeReservedSettlementReservationUsdc[reservation.accountId] -= reservationConsumedUsdc;
-            }
-
-            if (reservation.remainingAmountUsdc == 0) {
-                _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Consumed);
-            }
+            _consumeReservation(
+                reservation, reservationConsumedUsdc, true, IMarginClearinghouse.ReservationStatus.Consumed
+            );
 
             remainingUsdc -= reservationConsumedUsdc;
             consumedUsdc += reservationConsumedUsdc;
@@ -430,19 +393,9 @@ contract MarginClearinghouse is Ownable2Step {
                 continue;
             }
 
-            reservation.remainingAmountUsdc -= _toUint96(reservationConsumedUsdc);
-            if (consumeBuckets) {
-                _consumeReservationBucket(accountId, reservation.bucket, reservationConsumedUsdc);
-            }
-            if (reservation.bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-                activeCommittedOrderReservationUsdc[accountId] -= reservationConsumedUsdc;
-            } else {
-                activeReservedSettlementReservationUsdc[accountId] -= reservationConsumedUsdc;
-            }
-
-            if (reservation.remainingAmountUsdc == 0) {
-                _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Consumed);
-            }
+            _consumeReservation(
+                reservation, reservationConsumedUsdc, consumeBuckets, IMarginClearinghouse.ReservationStatus.Consumed
+            );
 
             remainingUsdc -= reservationConsumedUsdc;
             consumedUsdc += reservationConsumedUsdc;
@@ -452,6 +405,49 @@ contract MarginClearinghouse is Ownable2Step {
         }
 
         _advanceReservationHead(accountId);
+    }
+
+    function _releaseReservation(
+        IMarginClearinghouse.OrderReservation storage reservation,
+        bool consumeBuckets
+    ) internal returns (uint256 releasedUsdc) {
+        releasedUsdc = reservation.remainingAmountUsdc;
+        if (releasedUsdc > 0) {
+            _consumeReservation(
+                reservation, releasedUsdc, consumeBuckets, IMarginClearinghouse.ReservationStatus.Released
+            );
+        } else {
+            _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Released);
+        }
+    }
+
+    function _consumeReservation(
+        IMarginClearinghouse.OrderReservation storage reservation,
+        uint256 amountUsdc,
+        bool consumeBuckets,
+        IMarginClearinghouse.ReservationStatus terminalStatus
+    ) internal {
+        reservation.remainingAmountUsdc -= _toUint96(amountUsdc);
+        if (consumeBuckets) {
+            _consumeReservationBucket(reservation.accountId, reservation.bucket, amountUsdc);
+        }
+        _decreaseActiveReservation(reservation.accountId, reservation.bucket, amountUsdc);
+
+        if (reservation.remainingAmountUsdc == 0) {
+            _closeReservation(reservation, terminalStatus);
+        }
+    }
+
+    function _decreaseActiveReservation(
+        bytes32 accountId,
+        IMarginClearinghouse.ReservationBucket bucket,
+        uint256 amountUsdc
+    ) internal {
+        if (bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
+            activeCommittedOrderReservationUsdc[accountId] -= amountUsdc;
+        } else {
+            activeReservedSettlementReservationUsdc[accountId] -= amountUsdc;
+        }
     }
 
     function lockReservedSettlement(

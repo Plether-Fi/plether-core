@@ -949,12 +949,14 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         }
 
         HousePoolPendingLivePlanLib.PendingLivePlan memory plan = HousePoolPendingLivePlanLib.planApplyPendingBuckets(
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: _getWaterfallState(),
-                unassignedAssets: unassignedAssets,
-                seniorSupply: _seniorShareSupply(),
-                juniorSupply: _juniorShareSupply()
-            }),
+            _copyPendingAccountingState(
+                PendingAccountingState({
+                    waterfall: _getWaterfallState(),
+                    unassignedAssets: unassignedAssets,
+                    seniorSupply: _seniorShareSupply(),
+                    juniorSupply: _juniorShareSupply()
+                })
+            ),
             seniorPrincipal,
             pendingRecapitalizationUsdc,
             pendingTradingRevenueUsdc
@@ -974,13 +976,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function _applyPendingBucketsPreview(
         PendingAccountingState memory state
     ) internal view {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: state.waterfall,
-                unassignedAssets: state.unassignedAssets,
-                seniorSupply: state.seniorSupply,
-                juniorSupply: state.juniorSupply
-            });
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
         HousePoolPendingPreviewLib.applyPendingBucketsPreview(
             previewState, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
         );
@@ -992,13 +988,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: state.waterfall,
-                unassignedAssets: state.unassignedAssets,
-                seniorSupply: state.seniorSupply,
-                juniorSupply: state.juniorSupply
-            });
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
         HousePoolPendingPreviewLib.applyRecapitalizationIntent(previewState, amount);
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;
@@ -1008,16 +998,21 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState =
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: state.waterfall,
-                unassignedAssets: state.unassignedAssets,
-                seniorSupply: state.seniorSupply,
-                juniorSupply: state.juniorSupply
-            });
+        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
         HousePoolPendingPreviewLib.routeSeededRevenue(previewState, amount);
         state.waterfall = previewState.waterfall;
         state.unassignedAssets = previewState.unassignedAssets;
+    }
+
+    function _copyPendingAccountingState(
+        PendingAccountingState memory state
+    ) internal pure returns (HousePoolPendingPreviewLib.PendingAccountingState memory copiedState) {
+        copiedState = HousePoolPendingPreviewLib.PendingAccountingState({
+            waterfall: state.waterfall,
+            unassignedAssets: state.unassignedAssets,
+            seniorSupply: state.seniorSupply,
+            juniorSupply: state.juniorSupply
+        });
     }
 
     function _pendingBucketAssets() internal view returns (uint256) {

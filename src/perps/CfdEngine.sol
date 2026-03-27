@@ -850,25 +850,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        if (!isOracleFrozen()) {
-            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-            if (age > _liveMarkStalenessLimit()) {
-                lastFundingTime = uint64(block.timestamp);
-                return;
-            }
+        if (!_canProjectFundingStep()) {
+            lastFundingTime = uint64(block.timestamp);
+            return;
         }
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: lastMarkPrice,
-                bullOi: bullState.openInterest,
-                bearOi: bearState.openInterest,
-                timeDelta: block.timestamp - lastFundingTime,
-                vaultDepthUsdc: vault.totalAssets(),
-                riskParams: riskParams
-            })
-        );
+        PositionRiskAccountingLib.FundingStepResult memory step = _buildFundingStep(lastMarkPrice, vault.totalAssets());
 
         bullState.fundingIndex += step.bullFundingIndexDelta;
         bearState.fundingIndex += step.bearFundingIndexDelta;
@@ -883,26 +871,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (block.timestamp <= lastFundingTime) {
             return;
         }
-        if (!isOracleFrozen()) {
-            uint256 maxStaleness = _liveMarkStalenessLimit();
-            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-            if (age > maxStaleness) {
-                return;
-            }
+        if (!_canProjectFundingStep()) {
+            return;
         }
-        uint256 timeDelta = block.timestamp - lastFundingTime;
 
         (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: currentOraclePrice,
-                bullOi: bullState.openInterest,
-                bearOi: bearState.openInterest,
-                timeDelta: timeDelta,
-                vaultDepthUsdc: vaultDepthUsdc,
-                riskParams: riskParams
-            })
-        );
+        PositionRiskAccountingLib.FundingStepResult memory step = _buildFundingStep(currentOraclePrice, vaultDepthUsdc);
         bullState.fundingIndex += step.bullFundingIndexDelta;
         bearState.fundingIndex += step.bearFundingIndexDelta;
 
@@ -2361,24 +2335,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return (bullFundingIndex, bearFundingIndex);
         }
 
-        if (!isOracleFrozen()) {
-            uint256 maxStaleness = _liveMarkStalenessLimit();
-            uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-            if (age > maxStaleness) {
-                return (bullFundingIndex, bearFundingIndex);
-            }
+        if (!_canProjectFundingStep()) {
+            return (bullFundingIndex, bearFundingIndex);
         }
 
-        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: lastMarkPrice,
-                bullOi: bullState.openInterest,
-                bearOi: bearState.openInterest,
-                timeDelta: block.timestamp - lastFundingTime,
-                vaultDepthUsdc: vault.totalAssets(),
-                riskParams: riskParams
-            })
-        );
+        PositionRiskAccountingLib.FundingStepResult memory step = _buildFundingStep(lastMarkPrice, vault.totalAssets());
 
         bullFundingIndex += step.bullFundingIndexDelta;
         bearFundingIndex += step.bearFundingIndexDelta;
@@ -2394,6 +2355,32 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
     function _getSolvencyCappedFundingPnl() internal view returns (int256) {
         return _buildFundingSnapshot().solvencyFunding;
+    }
+
+    function _canProjectFundingStep() internal view returns (bool) {
+        if (isOracleFrozen()) {
+            return true;
+        }
+
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        return age <= _liveMarkStalenessLimit();
+    }
+
+    function _buildFundingStep(
+        uint256 price,
+        uint256 vaultDepthUsdc
+    ) internal view returns (PositionRiskAccountingLib.FundingStepResult memory step) {
+        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
+        step = PositionRiskAccountingLib.computeFundingStep(
+            PositionRiskAccountingLib.FundingStepInputs({
+                price: price,
+                bullOi: bullState.openInterest,
+                bearOi: bearState.openInterest,
+                timeDelta: block.timestamp - lastFundingTime,
+                vaultDepthUsdc: vaultDepthUsdc,
+                riskParams: riskParams
+            })
+        );
     }
 
     function _getLiabilityOnlyFundingPnl() internal view returns (uint256) {

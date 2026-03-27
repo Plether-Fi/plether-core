@@ -37,6 +37,13 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         uint256 size;
     }
 
+    struct RouterExecutionContext {
+        bool oracleFrozen;
+        bool isFadWindow;
+        bool degradedMode;
+        OrderOraclePolicyLib.OracleExecutionPolicy policy;
+    }
+
     ICfdVault internal immutable vault;
     IPyth public pyth;
     bytes32[] public pythFeedIds;
@@ -509,52 +516,43 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
             _resolveOraclePrice(pythUpdateData, order.targetPrice);
 
-        bool oracleFrozen;
-        bool isFadWindow;
+        RouterExecutionContext memory executionContext;
         if (address(pyth) != address(0)) {
-            oracleFrozen = _isOracleFrozen();
-            isFadWindow = engine.isFadWindow();
-            OrderOraclePolicyLib.OracleExecutionPolicy memory policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-                OrderOraclePolicyLib.OracleAction.OrderExecution,
-                oracleFrozen,
-                isFadWindow,
-                orderExecutionStalenessLimit,
-                liquidationStalenessLimit,
-                engine.fadMaxStaleness()
-            );
-            if (policy.closeOnly && !order.isClose) {
+            executionContext = _currentRouterExecutionContext();
+            if (executionContext.policy.closeOnly && !order.isClose) {
                 emit OrderFailed(
-                    orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
+                    orderId,
+                    executionContext.policy.oracleFrozen
+                        ? OrderFailReason.CloseOnlyOracleFrozen
+                        : OrderFailReason.CloseOnlyFad
                 );
                 _finalizeExecution(
                     orderId,
                     pythFee,
                     false,
                     _failedOrderBountyPolicy(
-                        _routedRouterPolicyFailure(
+                        _routedCloseOnlyFailure(
                             order,
-                            policy.oracleFrozen
-                                ? OrderFailurePolicyLib.RouterFailureCode.CloseOnlyOracleFrozen
-                                : OrderFailurePolicyLib.RouterFailureCode.CloseOnlyFad,
-                            policy.oracleFrozen,
-                            isFadWindow,
-                            engine.degradedMode(),
-                            policy.closeOnly
+                            executionContext.policy.oracleFrozen,
+                            executionContext.isFadWindow,
+                            executionContext.degradedMode,
+                            executionContext.policy.closeOnly
                         )
                     )
                 );
                 return;
             }
 
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
+            {
                 revert OrderRouter__OraclePriceTooStale();
             }
 
-            if (policy.mevChecks && block.number == order.commitBlock) {
+            if (executionContext.policy.mevChecks && block.number == order.commitBlock) {
                 revert OrderRouter__MevDetected();
             }
 
-            if (policy.mevChecks && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
+            if (executionContext.policy.mevChecks && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
                 revert OrderRouter__MevDetected();
             }
         }
@@ -583,28 +581,27 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
         _releaseCommittedMarginForExecution(orderId);
 
-        try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
+        (
+            bool executionSucceeded,
+            OrderFailReason failureReason,
+            OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
+        ) = _processTypedOrderExecution(
+            order,
+            executionPrice,
+            vaultDepth,
+            oraclePublishTime,
+            executionContext.oracleFrozen,
+            executionContext.isFadWindow,
+            executionContext.degradedMode
+        );
+        if (executionSucceeded) {
             emit OrderExecuted(orderId, executionPrice);
-        } catch (bytes memory revertData) {
-            bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
-            if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                revert OrderRouter__OraclePublishTimeOutOfOrder();
-            }
-            OrderFailReason reason =
-                selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
-            emit OrderFailed(orderId, reason);
-            _finalizeExecution(
-                orderId,
-                pythFee,
-                false,
-                _failedOrderBountyPolicy(
-                    _routedFailureFromEngineRevert(order, revertData, oracleFrozen, isFadWindow, engine.degradedMode())
-                )
-            );
+            _finalizeExecution(orderId, pythFee, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
             return;
         }
 
-        _finalizeExecution(orderId, pythFee, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
+        emit OrderFailed(orderId, failureReason);
+        _finalizeExecution(orderId, pythFee, false, failureBountyPolicy);
     }
 
     /// @notice Executes queued pending orders against a single Pyth price tick.
@@ -628,23 +625,11 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) = _resolveOraclePrice(pythUpdateData, 1e8);
 
-        OrderOraclePolicyLib.OracleExecutionPolicy memory policy;
-        bool oracleFrozen;
-        bool isFadWindow;
-        bool degradedMode;
+        RouterExecutionContext memory executionContext;
         if (address(pyth) != address(0)) {
-            oracleFrozen = _isOracleFrozen();
-            isFadWindow = engine.isFadWindow();
-            degradedMode = engine.degradedMode();
-            policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
-                OrderOraclePolicyLib.OracleAction.OrderExecution,
-                oracleFrozen,
-                isFadWindow,
-                orderExecutionStalenessLimit,
-                liquidationStalenessLimit,
-                engine.fadMaxStaleness()
-            );
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, policy.maxStaleness, block.timestamp)) {
+            executionContext = _currentRouterExecutionContext();
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
+            {
                 revert OrderRouter__OraclePriceTooStale();
             }
         }
@@ -679,23 +664,23 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
                 continue;
             }
 
-            if (policy.closeOnly && !order.isClose) {
+            if (executionContext.policy.closeOnly && !order.isClose) {
                 emit OrderFailed(
-                    orderId, policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
+                    orderId,
+                    executionContext.policy.oracleFrozen
+                        ? OrderFailReason.CloseOnlyOracleFrozen
+                        : OrderFailReason.CloseOnlyFad
                 );
                 _cleanupOrder(
                     orderId,
                     false,
                     _failedOrderBountyPolicy(
-                        _routedRouterPolicyFailure(
+                        _routedCloseOnlyFailure(
                             order,
-                            policy.oracleFrozen
-                                ? OrderFailurePolicyLib.RouterFailureCode.CloseOnlyOracleFrozen
-                                : OrderFailurePolicyLib.RouterFailureCode.CloseOnlyFad,
-                            policy.oracleFrozen,
-                            isFadWindow,
-                            degradedMode,
-                            policy.closeOnly
+                            executionContext.policy.oracleFrozen,
+                            executionContext.isFadWindow,
+                            executionContext.degradedMode,
+                            executionContext.policy.closeOnly
                         )
                     )
                 );
@@ -703,7 +688,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             }
 
             if (
-                address(pyth) != address(0) && policy.mevChecks
+                address(pyth) != address(0) && executionContext.policy.mevChecks
                     // Stop at the first same-block order so newer queued orders remain pending too.
                     && (block.number == order.commitBlock
                         || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
@@ -725,24 +710,25 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
 
             _releaseCommittedMarginForExecution(orderId);
 
-            try engine.processOrderTyped(order, clampedPrice, vaultDepth, oraclePublishTime) {
+            (
+                bool executionSucceeded,
+                OrderFailReason failureReason,
+                OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
+            ) = _processTypedOrderExecution(
+                order,
+                clampedPrice,
+                vaultDepth,
+                oraclePublishTime,
+                executionContext.oracleFrozen,
+                executionContext.isFadWindow,
+                executionContext.degradedMode
+            );
+            if (executionSucceeded) {
                 emit OrderExecuted(orderId, clampedPrice);
                 _cleanupOrder(orderId, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
-            } catch (bytes memory revertData) {
-                bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
-                if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
-                    revert OrderRouter__OraclePublishTimeOutOfOrder();
-                }
-                OrderFailReason reason =
-                    selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
-                emit OrderFailed(orderId, reason);
-                _cleanupOrder(
-                    orderId,
-                    false,
-                    _failedOrderBountyPolicy(
-                        _routedFailureFromEngineRevert(order, revertData, oracleFrozen, isFadWindow, degradedMode)
-                    )
-                );
+            } else {
+                emit OrderFailed(orderId, failureReason);
+                _cleanupOrder(orderId, false, failureBountyPolicy);
             }
         }
 
@@ -775,6 +761,70 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             emit OrderFailed(headId, OrderFailReason.Expired);
             _cleanupOrder(headId, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
             skipped++;
+        }
+    }
+
+    function _currentRouterExecutionContext() internal view returns (RouterExecutionContext memory context) {
+        context.oracleFrozen = _isOracleFrozen();
+        context.isFadWindow = engine.isFadWindow();
+        context.degradedMode = engine.degradedMode();
+        context.policy = OrderOraclePolicyLib.getOracleExecutionPolicy(
+            OrderOraclePolicyLib.OracleAction.OrderExecution,
+            context.oracleFrozen,
+            context.isFadWindow,
+            orderExecutionStalenessLimit,
+            liquidationStalenessLimit,
+            engine.fadMaxStaleness()
+        );
+    }
+
+    function _routedCloseOnlyFailure(
+        CfdTypes.Order memory order,
+        bool oracleFrozen,
+        bool isFadWindow,
+        bool degradedMode,
+        bool closeOnly
+    ) internal pure returns (OrderFailurePolicyLib.FailureContext memory failure) {
+        failure = _routedRouterPolicyFailure(
+            order,
+            oracleFrozen
+                ? OrderFailurePolicyLib.RouterFailureCode.CloseOnlyOracleFrozen
+                : OrderFailurePolicyLib.RouterFailureCode.CloseOnlyFad,
+            oracleFrozen,
+            isFadWindow,
+            degradedMode,
+            closeOnly
+        );
+    }
+
+    function _processTypedOrderExecution(
+        CfdTypes.Order memory order,
+        uint256 executionPrice,
+        uint256 vaultDepth,
+        uint64 oraclePublishTime,
+        bool oracleFrozen,
+        bool isFadWindow,
+        bool degradedMode
+    )
+        internal
+        returns (
+            bool success,
+            OrderFailReason failureReason,
+            OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
+        )
+    {
+        try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
+            return (true, OrderFailReason.EngineRevert, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
+        } catch (bytes memory revertData) {
+            bytes4 selector = revertData.length >= 4 ? bytes4(revertData) : bytes4(0);
+            if (selector == MARK_PRICE_OUT_OF_ORDER_SELECTOR) {
+                revert OrderRouter__OraclePublishTimeOutOfOrder();
+            }
+            failureReason = selector == PANIC_SELECTOR ? OrderFailReason.EnginePanic : OrderFailReason.EngineRevert;
+            failureBountyPolicy = _failedOrderBountyPolicy(
+                _routedFailureFromEngineRevert(order, revertData, oracleFrozen, isFadWindow, degradedMode)
+            );
+            return (false, failureReason, failureBountyPolicy);
         }
     }
 

@@ -17,13 +17,9 @@ library HousePoolPendingLivePlanLib {
         uint256 pendingTradingRevenueUsdc
     ) internal pure returns (PendingLivePlan memory plan) {
         plan.state = state;
-
-        if (pendingRecapitalizationUsdc > 0) {
-            HousePoolPendingPreviewLib.applyRecapitalizationIntent(plan.state, pendingRecapitalizationUsdc);
-        }
-        if (pendingTradingRevenueUsdc > 0) {
-            HousePoolPendingPreviewLib.routeSeededRevenue(plan.state, pendingTradingRevenueUsdc);
-        }
+        HousePoolPendingPreviewLib.applyPendingBucketsPreview(
+            plan.state, pendingRecapitalizationUsdc, pendingTradingRevenueUsdc
+        );
 
         plan.seniorPrincipalChanged = plan.state.waterfall.seniorPrincipal != currentSeniorPrincipal;
     }

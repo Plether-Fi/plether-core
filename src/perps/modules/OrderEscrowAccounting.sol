@@ -52,13 +52,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         // Clearinghouse remains the canonical owner of committed-order margin value; this module only composes the view.
         escrow.committedMarginUsdc =
         clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
-        uint64 orderId = _pendingHeadOrderId(accountId);
-        while (orderId != 0) {
-            OrderRecord storage record = orderRecords[orderId];
-            escrow.executionBountyUsdc += record.executionBountyUsdc;
-            escrow.pendingOrderCount++;
-            orderId = record.nextPendingOrderId;
-        }
+        (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(accountId);
     }
 
     function getAccountOrderSummary(
@@ -67,16 +61,36 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         // Use the clearinghouse reservation summary as the primary committed-margin source rather than re-summing queue links.
         summary.committedMarginUsdc =
         clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
+        (
+            summary.pendingOrderCount,
+            summary.executionBountyUsdc,
+            summary.pendingCloseSize,
+            summary.hasTerminalCloseQueued
+        ) = _summarizePendingOrders(accountId);
+    }
+
+    function _summarizePendingOrders(
+        bytes32 accountId
+    )
+        internal
+        view
+        returns (
+            uint256 pendingOrderCount,
+            uint256 executionBountyUsdc,
+            uint256 pendingCloseSize_,
+            bool hasTerminalCloseQueued
+        )
+    {
         uint64 orderId = _pendingHeadOrderId(accountId);
         while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
             CfdTypes.Order memory order = record.core;
-            summary.pendingOrderCount++;
+            pendingOrderCount++;
+            executionBountyUsdc += record.executionBountyUsdc;
             if (order.isClose) {
-                summary.pendingCloseSize += order.sizeDelta;
-                summary.hasTerminalCloseQueued = true;
+                pendingCloseSize_ += order.sizeDelta;
+                hasTerminalCloseQueued = true;
             }
-            summary.executionBountyUsdc += record.executionBountyUsdc;
             orderId = record.nextPendingOrderId;
         }
     }
