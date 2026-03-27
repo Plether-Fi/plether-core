@@ -617,7 +617,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcOut, 0, "Should receive USDC during emergency");
     }
@@ -643,7 +643,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcOut + bearOut, 0);
     }
@@ -671,15 +671,36 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcReturned, 0);
+    }
+
+    function test_LpWithdraw_CanSendAssetsToAlternateReceiver() public {
+        vm.prank(alice);
+        ic.deposit(20_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+
+        uint256 bal = ic.balanceOf(alice);
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+        uint256 aliceBearBefore = bearToken.balanceOf(alice);
+        uint256 bobUsdcBefore = usdc.balanceOf(bob);
+        uint256 bobBearBefore = bearToken.balanceOf(bob);
+
+        vm.prank(alice);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, bob);
+
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore);
+        assertEq(bearToken.balanceOf(alice), aliceBearBefore);
+        assertEq(usdc.balanceOf(bob) - bobUsdcBefore, usdcReturned);
+        assertEq(bearToken.balanceOf(bob) - bobBearBefore, bearReturned);
     }
 
     function test_LpWithdraw_RevertsOnZero() public {
         vm.expectRevert(InvarCoin.InvarCoin__ZeroAmount.selector);
         vm.prank(alice);
-        ic.lpWithdraw(0, 0, 0);
+        ic.lpWithdraw(0, 0, 0, alice);
     }
 
     function test_LpWithdraw_SlippageProtection() public {
@@ -691,7 +712,7 @@ contract InvarCoinTest is Test {
         uint256 bal = ic.balanceOf(alice);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
         vm.prank(alice);
-        ic.lpWithdraw(bal, type(uint256).max, 0);
+        ic.lpWithdraw(bal, type(uint256).max, 0, alice);
     }
 
     // ==========================================
@@ -1071,7 +1092,7 @@ contract InvarCoinTest is Test {
         // Alice uses lpWithdraw for 50% of supply
         uint256 aliceShares = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.lpWithdraw(aliceShares, 0, 0);
+        ic.lpWithdraw(aliceShares, 0, 0, alice);
 
         uint256 trackedAfter = ic.trackedLpBalance();
         uint256 costAfter = ic.curveLpCostVp();
@@ -1209,7 +1230,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcOut, 0, "Should return USDC");
         assertGt(bearOut, 0, "Should return raw BEAR post-emergency");
@@ -1416,7 +1437,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcOut, 0);
     }
@@ -1429,7 +1450,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(bal, 0, 0, alice);
 
         assertGt(usdcOut, 0);
         assertEq(ic.balanceOf(alice), 0);
@@ -1578,7 +1599,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(bal, 0, 0, alice);
 
         uint256 bearValueUsdc = (bearReturned * ORACLE_PRICE) / 1e20;
         uint256 totalValueReturned = usdcReturned + bearValueUsdc;
@@ -1673,7 +1694,7 @@ contract InvarCoinTest is Test {
 
         uint256 bal = ic.balanceOf(alice);
         vm.prank(alice);
-        ic.lpWithdraw(bal, 0, 0);
+        ic.lpWithdraw(bal, 0, 0, alice);
 
         assertEq(ic.curveLpCostVp(), 0);
     }
@@ -1737,7 +1758,7 @@ contract InvarCoinTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0, alice);
         assertGt(usdcOut + bearOut, 0);
     }
 
@@ -2046,7 +2067,7 @@ contract InvarCoinTest is Test {
 
         // lpWithdraw should also harvest first
         vm.prank(bob);
-        ic.lpWithdraw(bobShares, 0, 0);
+        ic.lpWithdraw(bobShares, 0, 0, bob);
 
         uint256 sInvarAfter = ic.balanceOf(address(sInvar));
         assertGt(sInvarAfter, sInvarBefore, "sINVAR should receive yield during lpWithdraw");
@@ -2080,7 +2101,7 @@ contract InvarCoinTest is Test {
         vm.mockCallRevert(address(curve), abi.encodeWithSignature("get_virtual_price()"), "Curve bricked");
 
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0, alice);
         assertGt(usdcOut + bearOut, 0, "lpWithdraw must succeed when get_virtual_price reverts");
     }
 
@@ -2121,7 +2142,7 @@ contract InvarCoinTest is Test {
 
         vm.prank(alice);
         vm.expectRevert("Curve bricked");
-        ic.lpWithdraw(shares, 0, 0);
+        ic.lpWithdraw(shares, 0, 0, alice);
     }
 
     function test_EmergencyWithdrawFromCurve_RevertsWhenCurveBricked() public {
@@ -2292,7 +2313,7 @@ contract InvarCoinTest is Test {
         uint256 expectedBear = Math.mulDiv(bearInContract, shares, supply);
 
         vm.prank(alice);
-        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertEq(bearReturned, expectedBear);
         assertGt(bearReturned, 0);
@@ -2316,7 +2337,7 @@ contract InvarCoinTest is Test {
         uint256 expectedBearFromCurve = (curve.bearBalance() * shareRatio) / 1e18;
 
         vm.prank(alice);
-        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+        (, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertEq(bearReturned, expectedBearFromCurve);
         assertGt(bearReturned, 0);
@@ -2335,7 +2356,7 @@ contract InvarCoinTest is Test {
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertEq(usdc.balanceOf(alice) - usdcBefore, usdcReturned);
         assertEq(bearToken.balanceOf(alice) - bearBefore, bearReturned);
@@ -2361,7 +2382,7 @@ contract InvarCoinTest is Test {
         uint256 expectedCost = costBefore - Math.mulDiv(costBefore, lpToBurn, lpBal);
 
         vm.prank(alice);
-        ic.lpWithdraw(shares, 0, 0);
+        ic.lpWithdraw(shares, 0, 0, alice);
 
         assertEq(ic.trackedLpBalance(), expectedTracked);
         assertEq(ic.curveLpCostVp(), expectedCost);
@@ -3132,7 +3153,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertGt(usdcOut, 0);
         assertEq(gauge.balanceOf(address(ic)), 0);
@@ -3510,7 +3531,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertGt(usdcOut, 0);
         assertEq(gauge.balanceOf(address(ic)), 0);
@@ -3638,7 +3659,7 @@ contract InvarCoinGaugeTest is Test {
 
         uint256 shares = ic.balanceOf(alice);
         vm.prank(alice);
-        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0);
+        (uint256 usdcOut,) = ic.lpWithdraw(shares, 0, 0, alice);
 
         assertGt(usdcOut, 0);
     }
@@ -3715,7 +3736,7 @@ contract InvarCoinGaugeTest is Test {
         ic.forceRemoveGauge();
 
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(sharesBefore, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(sharesBefore, 0, 0, alice);
         assertGt(usdcOut, 0, "user should receive USDC from local buffer");
         assertEq(ic.balanceOf(alice), 0, "all shares should be burned");
     }
@@ -3922,7 +3943,7 @@ contract HarvestBypassTest is Test {
         oracle.setUpdatedAt(block.timestamp - 25 hours);
 
         vm.prank(alice);
-        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0, alice);
         assertGt(usdcOut + bearOut, 0);
     }
 

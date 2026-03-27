@@ -664,20 +664,23 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     /// @param glUsdAmount Amount of INVAR shares to burn.
     /// @param minUsdcOut Minimum USDC to receive (slippage protection).
     /// @param minBearOut Minimum plDXY-BEAR to receive (slippage protection).
+    /// @param receiver Address receiving the withdrawn assets.
     /// @return usdcReturned Total USDC returned.
     /// @return bearReturned Total plDXY-BEAR returned.
     function lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
-        uint256 minBearOut
+        uint256 minBearOut,
+        address receiver
     ) external nonReentrant returns (uint256 usdcReturned, uint256 bearReturned) {
-        (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut);
+        (usdcReturned, bearReturned) = _lpWithdraw(glUsdAmount, minUsdcOut, minBearOut, receiver);
     }
 
     function _lpWithdraw(
         uint256 glUsdAmount,
         uint256 minUsdcOut,
-        uint256 minBearOut
+        uint256 minBearOut,
+        address receiver
     ) internal returns (uint256 usdcReturned, uint256 bearReturned) {
         if (glUsdAmount == 0) {
             revert InvarCoin__ZeroAmount();
@@ -711,10 +714,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
         }
 
         if (usdcReturned > 0) {
-            USDC.safeTransfer(msg.sender, usdcReturned);
+            USDC.safeTransfer(receiver, usdcReturned);
         }
         if (bearReturned > 0) {
-            BEAR.safeTransfer(msg.sender, bearReturned);
+            BEAR.safeTransfer(receiver, bearReturned);
         }
 
         emit LpWithdrawn(msg.sender, glUsdAmount, usdcReturned, bearReturned);
