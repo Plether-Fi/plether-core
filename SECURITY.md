@@ -467,11 +467,11 @@ LP tokens are auto-staked to the Curve gauge on deployment for CRV reward accrua
 
 Gauge reward tokens (CRV, etc.) use a separate flow from `rescueToken()`:
 
-1. Owner calls `protectRewardToken(token)` — irreversible, blocks `rescueToken` for that token
+1. Owner calls `protectRewardToken(token)` — irreversible, blocks `rescueToken` for that token. Core vault assets (`USDC`, `BEAR`, Curve LP) cannot be protected
 2. Owner proposes gauge rewards receiver (7-day timelock)
 3. After timelock, `sweepGaugeRewards(token)` sends balance to the receiver
 
-This prevents the owner from instantly draining reward tokens via `rescueToken()` while still allowing legitimate reward collection.
+This prevents the owner from instantly draining reward tokens via `rescueToken()` while still allowing legitimate reward collection. `sweepGaugeRewards()` cannot be used as an alternate path to transfer core vault assets.
 
 **Limitation:** `protectRewardToken` is irreversible. A mistakenly protected token can only be recovered via `sweepGaugeRewards` (requires receiver to be set). Unprotected reward tokens remain rescuable via `rescueToken()`.
 
