@@ -334,7 +334,7 @@ These deferred liabilities are senior claims on vault cash and must be subtracte
 
 Deferred servicing rule:
 
-- deferred clearer bounties are appended to the oldest-first global claim queue, while trader deferred payouts are coalesced to at most one active queue node per account,
+- deferred clearer bounties are coalesced to at most one active queue node per keeper, while trader deferred payouts are coalesced to at most one active queue node per account,
 - if an account with an existing deferred trader queue node accrues additional deferred payout, that additional amount inherits the account's current queue position instead of appending as a fresh later-aged node,
 - fresh vault cash may only fund new non-fee payouts above the queued senior-claim remainder and reserved protocol-fee inventory,
 - deferred head-claim servicing is senior to protocol-fee withdrawal and may consume any currently available physical cash up to the queue head amount,

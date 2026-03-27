@@ -359,11 +359,8 @@ contract PerpAccountingHandler is Test {
     function claimDeferredClearerBounty() external {
         _clearLastBadDebtDeferredEvent();
         _clearTerminalReservationSet();
-        uint256 ghostDeferredBounty = ghost.deferredClearerBountySnapshot(address(this));
         try engine.claimDeferredClearerBounty() {
-            if (ghostDeferredBounty > 0) {
-                ghost.decreaseDeferredClearerBounty(address(this), ghostDeferredBounty);
-            }
+            _syncGhostDeferredClearerBounty(address(this));
         } catch {}
     }
 
@@ -598,6 +595,18 @@ contract PerpAccountingHandler is Test {
             ghost.increaseDeferredTraderPayout(accountId, liveDeferredPayout - ghostDeferredPayout);
         } else if (ghostDeferredPayout > liveDeferredPayout) {
             ghost.decreaseDeferredTraderPayout(accountId, ghostDeferredPayout - liveDeferredPayout);
+        }
+    }
+
+    function _syncGhostDeferredClearerBounty(
+        address keeper
+    ) internal {
+        uint256 ghostDeferredBounty = ghost.deferredClearerBountySnapshot(keeper);
+        uint256 liveDeferredBounty = engine.deferredClearerBountyUsdc(keeper);
+        if (liveDeferredBounty > ghostDeferredBounty) {
+            ghost.increaseDeferredClearerBounty(keeper, liveDeferredBounty - ghostDeferredBounty);
+        } else if (ghostDeferredBounty > liveDeferredBounty) {
+            ghost.decreaseDeferredClearerBounty(keeper, ghostDeferredBounty - liveDeferredBounty);
         }
     }
 

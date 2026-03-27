@@ -115,6 +115,28 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         }
     }
 
+    function invariant_ClearerDeferredClaimPointersMatchTrackedClearerState() public view {
+        address keeper = address(handler);
+        uint64 claimId = engine.clearerDeferredClaimIdByKeeper(keeper);
+        uint256 deferredBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+
+        if (deferredBountyUsdc == 0) {
+            assertEq(claimId, 0, "Keepers without deferred bounty must not retain clearer claim pointers");
+            return;
+        }
+
+        assertGt(claimId, 0, "Keepers with deferred bounty must have a clearer deferred claim pointer");
+        (ICfdEngine.DeferredClaimType claimType,, address claimKeeper, uint256 remainingUsdc,,) =
+            engine.deferredClaims(claimId);
+        assertEq(
+            uint8(claimType),
+            uint8(ICfdEngine.DeferredClaimType.ClearerBounty),
+            "Clearer deferred claim pointer must point to a clearer bounty node"
+        );
+        assertEq(claimKeeper, keeper, "Clearer deferred claim pointer must belong to the tracked keeper");
+        assertEq(remainingUsdc, deferredBountyUsdc, "Coalesced clearer deferred node must equal tracked liability");
+    }
+
     function invariant_GlobalDeferredQueueLinksRemainConsistent() public view {
         uint64 claimId = engine.deferredClaimHeadId();
         uint64 prevClaimId;
@@ -125,7 +147,8 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         while (claimId != 0) {
             (
                 ICfdEngine.DeferredClaimType claimType,
-                bytes32 claimAccountId,,
+                bytes32 claimAccountId,
+                address claimKeeper,
                 uint256 remainingUsdc,
                 uint64 storedPrevClaimId,
                 uint64 nextClaimId
@@ -148,6 +171,16 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 );
             } else {
                 assertEq(claimAccountId, bytes32(0), "Clearer bounty claims must not carry trader account ids");
+                assertEq(
+                    engine.clearerDeferredClaimIdByKeeper(claimKeeper),
+                    claimId,
+                    "Each clearer should have exactly one coalesced deferred claim node"
+                );
+                assertEq(
+                    remainingUsdc,
+                    engine.deferredClearerBountyUsdc(claimKeeper),
+                    "Clearer deferred node amount must match keeper state"
+                );
             }
 
             prevClaimId = claimId;

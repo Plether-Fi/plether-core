@@ -2525,6 +2525,53 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(protocolViewAfter.totalDeferredClearerBountyUsdc, 0);
     }
 
+    function test_DeferredClearerBounty_CoalescesPerKeeperAndSupportsPartialHeadClaims() public {
+        address keeper = address(0xAB1605);
+        bytes32 keeperId = bytes32(uint256(uint160(keeper)));
+
+        vm.startPrank(address(router));
+        engine.recordDeferredClearerBounty(keeper, 25e6);
+        uint64 initialClaimId = engine.clearerDeferredClaimIdByKeeper(keeper);
+        engine.recordDeferredClearerBounty(keeper, 5e6);
+        vm.stopPrank();
+
+        assertEq(
+            engine.clearerDeferredClaimIdByKeeper(keeper), initialClaimId, "Keeper bounty should coalesce to one node"
+        );
+        assertEq(engine.deferredClearerBountyUsdc(keeper), 30e6, "Keeper liability should aggregate across events");
+
+        ICfdEngine.DeferredClaim memory headBefore = engine.getDeferredClaimHead();
+        assertEq(headBefore.keeper, keeper, "Coalesced keeper node should remain at queue head");
+        assertEq(headBefore.remainingUsdc, 30e6, "Head node should equal the aggregated keeper liability");
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets);
+        usdc.mint(address(pool), 10e6);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(keeperId);
+        vm.prank(keeper);
+        engine.claimDeferredClearerBounty();
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperId) - settlementBefore,
+            10e6,
+            "Head claim should service only available liquidity"
+        );
+        assertEq(
+            engine.deferredClearerBountyUsdc(keeper), 20e6, "Partial claim should preserve remaining keeper liability"
+        );
+        assertEq(
+            engine.clearerDeferredClaimIdByKeeper(keeper),
+            initialClaimId,
+            "Partial claim should retain the same coalesced node"
+        );
+
+        ICfdEngine.DeferredClaim memory headAfter = engine.getDeferredClaimHead();
+        assertEq(headAfter.keeper, keeper, "Partially serviced coalesced node should remain at head");
+        assertEq(headAfter.remainingUsdc, 20e6, "Head node should shrink by the claimed amount");
+    }
+
     function test_ClaimDeferredClearerBounty_IgnoresKeeperWalletTransferBlacklist() public {
         address keeper = address(0xAB1603);
         address laterKeeper = address(0xAB1604);

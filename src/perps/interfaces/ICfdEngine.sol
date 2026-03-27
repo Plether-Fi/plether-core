@@ -145,6 +145,20 @@ interface ICfdEngine {
         uint64 nextClaimId;
     }
 
+    struct DeferredTraderStatus {
+        uint64 claimId;
+        uint256 deferredPayoutUsdc;
+        bool isHead;
+        bool claimableNow;
+    }
+
+    struct DeferredClearerStatus {
+        uint64 claimId;
+        uint256 deferredBountyUsdc;
+        bool isHead;
+        bool claimableNow;
+    }
+
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     function clearinghouse() external view returns (address);
 
@@ -205,6 +219,16 @@ interface ICfdEngine {
         address keeper,
         uint256 amountUsdc
     ) external;
+
+    function getDeferredClaimHead() external view returns (DeferredClaim memory claim);
+
+    function getDeferredTraderStatus(
+        bytes32 accountId
+    ) external view returns (DeferredTraderStatus memory status);
+
+    function getDeferredClearerStatus(
+        address keeper
+    ) external view returns (DeferredClearerStatus memory status);
 
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
@@ -287,8 +311,6 @@ interface ICfdEngine {
     function totalDeferredClearerBountyUsdc() external view returns (uint256);
 
     function deferredClaimHeadId() external view returns (uint64);
-
-    function getDeferredClaimHead() external view returns (DeferredClaim memory claim);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).

@@ -233,7 +233,7 @@ When a position goes underwater (equity < 0):
 #### Deferred Liquidation Bounties
 
 - **Behavior**: If the House Pool cannot immediately fund a liquidation bounty from cash left after reserving existing deferred claims and protocol-fee inventory, the state transition still completes and the unpaid amount is recorded in the deferred bounty liability bucket. Order-execution bounties are router-custodied and therefore do not share this vault-liability path.
-- **Claim path**: Deferred clearer bounties share the same oldest-first queue. Once liquidity returns and a clearer bounty reaches the queue head, anyone may call `claimDeferredClearerBounty()` and the currently available USDC is paid into `MarginClearinghouse`, which credits the recorded keeper's address-derived account there. Queue-head servicing remains senior to protocol-fee withdrawals and no longer depends on direct USDC wallet transfer success for the keeper.
+- **Claim path**: Deferred clearer bounties share the same oldest-first queue and coalesce to one active node per keeper. Once liquidity returns and a clearer bounty reaches the queue head, anyone may call `claimDeferredClearerBounty()` and the currently available USDC is paid into `MarginClearinghouse`, which credits the recorded keeper's address-derived account there. Queue-head servicing remains senior to protocol-fee withdrawals and no longer depends on direct USDC wallet transfer success for the keeper.
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 

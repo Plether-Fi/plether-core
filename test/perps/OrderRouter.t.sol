@@ -4134,6 +4134,7 @@ contract KeeperFeeRefundTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
+        uint256 deferredClearerBefore = engine.totalDeferredClearerBountyUsdc();
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.prank(keeper);
@@ -4143,6 +4144,11 @@ contract KeeperFeeRefundTest is Test {
         assertEq(router.claimableEth(alice), 0, "Refund should be sent directly to the user");
         assertEq(keeper.balance - keeperBefore, 0, "Keeper should not receive fee on slippage failure");
         assertEq(alice.balance, 1 ether, "User receives slippage-failure refund");
+        assertEq(
+            engine.totalDeferredClearerBountyUsdc(),
+            deferredClearerBefore,
+            "Slippage failure should not leak failed-order bounty into deferred clearer liabilities"
+        );
     }
 
     // Regression: H-01
