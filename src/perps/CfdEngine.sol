@@ -737,13 +737,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
-        uint256 price = lastMarkPrice;
-        if (price == 0) {
-            revert CfdEngine__InsufficientCloseOrderBountyBacking();
-        }
-        uint256 maxStaleness = _liveMarkStalenessLimit();
-        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        if (age > maxStaleness) {
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
@@ -754,11 +749,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         CfdTypes.Position memory positionAfter = _loadPosition(accountId);
         positionAfter.margin = positionMarginUsdc - amountUsdc;
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
+        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildProjectedPositionRiskState(
+            accountId,
             positionAfter,
             price,
-            CAP_PRICE,
-            _getProjectedPendingFunding(accountId, positionAfter),
             reachableUsdc - amountUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
@@ -818,21 +812,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__DegradedMode();
         }
 
-        uint256 price = lastMarkPrice;
-        if (price == 0) {
-            revert CfdEngine__MarkPriceStale();
-        }
-
-        uint256 maxStaleness = _liveMarkStalenessLimit();
-        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        if (age > maxStaleness) {
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
             revert CfdEngine__MarkPriceStale();
         }
 
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, CAP_PRICE, _getProjectedPendingFunding(accountId, pos), reachableUsdc, riskParams.initMarginBps
-        );
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            _buildProjectedPositionRiskState(accountId, pos, price, reachableUsdc, riskParams.initMarginBps);
 
         uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
         if (riskState.equityUsdc < int256(initialMarginRequirementUsdc)) {
@@ -1917,6 +1904,32 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             ? snap.bullSide.fundingIndex + fundingDelta.bullFundingIndexDelta
             : snap.bearSide.fundingIndex + fundingDelta.bearFundingIndexDelta;
         fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
+    }
+
+    function _buildProjectedPositionRiskState(
+        bytes32 accountId,
+        CfdTypes.Position memory pos,
+        uint256 price,
+        uint256 reachableUsdc,
+        uint256 riskBps
+    ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory riskState) {
+        riskState = PositionRiskAccountingLib.buildPositionRiskState(
+            pos, price, CAP_PRICE, _getProjectedPendingFunding(accountId, pos), reachableUsdc, riskBps
+        );
+    }
+
+    function _tryGetFreshLiveMarkPrice() internal view returns (bool fresh, uint256 price) {
+        price = lastMarkPrice;
+        if (price == 0) {
+            return (false, 0);
+        }
+
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        if (age > _liveMarkStalenessLimit()) {
+            return (false, 0);
+        }
+
+        return (true, price);
     }
 
     // ==========================================
