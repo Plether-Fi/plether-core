@@ -1312,10 +1312,17 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
         address eve = address(0xE111);
+        bytes32 eveId = bytes32(uint256(uint160(eve)));
         _fundTrader(eve, 1000e6);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        assertEq(
+            engine.previewOpenRevertCode(eveId, CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, uint64(block.timestamp)),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "Commit-time IMR rejection should match previewOpenRevertCode"
+        );
 
         vm.prank(eve);
         vm.expectRevert(
@@ -1387,6 +1394,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        assertEq(
+            engine.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+            "Commit-time skew rejection should match previewOpenRevertCode"
+        );
+
         vm.prank(alice);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1400,6 +1414,7 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
         address bearTrader = address(0xC333);
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _fundTrader(bearTrader, 50_000e6);
         _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
@@ -1407,6 +1422,14 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
+
+        assertEq(
+            engine.previewOpenRevertCode(
+                aliceId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "Commit-time solvency rejection should match previewOpenRevertCode"
+        );
 
         vm.prank(alice);
         vm.expectRevert(
@@ -1444,6 +1467,7 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_PostCommitSolvencyInvalidationRefundsUserBounty() public {
         address bearTrader = address(0xC333);
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
         _fundTrader(bearTrader, 50_000e6);
         _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
@@ -1456,13 +1480,20 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), 700_000e6);
         vm.warp(block.timestamp + 6);
 
+        assertEq(
+            engine.previewOpenRevertCode(
+                aliceId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "Post-commit solvency invalidation should preserve the same typed revert code"
+        );
+
         uint256 keeperBefore = usdc.balanceOf(address(this));
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
         assertEq(
@@ -2337,10 +2368,14 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
 
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
         router.executeLiquidation(accountId, priceData);
+
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, address(this), beforeSnapshot);
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
             usdc.balanceOf(address(this)) - keeperWalletBefore,
@@ -2351,6 +2386,36 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this))))) - keeperSettlementBefore,
             0,
             "Immediate liquidation bounty should not be routed through clearinghouse credit"
+        );
+    }
+
+    function test_ExecuteLiquidation_DefersKeeperBountyPerPreview() public {
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 900e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
+
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(usdc.transfer.selector, address(this), preview.keeperBountyUsdc),
+            abi.encodeWithSignature("Error(string)", "blacklisted")
+        );
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(150_000_000));
+
+        router.executeLiquidation(accountId, priceData);
+
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, address(this), beforeSnapshot);
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(observed.keeperWalletUsdc, 0, "Blacklisted keeper payout should not reach the wallet");
+        assertEq(
+            observed.deferredClearerBountyUsdc,
+            preview.keeperBountyUsdc,
+            "Failed wallet payout should defer the previewed keeper bounty into deferred clearer liability"
         );
     }
 

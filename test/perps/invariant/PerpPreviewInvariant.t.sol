@@ -140,6 +140,20 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
+    function invariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() public view {
+        uint256 oraclePrice = _previewOraclePrice();
+        uint256 canonicalDepth = vault.totalAssets();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
+            CfdEngine.LiquidationPreview memory simulation =
+                engine.simulateLiquidation(accountId, oraclePrice, canonicalDepth);
+
+            _assertLiquidationPreviewEquals(preview, simulation);
+        }
+    }
+
     function invariant_FullClosePreviewStaysConsistentWithCurrentDegradedMode() public view {
         bool alreadyDegraded = engine.degradedMode();
         uint256 oraclePrice = _previewOraclePrice();
@@ -218,6 +232,40 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         address actor
     ) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(actor)));
+    }
+
+    function _assertLiquidationPreviewEquals(
+        CfdEngine.LiquidationPreview memory actual,
+        CfdEngine.LiquidationPreview memory expected
+    ) internal pure {
+        assertEq(actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulation");
+        assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
+        assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
+        assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
+        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Liquidation funding should match");
+        assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
+        assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
+        assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
+        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
+        assertEq(
+            actual.existingDeferredConsumedUsdc,
+            expected.existingDeferredConsumedUsdc,
+            "Deferred consumption should match"
+        );
+        assertEq(
+            actual.existingDeferredRemainingUsdc,
+            expected.existingDeferredRemainingUsdc,
+            "Deferred remainder should match"
+        );
+        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
+        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Deferred payout should match");
+        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
+        assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
+        assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
+        assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
+        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
+        assertEq(actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Solvency funding pnl should match");
     }
 
 }

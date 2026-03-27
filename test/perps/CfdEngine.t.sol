@@ -267,6 +267,30 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_OpenParity_HealthyPreviewMatchesLiveExecution() public {
+        bytes32 accountId = bytes32(uint256(0xBEEF2));
+        _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
+
+        assertEq(
+            engine.previewOpenRevertCode(
+                accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
+            "Preview should accept the healthy open"
+        );
+
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+
+        (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+        assertEq(size, 100_000e18, "Live open should match the previewed size");
+        assertGt(margin, 0, "Live open should leave positive position margin");
+        assertLt(margin, 5000e6, "Live open margin should reflect execution costs after the successful preview");
+        assertGt(
+            engine.accumulatedFeesUsdc() - feesBefore, 0, "Live open should collect protocol revenue after success"
+        );
+    }
+
     function test_ProcessOrderTyped_ProtocolStateFailureUsesTypedTaxonomy() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
@@ -565,14 +589,75 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory lowDepthSimulation =
             engine.simulateClose(bearId, 10_000e18, 1e8, canonicalDepth / 10);
 
-        assertEq(
-            canonicalPreview.fundingUsdc, matchedSimulation.fundingUsdc, "Canonical close preview should use live depth"
-        );
+        _assertClosePreviewEquals(canonicalPreview, matchedSimulation);
+
         assertGt(
             lowDepthSimulation.fundingUsdc,
             canonicalPreview.fundingUsdc,
             "Simulation should honor lower hypothetical depth"
         );
+    }
+
+    function test_CloseParity_ImmediateProfitMatchesPreview() public {
+        address trader = address(0xD3A1);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 80_000_000);
+        assertTrue(preview.valid, "Setup close preview should be valid");
+        assertGt(preview.immediatePayoutUsdc, 0, "Profitable liquid close should pay immediately");
+        assertEq(preview.deferredPayoutUsdc, 0, "Liquid profitable close should not defer payout");
+
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(accountId);
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        CloseParityObserved memory observed = _observeCloseParity(accountId, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+    }
+
+    function test_CloseParity_DeferredProfitMatchesPreview() public {
+        address trader = address(0xD3A2);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 11_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+
+        uint256 poolAssets = pool.totalAssets();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, 80_000_000);
+        assertTrue(preview.valid, "Setup close preview should be valid");
+        assertEq(preview.immediatePayoutUsdc, 0, "Illiquid profitable close should not pay immediately");
+        assertGt(preview.deferredPayoutUsdc, 0, "Illiquid profitable close should defer payout");
+
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(accountId);
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        CloseParityObserved memory observed = _observeCloseParity(accountId, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+    }
+
+    function test_CloseParity_LossConsumesSettlementMatchesPreview() public {
+        address trader = address(0xD3A3);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8);
+
+        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 10_000e18, 120_000_000);
+        assertTrue(preview.valid, "Setup loss close preview should be valid");
+        assertEq(preview.immediatePayoutUsdc, 0, "Loss-making close should not create immediate payout");
+        assertEq(preview.deferredPayoutUsdc, 0, "Loss-making close should not create deferred payout");
+        assertEq(preview.badDebtUsdc, 0, "Setup should keep the loss fully collateralized");
+
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(accountId);
+        _close(accountId, CfdTypes.Side.BULL, 10_000e18, 120_000_000);
+
+        CloseParityObserved memory observed = _observeCloseParity(accountId, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     function test_ClaimDeferredPayout_CreditsClearinghouseWhenLiquidityReturns() public {
@@ -1393,7 +1478,11 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, 500_000e18, 20_000_000);
         assertTrue(preview.triggersDegradedMode, "Preview should flag the profitable close that reveals insolvency");
 
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bullId);
         _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+
+        CloseParityObserved memory observed = _observeCloseParity(bullId, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
@@ -1801,16 +1890,37 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory lowDepthSimulation =
             engine.simulateLiquidation(accountId, 110_000_000, canonicalDepth / 10);
 
-        assertEq(
-            canonicalPreview.fundingUsdc,
-            matchedSimulation.fundingUsdc,
-            "Canonical liquidation preview should use live depth"
-        );
+        _assertLiquidationPreviewEquals(canonicalPreview, matchedSimulation);
+
         assertGt(
             canonicalPreview.fundingUsdc,
             lowDepthSimulation.fundingUsdc,
             "Simulation should honor lower hypothetical depth"
         );
+    }
+
+    function test_LiquidationParity_ImmediatePayoutMatchesPreview() public {
+        address trader = address(0xAB14A1);
+        address keeper = address(0xAB14A2);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 300e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.prank(trader);
+        clearinghouse.withdraw(accountId, 100e6);
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
+        assertTrue(preview.liquidatable, "Setup liquidation preview should be liquidatable");
+
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, keeper);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(101_000_000));
+        vm.prank(keeper);
+        router.executeLiquidation(accountId, priceData);
+
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     function test_LiquidationPreview_InterfaceMatchesContractStructLayout() public {
@@ -1893,23 +2003,22 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, keeper);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(101_000_000));
         vm.prank(keeper);
         router.executeLiquidation(accountId, priceData);
 
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+
         assertEq(
             engine.deferredPayoutUsdc(accountId),
             preview.deferredPayoutUsdc,
             "Illiquid liquidation preview should match live deferred trader payout"
         );
-        assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
-            preview.badDebtUsdc,
-            "Illiquid liquidation preview should match live bad debt"
-        );
+        assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Illiquid liquidation preview should match live bad debt");
     }
 
     function test_LiquidationPreview_DeferredPayoutPreventsUnfairLiquidation() public {
@@ -1966,14 +2075,17 @@ contract CfdEngineTest is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrowBefore = router.getAccountEscrow(accountId);
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 195_000_000);
-        ICfdEngine.ProtocolAccountingSnapshot memory beforeSnapshot = engine.getProtocolAccountingSnapshot();
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, keeper);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
         vm.prank(keeper);
         router.executeLiquidation(accountId, priceData);
 
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
         ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engine.getProtocolAccountingSnapshot();
+
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
             engine.deferredPayoutUsdc(accountId),
@@ -1981,17 +2093,17 @@ contract CfdEngineTest is BasePerpTest {
             "Preview deferred payout should match live liquidation after staged forfeiture"
         );
         assertEq(
-            afterSnapshot.accumulatedBadDebtUsdc - beforeSnapshot.accumulatedBadDebtUsdc,
+            observed.badDebtUsdc,
             preview.badDebtUsdc,
             "Preview bad debt should match live liquidation after staged forfeiture"
         );
         assertEq(
-            afterSnapshot.accumulatedFeesUsdc - beforeSnapshot.accumulatedFeesUsdc,
+            afterSnapshot.accumulatedFeesUsdc - beforeSnapshot.protocol.accumulatedFeesUsdc,
             escrowBefore.executionBountyUsdc,
             "Live liquidation should book the same forfeited escrow preview assumes as protocol fees"
         );
         assertEq(
-            afterSnapshot.effectiveSolvencyAssetsUsdc,
+            observed.effectiveAssetsAfterUsdc,
             preview.effectiveAssetsAfterUsdc,
             "Preview solvency should match live liquidation after staged forfeiture"
         );
@@ -2096,7 +2208,6 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
-        uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
         CfdEngine.ClosePreview memory preview = engine.simulateClose(bearId, 5000e18, 80_000_000, vaultDepth);
         assertGt(
             preview.existingDeferredConsumedUsdc,
@@ -2109,12 +2220,10 @@ contract CfdEngineTest is BasePerpTest {
             "Close preview should show less deferred payout remaining after loss absorption"
         );
 
-        uint256 nominalExecutionFeeUsdc = (((5000e18 * uint256(80_000_000)) / CfdMath.USDC_TO_TOKEN_SCALE) * 4) / 10_000;
-        int256 terminalResidual = int256(settlementReachableBefore + deferredBefore) + preview.realizedPnlUsdc
-            + preview.fundingUsdc - int256(nominalExecutionFeeUsdc);
-
-        uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(bearId);
         _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 80_000_000, vaultDepth, refreshTime);
+
+        CloseParityObserved memory observed = _observeCloseParity(bearId, beforeSnapshot);
 
         assertEq(
             engine.deferredPayoutUsdc(bearId),
@@ -2122,9 +2231,14 @@ contract CfdEngineTest is BasePerpTest {
             "Live close should leave the same deferred payout remainder shown in preview"
         );
         assertEq(
-            engine.accumulatedBadDebtUsdc() - badDebtBefore,
+            observed.badDebtUsdc,
             preview.badDebtUsdc,
             "Bad debt should only reflect the post-deferred shortfall on close"
+        );
+        assertEq(
+            preview.existingDeferredConsumedUsdc,
+            deferredBefore - preview.existingDeferredRemainingUsdc,
+            "Preview should expose the exact deferred payout consumed before socializing bad debt"
         );
     }
 
@@ -2349,6 +2463,7 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_PreviewLiquidation_TriggersDegradedModeMatchesLiveLiquidation() public {
         address trader = address(0xAB1410);
+        address keeper = address(0xAB1411);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 300e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
@@ -2357,11 +2472,15 @@ contract CfdEngineTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 100e6);
 
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, keeper);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(101_000_000));
-        vm.prank(address(0xAB1411));
+        vm.prank(keeper);
         router.executeLiquidation(accountId, priceData);
+
+        LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
             preview.triggersDegradedMode,
@@ -3545,6 +3664,28 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         engine.checkWithdraw(accountId);
+    }
+
+    function test_CheckWithdrawParity_FailThenLiveWithdrawReverts() public {
+        address trader = address(0x515816);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, trader, 5000e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+    }
+
+    function test_CheckWithdrawParity_StaleLiveMarkBlocksWithdraw() public {
+        address trader = address(0x515817);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, trader, 100e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
     }
 
     function test_CheckWithdraw_UsesExplicitInitMarginBps() public {

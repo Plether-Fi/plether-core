@@ -291,6 +291,38 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
     }
 
+    function test_PlanOpen_HealthyDeltaMatchesLiveOpenState() public {
+        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        _fundTrader(freshBullTrader, 20_000e6);
+
+        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
+
+        assertTrue(delta.valid, "Setup open plan should remain valid");
+        assertEq(
+            uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Setup should not predict failure"
+        );
+
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        _open(accountId, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
+
+        (uint256 size, uint256 margin, uint256 entryPrice,,,,,) = engine.positions(accountId);
+        assertEq(size, delta.newPosSize, "Live open size should match planner delta");
+        assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
+        assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
+        assertEq(
+            engine.accumulatedFeesUsdc() - feesBefore,
+            delta.executionFeeUsdc,
+            "Live open fee collection should match planner execution fee"
+        );
+        assertEq(
+            engine.getSideState(CfdTypes.Side.BULL).totalMargin,
+            delta.sideTotalMarginAfterOpen,
+            "Live side total margin should match planner delta"
+        );
+    }
+
     function test_ComputeOpenMarginAfter_DrainedPathMatchesPlannerRevert() public {
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         (bool drained,) = harness.computeOpenMarginAfter(100e6, -150e6);
@@ -371,6 +403,33 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint8(delta.revertCode),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
             "Planner should reject opens that rely on deferred funding IOUs for physically unlockable trade-cost margin"
+        );
+    }
+
+    function test_PlanOpen_SolvencyFailureCategoryMatchesTypedExecutionFailure() public {
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+        bytes32 bullId = bytes32(uint256(uint160(freshBullTrader)));
+
+        _fundTrader(bearTrader, 50_000e6);
+        _fundTrader(freshBullTrader, 40_000e6);
+        _open(bearId, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 700_000e6);
+
+        CfdTypes.Order memory order = _openOrder(bullId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8);
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
+
+        assertEq(
+            uint8(delta.revertCode),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
+            "Planner should surface the solvency invalidation explicitly"
+        );
+        assertEq(
+            uint256(CfdEnginePlanLib.getOpenFailurePolicyCategory(delta.revertCode)),
+            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable),
+            "Planner should classify the solvency invalidation consistently"
         );
     }
 

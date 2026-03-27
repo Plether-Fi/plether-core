@@ -111,6 +111,41 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
+    function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
+        uint256 oraclePrice = _previewOraclePrice();
+        uint256 canonicalDepth = vault.totalAssets();
+        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            bytes32 accountId = _accountId(handler.actorAt(i));
+            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            if (size == 0) {
+                continue;
+            }
+
+            _assertClosePreviewEquals(
+                engine.previewClose(accountId, size, oraclePrice),
+                engine.simulateClose(accountId, size, oraclePrice, canonicalDepth)
+            );
+
+            if (size < 2) {
+                continue;
+            }
+
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            for (uint256 f = 0; f < 3; f++) {
+                if (fractions[f] == 0 || fractions[f] >= size) {
+                    continue;
+                }
+
+                _assertClosePreviewEquals(
+                    engine.previewClose(accountId, fractions[f], oraclePrice),
+                    engine.simulateClose(accountId, fractions[f], oraclePrice, canonicalDepth)
+                );
+            }
+        }
+    }
+
     function invariant_ValidPartialCloseWithPositiveFundingImpliesVaultCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
@@ -277,6 +312,47 @@ contract PerpClosePreviewParityInvariantTest is Test {
             assertEq(preview.immediatePayoutUsdc, 0, "Deferred payout excludes immediate payout");
             assertLt(adjustedCash, totalOwed, "Deferred payout implies adjusted cash insufficient for full settlement");
         }
+    }
+
+    function _assertClosePreviewEquals(
+        CfdEngine.ClosePreview memory actual,
+        CfdEngine.ClosePreview memory expected
+    ) internal pure {
+        assertEq(actual.valid, expected.valid, "Close preview validity should match canonical simulateClose");
+        assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");
+        assertEq(actual.executionPrice, expected.executionPrice, "Close execution price should match");
+        assertEq(actual.sizeDelta, expected.sizeDelta, "Close size delta should match");
+        assertEq(actual.realizedPnlUsdc, expected.realizedPnlUsdc, "Close realized pnl should match");
+        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Close funding should match");
+        assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
+        assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
+        assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
+        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
+        assertEq(
+            actual.existingDeferredConsumedUsdc,
+            expected.existingDeferredConsumedUsdc,
+            "Close deferred consumption should match"
+        );
+        assertEq(
+            actual.existingDeferredRemainingUsdc,
+            expected.existingDeferredRemainingUsdc,
+            "Close deferred remainder should match"
+        );
+        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
+        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
+        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
+        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
+        assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
+        assertEq(actual.remainingMargin, expected.remainingMargin, "Close remaining margin should match");
+        assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Close degraded trigger should match");
+        assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Close post-op degraded mode should match");
+        assertEq(
+            actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Close effective assets should match"
+        );
+        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Close max liability should match");
+        assertEq(
+            actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Close solvency funding pnl should match"
+        );
     }
 
     function _closeFractions(

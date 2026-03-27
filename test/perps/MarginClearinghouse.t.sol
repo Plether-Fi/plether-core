@@ -721,6 +721,36 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), balance, "Alice should receive her USDC");
     }
 
+    function test_Withdraw_UsesEngineGuardParityForOpenPositions() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 10_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, alice, 5000e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+    }
+
+    function test_Withdraw_FailsConsistentlyWhenGuardWouldFailOnStaleMark() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+        _fundTrader(alice, 10_000 * 1e6);
+
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, alice, 100e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
+    }
+
 }
 
 contract NonUsdcCollateralTest is Test {
