@@ -1,26 +1,26 @@
 # Perps Accounting Spec
 
-This document defines the intended accounting model for the Plether Perpetuals Engine. It is the target semantic model for future refactors and the source of truth for distinguishing solvency, withdrawable cash, liquidation equity, and queued-order escrow.
+This document defines the target accounting model for the Plether Perpetuals Engine. It is the source of truth for solvency, withdrawable cash, liquidation equity, and queued-order escrow semantics.
 
-The implementation now treats four engine-side accounting domains as first-class modules:
+The engine accounting model has four domains:
 
 - close settlement,
 - liquidation settlement,
 - protocol solvency,
 - LP withdrawal reserves.
 
-The spec below defines the semantic boundary for each domain and the points where they are allowed to interact.
+This spec defines each domain boundary and the allowed interaction points.
 
 ## Purpose
 
-The protocol has several closely related but non-identical views of the same system state:
+The protocol maintains several related but non-identical views of system state:
 
 - whether the protocol may accept more directional risk,
 - how much LP cash may leave the vault,
 - how much value a liquidator may seize from a trader,
 - how much of a trader's balance is reserved for pending orders.
 
-These views must never share a helper unless they are intentionally using the exact same assumptions.
+These views must not share helpers unless they intentionally use identical assumptions.
 
 ## Core Principles
 
@@ -37,7 +37,7 @@ All values below are denominated in 6-decimal USDC unless stated otherwise.
 
 ### Physical Assets
 
-Use the following vocabulary consistently:
+Use the following terms consistently:
 
 - `rawAssets`: the actual USDC token balance currently sitting in `HousePool`
 - `accountedAssets`: the canonical protocol-owned asset ledger maintained by controlled protocol paths
@@ -46,7 +46,7 @@ Use the following vocabulary consistently:
 - `protocolFees`: `accumulatedFeesUsdc`, which are owned by the protocol and not LP equity
 - `netPhysicalAssets = physicalAssets - protocolFees`
 
-Operational consequences:
+Operational rules:
 
 - unsolicited positive transfers do not increase economic depth until explicitly accounted,
 - raw-balance shortfalls reduce `physicalAssets` immediately via the `min(rawAssets, accountedAssets)` boundary,
@@ -58,9 +58,9 @@ Controlled inflow families must remain distinct:
 - `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
 - `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
 
-These inflow entrypoints must not mutate LP principal through ad hoc, path-specific logic. They should translate external events into a small, explicit pending-accounting state that flows through the HousePool settlement entrypoint, with freshness gating applied only to the mark-dependent reconcile math.
+These inflow entrypoints must not mutate LP principal through ad hoc path-specific logic. They should translate external events into a small explicit pending-accounting state that flows through the `HousePool` settlement entrypoint, with freshness gating applied only to mark-dependent reconcile math.
 
-Current policy nuance:
+Current policy details:
 
 - fresh-mark reconcile math and pending-bucket application share the same HousePool settlement entrypoint,
 - the senior-yield checkpoint still respects mark freshness, but `finalizeSeniorRate()` is allowed to truncate stale-window elapsed accrual time when it applies a new rate without running fresh-mark reconcile math,
@@ -75,11 +75,11 @@ Current policy nuance:
 - `bearMaxProfit`: worst-case payout to all open BEAR positions at the opposite basket extreme
 - `maxLiability = max(bullMaxProfit, bearMaxProfit)`
 
-This is the protocol's bounded directional liability surface.
+This is the bounded directional liability surface.
 
 ### Funding Views
 
-Funding must be represented in two different ways.
+Funding has two distinct representations.
 
 #### 1. Solvency Funding
 
@@ -94,7 +94,7 @@ Definition:
 - `solvencyFunding = cappedBullFunding + cappedBearFunding`
 - where each side's negative value is clipped at `-totalSideMargin`
 
-This is the correct funding input for `effectiveAssets` and degraded-mode decisions.
+This is the funding input for `effectiveAssets` and degraded-mode decisions.
 
 #### 2. Withdrawal Funding Liability
 
@@ -107,11 +107,11 @@ Definition:
 
 - `withdrawalFundingLiability = max(bullFunding, 0) + max(bearFunding, 0)`
 
-This is intentionally more conservative than solvency funding.
+This view is intentionally more conservative than solvency funding.
 
 ### Unrealized MtM Liability
 
-The vault may only recognize unrealized trader profits as liabilities, never unrealized trader losses as assets.
+The vault may recognize unrealized trader profits only as liabilities, never unrealized trader losses as assets.
 
 Definition:
 
@@ -126,22 +126,22 @@ This quantity is suitable for conservative LP equity accounting and tranche reco
 
 - `badDebt`: realized trader obligations that were not covered by seized balance, seized margin, or fees
 
-Bad debt must be explicit state. It must never be left implicit in a mismatch between expected equity and physically recoverable equity.
+Bad debt must be explicit state. It must not remain implicit in a mismatch between expected equity and physically recoverable equity.
 
 ## Accounting Views
 
-The engine should continue to maintain separate kernels for the following four domains:
+The engine should maintain separate kernels for four domains:
 
 - `CloseAccounting`: trader-facing position reductions and net settlement.
 - `LiquidationAccounting`: forced close settlement, keeper bounty, residual payout, and bad debt.
 - `SolvencyAccounting`: protocol-level effective assets versus bounded max liability.
 - `WithdrawalAccounting`: LP cash firewall and immediately withdrawable vault cash.
 
-Any shared helper across domains is acceptable only when the assumptions are intentionally identical.
+Shared helpers across domains are acceptable only when assumptions are intentionally identical.
 
 ## Snapshot Interfaces
 
-The engine exposes several snapshot structs as boundary objects between core accounting and downstream consumers. These snapshots are not just convenience getters; they define which assumptions are safe for LP accounting, UI previews, and operator tooling to consume.
+The engine exposes snapshot structs as boundary objects between core accounting and downstream consumers. They define which assumptions are safe for LP accounting, UI previews, and operator tooling.
 
 ### A. `HousePoolInputSnapshot`
 
@@ -199,7 +199,7 @@ Field semantics:
 
 Design rule:
 
-- status flags should stay separate from accounting quantities so downstream consumers can explain whether an action is blocked by state gating or by insufficient free cash
+- status flags should stay separate from accounting quantities so downstream consumers can distinguish state gating from insufficient free cash
 
 ### C. Preview And Simulation Solvency Outputs
 
@@ -214,7 +214,7 @@ Consumed by:
 
 Purpose:
 
-- explain not only whether an action is legal, but whether it would newly degrade the protocol or leave it degraded afterward
+- describe not only whether an action is legal, but whether it newly degrades the protocol or leaves it degraded afterward
 
 Field semantics:
 
@@ -250,18 +250,18 @@ Lifecycle rule:
 
 - seed positions are the default owner-continuity mechanism,
 - share-backed `assignUnassignedAssets(...)` is the exceptional fallback,
-- `unassignedAssets` should only appear when value exists but no seeded claimant path can safely determine ownership.
+- `unassignedAssets` should appear only when value exists but no seeded claimant path can safely determine ownership.
 
 ## Ownership Routing Model
 
-The final routing model is:
+The routing model is:
 
 - protocol fees remain outside LP equity via `accumulatedFeesUsdc`, even when the raw USDC transfer itself is accounted immediately,
 - recapitalization inflows restore seeded senior claimants first through `recordRecapitalizationInflow`; after a full wipeout (`seniorPrincipal == 0 && juniorPrincipal == 0`), the first recapitalization resets `seniorHighWaterMark` to the new recapitalized principal instead of reviving the stale pre-wipeout mark, with any remainder that still has no claimant path falling into `unassignedAssets`,
 - LP-owned trading revenue uses `recordTradingRevenueInflow`; if live principal exists, normal reconcile applies the waterfall, and if both principals are zero but seed claimants exist, the revenue attaches directly to the seeded waterfall path (senior restoration first, junior residual second),
 - only inflows whose owner cannot be inferred from source semantics or seeded claimant continuity may remain in `unassignedAssets` for explicit governance assignment, and pending recap/trading buckets must also fall back into `unassignedAssets` whenever no claimant path exists.
 
-The intended end state is that `unassignedAssets` is exceptional telemetry, not a routine accounting mode.
+`unassignedAssets` should be exceptional telemetry, not a routine accounting mode.
 
 ### A. Risk-Increasing Solvency View
 
@@ -318,10 +318,10 @@ Notes:
 
 - This view is for principal and yield accounting, not open-path solvency.
 - Temporary under-recognition is acceptable; over-recognition is not.
-- If economic assets exist while no tranche shares can validly claim them, those assets must sit in an explicit `unassignedAssets` bucket rather than being silently attributed to the next LP.
-- While `unassignedAssets > 0`, tranche deposits must remain blocked until governance explicitly assigns the bucket by minting matching tranche shares to a chosen bootstrap receiver.
-- A tranche with `totalSupply == 0` must not accumulate live principal; any revenue that would otherwise land there must be redirected into `unassignedAssets`.
-- If a tranche still has outstanding shares but `totalAssets() == 0`, treat it as terminally non-depositable; ordinary ERC4626 `deposit` / `mint` must not be used to revive a wiped seeded tranche.
+- If economic assets exist while no tranche shares can validly claim them, those assets must sit in explicit `unassignedAssets` rather than being silently attributed to the next LP.
+- While `unassignedAssets > 0`, tranche deposits must remain blocked until governance assigns the bucket by minting matching tranche shares to a bootstrap receiver.
+- A tranche with `totalSupply == 0` must not accumulate live principal; revenue that would otherwise land there must be redirected into `unassignedAssets`.
+- If a tranche still has outstanding shares but `totalAssets() == 0`, treat it as terminally non-depositable; ordinary ERC4626 `deposit` / `mint` must not revive a wiped seeded tranche.
 - Preferred steady state is permanent seed-share ownership in each tranche: protocol-controlled seed shares remain non-redeemable below a configured floor so ordinary LP exits cannot make a tranche ownerless.
 
 Required liabilities in this view:
@@ -330,7 +330,7 @@ Required liabilities in this view:
 - deferred trader payouts,
 - deferred liquidation bounties.
 
-These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so those paths cannot drift on what cash is truly free.
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so these paths cannot drift on what cash is actually free.
 
 Deferred servicing rule:
 
@@ -449,7 +449,7 @@ Rules:
 
 ## Trader Balance Semantics
 
-Each account must have conceptually distinct balances even if the current implementation stores them in fewer variables.
+Each account must have conceptually distinct balances even if the implementation stores them in fewer variables.
 
 - Trader-owned domain:
   - `balance`: physical collateral deposited in the clearinghouse
@@ -601,7 +601,7 @@ Every order should conceptually live in one of these states:
 - `Executed`
 - `Expired`
 
-In the live router implementation, storage persists a slightly lower-level state machine:
+In the live router implementation, storage persists a lower-level state machine:
 
 - `None`
 - `Pending`
@@ -656,6 +656,6 @@ The preferred end state is four explicit internal accounting domains:
 - `LiquidationAccounting`
 - `OrderEscrowAccounting`
 
-Each module should consume a common raw state snapshot but produce domain-specific answers.
+Each module should consume a common raw state snapshot and produce domain-specific answers.
 
-The architecture goal is not to eliminate conservatism. It is to make each conservative assumption local, explicit, and impossible to accidentally reuse in the wrong context.
+The architecture goal is not to eliminate conservatism. It is to keep each conservative assumption local, explicit, and hard to reuse in the wrong context.
