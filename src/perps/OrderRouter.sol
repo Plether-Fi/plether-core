@@ -1317,6 +1317,16 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         }
     }
 
+    /// @notice Claims USDC bounty refunds that could not be pushed during failed-order cleanup.
+    function claimUsdc() external {
+        uint256 amount = claimableUsdc[msg.sender];
+        if (amount == 0) {
+            revert OrderRouter__NothingToClaim();
+        }
+        claimableUsdc[msg.sender] = 0;
+        USDC.safeTransfer(msg.sender, amount);
+    }
+
     function _computeBasketPrice() internal view returns (uint256 basketPrice, uint256 minPublishTime) {
         minPublishTime = type(uint256).max;
         uint256 len = pythFeedIds.length;

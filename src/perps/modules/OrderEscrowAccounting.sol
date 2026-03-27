@@ -35,6 +35,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     mapping(bytes32 => uint256) public pendingCloseSize;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
+    mapping(address => uint256) public claimableUsdc;
 
     constructor(
         address _engine
@@ -189,7 +190,21 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
         record.executionBountyUsdc = 0;
         address trader = address(uint160(uint256(record.core.accountId)));
-        USDC.safeTransfer(trader, bounty);
+        if (!_tryTransferUsdc(trader, bounty)) {
+            claimableUsdc[trader] += bounty;
+        }
+    }
+
+    function _tryTransferUsdc(
+        address to,
+        uint256 amount
+    ) internal returns (bool success) {
+        if (amount == 0) {
+            return true;
+        }
+
+        (bool callSuccess, bytes memory returnData) = address(USDC).call(abi.encodeCall(IERC20.transfer, (to, amount)));
+        return callSuccess && (returnData.length == 0 || abi.decode(returnData, (bool)));
     }
 
     function _releaseCommittedMargin(

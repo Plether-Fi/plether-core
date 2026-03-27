@@ -1310,6 +1310,39 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
     }
 
+    function test_PostCommitDegradedModeRefundFallbackDoesNotBrickHead() public {
+        _fundTrader(bob, 10_000e6);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        vm.prank(bob);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        _setDegradedModeForTest();
+        vm.warp(block.timestamp + 6);
+
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(usdc.transfer.selector, alice, 1e6),
+            abi.encodeWithSignature("Error(string)", "blacklisted")
+        );
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 2, "Failed refund transfer must not brick the FIFO head");
+        assertEq(router.claimableUsdc(alice), 1e6, "Failed refund transfer should fall back to claimable USDC");
+        assertEq(usdc.balanceOf(alice), 0, "User should not receive direct USDC when refund fallback is used");
+
+        vm.clearMockedCalls();
+        vm.prank(alice);
+        router.claimUsdc();
+        assertEq(router.claimableUsdc(alice), 0, "Claimable USDC should clear after claim");
+        assertEq(usdc.balanceOf(alice), 1e6, "User should recover the failed refund via claimUsdc");
+    }
+
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
         address eve = address(0xE111);
         bytes32 eveId = bytes32(uint256(uint160(eve)));
