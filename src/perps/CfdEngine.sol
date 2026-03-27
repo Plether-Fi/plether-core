@@ -758,7 +758,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             positionAfter,
             price,
             CAP_PRICE,
-            getPendingFunding(positionAfter),
+            _getProjectedPendingFunding(accountId, positionAfter),
             reachableUsdc - amountUsdc,
             isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
         );
@@ -831,7 +831,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, CAP_PRICE, getPendingFunding(pos), reachableUsdc, riskParams.initMarginBps
+            pos, price, CAP_PRICE, _getProjectedPendingFunding(accountId, pos), reachableUsdc, riskParams.initMarginBps
         );
 
         uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
@@ -1709,6 +1709,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
+        snap.fundingVaultDepthUsdc += forfeitedUsdc;
         snap.vaultAssetsUsdc += forfeitedUsdc;
         snap.vaultCashUsdc += forfeitedUsdc;
         snap.accumulatedFeesUsdc += forfeitedUsdc;

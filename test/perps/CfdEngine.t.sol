@@ -2109,6 +2109,43 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_PreviewLiquidation_ForfeitedEscrowChangesFundingSensitivePreview() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseApy = 1000e18;
+        params.maxApy = 1000e18;
+        _setRiskParams(params);
+
+        address trader = address(0xAB1407);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 300e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 200e6, 1e8);
+
+        vm.startPrank(trader);
+        for (uint256 i = 0; i < 5; i++) {
+            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 0, type(uint256).max, true);
+        }
+        vm.stopPrank();
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
+
+        uint256 canonicalDepth = pool.totalAssets();
+        uint256 forfeitedEscrow = router.getAccountEscrow(accountId).executionBountyUsdc;
+        assertGt(forfeitedEscrow, 0, "Setup must build forfeitable execution escrow");
+        assertGt(canonicalDepth, forfeitedEscrow, "Setup needs canonical vault depth to exceed escrow");
+
+        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 101_000_000);
+        CfdEngine.LiquidationPreview memory oldModelEquivalent =
+            engine.simulateLiquidation(accountId, 101_000_000, canonicalDepth - forfeitedEscrow);
+
+        assertNotEq(
+            preview.fundingUsdc,
+            oldModelEquivalent.fundingUsdc,
+            "Forfeited escrow should now change the funding-sensitive liquidation preview"
+        );
+    }
+
     function test_Liquidation_ConsumesDeferredPayoutBeforeRecordingBadDebt() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD221));
@@ -3688,6 +3725,40 @@ contract CfdEngineTest is BasePerpTest {
         _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
     }
 
+    function test_CheckWithdrawParity_ProjectsAccruedFundingWithoutPriorSync() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseApy = 1000e18;
+        params.maxApy = 1000e18;
+        _setRiskParams(params);
+
+        address trader = address(0x515818);
+        address counterparty = address(0x515819);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 2000e6, 1e8);
+
+        engine.proposeEngineMarkStalenessLimit(300);
+        vm.warp(engine.engineMarkStalenessActivationTime() + 1);
+        engine.finalizeEngineMarkStalenessLimit();
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
+
+        (uint256 size,,,, int256 entryFunding,,,) = engine.positions(accountId);
+        assertLt(
+            _previewFundingPnl(CfdTypes.Side.BULL, size, entryFunding),
+            0,
+            "Setup must accrue negative funding before any explicit sync"
+        );
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, trader, 80e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+    }
+
     function test_CheckWithdraw_UsesExplicitInitMarginBps() public {
         address trader = address(0x515815);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -3725,6 +3796,37 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_ProjectsAccruedFundingWithoutPriorSync() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseApy = 1000e18;
+        params.maxApy = 1000e18;
+        _setRiskParams(params);
+
+        address trader = address(0x51583);
+        address counterparty = address(0x51584);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
+        _fundTrader(trader, 1600e6);
+        _fundTrader(counterparty, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
+        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 2000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
+
+        (uint256 size,,,, int256 entryFunding,,,) = engine.positions(accountId);
+        assertLt(
+            _previewFundingPnl(CfdTypes.Side.BULL, size, entryFunding),
+            0,
+            "Setup must accrue negative funding before reserving the close bounty"
+        );
+
+        vm.prank(address(router));
+        vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        engine.reserveCloseOrderExecutionBounty(accountId, 1400e6, address(router));
     }
 
     function test_VpiDepthManipulation_NeutralizedByStatefulBound() public {
