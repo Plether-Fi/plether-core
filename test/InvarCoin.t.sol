@@ -3926,4 +3926,25 @@ contract HarvestBypassTest is Test {
         assertGt(usdcOut + bearOut, 0);
     }
 
+    function test_LpWithdrawSucceedsWhenYieldPendingAndOracleReverts() public {
+        vm.prank(alice);
+        ic.deposit(100_000e6, alice, 0);
+
+        ic.deployToCurve(0);
+
+        curve.setVirtualPrice(1.1e18);
+
+        assertGt(ic.getHarvestableYield(), 0, "yield should be pending");
+
+        vm.mockCallRevert(
+            address(oracle), abi.encodeWithSignature("latestRoundData()"), "oracle deviation"
+        );
+
+        uint256 shares = ic.balanceOf(alice);
+
+        vm.prank(alice);
+        (uint256 usdcOut, uint256 bearOut) = ic.lpWithdraw(shares / 2, 0, 0);
+        assertGt(usdcOut + bearOut, 0);
+    }
+
 }
