@@ -1849,7 +1849,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.riskParams = riskParams;
         snap.isFadWindow = isFadWindow();
         uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        snap.liveMarkFreshForFunding = isOracleFrozen() || liveMarkAge <= _liveMarkStalenessLimit();
+        snap.liveMarkFreshForFunding = liveMarkAge <= _fundingMarkStalenessLimit();
     }
 
     function _copySideSnapshot(
@@ -2358,12 +2358,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _canProjectFundingStep() internal view returns (bool) {
-        if (isOracleFrozen()) {
-            return true;
-        }
-
         uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        return age <= _liveMarkStalenessLimit();
+        return age <= _fundingMarkStalenessLimit();
+    }
+
+    function _fundingMarkStalenessLimit() internal view returns (uint256 maxStaleness) {
+        maxStaleness = _liveMarkStalenessLimit();
+        if (isOracleFrozen()) {
+            maxStaleness = fadMaxStaleness;
+        }
     }
 
     function _buildFundingStep(

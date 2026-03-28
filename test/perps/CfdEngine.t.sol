@@ -189,6 +189,24 @@ contract CfdEngineTest is BasePerpTest {
         });
     }
 
+    function _setFadMaxStaleness(
+        uint256 val
+    ) internal {
+        engine.proposeFadMaxStaleness(val);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engine.finalizeFadMaxStaleness();
+    }
+
+    function _nextSaturdayNoon() internal view returns (uint256 timestamp) {
+        uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
+        uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
+        uint256 deltaDays = 6 - currentDay;
+        timestamp = startOfDay + deltaDays * 1 days + 12 hours;
+        if (timestamp <= block.timestamp) {
+            timestamp += 7 days;
+        }
+    }
+
     function test_OpenPosition_SolvencyCheck() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
@@ -491,6 +509,88 @@ contract CfdEngineTest is BasePerpTest {
             engine.getHousePoolInputSnapshot(pool.markStalenessLimit()).withdrawalFundingLiabilityUsdc,
             houseBefore.withdrawalFundingLiabilityUsdc,
             "HousePool input snapshot should not inherit stale projected funding"
+        );
+    }
+
+    function test_SyncFunding_DoesNotAdvanceOnFrozenMarkPastFadMaxStaleness() public {
+        address trader = address(0xABC5);
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+
+        _setFadMaxStaleness(1 hours);
+
+        _fundTrader(trader, 50_000e6);
+        _open(traderId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+
+        uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
+        uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
+        uint256 saturdayNoon = startOfDay + (6 - currentDay) * 1 days + 12 hours;
+        if (saturdayNoon <= block.timestamp) {
+            saturdayNoon += 7 days;
+        }
+        vm.warp(saturdayNoon);
+        assertTrue(engine.isOracleFrozen(), "Setup must be inside a frozen oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint64 fundingBefore = engine.lastFundingTime();
+        vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
+
+        engine.syncFunding();
+
+        assertEq(
+            engine.lastFundingTime(),
+            fundingBefore,
+            "Funding should not advance once the frozen mark exceeds fadMaxStaleness"
+        );
+    }
+
+    function test_ProtocolAccounting_DoesNotProjectFundingFromFrozenMarkPastFadMaxStaleness() public {
+        address bullTrader = address(0xABC6);
+        address bearTrader = address(0xABC7);
+        bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _setFadMaxStaleness(1 hours);
+
+        _fundTrader(bullTrader, 50_000e6);
+        _fundTrader(bearTrader, 10_000e6);
+        _open(bullId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
+
+        uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
+        uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
+        uint256 saturdayNoon = startOfDay + (6 - currentDay) * 1 days + 12 hours;
+        if (saturdayNoon <= block.timestamp) {
+            saturdayNoon += 7 days;
+        }
+        vm.warp(saturdayNoon);
+        assertTrue(engine.isOracleFrozen(), "Setup must be inside a frozen oracle window");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 fundingLiabilityBefore = engine.getLiabilityOnlyFundingPnl();
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+
+        vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
+
+        assertEq(
+            engine.getLiabilityOnlyFundingPnl(),
+            fundingLiabilityBefore,
+            "Frozen marks beyond fadMaxStaleness should not project additional funding liability"
+        );
+        assertEq(
+            engine.getProtocolAccountingSnapshot().liabilityOnlyFundingPnlUsdc,
+            snapshotBefore.liabilityOnlyFundingPnlUsdc,
+            "Protocol accounting should freeze funding liability once the frozen mark exceeds fadMaxStaleness"
+        );
+        assertEq(
+            engine.getHousePoolInputSnapshot(pool.markStalenessLimit()).withdrawalFundingLiabilityUsdc,
+            houseBefore.withdrawalFundingLiabilityUsdc,
+            "HousePool input snapshot should not inherit over-stale frozen funding"
         );
     }
 
@@ -2111,8 +2211,8 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_PreviewLiquidation_ForfeitedEscrowChangesFundingSensitivePreview() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 1000e18;
-        params.maxApy = 1000e18;
+        params.baseApy = 10_000e18;
+        params.maxApy = 10_000e18;
         _setRiskParams(params);
 
         address trader = address(0xAB1407);
@@ -3727,8 +3827,8 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_CheckWithdrawParity_ProjectsAccruedFundingWithoutPriorSync() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 1000e18;
-        params.maxApy = 1000e18;
+        params.baseApy = 100_000e18;
+        params.maxApy = 100_000e18;
         _setRiskParams(params);
 
         address trader = address(0x515818);
@@ -5260,13 +5360,27 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
 
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseApy = 1000e18;
+        params.maxApy = 1000e18;
+        _setRiskParams(params);
+
         _fundTrader(bullTrader, 30_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000e6, 1e8);
+        _open(bullId, CfdTypes.Side.BULL, 1_000_000e18, 20_000e6, 1e8);
         _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(block.timestamp + 180 days);
+        uint256 currentDay = ((block.timestamp / 1 days) + 4) % 7;
+        uint256 startOfDay = block.timestamp - (block.timestamp % 1 days);
+        uint256 saturdayNoon = startOfDay + (6 - currentDay) * 1 days + 12 hours;
+        if (saturdayNoon <= block.timestamp) {
+            saturdayNoon += 7 days;
+        }
+        vm.warp(saturdayNoon);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30 hours);
 
         CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(bullId, 1e8);
         assertTrue(preview.liquidatable, "BULL majority must be liquidatable after funding drain");
