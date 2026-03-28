@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
@@ -49,6 +50,25 @@ contract PerpAccountingHandler is Test {
         bool walletPayoutExpected;
     }
 
+    struct OpenCommitAttempt {
+        bool active;
+        bytes32 accountId;
+        bool routerOpenAllowed;
+        bool prefilterActive;
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory;
+        uint8 revertCode;
+        bool commitSucceeded;
+    }
+
+    struct WithdrawParityAttempt {
+        bool active;
+        bytes32 accountId;
+        bool checkWithdrawPasses;
+        bytes4 checkWithdrawSelector;
+        bool withdrawPasses;
+        bytes4 withdrawSelector;
+    }
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -72,6 +92,8 @@ contract PerpAccountingHandler is Test {
 
     BadDebtDeferredEvent internal lastBadDebtDeferredEvent;
     TerminalResidualEvent internal lastTerminalResidualEvent;
+    OpenCommitAttempt internal lastOpenCommitAttempt;
+    WithdrawParityAttempt internal lastWithdrawParityAttempt;
 
     bytes32 internal lastTerminalReservationAccountId;
     uint256 internal lastTerminalReservationCount;
@@ -159,10 +181,24 @@ contract PerpAccountingHandler is Test {
 
         ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(accountId);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
+        WithdrawParityAttempt memory attempt;
+        attempt.active = true;
+        attempt.accountId = accountId;
+        try engine.checkWithdraw(accountId) {
+            attempt.checkWithdrawPasses = true;
+        } catch (bytes memory err) {
+            attempt.checkWithdrawSelector = _revertSelector(err);
+        }
+
         vm.prank(actor);
-        clearinghouse.withdraw(accountId, amount);
-        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(accountId);
-        _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
+        try clearinghouse.withdraw(accountId, amount) {
+            attempt.withdrawPasses = true;
+            ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(accountId);
+            _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
+        } catch (bytes memory err) {
+            attempt.withdrawSelector = _revertSelector(err);
+        }
+        lastWithdrawParityAttempt = attempt;
     }
 
     function commitOpenOrder(
@@ -188,11 +224,45 @@ contract PerpAccountingHandler is Test {
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
         uint64 orderId = router.nextCommitId();
         bytes32 accountId = _accountId(actor);
+        lastOpenCommitAttempt = OpenCommitAttempt({
+            active: true,
+            accountId: accountId,
+            routerOpenAllowed: !router.paused() && !engine.degradedMode() && !engine.isOracleFrozen()
+                && !engine.isFadWindow() && vault.canIncreaseRisk()
+                && router.pendingOrderCounts(accountId) < router.MAX_PENDING_ORDERS(),
+            prefilterActive: _canUseCommitMarkForOpenPrefilter(),
+            failureCategory: engine.previewOpenFailurePolicyCategory(
+                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+            ),
+            revertCode: engine.previewOpenRevertCode(
+                accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+            ),
+            commitSucceeded: false
+        });
 
         vm.prank(actor);
         try router.commitOrder(side, sizeDelta, marginDelta, targetPrice, false) {
+            lastOpenCommitAttempt.commitSucceeded = true;
             _registerPendingOrder(orderId, accountId, marginDelta);
         } catch {}
+    }
+
+    function warpForward(
+        uint256 secondsFuzz
+    ) external {
+        _clearLastBadDebtDeferredEvent();
+        _clearTerminalReservationSet();
+        vm.warp(block.timestamp + bound(secondsFuzz, 1, 7 days));
+    }
+
+    function syncMarkNow(
+        uint256 priceFuzz
+    ) external {
+        _clearLastBadDebtDeferredEvent();
+        _clearTerminalReservationSet();
+        uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
+        vm.prank(address(router));
+        engine.updateMarkPrice(price, uint64(block.timestamp));
     }
 
     function commitCloseOrder(
@@ -497,6 +567,14 @@ contract PerpAccountingHandler is Test {
         return lastTerminalResidualEvent;
     }
 
+    function lastOpenCommitAttemptSnapshot() external view returns (OpenCommitAttempt memory) {
+        return lastOpenCommitAttempt;
+    }
+
+    function lastWithdrawParityAttemptSnapshot() external view returns (WithdrawParityAttempt memory) {
+        return lastWithdrawParityAttempt;
+    }
+
     function accountRouterEscrow(
         bytes32 accountId
     ) public view returns (uint256 totalEscrowUsdc) {
@@ -552,6 +630,42 @@ contract PerpAccountingHandler is Test {
     function _clearLastBadDebtDeferredEvent() internal {
         delete lastBadDebtDeferredEvent;
         delete lastTerminalResidualEvent;
+    }
+
+    function _revertSelector(
+        bytes memory err
+    ) internal pure returns (bytes4 selector) {
+        if (err.length < 4) {
+            return bytes4(0);
+        }
+        assembly {
+            selector := mload(add(err, 32))
+        }
+    }
+
+    function _commitReferencePrice() internal view returns (uint256 price) {
+        price = engine.lastMarkPrice();
+        if (price == 0) {
+            price = 1e8;
+        }
+
+        uint256 capPrice = engine.CAP_PRICE();
+        return price > capPrice ? capPrice : price;
+    }
+
+    function _canUseCommitMarkForOpenPrefilter() internal view returns (bool) {
+        uint64 lastMarkTime = engine.lastMarkTime();
+        if (lastMarkTime == 0) {
+            return false;
+        }
+
+        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
+        uint256 maxStaleness = engine.isOracleFrozen() || engine.isFadWindow()
+            ? router.liquidationStalenessLimit() > engine.fadMaxStaleness()
+                ? router.liquidationStalenessLimit()
+                : engine.fadMaxStaleness()
+            : router.orderExecutionStalenessLimit();
+        return age <= maxStaleness;
     }
 
     function _recordBadDebtDeferredEvent(

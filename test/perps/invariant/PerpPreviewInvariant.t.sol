@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
@@ -32,7 +33,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, vault);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](8);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
@@ -41,6 +42,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         selectors[5] = handler.liquidate.selector;
         selectors[6] = handler.claimDeferredClearerBounty.selector;
         selectors[7] = handler.setRouterPayoutFailureMode.selector;
+        selectors[8] = handler.warpForward.selector;
+        selectors[9] = handler.syncMarkNow.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -219,6 +222,53 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 closePreview.postOpDegradedMode,
                 closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
                 "Close preview post-op degraded flag mismatch"
+            );
+        }
+    }
+
+    function invariant_LastOpenCommitAttemptRespectsPreviewCommitSemantics() public view {
+        PerpAccountingHandler.OpenCommitAttempt memory attempt = handler.lastOpenCommitAttemptSnapshot();
+        if (!attempt.active) {
+            return;
+        }
+
+        if (attempt.commitSucceeded) {
+            assertTrue(
+                !attempt.prefilterActive
+                    || attempt.failureCategory != CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable,
+                "Committed opens must not succeed when preview classifies them as commit-time rejectable"
+            );
+        }
+
+        if (
+            attempt.routerOpenAllowed && attempt.prefilterActive
+                && attempt.failureCategory == CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable
+        ) {
+            assertFalse(
+                attempt.commitSucceeded,
+                "Predictably invalid opens must not bypass the router commit-time prefilter when router-local gates are open"
+            );
+        }
+    }
+
+    function invariant_LastWithdrawAttemptMatchesGuardParity() public view {
+        PerpAccountingHandler.WithdrawParityAttempt memory attempt = handler.lastWithdrawParityAttemptSnapshot();
+        if (!attempt.active) {
+            return;
+        }
+
+        if (attempt.withdrawPasses) {
+            assertTrue(
+                attempt.checkWithdrawPasses,
+                "Successful withdraws must only happen when checkWithdraw also passes under randomized funding/time evolution"
+            );
+        }
+        if (!attempt.checkWithdrawPasses) {
+            assertFalse(attempt.withdrawPasses, "Guard-blocked withdraws must not succeed live");
+            assertEq(
+                attempt.withdrawSelector,
+                attempt.checkWithdrawSelector,
+                "Withdraw revert selector must match checkWithdraw when the guard blocks"
             );
         }
     }
