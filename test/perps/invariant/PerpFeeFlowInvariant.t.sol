@@ -36,7 +36,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_ProtocolAccountingSnapshotIncludesFeeBucket() public view {
-        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc(), "Protocol snapshot fee bucket mismatch");
         assertEq(
             snapshot.accumulatedFeesUsdc, handler.ghostTrackedFeesUsdc(), "Fee model and protocol snapshot must agree"

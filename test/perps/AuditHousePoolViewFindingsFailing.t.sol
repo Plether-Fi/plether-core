@@ -168,9 +168,9 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
 
         vm.warp(block.timestamp + 30 days);
 
-        CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
-        ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 1e8);
+        CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+        ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 1e8);
 
         assertEq(positionView.pendingFundingUsdc, preview.fundingUsdc, "Position view should project pending funding");
         assertEq(snapshot.pendingFundingUsdc, preview.fundingUsdc, "Ledger snapshot should project pending funding");
@@ -245,7 +245,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), burnAmount);
 
-        ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        ICfdEngine.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
 

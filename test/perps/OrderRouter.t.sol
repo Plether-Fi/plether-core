@@ -2400,7 +2400,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 keeperWalletBefore = usdc.balanceOf(address(this));
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(address(this)))));
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -2428,7 +2428,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(accountId, address(this));
 
         vm.mockCallRevert(
@@ -2477,8 +2477,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             "Queued open orders should remain pending before liquidation"
         );
 
-        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -2539,7 +2539,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 canonicalDepthBefore = pool.totalAssets();
 
         CfdEngine.LiquidationPreview memory expectedPreview =
-            engine.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
+            engineLens.simulateLiquidation(accountId, 195_000_000, canonicalDepthBefore);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
@@ -2579,7 +2579,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
 
-        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 vaultAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);

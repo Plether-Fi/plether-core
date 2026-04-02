@@ -20,7 +20,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, closePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -74,7 +74,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 100_000e18, closePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, closePrice);
         vm.assume(preview.valid);
 
         vm.prank(trader);
@@ -131,7 +131,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         vm.warp(block.timestamp + 180 days);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bearId, 50_000e18, 1e8);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(bearId, 50_000e18, 1e8);
         assertTrue(preview.valid, "Positive-funding partial close preview should remain valid");
 
         uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
@@ -174,7 +174,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(trader, 8000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 4000e6, 1e8);
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 110_000_000);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 110_000_000);
         assertTrue(preview.valid, "Partial close preview should remain valid without queued margin support");
 
         vm.prank(trader);
@@ -211,7 +211,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 100e6);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         vm.assume(preview.liquidatable);
 
         uint256 traderWalletBefore = usdc.balanceOf(trader);
@@ -283,7 +283,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, liquidationPrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         vm.assume(preview.liquidatable);
 
         uint256 traderWalletBefore = usdc.balanceOf(trader);
@@ -358,8 +358,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 70e6);
         vm.stopPrank();
 
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, liquidationPrice);
-        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engine.getAccountLedgerSnapshot(accountId);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
+        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);

@@ -296,7 +296,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 committedBefore = router.committedMargins(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, 50_000e18, 1.08e8);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 1.08e8);
 
         assertFalse(preview.valid, "Preview should reject a partial close that would need queued committed margin");
         assertEq(

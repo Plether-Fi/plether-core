@@ -39,7 +39,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(accountId, address(handler));
+            CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(accountId, address(handler));
             uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
             uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(address(handler));
 
@@ -213,7 +213,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, size, oraclePrice);
+            CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, size, oraclePrice);
             if (!preview.valid) {
                 continue;
             }
@@ -249,7 +249,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
+            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
             uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
             if (totalPayoutUsdc == 0) {

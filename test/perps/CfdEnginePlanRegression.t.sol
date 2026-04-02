@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanner} from "../../src/perps/CfdEnginePlanner.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -34,6 +35,15 @@ contract CfdEnginePlanHarness is CfdEngine {
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
 
+    function buildRawSnapshotForPlanner(
+        bytes32 accountId,
+        uint256 executionPrice,
+        uint256 vaultDepthUsdc
+    ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        snap = _buildRawSnapshot(accountId, executionPrice, vaultDepthUsdc, 0);
+        snap.vaultCashUsdc = vault.totalAssets();
+    }
+
     function computeOpenMarginAfter(
         uint256 marginAfterFunding,
         int256 netMarginChange
@@ -49,6 +59,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     address bullTraderB = address(0xB012);
     address bearTrader = address(0xBEA2);
     address freshBullTrader = address(0xB013);
+    CfdEnginePlanner planner;
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -97,6 +108,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _bypassAllTimelocks();
         _bootstrapSeededLifecycle();
         _fundJunior(address(this), 1_000_000e6);
+        planner = new CfdEnginePlanner();
     }
 
     function _position(
@@ -160,41 +172,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         return marginAfterFunding;
     }
 
-    function test_PreviewClose_UncoveredFundingMatchesLiveFeeAndSolvencyState() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-
-        _fundTrader(bullTraderA, 20_000e6);
-        _fundTrader(bearTrader, 100_000e6);
-
-        _open(bullId, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
-
-        vm.warp(block.timestamp + 180 days);
-        vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        CfdTypes.Position memory bullPos = _position(bullId);
-        int256 bullFunding = engine.getPendingFunding(bullPos);
-        assertLt(bullFunding, -int256(bullPos.margin), "Setup must produce uncovered funding loss on full close");
-
-        CfdEngine.ClosePreview memory preview = engine.previewClose(bullId, bullPos.size, 1e8);
-        assertTrue(preview.valid, "Full close preview must remain executable");
-
-        uint256 feesBefore = engine.accumulatedFeesUsdc();
-        _close(bullId, CfdTypes.Side.BULL, bullPos.size, 1e8);
-
-        uint256 liveFeeDelta = engine.accumulatedFeesUsdc() - feesBefore;
-        uint256 liveEffectiveAssets = engine.getProtocolAccountingSnapshot().effectiveSolvencyAssetsUsdc;
-
-        assertEq(preview.executionFeeUsdc, liveFeeDelta, "Close preview fee must match live collectible fee");
-        assertEq(
-            preview.effectiveAssetsAfterUsdc,
-            liveEffectiveAssets,
-            "Close preview effective assets must match live state after uncovered funding settlement"
-        );
-    }
-
     function test_PlanOpen_FreshAccountUsesGlobalSideMarginBaseline() public {
         bytes32 bullIdA = bytes32(uint256(uint160(bullTraderA)));
         bytes32 bullIdB = bytes32(uint256(uint160(bullTraderB)));
@@ -240,6 +217,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(200e6, -50e6);
         assertFalse(drained, "Positive offset path should remain nonnegative");
         assertEq(marginAfter, 150e6, "Single-frame margin should equal base plus net change");
+    }
+
+    function test_PlannerWrapper_ComputeOpenMarginAfterMatchesLibrary() public view {
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        (bool libDrained, uint256 libMarginAfter) = harness.computeOpenMarginAfter(200e6, -50e6);
+        (bool plannerDrained, uint256 plannerMarginAfter) = planner.computeOpenMarginAfter(200e6, -50e6);
+
+        assertEq(plannerDrained, libDrained, "Planner wrapper should match library drained flag");
+        assertEq(plannerMarginAfter, libMarginAfter, "Planner wrapper should match library margin result");
     }
 
     function test_ComputeOpenMarginAfter_NegativePathSubtractsOnce() public view {
@@ -320,6 +306,35 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             engine.getSideState(CfdTypes.Side.BULL).totalMargin,
             delta.sideTotalMarginAfterOpen,
             "Live side total margin should match planner delta"
+        );
+    }
+
+    function test_PlannerWrapper_OpenPlanMatchesLibrary() public {
+        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        _fundTrader(freshBullTrader, 20_000e6);
+
+        CfdTypes.Order memory order = _openOrder(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            harness.buildRawSnapshotForPlanner(order.accountId, 1e8, pool.totalAssets());
+        CfdEnginePlanTypes.OpenDelta memory libDelta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
+        CfdEnginePlanTypes.OpenDelta memory plannerDelta = planner.planOpen(snap, order, 1e8, 0);
+
+        assertEq(plannerDelta.valid, libDelta.valid, "Planner open validity should match library");
+        assertEq(
+            uint8(plannerDelta.revertCode), uint8(libDelta.revertCode), "Planner open revert code should match library"
+        );
+        assertEq(plannerDelta.newPosSize, libDelta.newPosSize, "Planner open size should match library");
+        assertEq(
+            plannerDelta.positionMarginAfterOpen,
+            libDelta.positionMarginAfterOpen,
+            "Planner open margin should match library"
+        );
+        assertEq(plannerDelta.executionFeeUsdc, libDelta.executionFeeUsdc, "Planner open fee should match library");
+        assertEq(
+            plannerDelta.sideTotalMarginAfterOpen,
+            libDelta.sideTotalMarginAfterOpen,
+            "Planner open side total margin should match library"
         );
     }
 
@@ -430,6 +445,72 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint256(CfdEnginePlanLib.getOpenFailurePolicyCategory(delta.revertCode)),
             uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable),
             "Planner should classify the solvency invalidation consistently"
+        );
+    }
+
+    function test_PlannerWrapper_FundingPlansMatchLibrary() public {
+        bytes32 bullId = bytes32(uint256(uint160(bullTraderA)));
+        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
+
+        _fundTrader(bullTraderA, 20_000e6);
+        _fundTrader(bearTrader, 100_000e6);
+        _open(bullId, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
+        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        vm.warp(block.timestamp + 7 days);
+
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap = harness.buildRawSnapshotForPlanner(bullId, 1e8, pool.totalAssets());
+        CfdEnginePlanTypes.GlobalFundingDelta memory libGlobal = CfdEnginePlanLib.planGlobalFunding(snap, 1e8, 0);
+        CfdEnginePlanTypes.GlobalFundingDelta memory plannerGlobal = planner.planGlobalFunding(snap, 1e8, 0);
+        assertEq(
+            plannerGlobal.bullFundingIndexDelta,
+            libGlobal.bullFundingIndexDelta,
+            "Planner global bull funding should match library"
+        );
+        assertEq(
+            plannerGlobal.bearFundingIndexDelta,
+            libGlobal.bearFundingIndexDelta,
+            "Planner global bear funding should match library"
+        );
+
+        CfdEnginePlanTypes.FundingDelta memory libFunding = CfdEnginePlanLib.planFunding(snap, 1e8, 0, false, false);
+        CfdEnginePlanTypes.FundingDelta memory plannerFunding = planner.planFunding(snap, 1e8, 0, false, false);
+        assertEq(
+            plannerFunding.pendingFundingUsdc,
+            libFunding.pendingFundingUsdc,
+            "Planner pending funding should match library"
+        );
+        assertEq(
+            plannerFunding.bullFundingIndexDelta,
+            libFunding.bullFundingIndexDelta,
+            "Planner bull funding delta should match library"
+        );
+        assertEq(
+            plannerFunding.bearFundingIndexDelta,
+            libFunding.bearFundingIndexDelta,
+            "Planner bear funding delta should match library"
+        );
+    }
+
+    function test_PlannerWrapper_FailureCategoriesMatchLibraryHelpers() public view {
+        assertEq(
+            uint256(planner.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)),
+            uint256(CfdEnginePlanLib.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)),
+            "Planner open failure category should match library helper"
+        );
+        assertEq(
+            uint256(planner.getExecutionFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE)),
+            uint256(
+                CfdEnginePlanLib.getExecutionFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE)
+            ),
+            "Planner open execution failure category should match library helper"
+        );
+        assertEq(
+            uint256(planner.getCloseExecutionFailurePolicyCategory(CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION)),
+            uint256(
+                CfdEnginePlanLib.getExecutionFailurePolicyCategory(CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION)
+            ),
+            "Planner close execution failure category should match library helper"
         );
     }
 

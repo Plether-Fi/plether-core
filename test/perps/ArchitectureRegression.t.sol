@@ -102,7 +102,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), deferredPayout);
 
-        CfdEngine.DeferredPayoutStatus memory status = engine.getDeferredPayoutStatus(aliceId, keeper);
+        CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(aliceId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "oldest queue head should become claimable under partial liquidity");
         assertFalse(status.liquidationBountyClaimableNow, "later claims must remain blocked behind the queue head");
 

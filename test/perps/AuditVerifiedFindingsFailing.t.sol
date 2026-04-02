@@ -76,12 +76,12 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         assertLt(bullFunding, 0, "Bull side should owe funding in the skewed market");
         assertGt(bearFunding, 0, "Bear side should be owed funding in the skewed market");
         assertLt(
-            engine.getCappedFundingPnl(),
+            engineProtocolLens.getCappedFundingPnl(),
             0,
             "Solvency funding should include collectible receivables instead of liability-only clipping"
         );
         assertGt(
-            engine.getLiabilityOnlyFundingPnl(),
+            engineProtocolLens.getLiabilityOnlyFundingPnl(),
             0,
             "Withdrawal funding should remain conservative and reserve only liabilities"
         );

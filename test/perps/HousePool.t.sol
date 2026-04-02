@@ -1372,7 +1372,7 @@ contract HousePoolTest is BasePerpTest {
         bytes[] memory empty;
         router.executeOrder(1, empty);
 
-        assertEq(engine.getUnrealizedFundingPnl(), 0, "Starts at zero");
+        assertEq(engineProtocolLens.getUnrealizedFundingPnl(), 0, "Starts at zero");
 
         vm.warp(block.timestamp + 60 days);
 
@@ -1382,7 +1382,9 @@ contract HousePoolTest is BasePerpTest {
 
         router.executeLiquidation(carolId, pythData);
 
-        assertEq(engine.getUnrealizedFundingPnl(), 0, "Liquidation clears unrealized funding for closed position");
+        assertEq(
+            engineProtocolLens.getUnrealizedFundingPnl(), 0, "Liquidation clears unrealized funding for closed position"
+        );
     }
 
     // ==========================================
@@ -1427,7 +1429,7 @@ contract HousePoolTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
+        uint256 fundingLiability = engineProtocolLens.getLiabilityOnlyFundingPnl();
         assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
 
         uint256 freeUSDC = pool.getFreeUSDC();
@@ -1480,7 +1482,7 @@ contract HousePoolTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 fundingLiability = engine.getLiabilityOnlyFundingPnl();
+        uint256 fundingLiability = engineProtocolLens.getLiabilityOnlyFundingPnl();
         assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
 
         vm.prank(address(juniorVault));
@@ -1816,7 +1818,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
         uint256 assetsBefore = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, 150_000_000);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
         router.executeLiquidation(accountId, priceData);
@@ -2633,7 +2635,9 @@ contract HousePoolAuditTest is BasePerpTest {
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "All bear positions closed");
 
         assertEq(
-            engine.getUnrealizedFundingPnl(), 0, "No positions => zero unrealized funding; spread is distributable"
+            engineProtocolLens.getUnrealizedFundingPnl(),
+            0,
+            "No positions => zero unrealized funding; spread is distributable"
         );
     }
 
@@ -2677,6 +2681,11 @@ contract HousePoolAuditTest is BasePerpTest {
 
     // Regression: C-02 — negative funding must not inflate junior principal
     function test_NegativeFundingDoesNotInflateJuniorPrincipal() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseApy = 100_000e18;
+        params.maxApy = 100_000e18;
+        _setRiskParams(params);
+
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
@@ -2690,7 +2699,9 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, empty);
 
-        vm.warp(block.timestamp + 90 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30);
 
         bytes[] memory price = new bytes[](1);
         price[0] = abi.encode(uint256(1e8));
@@ -2698,7 +2709,7 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         router.executeOrder(3, price);
 
-        int256 unrealizedFunding = engine.getUnrealizedFundingPnl();
+        int256 unrealizedFunding = engineProtocolLens.getUnrealizedFundingPnl();
         assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
 
         uint256 juniorBefore = pool.juniorPrincipal();

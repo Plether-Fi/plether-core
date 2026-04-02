@@ -2,6 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
+import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
@@ -13,6 +16,9 @@ abstract contract BasePerpInvariantTest is Test {
 
     MockUSDC internal usdc;
     CfdEngine internal engine;
+    CfdEngineAccountLens internal engineAccountLens;
+    CfdEngineLens internal engineLens;
+    CfdEngineProtocolLens internal engineProtocolLens;
     MarginClearinghouse internal clearinghouse;
     MockInvariantVault internal vault;
     OrderRouter internal router;
@@ -25,6 +31,9 @@ abstract contract BasePerpInvariantTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
+        engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         vault = new MockInvariantVault(address(usdc), address(engine));
         router = new OrderRouter(
             address(engine),

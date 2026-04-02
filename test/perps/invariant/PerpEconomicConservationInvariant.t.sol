@@ -64,7 +64,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        expectedReserved += engine.getLiabilityOnlyFundingPnl();
+        expectedReserved += engineProtocolLens.getLiabilityOnlyFundingPnl();
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),
@@ -122,7 +122,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
 
-            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
+            ICfdEngine.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
@@ -167,7 +167,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 totalDeferredPayoutUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(_accountId(handler.actorAt(i)));
+            ICfdEngine.AccountLedgerView memory ledgerView =
+                engineAccountLens.getAccountLedgerView(_accountId(handler.actorAt(i)));
             totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
             totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
             totalDeferredPayoutUsdc += ledgerView.deferredPayoutUsdc;
@@ -236,10 +237,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
-            ICfdEngine.AccountLedgerView memory ledgerView = engine.getAccountLedgerView(accountId);
-            CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
-            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
+            CfdEngine.AccountCollateralView memory collateralView =
+                engineAccountLens.getAccountCollateralView(accountId);
+            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets =
                 clearinghouse.getLockedMarginBuckets(accountId);
 
@@ -370,7 +372,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             ICfdEngine.AccountLedgerSnapshot memory snapshot =
-                engine.getAccountLedgerSnapshot(_accountId(handler.actorAt(i)));
+                engineAccountLens.getAccountLedgerSnapshot(_accountId(handler.actorAt(i)));
             if (snapshot.hasPosition || snapshot.pendingOrderCount != 0) {
                 continue;
             }
@@ -402,10 +404,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
-            ICfdEngine.AccountLedgerView memory compactView = engine.getAccountLedgerView(accountId);
-            CfdEngine.AccountCollateralView memory collateralView = engine.getAccountCollateralView(accountId);
-            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerView memory compactView = engineAccountLens.getAccountLedgerView(accountId);
+            CfdEngine.AccountCollateralView memory collateralView =
+                engineAccountLens.getAccountCollateralView(accountId);
+            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
 
             assertEq(
                 snapshot.settlementBalanceUsdc,
@@ -443,8 +446,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
-        ICfdEngine.HousePoolInputSnapshot memory snapshot = engine.getHousePoolInputSnapshot(60 seconds);
-        ICfdEngine.ProtocolAccountingSnapshot memory protocolSnapshot = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
+        ICfdEngine.ProtocolAccountingSnapshot memory protocolSnapshot =
+            engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 feesUsdc = engine.accumulatedFeesUsdc();
 
@@ -462,7 +466,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             protocolSnapshot.freeUsdc,
-            engine.getProtocolAccountingView().freeUsdc,
+            engineProtocolLens.getProtocolAccountingView().freeUsdc,
             "Protocol snapshot free USDC mismatch"
         );
         assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
@@ -479,7 +483,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
             snapshot.withdrawalFundingLiabilityUsdc,
-            engine.getLiabilityOnlyFundingPnl(),
+            engineProtocolLens.getLiabilityOnlyFundingPnl(),
             "House-pool snapshot withdrawal funding liability mismatch"
         );
         assertEq(
@@ -516,7 +520,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
-        ICfdEngine.HousePoolStatusSnapshot memory snapshot = engine.getHousePoolStatusSnapshot();
+        ICfdEngine.HousePoolStatusSnapshot memory snapshot = engineProtocolLens.getHousePoolStatusSnapshot();
 
         assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "House-pool status last mark time mismatch");
         assertEq(snapshot.oracleFrozen, engine.isOracleFrozen(), "House-pool status oracle frozen mismatch");

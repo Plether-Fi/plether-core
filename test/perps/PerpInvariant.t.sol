@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -17,6 +18,7 @@ contract PerpHandler is Test {
 
     MockUSDC public usdc;
     CfdEngine public engine;
+    CfdEngineLens public engineLens;
     HousePool public pool;
     MarginClearinghouse public clearinghouse;
     OrderRouter public router;
@@ -41,6 +43,7 @@ contract PerpHandler is Test {
     ) {
         usdc = _usdc;
         engine = _engine;
+        engineLens = new CfdEngineLens(address(_engine));
         pool = _pool;
         clearinghouse = _clearinghouse;
         router = _router;
@@ -207,7 +210,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
 
-        int256 cappedFunding = engine.getCappedFundingPnl();
+        int256 cappedFunding = engineProtocolLens.getCappedFundingPnl();
         if (cappedFunding < 0) {
             effectiveAssets += uint256(-cappedFunding);
         } else if (cappedFunding > 0) {
@@ -383,7 +386,7 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
 
             assertEq(positionView.exists, size > 0, "Position view existence must match stored size");
@@ -490,7 +493,7 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
             if (!positionView.exists) {
                 continue;
             }
@@ -570,7 +573,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_ProtocolAccountingViewMatchesAccessors() public view {
-        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
 
         assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
         assertEq(protocolView.maxLiabilityUsdc, engine.getMaxLiability(), "Protocol view liability must match accessor");
@@ -598,7 +601,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        expectedReserved += engine.getLiabilityOnlyFundingPnl();
+        expectedReserved += engineProtocolLens.getLiabilityOnlyFundingPnl();
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),
@@ -609,7 +612,7 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
-        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on vault assets");
         assertEq(
@@ -629,12 +632,12 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 vaultDepth = pool.totalAssets();
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engine.getPositionView(accountId);
+            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
             if (!positionView.exists) {
                 continue;
             }
 
-            CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
+            CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
             assertEq(
                 preview.liquidatable, positionView.liquidatable, "Liquidation preview must match live position view"
             );
@@ -647,6 +650,7 @@ contract AdversarialPerpHandler is Test {
 
     MockUSDC public usdc;
     CfdEngine public engine;
+    CfdEngineLens public engineLens;
     HousePool public pool;
     MarginClearinghouse public clearinghouse;
     OrderRouter public router;
@@ -680,6 +684,7 @@ contract AdversarialPerpHandler is Test {
     ) {
         usdc = _usdc;
         engine = _engine;
+        engineLens = new CfdEngineLens(address(_engine));
         pool = _pool;
         clearinghouse = _clearinghouse;
         router = _router;
@@ -911,7 +916,7 @@ contract AdversarialPerpHandler is Test {
 
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
         uint256 vaultDepth = pool.totalAssets();
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, oraclePrice);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
         if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
             return;
         }
@@ -996,7 +1001,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialViewsStayConsistent() public view {
-        CfdEngine.ProtocolAccountingView memory protocolView = engine.getProtocolAccountingView();
+        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on assets");

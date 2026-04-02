@@ -3,6 +3,8 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -63,6 +65,8 @@ contract GasProfileTest is Test {
 
     MarginClearinghouse clearinghouse;
     CfdEngine engine;
+    CfdEngineAccountLens engineAccountLens;
+    CfdEngineLens engineLens;
     HousePool pool;
     TrancheVault seniorVault;
     TrancheVault juniorVault;
@@ -110,6 +114,8 @@ contract GasProfileTest is Test {
 
         clearinghouse = new MarginClearinghouse(usdc);
         engine = new CfdEngine(usdc, address(clearinghouse), CAP_PRICE, params);
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine));
 
         seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC");
@@ -438,7 +444,7 @@ contract GasProfileTest is Test {
 
         bytes32 aliceId = _accountId(alice);
         uint256 g0 = gasleft();
-        engine.previewClose(aliceId, 50_000e18, 0.95e8);
+        engineLens.previewClose(aliceId, 50_000e18, 0.95e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("17_previewClose", gas);
     }
@@ -450,7 +456,7 @@ contract GasProfileTest is Test {
 
         bytes32 aliceId = _accountId(alice);
         uint256 g0 = gasleft();
-        engine.previewLiquidation(aliceId, 1.1e8);
+        engineLens.previewLiquidation(aliceId, 1.1e8);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("18_previewLiquidation", gas);
     }
@@ -462,7 +468,7 @@ contract GasProfileTest is Test {
 
         bytes32 aliceId = _accountId(alice);
         uint256 g0 = gasleft();
-        engine.getAccountLedgerSnapshot(aliceId);
+        engineAccountLens.getAccountLedgerSnapshot(aliceId);
         uint256 gas = g0 - gasleft();
         emit log_named_uint("19_getAccountLedgerSnapshot", gas);
     }

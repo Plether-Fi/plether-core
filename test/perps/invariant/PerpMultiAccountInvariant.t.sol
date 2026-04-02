@@ -77,7 +77,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 liveCounts[i],
-                engine.getAccountLedgerView(accountId).pendingOrderCount,
+                engineAccountLens.getAccountLedgerView(accountId).pendingOrderCount,
                 "Account ledger pending count must match live ownership"
             );
         }
@@ -87,7 +87,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint256 aggregateDeferredPayouts;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerView memory ledger = engine.getAccountLedgerView(accountId);
+            ICfdEngine.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(accountId);
             aggregateDeferredPayouts += ledger.deferredPayoutUsdc;
         }
 
@@ -130,7 +130,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engine.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
             (, uint256 margin,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
 

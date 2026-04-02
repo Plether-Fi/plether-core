@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {CfdEngineProtocolLens} from "./CfdEngineProtocolLens.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
@@ -56,6 +58,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
 
     IERC20 public immutable USDC;
     ICfdEngine public immutable ENGINE;
+    ICfdEngineProtocolLens public immutable ENGINE_PROTOCOL_LENS;
 
     address public orderRouter;
     address public seniorVault;
@@ -146,6 +149,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     ) Ownable(msg.sender) {
         USDC = IERC20(_usdc);
         ENGINE = ICfdEngine(_engine);
+        ENGINE_PROTOCOL_LENS = ICfdEngineProtocolLens(address(new CfdEngineProtocolLens(_engine)));
         lastReconcileTime = block.timestamp;
         lastSeniorYieldCheckpointTime = block.timestamp;
         seniorRateBps = 800; // 8% APY default
@@ -1020,11 +1024,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _getHousePoolInputSnapshot() internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
-        return ENGINE.getHousePoolInputSnapshot(markStalenessLimit);
+        return ENGINE_PROTOCOL_LENS.getHousePoolInputSnapshot(markStalenessLimit);
     }
 
     function _getHousePoolStatusSnapshot() internal view returns (ICfdEngine.HousePoolStatusSnapshot memory snapshot) {
-        return ENGINE.getHousePoolStatusSnapshot();
+        return ENGINE_PROTOCOL_LENS.getHousePoolStatusSnapshot();
     }
 
     function _getHousePoolSnapshots()

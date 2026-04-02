@@ -44,7 +44,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 mtm = engine.getVaultMtmAdjustment();
+        uint256 mtm = engineProtocolLens.getVaultMtmAdjustment();
         assertEq(mtm, 0, "O(1) netting currently hides uncollectible losses before liquidation");
     }
 

@@ -2,6 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineLens} from "../../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
@@ -71,6 +73,8 @@ contract PerpAccountingHandler is Test {
 
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
+    CfdEngineAccountLens public immutable engineAccountLens;
+    CfdEngineLens public immutable engineLens;
     MarginClearinghouse public immutable clearinghouse;
     OrderRouter public immutable router;
     MockInvariantVault public immutable vault;
@@ -110,6 +114,8 @@ contract PerpAccountingHandler is Test {
     ) {
         usdc = _usdc;
         engine = _engine;
+        engineAccountLens = new CfdEngineAccountLens(address(_engine));
+        engineLens = new CfdEngineLens(address(_engine));
         clearinghouse = _clearinghouse;
         router = _router;
         vault = _vault;
@@ -155,10 +161,12 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(_accountId(actor));
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
         uint256 amount = bound(amountFuzz, 1e6, 250_000e6);
         _mintAndDepositTrader(actor, amount);
-        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(_accountId(actor));
+        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
         _recordReachabilityTransition(_accountId(actor), REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
     }
 
@@ -179,7 +187,7 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(accountId);
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
         WithdrawParityAttempt memory attempt;
         attempt.active = true;
@@ -193,7 +201,8 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try clearinghouse.withdraw(accountId, amount) {
             attempt.withdrawPasses = true;
-            ICfdEngine.AccountLedgerSnapshot memory afterSnapshot = engine.getAccountLedgerSnapshot(accountId);
+            ICfdEngine.AccountLedgerSnapshot memory afterSnapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
         } catch (bytes memory err) {
             attempt.withdrawSelector = _revertSelector(err);
@@ -325,10 +334,10 @@ contract PerpAccountingHandler is Test {
         uint256 expectedBadDebtDeltaUsdc;
         uint256 expectedFinalResidualUsdc;
         bool terminalClose;
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engine.getAccountLedgerSnapshot(accountId);
+        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(address(uint160(uint256(accountId))));
         if (isClose && marginDelta == 0) {
-            CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, targetPrice);
+            CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, targetPrice);
             if (preview.valid) {
                 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
                 allowedDeferredAfterUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
@@ -391,7 +400,7 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(price);
-        CfdEngine.LiquidationPreview memory preview = engine.previewLiquidation(accountId, price);
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, price);
         uint256 keeperBountyUsdc = preview.keeperBountyUsdc;
         bool shouldDefer = vault.failRouterPayouts() && keeperBountyUsdc > 0;
         uint256 deferredTraderPayoutUsdc = preview.deferredPayoutUsdc;
@@ -480,7 +489,7 @@ contract PerpAccountingHandler is Test {
         vault.setAssets(0);
         uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(15e7) : uint256(5e7);
 
-        CfdEngine.ClosePreview memory closePreview = engine.previewClose(accountId, size, closeOraclePrice);
+        CfdEngine.ClosePreview memory closePreview = engineLens.previewClose(accountId, size, closeOraclePrice);
         uint256 deferredTraderPayoutUsdc = closePreview.deferredPayoutUsdc;
         _recordTerminalReservationSet(accountId);
 

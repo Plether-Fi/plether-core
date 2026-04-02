@@ -2,6 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdEngineProtocolLens} from "../../src/perps/CfdEngineProtocolLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -60,6 +63,9 @@ abstract contract BasePerpTest is Test {
 
     MockUSDC usdc;
     CfdEngine engine;
+    CfdEngineAccountLens engineAccountLens;
+    CfdEngineLens engineLens;
+    CfdEngineProtocolLens engineProtocolLens;
     HousePool pool;
     MarginClearinghouse clearinghouse;
     TrancheVault seniorVault;
@@ -77,6 +83,9 @@ abstract contract BasePerpTest is Test {
         clearinghouse = new MarginClearinghouse(address(usdc));
 
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
+        engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine));
 
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
@@ -323,7 +332,7 @@ abstract contract BasePerpTest is Test {
     function _captureCloseParitySnapshot(
         bytes32 accountId
     ) internal view returns (CloseParitySnapshot memory snapshot) {
-        snapshot.protocol = engine.getProtocolAccountingSnapshot();
+        snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
         snapshot.deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
     }
@@ -332,7 +341,7 @@ abstract contract BasePerpTest is Test {
         bytes32 accountId,
         CloseParitySnapshot memory beforeSnapshot
     ) internal view returns (CloseParityObserved memory observed) {
-        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize, observed.remainingMargin,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
@@ -418,7 +427,7 @@ abstract contract BasePerpTest is Test {
         bytes32 accountId,
         address keeper
     ) internal view returns (LiquidationParitySnapshot memory snapshot) {
-        snapshot.protocol = engine.getProtocolAccountingSnapshot();
+        snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
         snapshot.settlementUsdc = clearinghouse.balanceUsdc(accountId);
         snapshot.deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
         snapshot.keeperWalletUsdc = usdc.balanceOf(keeper);
@@ -430,7 +439,7 @@ abstract contract BasePerpTest is Test {
         address keeper,
         LiquidationParitySnapshot memory beforeSnapshot
     ) internal view returns (LiquidationParityObserved memory observed) {
-        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engine.getProtocolAccountingSnapshot();
+        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize,,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =

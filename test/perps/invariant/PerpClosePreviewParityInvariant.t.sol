@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
@@ -17,6 +18,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     MockUSDC internal usdc;
     CfdEngineHarness internal harness;
     CfdEngine internal engine;
+    CfdEngineLens internal engineLens;
     MarginClearinghouse internal clearinghouse;
     MockInvariantVault internal vault;
     OrderRouter internal router;
@@ -31,6 +33,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams());
         engine = harness;
+        engineLens = new CfdEngineLens(address(engine));
 
         vault = new MockInvariantVault(address(usdc), address(engine));
         router = new OrderRouter(
@@ -88,7 +91,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
+                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     if (preview.invalidReason == CfdTypes.CloseInvalidReason.DustPosition) {
@@ -124,8 +127,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
             }
 
             _assertClosePreviewEquals(
-                engine.previewClose(accountId, size, oraclePrice),
-                engine.simulateClose(accountId, size, oraclePrice, canonicalDepth)
+                engineLens.previewClose(accountId, size, oraclePrice),
+                engineLens.simulateClose(accountId, size, oraclePrice, canonicalDepth)
             );
 
             if (size < 2) {
@@ -139,8 +142,8 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 }
 
                 _assertClosePreviewEquals(
-                    engine.previewClose(accountId, fractions[f], oraclePrice),
-                    engine.simulateClose(accountId, fractions[f], oraclePrice, canonicalDepth)
+                    engineLens.previewClose(accountId, fractions[f], oraclePrice),
+                    engineLens.simulateClose(accountId, fractions[f], oraclePrice, canonicalDepth)
                 );
             }
         }
@@ -163,7 +166,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
+                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (preview.valid && preview.fundingUsdc > 0 && preview.deferredPayoutUsdc == 0) {
                     assertGe(
@@ -187,7 +190,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 continue;
             }
 
-            CfdEngine.ClosePreview memory fullPreview = engine.previewClose(accountId, size, oraclePrice);
+            CfdEngine.ClosePreview memory fullPreview = engineLens.previewClose(accountId, size, oraclePrice);
             if (!fullPreview.valid) {
                 continue;
             }
@@ -198,7 +201,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     continue;
                 }
 
-                CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, fractions[f], oraclePrice);
+                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
 
                 if (!preview.valid) {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
@@ -291,7 +294,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         uint256 vaultDepthUsdc,
         bool isFullClose
     ) internal view {
-        CfdEngine.ClosePreview memory preview = engine.previewClose(accountId, sizeDelta, oraclePrice);
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, oraclePrice);
 
         if (!preview.valid || (preview.immediatePayoutUsdc == 0 && preview.deferredPayoutUsdc == 0)) {
             return;
