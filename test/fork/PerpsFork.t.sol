@@ -102,6 +102,7 @@ contract PerpsForkTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -233,6 +234,7 @@ contract PerpsForkTest is Test {
             uint256 maintMarginBps,
             uint256 initMarginBps,
             uint256 fadMarginBps,
+            uint256 baseCarryBps,
             uint256 minBountyUsdc,
             uint256 bountyBps
         ) = engine.riskParams();
@@ -245,6 +247,7 @@ contract PerpsForkTest is Test {
             maintMarginBps: maintMarginBps,
             initMarginBps: initMarginBps,
             fadMarginBps: fadMarginBps,
+            baseCarryBps: baseCarryBps,
             minBountyUsdc: minBountyUsdc,
             bountyBps: bountyBps
         });

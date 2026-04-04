@@ -156,6 +156,7 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -198,6 +199,7 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });

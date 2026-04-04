@@ -30,6 +30,29 @@ library PositionRiskAccountingLib {
         bool liquidatable;
     }
 
+    function computeLpBackedNotionalUsdc(
+        uint256 size,
+        uint256 price,
+        uint256 marginUsdc
+    ) internal pure returns (uint256 lpBackedNotionalUsdc) {
+        uint256 notionalUsdc = (size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        lpBackedNotionalUsdc = notionalUsdc > marginUsdc ? notionalUsdc - marginUsdc : 0;
+    }
+
+    function computePendingCarryUsdc(
+        uint256 size,
+        uint256 price,
+        uint256 marginUsdc,
+        uint256 baseCarryBps,
+        uint256 timeDelta
+    ) internal pure returns (uint256 carryUsdc) {
+        if (timeDelta == 0 || size == 0 || price == 0 || baseCarryBps == 0) {
+            return 0;
+        }
+        uint256 lpBackedNotionalUsdc = computeLpBackedNotionalUsdc(size, price, marginUsdc);
+        carryUsdc = (baseCarryBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+    }
+
     function getPendingFunding(
         CfdTypes.Position memory pos,
         int256 currentIndex
@@ -130,6 +153,23 @@ library PositionRiskAccountingLib {
         state.pendingFundingUsdc = pendingFundingUsdc;
         state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
         state.equityUsdc = int256(reachableCollateralUsdc) + pendingFundingUsdc + state.unrealizedPnlUsdc;
+        state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
+        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
+        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
+    }
+
+    function buildPositionRiskStateWithCarry(
+        CfdTypes.Position memory pos,
+        uint256 price,
+        uint256 capPrice,
+        uint256 pendingCarryUsdc,
+        uint256 reachableCollateralUsdc,
+        uint256 requiredBps
+    ) internal pure returns (PositionRiskState memory state) {
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, capPrice);
+        state.pendingFundingUsdc = -int256(pendingCarryUsdc);
+        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc) + state.unrealizedPnlUsdc;
         state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
         state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);

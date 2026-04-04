@@ -37,6 +37,7 @@ contract OrderRouterTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -1131,6 +1132,7 @@ contract OrderRouterPythTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -2386,6 +2388,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9
         });
@@ -2676,6 +2679,7 @@ contract FadStalenessTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -3453,6 +3457,7 @@ contract OrderRouterAuditTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -3589,6 +3594,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -3819,6 +3825,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -3906,6 +3913,7 @@ contract StalenessGriefTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4016,6 +4024,7 @@ contract VpiImrBypassTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4149,6 +4158,7 @@ contract KeeperFeeRefundTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4350,6 +4360,7 @@ contract WeekendArbitrageTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });

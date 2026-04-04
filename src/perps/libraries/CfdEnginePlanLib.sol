@@ -366,6 +366,15 @@ library CfdEnginePlanLib {
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
+        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            snap.position.size,
+            price,
+            snap.position.margin,
+            snap.riskParams.baseCarryBps,
+            snap.currentTimestamp > snap.position.lastUpdateTime
+                ? snap.currentTimestamp - snap.position.lastUpdateTime
+                : 0
+        );
 
         if (snap.position.size > 0 && snap.position.side != order.side) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING;
@@ -592,6 +601,15 @@ library CfdEnginePlanLib {
         delta.accountId = order.accountId;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
+        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            snap.position.size,
+            price,
+            snap.position.margin,
+            snap.riskParams.baseCarryBps,
+            snap.currentTimestamp > snap.position.lastUpdateTime
+                ? snap.currentTimestamp - snap.position.lastUpdateTime
+                : 0
+        );
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -848,6 +866,15 @@ library CfdEnginePlanLib {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         delta.accountId = snap.accountId;
         delta.price = price;
+        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            snap.position.size,
+            price,
+            snap.position.margin,
+            snap.riskParams.baseCarryBps,
+            snap.currentTimestamp > snap.position.lastUpdateTime
+                ? snap.currentTimestamp - snap.position.lastUpdateTime
+                : 0
+        );
 
         CfdTypes.Position memory pos = snap.position;
         if (pos.size == 0) {

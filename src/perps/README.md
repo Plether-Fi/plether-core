@@ -20,6 +20,7 @@ For the accounting model that should govern future refactors, see [`ACCOUNTING_S
 - `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees, deferred liabilities, and withdrawal-only funding liabilities.
 - Planner previews follow the same staged transition model as live execution: funding first on pre-mutation depth, then protocol/router cash mutations, then payout and solvency classification on the post-mutation state.
 - Deferred funding receivables may count toward trader equity/risk, but opens cannot rely on deferred IOUs as if they were unlocked position margin for paying physical trade costs.
+- Carry migration note: the repo now includes additive Phase 1 plumbing for a future `baseCarryBps` LP-capital-usage carry model, but live protocol behavior still uses the existing funding model until a later migration phase switches settlement and guard semantics.
 
 These domains answer different questions and must not silently share assumptions.
 

@@ -48,7 +48,7 @@ library CfdTypes {
         DustPosition
     }
 
-    /// @notice Global configuration parameters for the VPI and Funding engines
+    /// @notice Global configuration parameters for the VPI, funding, and carry engines
     struct RiskParams {
         uint256 vpiFactor; // [18 dec WAD] Impact severity 'k'
         uint256 maxSkewRatio; // [18 dec WAD] Hard cliff e.g., 40% (0.40e18)
@@ -58,6 +58,7 @@ library CfdTypes {
         uint256 maintMarginBps; // e.g., 100 (1%)
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
+        uint256 baseCarryBps; // e.g., 500 (5% annualized carry on LP-backed notional)
         uint256 minBountyUsdc; // e.g., 5_000_000 ($5 USDC floor)
         uint256 bountyBps; // e.g., 15 (0.15% of Notional Size)
     }

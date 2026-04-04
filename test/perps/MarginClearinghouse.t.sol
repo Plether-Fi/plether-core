@@ -662,6 +662,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -751,6 +752,28 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
     }
 
+    function test_Withdraw_UsesCarryAwareGuardParityForOpenPositions() public {
+        _fundJunior(bob, 1_000_000 * 1e6);
+
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseCarryBps = 100_000;
+        _setRiskParams(params);
+
+        _fundTrader(alice, 10_000 * 1e6);
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8, false);
+        bytes[] memory empty;
+        router.executeOrder(1, empty);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30);
+
+        WithdrawParityState memory state = _observeWithdrawParity(accountId, alice, 80e6);
+        _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+    }
+
 }
 
 contract NonUsdcCollateralTest is Test {
@@ -776,6 +799,7 @@ contract NonUsdcCollateralTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });

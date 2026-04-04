@@ -11,6 +11,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -71,6 +72,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -336,6 +338,72 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             libDelta.sideTotalMarginAfterOpen,
             "Planner open side total margin should match library"
         );
+    }
+
+    function test_PlanOpen_ReportsPendingCarry() public {
+        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        _fundTrader(freshBullTrader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        vm.warp(block.timestamp + 7 days);
+
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.OpenDelta memory delta = harness.previewOpenPlan(
+            _openOrder(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8), 1e8, pool.totalAssets()
+        );
+
+        assertGt(delta.pendingCarryUsdc, 0, "Open plan should report observational pending carry");
+    }
+
+    function test_PlanClose_ReportsPendingCarry() public {
+        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        _fundTrader(freshBullTrader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        vm.warp(block.timestamp + 7 days);
+
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            harness.buildRawSnapshotForPlanner(accountId, 1e8, pool.totalAssets());
+        CfdTypes.Position memory pos = _position(accountId);
+        CfdTypes.Order memory closeOrder = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: pos.size / 2,
+            marginDelta: 0,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: pos.side,
+            isClose: true
+        });
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, closeOrder, 1e8, 0);
+        assertGt(delta.pendingCarryUsdc, 0, "Close plan should report observational pending carry");
+    }
+
+    function test_PlanLiquidation_ReportsPendingCarry() public {
+        bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
+        _fundTrader(freshBullTrader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        vm.warp(block.timestamp + 7 days);
+
+        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            harness.buildRawSnapshotForPlanner(accountId, 150_000_000, pool.totalAssets());
+        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, 150_000_000, 0);
+        assertGt(delta.pendingCarryUsdc, 0, "Liquidation plan should report observational pending carry");
+    }
+
+    function test_PendingCarry_IncreasesWithHigherLeverage() public pure {
+        uint256 lowLeverageCarry =
+            PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 50_000e6, 500, 30 days);
+        uint256 highLeverageCarry =
+            PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 30 days);
+        assertGt(highLeverageCarry, lowLeverageCarry, "Higher leverage should report more carry");
+    }
+
+    function test_PendingCarry_IncreasesWithTime() public pure {
+        uint256 shortCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 1 days);
+        uint256 longCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 30 days);
+        assertGt(longCarry, shortCarry, "Longer time should report more carry");
     }
 
     function test_ComputeOpenMarginAfter_DrainedPathMatchesPlannerRevert() public {

@@ -68,6 +68,7 @@ abstract contract BasePerpInvariantTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9
         });

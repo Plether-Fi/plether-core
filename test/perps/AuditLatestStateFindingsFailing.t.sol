@@ -91,6 +91,7 @@ contract AuditLatestStateFindingsFailing_LiquidationBounty is BasePerpTest {
             maintMarginBps: 10,
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
+            baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 1000
         });

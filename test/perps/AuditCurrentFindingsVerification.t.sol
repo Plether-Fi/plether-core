@@ -95,6 +95,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
             maintMarginBps: 10,
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
+            baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 1000
         });
@@ -237,6 +238,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });

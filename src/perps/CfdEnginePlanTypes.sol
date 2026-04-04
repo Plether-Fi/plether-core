@@ -175,6 +175,7 @@ library CfdEnginePlanTypes {
         uint256 vaultRebatePayoutUsdc;
 
         uint256 executionFeeUsdc;
+        uint256 pendingCarryUsdc;
 
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterFunding;
@@ -242,6 +243,7 @@ library CfdEnginePlanTypes {
 
         uint256 executionFeeUsdc;
         uint256 badDebtUsdc;
+        uint256 pendingCarryUsdc;
 
         uint256 totalMarginBefore;
         uint256 totalMarginAfterFunding;
@@ -296,6 +298,7 @@ library CfdEnginePlanTypes {
         uint256 syncMarginQueueAmount;
 
         uint256 badDebtUsdc;
+        uint256 pendingCarryUsdc;
 
         SolvencyPreview solvency;
 

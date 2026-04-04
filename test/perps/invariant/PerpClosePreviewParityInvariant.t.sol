@@ -76,7 +76,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -117,7 +117,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = vault.totalAssets();
-        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -151,7 +151,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseWithPositiveFundingImpliesVaultCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -181,7 +181,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -262,7 +262,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_ImmediateDeferredSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 vaultDepthUsdc = vault.totalAssets();
-        (,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -388,6 +388,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 1e6,
             bountyBps: 9
         });

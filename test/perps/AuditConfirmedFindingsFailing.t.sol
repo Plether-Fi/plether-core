@@ -395,6 +395,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -491,6 +492,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 1,
             bountyBps: 15
         });
@@ -553,6 +555,7 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });

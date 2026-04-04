@@ -45,6 +45,7 @@ contract HousePoolTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -1357,6 +1358,7 @@ contract HousePoolTest is BasePerpTest {
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
             })
@@ -1402,6 +1404,7 @@ contract HousePoolTest is BasePerpTest {
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
             })
@@ -1456,6 +1459,7 @@ contract HousePoolTest is BasePerpTest {
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
             })
@@ -1740,6 +1744,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -2347,6 +2352,7 @@ contract HousePoolAuditTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
