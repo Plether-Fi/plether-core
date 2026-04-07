@@ -3,16 +3,16 @@ pragma solidity 0.8.33;
 
 import {HousePool} from "./HousePool.sol";
 import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
-import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
 import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
+import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IPerpsLPViews} from "./interfaces/IPerpsLPViews.sol";
 import {IPerpsTraderViews} from "./interfaces/IPerpsTraderViews.sol";
 import {IProtocolViews} from "./interfaces/IProtocolViews.sol";
 import {PerpsViewTypes} from "./interfaces/PerpsViewTypes.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Compact read facade that maps the current perps system onto the simplified product surface.
 contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
@@ -22,7 +22,12 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     IOrderRouterAccounting public immutable ORDER_ROUTER;
     HousePool public immutable HOUSE_POOL;
 
-    constructor(address accountLens_, address engine_, address orderRouter_, address housePool_) {
+    constructor(
+        address accountLens_,
+        address engine_,
+        address orderRouter_,
+        address housePool_
+    ) {
         ACCOUNT_LENS = ICfdEngineAccountLens(accountLens_);
         ENGINE = ICfdEngineCore(engine_);
         ORDER_ROUTER = IOrderRouterAccounting(orderRouter_);
@@ -32,8 +37,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     function getTraderAccount(
         bytes32 accountId
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
-        viewData.equityUsdc = ACCOUNT_LENS.getAccountCollateralView(accountId).accountEquityUsdc;
-        viewData.withdrawableUsdc = ACCOUNT_LENS.getAccountCollateralView(accountId).freeBuyingPowerUsdc;
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
+        viewData.equityUsdc = snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0;
+        viewData.withdrawableUsdc = ENGINE.getWithdrawableUsdc(accountId);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(accountId);
         viewData.pendingOrderMarginUsdc = escrow.committedMarginUsdc;
@@ -90,7 +96,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
         PerpsViewTypes.ProtocolStatusView memory status = _getProtocolStatusView();
         viewData.lastMarkTime = status.lastMarkTime;
-        viewData.oracleFresh = status.oracleFrozen || block.timestamp <= status.lastMarkTime + HOUSE_POOL.markStalenessLimit();
+        viewData.oracleFresh = HOUSE_POOL.getVaultLiquidityView().markFresh;
     }
 
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
@@ -112,7 +118,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.marginUsdc = snapshot.margin;
         viewData.unrealizedPnlUsdc = snapshot.unrealizedPnlUsdc;
         viewData.liquidatable = snapshot.liquidatable;
-        viewData.maintenanceMarginUsdc = 0;
+        viewData.maintenanceMarginUsdc = ENGINE.getMaintenanceMarginUsdc(snapshot.size, ENGINE.lastMarkPrice());
     }
 
     function _getTrancheView(
@@ -143,4 +149,5 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
     }
+
 }

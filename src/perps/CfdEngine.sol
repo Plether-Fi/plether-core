@@ -5,10 +5,10 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "./CfdEnginePlanner.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
-import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
-import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {DeferredEngineViewTypes} from "./interfaces/DeferredEngineViewTypes.sol";
+import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
+import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
@@ -877,7 +877,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             } else {
                 _revertIfCloseInvalid(delta.revertCode);
             }
-            _applyClose(delta);
+            _applyClose(delta, publishTime);
         } else {
             CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice, publishTime);
             if (typedFailures) {
@@ -885,7 +885,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             } else {
                 _revertIfOpenInvalid(delta.revertCode);
             }
-            _applyOpen(delta);
+            _applyOpen(delta, publishTime);
         }
     }
 
@@ -943,8 +943,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         uint64 claimId = traderDeferredClaimIdByAccount[accountId];
         if (claimId == 0) {
-            claimId =
-                _enqueueDeferredClaim(DeferredEngineViewTypes.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc);
+            claimId = _enqueueDeferredClaim(
+                DeferredEngineViewTypes.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc
+            );
             traderDeferredClaimIdByAccount[accountId] = claimId;
             return;
         }
@@ -961,7 +962,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         uint64 claimId = clearerDeferredClaimIdByKeeper[keeper];
         if (claimId == 0) {
-            claimId = _enqueueDeferredClaim(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty, bytes32(0), keeper, amountUsdc);
+            claimId = _enqueueDeferredClaim(
+                DeferredEngineViewTypes.DeferredClaimType.ClearerBounty, bytes32(0), keeper, amountUsdc
+            );
             clearerDeferredClaimIdByKeeper[keeper] = claimId;
             return;
         }
@@ -1231,6 +1234,39 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return (notionalUsdc * requiredBps) / 10_000;
     }
 
+    /// @notice Returns the maximum settlement USDC the account can withdraw without violating engine guards.
+    /// @dev Mirrors `checkWithdraw()` semantics and returns zero when withdrawals are blocked by engine state.
+    function getWithdrawableUsdc(
+        bytes32 accountId
+    ) external view returns (uint256 withdrawableUsdc) {
+        withdrawableUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
+
+        CfdTypes.Position memory pos = _loadPosition(accountId);
+        if (pos.size == 0) {
+            return withdrawableUsdc;
+        }
+        if (degradedMode) {
+            return 0;
+        }
+
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
+            return 0;
+        }
+
+        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            _buildProjectedPositionRiskState(accountId, pos, price, reachableUsdc, riskParams.initMarginBps);
+
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
+        if (riskState.equityUsdc <= int256(initialMarginRequirementUsdc)) {
+            return 0;
+        }
+
+        uint256 imrHeadroomUsdc = uint256(riskState.equityUsdc) - initialMarginRequirementUsdc;
+        return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
+    }
+
     /// @notice Liquidates an undercollateralized position.
     ///         Surplus equity (after bounty) is returned to the user.
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
@@ -1262,7 +1298,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__PositionIsSolvent();
         }
 
-        return _applyLiquidation(delta);
+        return _applyLiquidation(delta, publishTime);
     }
 
     function _assertPostSolvency() internal view {
@@ -1469,11 +1505,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _applyOpen(
-        CfdEnginePlanTypes.OpenDelta memory delta
+        CfdEnginePlanTypes.OpenDelta memory delta,
+        uint64 publishTime
     ) internal {
         StoredPosition storage pos = _positions[delta.accountId];
         CfdTypes.Side marginSide = pos.size > 0 ? pos.side : delta.posSide;
-        _applyFundingAndMark(delta.price, uint64(block.timestamp));
+        _applyFundingAndMark(delta.price, publishTime);
         uint256 marginBefore = _positionMarginBucketUsdc(delta.accountId);
 
         SideState storage sideState = _sideState(delta.posSide);
@@ -1525,11 +1562,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _applyClose(
-        CfdEnginePlanTypes.CloseDelta memory delta
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        uint64 publishTime
     ) internal {
         StoredPosition storage pos = _positions[delta.accountId];
         CfdTypes.Side marginSide = pos.side;
-        _applyFundingAndMark(delta.price, uint64(block.timestamp));
+        _applyFundingAndMark(delta.price, publishTime);
         uint256 marginBefore = _positionMarginBucketUsdc(delta.accountId);
         _syncTotalSideMargin(marginSide, marginBefore, delta.posMarginAfter);
         pos.maxProfitUsdc -= delta.posMaxProfitReduction;
@@ -1590,9 +1628,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _applyLiquidation(
-        CfdEnginePlanTypes.LiquidationDelta memory delta
+        CfdEnginePlanTypes.LiquidationDelta memory delta,
+        uint64 publishTime
     ) internal returns (uint256 keeperBountyUsdc) {
-        _applyFundingAndMark(delta.price, uint64(block.timestamp));
+        _applyFundingAndMark(delta.price, publishTime);
 
         SideState storage sideState = _sideState(delta.side);
         sideState.maxProfitUsdc -= delta.sideMaxProfitDecrease;

@@ -22,6 +22,29 @@ interface ICfdEngineCore {
 
     function lastMarkPrice() external view returns (uint256);
 
+    function getMaintenanceMarginUsdc(
+        uint256 size,
+        uint256 currentOraclePrice
+    ) external view returns (uint256);
+
+    function getWithdrawableUsdc(
+        bytes32 accountId
+    ) external view returns (uint256);
+
+    function riskParams()
+        external
+        view
+        returns (
+            uint256 vpiFactor,
+            uint256 maxSkewRatio,
+            uint256 maintMarginBps,
+            uint256 initMarginBps,
+            uint256 fadMarginBps,
+            uint256 baseCarryBps,
+            uint256 minBountyUsdc,
+            uint256 bountyBps
+        );
+
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -47,13 +70,24 @@ interface ICfdEngineCore {
         uint64 publishTime
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
-    function recordDeferredClearerBounty(address keeper, uint256 amountUsdc) external;
+    function recordDeferredClearerBounty(
+        address keeper,
+        uint256 amountUsdc
+    ) external;
 
-    function reserveCloseOrderExecutionBounty(bytes32 accountId, uint256 amountUsdc, address recipient) external;
+    function reserveCloseOrderExecutionBounty(
+        bytes32 accountId,
+        uint256 amountUsdc,
+        address recipient
+    ) external;
 
-    function absorbRouterCancellationFee(uint256 amountUsdc) external;
+    function absorbRouterCancellationFee(
+        uint256 amountUsdc
+    ) external;
 
-    function recordRouterProtocolFee(uint256 amountUsdc) external;
+    function recordRouterProtocolFee(
+        uint256 amountUsdc
+    ) external;
 
     function accumulatedFeesUsdc() external view returns (uint256);
 
@@ -70,7 +104,10 @@ interface ICfdEngineCore {
 
     function lastMarkTime() external view returns (uint64);
 
-    function updateMarkPrice(uint256 price, uint64 publishTime) external;
+    function updateMarkPrice(
+        uint256 price,
+        uint64 publishTime
+    ) external;
 
     function CAP_PRICE() external view returns (uint256);
 
@@ -78,17 +115,28 @@ interface ICfdEngineCore {
 
     function fadMaxStaleness() external view returns (uint256);
 
-    function fadDayOverrides(uint256 dayNumber) external view returns (bool);
+    function engineMarkStalenessLimit() external view returns (uint256);
+
+    function fadDayOverrides(
+        uint256 dayNumber
+    ) external view returns (bool);
 
     function isOracleFrozen() external view returns (bool);
 
-    function hasOpenPosition(bytes32 accountId) external view returns (bool);
+    function hasOpenPosition(
+        bytes32 accountId
+    ) external view returns (bool);
 
-    function getPositionSize(bytes32 accountId) external view returns (uint256);
+    function getPositionSize(
+        bytes32 accountId
+    ) external view returns (uint256);
 
-    function getPositionSide(bytes32 accountId) external view returns (CfdTypes.Side);
+    function getPositionSide(
+        bytes32 accountId
+    ) external view returns (CfdTypes.Side);
 
     function degradedMode() external view returns (bool);
 
     function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory status);
+
 }
