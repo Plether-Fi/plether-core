@@ -46,6 +46,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         OrderOraclePolicyLib.OracleExecutionPolicy policy;
     }
 
+    enum OrderExecutionStepResult {
+        Continue,
+        Break,
+        Return
+    }
+
     ICfdVault internal immutable vault;
     IPyth public pyth;
     bytes32[] public pythFeedIds;
@@ -129,6 +135,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         Expired,
         CloseOnlyOracleFrozen,
         CloseOnlyFad,
+        OraclePriceTooStale,
         SlippageExceeded,
         EnginePanic,
         AccountLiquidated,
@@ -492,14 +499,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__FIFOViolation();
         }
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
-        if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-            emit OrderFailed(orderId, OrderFailReason.Expired);
-            _finalizeExecution(orderId, 0, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
-            return;
-        }
-        if (_orderRecord(orderId).retryAfterTimestamp > block.timestamp) {
-            revert OrderRouter__RetryCooldownActive();
-        }
 
         (uint256 executionPrice, uint64 oraclePublishTime, uint256 pythFee) =
             _resolveOraclePrice(pythUpdateData, order.targetPrice);
@@ -507,21 +506,21 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         RouterExecutionContext memory executionContext;
         if (address(pyth) != address(0)) {
             executionContext = _currentRouterExecutionContext();
-            if (executionContext.policy.closeOnly && !order.isClose) {
-                emit OrderFailed(
-                    orderId,
-                    executionContext.policy.oracleFrozen
-                        ? OrderFailReason.CloseOnlyOracleFrozen
-                        : OrderFailReason.CloseOnlyFad
-                );
+            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
+            {
+                if (oraclePublishTime < order.commitTime) {
+                    revert OrderRouter__OraclePriceTooStale();
+                }
+                emit OrderFailed(orderId, OrderFailReason.OraclePriceTooStale);
                 _finalizeExecution(
                     orderId,
                     pythFee,
                     false,
                     _failedOrderBountyPolicy(
-                        _routedCloseOnlyFailure(
+                        _routedRouterPolicyFailure(
                             order,
-                            executionContext.policy.oracleFrozen,
+                            OrderFailurePolicyLib.RouterFailureCode.StaleOracle,
+                            executionContext.oracleFrozen,
                             executionContext.isFadWindow,
                             executionContext.degradedMode,
                             executionContext.policy.closeOnly
@@ -529,19 +528,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                     )
                 );
                 return;
-            }
-
-            if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
-            {
-                revert OrderRouter__OraclePriceTooStale();
-            }
-
-            if (executionContext.policy.mevChecks && block.number == order.commitBlock) {
-                revert OrderRouter__MevDetected();
-            }
-
-            if (executionContext.policy.mevChecks && oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY) {
-                revert OrderRouter__MevDetected();
             }
         }
 
@@ -554,42 +540,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             executionPrice = capPrice;
         }
 
-        if (!_checkSlippage(order, executionPrice)) {
-            _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
-            _sendEth(msg.sender, msg.value - pythFee);
-            return;
-        }
-
-        uint256 vaultDepth = vault.totalAssets();
-
-        uint256 forwardedGas = gasleft() - (gasleft() / 64);
-        if (forwardedGas < MIN_ENGINE_GAS) {
-            revert OrderRouter__InsufficientGas();
-        }
-
-        _releaseCommittedMarginForExecution(orderId);
-
-        (
-            bool executionSucceeded,
-            OrderFailReason failureReason,
-            OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
-        ) = _processTypedOrderExecution(
-            order,
-            executionPrice,
-            vaultDepth,
-            oraclePublishTime,
-            executionContext.oracleFrozen,
-            executionContext.isFadWindow,
-            executionContext.degradedMode
-        );
-        if (executionSucceeded) {
-            emit OrderExecuted(orderId, executionPrice);
-            _finalizeExecution(orderId, pythFee, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
-            return;
-        }
-
-        emit OrderFailed(orderId, failureReason);
-        _finalizeExecution(orderId, pythFee, false, failureBountyPolicy);
+        _executePendingOrder(orderId, order, executionPrice, oraclePublishTime, executionContext, true, pythFee);
     }
 
     /// @notice Executes queued pending orders against a single Pyth price tick.
@@ -642,81 +593,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 continue;
             }
 
-            if (record.retryAfterTimestamp > block.timestamp) {
+            OrderExecutionStepResult result =
+                _executePendingOrder(orderId, order, clampedPrice, oraclePublishTime, executionContext, false, 0);
+            if (result == OrderExecutionStepResult.Break) {
                 break;
-            }
-
-            if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
-                emit OrderFailed(orderId, OrderFailReason.Expired);
-                _cleanupOrder(orderId, false, _failedOrderBountyPolicy(_routedExpiryFailure(order)));
-                continue;
-            }
-
-            if (executionContext.policy.closeOnly && !order.isClose) {
-                emit OrderFailed(
-                    orderId,
-                    executionContext.policy.oracleFrozen
-                        ? OrderFailReason.CloseOnlyOracleFrozen
-                        : OrderFailReason.CloseOnlyFad
-                );
-                _cleanupOrder(
-                    orderId,
-                    false,
-                    _failedOrderBountyPolicy(
-                        _routedCloseOnlyFailure(
-                            order,
-                            executionContext.policy.oracleFrozen,
-                            executionContext.isFadWindow,
-                            executionContext.degradedMode,
-                            executionContext.policy.closeOnly
-                        )
-                    )
-                );
-                continue;
-            }
-
-            if (
-                address(pyth) != address(0) && executionContext.policy.mevChecks
-                    // Stop at the first same-block order so newer queued orders remain pending too.
-                    && (block.number == order.commitBlock
-                        || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
-            ) {
-                break;
-            }
-
-            if (!_checkSlippage(order, clampedPrice)) {
-                _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
-                continue;
-            }
-
-            uint256 vaultDepth = vault.totalAssets();
-
-            uint256 forwardedGas = gasleft() - (gasleft() / 64);
-            if (forwardedGas < MIN_ENGINE_GAS) {
-                break;
-            }
-
-            _releaseCommittedMarginForExecution(orderId);
-
-            (
-                bool executionSucceeded,
-                OrderFailReason failureReason,
-                OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
-            ) = _processTypedOrderExecution(
-                order,
-                clampedPrice,
-                vaultDepth,
-                oraclePublishTime,
-                executionContext.oracleFrozen,
-                executionContext.isFadWindow,
-                executionContext.degradedMode
-            );
-            if (executionSucceeded) {
-                emit OrderExecuted(orderId, clampedPrice);
-                _cleanupOrder(orderId, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull);
-            } else {
-                emit OrderFailed(orderId, failureReason);
-                _cleanupOrder(orderId, false, failureBountyPolicy);
             }
         }
 
@@ -814,6 +694,129 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             );
             return (false, failureReason, failureBountyPolicy);
         }
+    }
+
+    function _executePendingOrder(
+        uint64 orderId,
+        CfdTypes.Order memory order,
+        uint256 executionPrice,
+        uint64 oraclePublishTime,
+        RouterExecutionContext memory executionContext,
+        bool revertOnBlockedExecution,
+        uint256 pythFee
+    ) internal returns (OrderExecutionStepResult result) {
+        OrderRecord storage record = _orderRecord(orderId);
+
+        if (record.retryAfterTimestamp > block.timestamp) {
+            if (revertOnBlockedExecution) {
+                revert OrderRouter__RetryCooldownActive();
+            }
+            return OrderExecutionStepResult.Break;
+        }
+
+        if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
+            emit OrderFailed(orderId, OrderFailReason.Expired);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                _failedOrderBountyPolicy(_routedExpiryFailure(order)),
+                revertOnBlockedExecution
+            );
+            return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
+        }
+
+        if (executionContext.policy.closeOnly && !order.isClose) {
+            emit OrderFailed(
+                orderId,
+                executionContext.policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
+            );
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                _failedOrderBountyPolicy(
+                    _routedCloseOnlyFailure(
+                        order,
+                        executionContext.policy.oracleFrozen,
+                        executionContext.isFadWindow,
+                        executionContext.degradedMode,
+                        executionContext.policy.closeOnly
+                    )
+                ),
+                revertOnBlockedExecution
+            );
+            return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
+        }
+
+        if (
+            address(pyth) != address(0) && executionContext.policy.mevChecks
+                && (block.number == order.commitBlock || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
+        ) {
+            if (revertOnBlockedExecution) {
+                revert OrderRouter__MevDetected();
+            }
+            return OrderExecutionStepResult.Break;
+        }
+
+        if (!_checkSlippage(order, executionPrice)) {
+            _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
+            if (revertOnBlockedExecution) {
+                _sendEth(msg.sender, msg.value - pythFee);
+                return OrderExecutionStepResult.Return;
+            }
+            return OrderExecutionStepResult.Continue;
+        }
+
+        uint256 forwardedGas = gasleft() - (gasleft() / 64);
+        if (forwardedGas < MIN_ENGINE_GAS) {
+            if (revertOnBlockedExecution) {
+                revert OrderRouter__InsufficientGas();
+            }
+            return OrderExecutionStepResult.Break;
+        }
+
+        uint256 vaultDepth = vault.totalAssets();
+        _releaseCommittedMarginForExecution(orderId);
+
+        (
+            bool executionSucceeded,
+            OrderFailReason failureReason,
+            OrderFailurePolicyLib.FailedOrderBountyPolicy failureBountyPolicy
+        ) = _processTypedOrderExecution(
+            order,
+            executionPrice,
+            vaultDepth,
+            oraclePublishTime,
+            executionContext.oracleFrozen,
+            executionContext.isFadWindow,
+            executionContext.degradedMode
+        );
+        if (executionSucceeded) {
+            emit OrderExecuted(orderId, executionPrice);
+            _finalizeOrCleanupOrder(
+                orderId, pythFee, true, OrderFailurePolicyLib.FailedOrderBountyPolicy.ClearerFull, revertOnBlockedExecution
+            );
+            return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
+        }
+
+        emit OrderFailed(orderId, failureReason);
+        _finalizeOrCleanupOrder(orderId, pythFee, false, failureBountyPolicy, revertOnBlockedExecution);
+        return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
+    }
+
+    function _finalizeOrCleanupOrder(
+        uint64 orderId,
+        uint256 pythFee,
+        bool success,
+        OrderFailurePolicyLib.FailedOrderBountyPolicy failedPolicy,
+        bool refundEthNow
+    ) internal {
+        if (refundEthNow) {
+            _finalizeExecution(orderId, pythFee, success, failedPolicy);
+            return;
+        }
+        _cleanupOrder(orderId, success, failedPolicy);
     }
 
     function pruneExpiredOrders(
