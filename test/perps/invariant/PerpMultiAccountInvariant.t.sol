@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -61,7 +62,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         uint256[] memory liveCounts = new uint256[](handler.actorCount());
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) != uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 continue;
             }
@@ -87,7 +88,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint256 aggregateDeferredPayouts;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(accountId);
+            AccountLensViewTypes.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(accountId);
             aggregateDeferredPayouts += ledger.deferredPayoutUsdc;
         }
 
@@ -130,7 +131,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
             (, uint256 margin,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
 
@@ -150,7 +151,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
     function _livePendingOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 count++;
             }
@@ -159,7 +160,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
     function _liveMarginOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue) {
                 count++;
             }

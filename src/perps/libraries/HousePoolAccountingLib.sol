@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ICfdEngine} from "../interfaces/ICfdEngine.sol";
+import {HousePoolEngineViewTypes} from "../interfaces/HousePoolEngineViewTypes.sol";
 
 library HousePoolAccountingLib {
 
@@ -28,7 +28,7 @@ library HousePoolAccountingLib {
     }
 
     function buildWithdrawalSnapshot(
-        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
@@ -41,7 +41,7 @@ library HousePoolAccountingLib {
     }
 
     function buildReconcileSnapshot(
-        ICfdEngine.HousePoolInputSnapshot memory engineSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
         snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
@@ -55,7 +55,7 @@ library HousePoolAccountingLib {
     }
 
     function getMarkFreshnessPolicy(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot
     ) internal pure returns (MarkFreshnessPolicy memory policy) {
         policy.required = accountingSnapshot.markFreshnessRequired;
         if (policy.required) {

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ICfdEngine} from "../interfaces/ICfdEngine.sol";
+import {HousePoolEngineViewTypes} from "../interfaces/HousePoolEngineViewTypes.sol";
 import {HousePoolAccountingLib} from "./HousePoolAccountingLib.sol";
 
 library HousePoolFreshnessLib {
 
     function markIsFreshForReconcile(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot,
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
         uint256 currentTimestamp
     ) internal pure returns (bool) {
         HousePoolAccountingLib.MarkFreshnessPolicy memory policy =
@@ -21,8 +21,8 @@ library HousePoolFreshnessLib {
     }
 
     function withdrawalsLive(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot,
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
         uint256 currentTimestamp
     ) internal pure returns (bool) {
         if (statusSnapshot.degradedMode) {
@@ -33,8 +33,8 @@ library HousePoolFreshnessLib {
     }
 
     function markFresh(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot,
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
         uint256 currentTimestamp
     ) internal pure returns (bool) {
         return markIsFreshForReconcile(accountingSnapshot, statusSnapshot, currentTimestamp);

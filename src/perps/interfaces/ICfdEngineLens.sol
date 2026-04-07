@@ -2,7 +2,6 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../CfdEngine.sol";
-import {ICfdEngine} from "./ICfdEngine.sol";
 
 interface ICfdEngineLens {
 

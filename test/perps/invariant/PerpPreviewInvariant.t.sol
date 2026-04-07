@@ -4,7 +4,9 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
+import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 
@@ -48,7 +50,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_ProtocolAccountingViewMatchesCoreState() public view {
-        CfdEngine.ProtocolAccountingView memory accountingView = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory accountingView = engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(accountingView.degradedMode, engine.degradedMode(), "Protocol accounting view degraded flag mismatch");
         assertEq(
@@ -111,7 +113,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             CfdEngine.LiquidationPreview memory liquidationPreview = engineLens.previewLiquidation(accountId, oraclePrice);
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                clearinghouse.getTerminalReachableUsdc(accountId),
+                _terminalReachableUsdc(accountId),
                 "Liquidation preview reachable collateral mismatch"
             );
         }
@@ -122,7 +124,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
             if (!snapshot.hasPosition || snapshot.executionEscrowUsdc == 0) {
                 continue;
             }

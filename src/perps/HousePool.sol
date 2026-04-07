@@ -2,10 +2,12 @@
 pragma solidity 0.8.33;
 
 import {CfdEngineProtocolLens} from "./CfdEngineProtocolLens.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
+import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
+import {IPerpsLPActions} from "./interfaces/IPerpsLPActions.sol";
 import {ITrancheVaultBootstrap} from "./interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "./libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "./libraries/HousePoolFreshnessLib.sol";
@@ -26,7 +28,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @notice Tranched house pool. Senior tranche gets fixed-rate yield with last-loss protection.
 ///         Junior tranche absorbs first loss but captures surplus revenue.
 /// @custom:security-contact contact@plether.com
-contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
+contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Pausable {
 
     using SafeERC20 for IERC20;
 
@@ -51,13 +53,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     struct HousePoolContext {
-        ICfdEngine.HousePoolInputSnapshot accountingSnapshot;
-        ICfdEngine.HousePoolStatusSnapshot statusSnapshot;
+        HousePoolEngineViewTypes.HousePoolInputSnapshot accountingSnapshot;
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot statusSnapshot;
         PendingAccountingState pendingState;
     }
 
     IERC20 public immutable USDC;
-    ICfdEngine public immutable ENGINE;
+    ICfdEngineCore public immutable ENGINE;
     ICfdEngineProtocolLens public immutable ENGINE_PROTOCOL_LENS;
 
     address public orderRouter;
@@ -148,7 +150,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         address _engine
     ) Ownable(msg.sender) {
         USDC = IERC20(_usdc);
-        ENGINE = ICfdEngine(_engine);
+        ENGINE = ICfdEngineCore(_engine);
         ENGINE_PROTOCOL_LENS = ICfdEngineProtocolLens(address(new CfdEngineProtocolLens(_engine)));
         lastReconcileTime = block.timestamp;
         lastSeniorYieldCheckpointTime = block.timestamp;
@@ -220,8 +222,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__TimelockNotReady();
         }
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
             _reconcile(accountingSnapshot);
@@ -318,8 +320,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         bool isSenior
     ) public view override returns (bool) {
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         HousePoolContext memory ctx = _buildHousePoolContext(accountingSnapshot, statusSnapshot);
         return HousePoolTrancheGateLib.trancheDepositsAllowed(
@@ -548,10 +550,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @param amount USDC to deposit (6 decimals)
     function depositSenior(
         uint256 amount
-    ) external onlyVault whenNotPaused {
+    ) external override(IHousePool, IPerpsLPActions) onlyVault whenNotPaused {
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         _reconcile(accountingSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
@@ -578,13 +580,13 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function withdrawSenior(
         uint256 amount,
         address receiver
-    ) external onlyVault {
+    ) external override(IHousePool, IPerpsLPActions) onlyVault {
         if (amount == 0) {
             return;
         }
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         _requireWithdrawalsLive(statusSnapshot);
         _reconcile(accountingSnapshot);
@@ -604,10 +606,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @param amount USDC to deposit (6 decimals)
     function depositJunior(
         uint256 amount
-    ) external onlyVault whenNotPaused {
+    ) external override(IHousePool, IPerpsLPActions) onlyVault whenNotPaused {
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         _reconcile(accountingSnapshot);
         _requireFreshMark(accountingSnapshot, statusSnapshot);
@@ -623,10 +625,10 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function withdrawJunior(
         uint256 amount,
         address receiver
-    ) external onlyVault {
+    ) external override(IHousePool, IPerpsLPActions) onlyVault {
         (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         ) = _getHousePoolSnapshots();
         _requireWithdrawalsLive(statusSnapshot);
         _reconcile(accountingSnapshot);
@@ -704,8 +706,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @notice Snapshot of pool liquidity, tranche principals, and oracle health for frontend consumption
     /// @return viewData Struct containing balances, reserves, and status flags
     function getVaultLiquidityView() external view returns (VaultLiquidityView memory viewData) {
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
             _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, false);
         viewData.totalAssetsUsdc = totalAssets();
@@ -731,8 +733,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireFreshMark(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view {
         if (!HousePoolFreshnessLib.markFresh(accountingSnapshot, statusSnapshot, block.timestamp)) {
             revert HousePool__MarkPriceStale();
@@ -740,7 +742,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _reconcile(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot
     ) internal {
         uint256 yieldElapsed =
             block.timestamp > lastSeniorYieldCheckpointTime ? block.timestamp - lastSeniorYieldCheckpointTime : 0;
@@ -785,8 +787,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _buildHousePoolContext(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (HousePoolContext memory ctx) {
         ctx.accountingSnapshot = accountingSnapshot;
         ctx.statusSnapshot = statusSnapshot;
@@ -802,8 +804,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _previewPendingAccountingState(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (PendingAccountingState memory pendingState) {
         pendingState.waterfall = _getWaterfallState();
         pendingState.unassignedAssets = unassignedAssets;
@@ -856,15 +858,15 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _markIsFreshForReconcile(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
         return HousePoolFreshnessLib.markIsFreshForReconcile(accountingSnapshot, statusSnapshot, block.timestamp);
     }
 
     function _withdrawalsLive(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal view returns (bool) {
         return HousePoolFreshnessLib.withdrawalsLive(accountingSnapshot, statusSnapshot, block.timestamp);
     }
@@ -899,7 +901,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _buildWithdrawalSnapshot(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         uint256 reservedUnassignedAssets,
         bool isProjected
     ) internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot) {
@@ -912,8 +914,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _checkpointSeniorYieldBeforePrincipalMutation(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal {
         uint256 elapsed =
             block.timestamp > lastSeniorYieldCheckpointTime ? block.timestamp - lastSeniorYieldCheckpointTime : 0;
@@ -936,8 +938,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _applyPendingBucketsLive(
-        ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal {
         if (pendingRecapitalizationUsdc == 0 && pendingTradingRevenueUsdc == 0) {
             return;
@@ -1014,11 +1016,11 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         return pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
     }
 
-    function _getHousePoolInputSnapshot() internal view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
+    function _getHousePoolInputSnapshot() internal view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         return ENGINE_PROTOCOL_LENS.getHousePoolInputSnapshot(markStalenessLimit);
     }
 
-    function _getHousePoolStatusSnapshot() internal view returns (ICfdEngine.HousePoolStatusSnapshot memory snapshot) {
+    function _getHousePoolStatusSnapshot() internal view returns (HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot) {
         return ENGINE_PROTOCOL_LENS.getHousePoolStatusSnapshot();
     }
 
@@ -1026,8 +1028,8 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         internal
         view
         returns (
-            ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
-            ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
         )
     {
         accountingSnapshot = _getHousePoolInputSnapshot();
@@ -1035,7 +1037,7 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _requireWithdrawalsLive(
-        ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
     ) internal pure {
         if (statusSnapshot.degradedMode) {
             revert HousePool__DegradedMode();

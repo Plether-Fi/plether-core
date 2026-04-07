@@ -3,13 +3,17 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
+import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
+import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {Test} from "forge-std/Test.sol";
@@ -312,11 +316,11 @@ contract PerpInvariantTest is BasePerpTest {
         uint64 nextCommitId = router.nextCommitId();
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (accountId == bytes32(0) || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
                 continue;
             }
-            pendingKeeperReserves += router.executionBountyReserves(orderId);
+            pendingKeeperReserves += record.executionBountyUsdc;
         }
 
         assertEq(
@@ -384,14 +388,14 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory positionView = engineAccountLens.getAccountLedgerSnapshot(accountId);
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
 
-            assertEq(positionView.exists, size > 0, "Position view existence must match stored size");
+            assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
             if (size == 0) {
                 assertEq(margin, 0, "Empty positions must not retain margin");
                 assertEq(entryPrice, 0, "Empty positions must not retain entry price");
-                assertEq(positionView.maxProfitUsdc, 0, "Empty positions must not retain bounded profit");
+                assertEq(positionView.unrealizedPnlUsdc, 0, "Empty positions must not retain bounded profit");
                 continue;
             }
 
@@ -404,11 +408,15 @@ contract PerpInvariantTest is BasePerpTest {
                 ? (size * entryPrice) / 1e20
                 : (size * (capPrice > entryPrice ? capPrice - entryPrice : 0)) / 1e20;
             assertLe(
-                positionView.maxProfitUsdc,
+                CfdMath.calculateMaxProfit(size, entryPrice, side, capPrice),
                 sideBound,
                 "Live position max profit must respect the side-specific bounded payoff"
             );
-            assertLe(positionView.maxProfitUsdc, (size * capPrice) / 1e20, "Live positions must remain bounded by CAP");
+            assertLe(
+                CfdMath.calculateMaxProfit(size, entryPrice, side, capPrice),
+                (size * capPrice) / 1e20,
+                "Live positions must remain bounded by CAP"
+            );
         }
     }
 
@@ -491,7 +499,7 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+            PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
             if (!positionView.exists) {
                 continue;
             }
@@ -503,7 +511,7 @@ contract PerpInvariantTest is BasePerpTest {
                 "Live positions must stay above the minimum liquidation bounty threshold"
             );
             assertGe(
-                positionView.margin,
+                positionView.marginUsdc,
                 minBountyUsdc,
                 "Live positions must not degrade into dust margin below the bounty floor"
             );
@@ -539,7 +547,7 @@ contract PerpInvariantTest is BasePerpTest {
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
 
             assertEq(
-                clearinghouse.getTerminalReachableUsdc(accountId),
+                _terminalReachableUsdc(accountId),
                 buckets.settlementBalanceUsdc,
                 "All trader-owned settlement collateral should remain terminally reachable"
             );
@@ -554,11 +562,11 @@ contract PerpInvariantTest is BasePerpTest {
             uint256 rawQueuedCommitted;
 
             for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-                (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-                if (queuedAccountId != accountId || sizeDelta == 0) {
+                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+                if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
                     continue;
                 }
-                rawQueuedCommitted += router.committedMargins(orderId);
+                rawQueuedCommitted += _remainingCommittedMargin(orderId);
             }
 
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
@@ -571,7 +579,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_ProtocolAccountingViewMatchesAccessors() public view {
-        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
         assertEq(protocolView.maxLiabilityUsdc, engine.getMaxLiability(), "Protocol view liability must match accessor");
@@ -610,7 +618,7 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
-        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on vault assets");
         assertEq(
@@ -630,7 +638,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 vaultDepth = pool.totalAssets();
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+            PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
             if (!positionView.exists) {
                 continue;
             }
@@ -744,7 +752,7 @@ contract AdversarialPerpHandler is Test {
         uint256 size = bound(sizeFuzz, 1000e18, 25_000e18);
         uint256 margin = bound(marginFuzz, 200e6, 5000e6);
 
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < margin + 1e6) {
+        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < margin + 1e6) {
             _seedTrader(actor, margin + 5e6);
         }
 
@@ -767,7 +775,7 @@ contract AdversarialPerpHandler is Test {
         bytes32 accountId = _accountId(actor);
         uint256 count = bound(countFuzz, 1, 6);
 
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < count * 101e6) {
+        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < count * 101e6) {
             _seedTrader(actor, count * 150e6);
         }
 
@@ -819,7 +827,7 @@ contract AdversarialPerpHandler is Test {
         address actor = actors[ghost_batchAttempts % actors.length];
         bytes32 accountId = _accountId(actor);
 
-        if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < 205e6) {
+        if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < 205e6) {
             _seedTrader(actor, 500e6);
         }
 
@@ -845,7 +853,7 @@ contract AdversarialPerpHandler is Test {
         uint64 beforeExecute = router.nextExecuteId();
         bool retryableSlippageAtHead;
         if (beforeExecute < router.nextCommitId()) {
-            OrderRouter.OrderRecord memory headRecord = router.getOrderRecord(beforeExecute);
+            OrderRouter.OrderRecord memory headRecord = _orderRecord(beforeExecute);
             if (uint8(headRecord.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 retryableSlippageAtHead = !_checkSlippage(headRecord.core, oraclePrice);
                 if (retryableSlippageAtHead) {
@@ -858,7 +866,7 @@ contract AdversarialPerpHandler is Test {
         uint64 afterExecute = router.nextExecuteId();
 
         if (retryableSlippageAtHead) {
-            OrderRouter.OrderRecord memory postRecord = router.getOrderRecord(ghost_lastRetryableSlippageOrderId);
+            OrderRouter.OrderRecord memory postRecord = _orderRecord(ghost_lastRetryableSlippageOrderId);
             if (postRecord.retryAfterTimestamp > 0) {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
@@ -895,10 +903,16 @@ contract AdversarialPerpHandler is Test {
 
     function _countPendingOrders() internal view returns (uint256 pending) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            if (uint8(router.getOrderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
+            if (uint8(_orderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 pending++;
             }
         }
+    }
+
+    function _orderRecord(
+        uint64 orderId
+    ) internal view returns (OrderRouter.OrderRecord memory record) {
+        return router.getOrderRecord(orderId);
     }
 
     function liquidateWithPayoutFailure(
@@ -976,11 +990,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function invariant_AdversarialEscrowStaysBacked() public view {
         uint256 pendingKeeperReserves;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (accountId == bytes32(0) || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
                 continue;
             }
-            pendingKeeperReserves += router.executionBountyReserves(orderId);
+            pendingKeeperReserves += record.executionBountyUsdc;
         }
 
         assertEq(
@@ -997,7 +1011,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialViewsStayConsistent() public view {
-        CfdEngine.ProtocolAccountingView memory protocolView = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on assets");
@@ -1043,7 +1057,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 pendingCount;
 
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            if (uint8(router.getOrderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
+            if (uint8(_orderRecord(orderId).status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 pendingCount++;
             }
         }
@@ -1056,7 +1070,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
 
         while (cursor != 0 && cursor < nextCommitId && traversed <= pendingCount) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(cursor);
+            OrderRouter.OrderRecord memory record = _orderRecord(cursor);
             assertEq(
                 uint8(record.status),
                 uint8(IOrderRouterAccounting.OrderStatus.Pending),
@@ -1074,11 +1088,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function invariant_AdversarialRouterCustodiesOnlyPendingKeeperReserves() public view {
         uint256 pendingKeeperReserves;
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (accountId == bytes32(0) || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
                 continue;
             }
-            pendingKeeperReserves += router.executionBountyReserves(orderId);
+            pendingKeeperReserves += record.executionBountyUsdc;
         }
 
         assertEq(

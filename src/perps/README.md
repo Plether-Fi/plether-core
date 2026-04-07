@@ -11,6 +11,29 @@ Traditional perpetuals have unbounded upside tail risk. Plether constrains payou
 Five contracts separate custody, execution, and ledger math.
 
 For the accounting model that should govern future refactors, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For a one-page map of custody buckets, mutators, accounting readers, and cross-domain value flows, see [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
+For the intended product-facing integration surface, see [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md).
+
+## Simplified Public API
+
+The intended product surface is smaller than the current internal accounting surface.
+
+- Traders use `MarginClearinghouse.depositMargin(...)`, `MarginClearinghouse.withdrawMargin(...)`, and `OrderRouter.submitOrder(...)`.
+- Keepers use `OrderRouter.executeOrder(...)`, `OrderRouter.executeOrderBatch(...)`, and `OrderRouter.executeLiquidation(...)`.
+- LPs use `HousePool.depositSenior(...)`, `HousePool.withdrawSenior(...)`, `HousePool.depositJunior(...)`, and `HousePool.withdrawJunior(...)`.
+- Read consumers use `PerpsPublicLens` for compact account, position, tranche, LP-status, and protocol-status views.
+
+The supporting interfaces for this simplified surface live in `src/perps/interfaces/`:
+
+- `IPerpsTraderActions.sol`
+- `IPerpsTraderViews.sol`
+- `IPerpsLPActions.sol`
+- `IPerpsLPViews.sol`
+- `IPerpsKeeper.sol`
+- `IProtocolViews.sol`
+- `IMarginAccount.sol`
+- `PerpsViewTypes.sol`
+
+The existing engine, clearinghouse, router, and house-pool interfaces still expose deeper accounting and lifecycle machinery. Those richer interfaces remain useful for testing, admin operations, and internal integration, but they should not define the long-term product story.
 
 ### Accounting Domains
 

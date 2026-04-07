@@ -8,6 +8,9 @@ import {CfdEngineProtocolLens} from "../../../src/perps/CfdEngineProtocolLens.so
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "../../../src/perps/PerpsPublicLens.sol";
+import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {PerpsViewTypes} from "../../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {MockInvariantVault} from "./mocks/MockInvariantVault.sol";
 import {Test} from "forge-std/Test.sol";
@@ -22,6 +25,7 @@ abstract contract BasePerpInvariantTest is Test {
     MarginClearinghouse internal clearinghouse;
     MockInvariantVault internal vault;
     OrderRouter internal router;
+    PerpsPublicLens internal publicLens;
 
     uint256 internal constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 internal constant CAP_PRICE = 2e8;
@@ -51,6 +55,7 @@ abstract contract BasePerpInvariantTest is Test {
         engine.setVault(address(vault));
         engine.setOrderRouter(address(router));
         vault.setOrderRouter(address(router));
+        publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(0));
 
         uint256 initialVaultAssets = _initialVaultAssets();
         if (initialVaultAssets > 0) {
@@ -73,6 +78,67 @@ abstract contract BasePerpInvariantTest is Test {
 
     function _initialVaultAssets() internal pure virtual returns (uint256) {
         return 1_000_000_000e6;
+    }
+
+    function _orderRecord(
+        uint64 orderId
+    ) internal view returns (OrderRouter.OrderRecord memory record) {
+        return router.getOrderRecord(orderId);
+    }
+
+    function _remainingCommittedMargin(
+        uint64 orderId
+    ) internal view returns (uint256) {
+        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+    }
+
+    function _isInMarginQueue(
+        uint64 orderId
+    ) internal view returns (bool) {
+        return _orderRecord(orderId).inMarginQueue;
+    }
+
+    function _freeSettlementUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+    }
+
+    function _terminalReachableUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+    }
+
+    function _publicPosition(
+        bytes32 accountId
+    ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
+        return publicLens.getPosition(accountId);
+    }
+
+    function _publicProtocolStatus(
+    ) internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
+        return publicLens.getProtocolStatus();
+    }
+
+    function _deferredPayoutStatus(
+        bytes32 accountId,
+        address keeper
+    ) internal view returns (DeferredEngineViewTypes.DeferredPayoutStatus memory status) {
+        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        bool headHasLiquidity = vault.totalAssets() > 0 && headClaim.remainingUsdc > 0;
+
+        uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+        uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+
+        status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
+        status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && headHasLiquidity
+            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout)
+            && headClaim.accountId == accountId;
+        status.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
+        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && headHasLiquidity
+            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty)
+            && headClaim.keeper == keeper;
     }
 
 }

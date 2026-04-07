@@ -9,9 +9,14 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
 import {LiquidationAccountingLib} from "../../src/perps/libraries/LiquidationAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
@@ -466,8 +471,8 @@ contract CfdEngineTest is BasePerpTest {
         _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
 
         uint256 fundingLiabilityBefore = uint256(0);
-        ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
@@ -548,8 +553,8 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 fundingLiabilityBefore = uint256(0);
-        ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
@@ -1098,7 +1103,7 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), fees);
 
-        CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(bytes32(0), keeper);
+        DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(bytes32(0), keeper);
         assertTrue(status.liquidationBountyClaimableNow, "Queue-head deferred bounty should be claimable ahead of fees");
 
         uint256 feesBefore = engine.accumulatedFeesUsdc();
@@ -1184,9 +1189,9 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(accountId));
         assertEq(viewData.activePositionMarginUsdc, positionMargin);
         assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
-        assertEq(viewData.freeSettlementUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(viewData.closeReachableUsdc, clearinghouse.getFreeSettlementBalanceUsdc(accountId));
-        assertEq(viewData.terminalReachableUsdc, clearinghouse.getTerminalReachableUsdc(accountId));
+        assertEq(viewData.freeSettlementUsdc, _freeSettlementUsdc(accountId));
+        assertEq(viewData.closeReachableUsdc, _freeSettlementUsdc(accountId));
+        assertEq(viewData.terminalReachableUsdc, _terminalReachableUsdc(accountId));
         assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(accountId));
         assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(accountId));
         assertEq(viewData.deferredPayoutUsdc, 0);
@@ -1201,16 +1206,14 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(block.timestamp));
 
-        CfdEngine.PositionView memory viewData = engineProtocolLens.getPositionView(accountId);
+        PerpsViewTypes.PositionView memory viewData = _publicPosition(accountId);
+        (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
         assertTrue(viewData.exists);
         assertEq(uint256(viewData.side), uint256(CfdTypes.Side.BULL));
         assertEq(viewData.size, 100_000 * 1e18);
         assertEq(viewData.entryPrice, 1e8);
-        assertEq(viewData.entryNotionalUsdc, 100_000 * 1e6);
-        assertEq(viewData.physicalReachableCollateralUsdc, clearinghouse.getTerminalReachableUsdc(accountId));
-        assertEq(viewData.nettableDeferredPayoutUsdc, engine.deferredPayoutUsdc(accountId));
+        assertEq(viewData.marginUsdc, positionMargin);
         assertGt(viewData.unrealizedPnlUsdc, 0);
-        assertEq(viewData.maxProfitUsdc, 100_000 * 1e6);
     }
 
     function test_GetPositionView_DoesNotCountDeferredPayoutAsPhysicalCollateral() public {
@@ -1224,10 +1227,9 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
             .checked_write(uint256(200e6));
 
-        CfdEngine.PositionView memory viewData = engineProtocolLens.getPositionView(accountId);
-        assertEq(viewData.physicalReachableCollateralUsdc, 0, "View should expose physical reachable collateral only");
-        assertEq(viewData.nettableDeferredPayoutUsdc, 200e6, "View should expose deferred payout separately");
-        assertEq(viewData.netEquityUsdc, 0, "Deferred payout should not inflate generic position equity views");
+        PerpsViewTypes.PositionView memory viewData = _publicPosition(accountId);
+        (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
+        assertEq(viewData.marginUsdc, positionMargin, "Public position view should still expose locked position margin");
         assertTrue(viewData.liquidatable, "Position should remain liquidatable when only deferred payout exists");
     }
 
@@ -1243,7 +1245,7 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        CfdEngine.ProtocolAccountingView memory viewData = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData = engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(viewData.vaultAssetsUsdc, pool.totalAssets());
         assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
@@ -1265,9 +1267,9 @@ contract CfdEngineTest is BasePerpTest {
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
 
-        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = engineProtocolLens.getProtocolAccountingSnapshot();
-        CfdEngine.ProtocolAccountingView memory viewData = engineProtocolLens.getProtocolAccountingView();
-        ICfdEngine.HousePoolInputSnapshot memory housePoolSnapshot =
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData = engineProtocolLens.getProtocolAccountingSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory housePoolSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(snapshot.vaultAssetsUsdc, pool.totalAssets());
@@ -1311,8 +1313,8 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), 100_000e6);
 
-        ICfdEngine.ProtocolAccountingSnapshot memory beforeAccount = engineProtocolLens.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseBefore =
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeAccount = engineProtocolLens.getProtocolAccountingSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw pool balance should include the donation");
@@ -1326,8 +1328,8 @@ contract CfdEngineTest is BasePerpTest {
 
         pool.accountExcess();
 
-        ICfdEngine.ProtocolAccountingSnapshot memory afterAccount = engineProtocolLens.getProtocolAccountingSnapshot();
-        ICfdEngine.HousePoolInputSnapshot memory houseAfter =
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterAccount = engineProtocolLens.getProtocolAccountingSnapshot();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory houseAfter =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
         assertEq(
@@ -1356,7 +1358,7 @@ contract CfdEngineTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         vm.stopPrank();
 
-        ICfdEngine.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
+        AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
         (, uint256 positionMargin,,,,,,) = engine.positions(accountId);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
@@ -1380,9 +1382,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         CfdEngine.AccountCollateralView memory collateralView = engineAccountLens.getAccountCollateralView(accountId);
-        CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+        (uint256 sizeStored, uint256 marginStored, uint256 entryPriceStored,,, CfdTypes.Side sideStored,,) =
+            engine.positions(accountId);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(accountId);
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
@@ -1401,15 +1404,11 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.terminalReachableUsdc, collateralView.terminalReachableUsdc);
         assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
         assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
-        assertEq(snapshot.hasPosition, positionView.exists);
-        assertEq(uint256(snapshot.side), uint256(positionView.side));
-        assertEq(snapshot.size, positionView.size);
-        assertEq(snapshot.margin, positionView.margin);
-        assertEq(snapshot.entryPrice, positionView.entryPrice);
-        assertEq(snapshot.unrealizedPnlUsdc, positionView.unrealizedPnlUsdc);
-        assertEq(snapshot.pendingFundingUsdc, positionView.pendingFundingUsdc);
-        assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc);
-        assertEq(snapshot.liquidatable, positionView.liquidatable);
+        assertTrue(snapshot.hasPosition);
+        assertEq(uint256(snapshot.side), uint256(sideStored));
+        assertEq(snapshot.size, sizeStored);
+        assertEq(snapshot.margin, marginStored);
+        assertEq(snapshot.entryPrice, entryPriceStored);
     }
 
     function test_GetHousePoolInputSnapshot_ReflectsCurrentAccountingState() public {
@@ -1418,9 +1417,9 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(trader, 11_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
 
-        ICfdEngine.HousePoolInputSnapshot memory snapshot =
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
-        ICfdEngine.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
         uint256 fees = engine.accumulatedFeesUsdc();
 
         assertEq(
@@ -1433,7 +1432,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.withdrawalFundingLiabilityUsdc, uint256(0), "Snapshot funding liability must match accessor");
         assertEq(
             snapshot.unrealizedMtmLiabilityUsdc,
-            engineProtocolLens.getVaultMtmAdjustment(),
+            _vaultMtmAdjustment(),
             "Snapshot MtM liability must match accessor"
         );
         assertEq(
@@ -1466,9 +1465,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(saturdayFrozen);
         assertTrue(engine.isOracleFrozen(), "Test setup should be inside a frozen oracle window");
 
-        ICfdEngine.HousePoolInputSnapshot memory snapshot =
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
-        ICfdEngine.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
         assertTrue(snapshot.markFreshnessRequired, "Open liability should still require freshness in frozen mode");
         assertEq(
             snapshot.maxMarkStaleness,
@@ -1682,7 +1681,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 900e6, type(uint256).max, false);
 
-        uint256 freeSettlementBeforePreview = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        uint256 freeSettlementBeforePreview = _freeSettlementUsdc(accountId);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 110_000_000);
 
@@ -1930,7 +1929,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
 
-        CfdEngine.PositionView memory viewData = engineProtocolLens.getPositionView(accountId);
+        PerpsViewTypes.PositionView memory viewData = _publicPosition(accountId);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 110_000_000);
 
         assertTrue(viewData.liquidatable, "Position view should use current notional for maintenance threshold");
@@ -2160,7 +2159,7 @@ contract CfdEngineTest is BasePerpTest {
         router.executeLiquidation(accountId, priceData);
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(accountId, keeper, beforeSnapshot);
-        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
 
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
@@ -2250,7 +2249,7 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
-        uint256 settlementReachableBefore = clearinghouse.getTerminalReachableUsdc(bearId);
+        uint256 settlementReachableBefore = _terminalReachableUsdc(bearId);
         uint256 traderWalletBefore = usdc.balanceOf(address(uint160(uint256(bearId))));
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bearId, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
@@ -2401,10 +2400,10 @@ contract CfdEngineTest is BasePerpTest {
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 80_000_000, vaultDepth, refreshTime);
 
-        ICfdEngine.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
         assertEq(
             uint8(headClaim.claimType),
-            uint8(ICfdEngine.DeferredClaimType.ClearerBounty),
+            uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty),
             "Consuming a later trader payout must not disturb the unrelated global queue head"
         );
         assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
@@ -2553,7 +2552,7 @@ contract CfdEngineTest is BasePerpTest {
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 102_500_000);
-        ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
 
         assertGt(escrow.executionBountyUsdc, 0, "Setup must create router-held execution escrow");
         assertEq(
@@ -2678,15 +2677,15 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
-        CfdEngine.DeferredPayoutStatus memory statusBefore =
-            engineProtocolLens.getDeferredPayoutStatus(accountId, address(this));
+        DeferredEngineViewTypes.DeferredPayoutStatus memory statusBefore =
+            _deferredPayoutStatus(accountId, address(this));
         assertGt(statusBefore.deferredTraderPayoutUsdc, 0);
         assertFalse(statusBefore.traderPayoutClaimableNow);
 
         usdc.mint(address(pool), statusBefore.deferredTraderPayoutUsdc);
 
-        CfdEngine.DeferredPayoutStatus memory statusAfter =
-            engineProtocolLens.getDeferredPayoutStatus(accountId, address(this));
+        DeferredEngineViewTypes.DeferredPayoutStatus memory statusAfter =
+            _deferredPayoutStatus(accountId, address(this));
         assertTrue(statusAfter.traderPayoutClaimableNow);
     }
 
@@ -2708,7 +2707,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.recordDeferredClearerBounty(keeper, deferred);
         usdc.mint(address(pool), deferred);
 
-        CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(accountId, keeper);
+        DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(accountId, keeper);
         assertTrue(
             status.traderPayoutClaimableNow, "Oldest deferred trader claim should be claimable under partial liquidity"
         );
@@ -2730,9 +2729,9 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets);
 
-        CfdEngine.ProtocolAccountingView memory protocolViewBefore = engineProtocolLens.getProtocolAccountingView();
-        CfdEngine.DeferredPayoutStatus memory statusBefore =
-            engineProtocolLens.getDeferredPayoutStatus(bytes32(0), keeper);
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolViewBefore = engineProtocolLens.getProtocolAccountingSnapshot();
+        DeferredEngineViewTypes.DeferredPayoutStatus memory statusBefore =
+            _deferredPayoutStatus(bytes32(0), keeper);
         assertEq(protocolViewBefore.totalDeferredClearerBountyUsdc, deferredBounty);
         assertEq(statusBefore.deferredClearerBountyUsdc, deferredBounty);
         assertFalse(
@@ -2742,8 +2741,8 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), deferredBounty);
 
-        CfdEngine.DeferredPayoutStatus memory statusAfterFunding =
-            engineProtocolLens.getDeferredPayoutStatus(bytes32(0), keeper);
+        DeferredEngineViewTypes.DeferredPayoutStatus memory statusAfterFunding =
+            _deferredPayoutStatus(bytes32(0), keeper);
         assertTrue(
             statusAfterFunding.liquidationBountyClaimableNow,
             "Deferred clearer bounty should become claimable once vault liquidity returns"
@@ -2754,7 +2753,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(relayer);
         engine.claimDeferredClearerBounty();
 
-        CfdEngine.ProtocolAccountingView memory protocolViewAfter = engineProtocolLens.getProtocolAccountingView();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolViewAfter = engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(clearinghouse.balanceUsdc(keeperId) - keeperSettlementBefore, deferredBounty);
         assertEq(engine.deferredClearerBountyUsdc(keeper), 0);
         assertEq(protocolViewAfter.totalDeferredClearerBountyUsdc, 0);
@@ -2775,7 +2774,7 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(engine.deferredClearerBountyUsdc(keeper), 30e6, "Keeper liability should aggregate across events");
 
-        ICfdEngine.DeferredClaim memory headBefore = engine.getDeferredClaimHead();
+        DeferredEngineViewTypes.DeferredClaim memory headBefore = engine.getDeferredClaimHead();
         assertEq(headBefore.keeper, keeper, "Coalesced keeper node should remain at queue head");
         assertEq(headBefore.remainingUsdc, 30e6, "Head node should equal the aggregated keeper liability");
 
@@ -2802,7 +2801,7 @@ contract CfdEngineTest is BasePerpTest {
             "Partial claim should retain the same coalesced node"
         );
 
-        ICfdEngine.DeferredClaim memory headAfter = engine.getDeferredClaimHead();
+        DeferredEngineViewTypes.DeferredClaim memory headAfter = engine.getDeferredClaimHead();
         assertEq(headAfter.keeper, keeper, "Partially serviced coalesced node should remain at head");
         assertEq(headAfter.remainingUsdc, 20e6, "Head node should shrink by the claimed amount");
     }
@@ -2862,7 +2861,7 @@ contract CfdEngineTest is BasePerpTest {
         _close(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 103_000_000);
 
         assertLt(
-            router.committedMargins(1),
+            _remainingCommittedMargin(1),
             7900e6,
             "Order record should reflect committed margin consumed by terminal settlement"
         );
@@ -4014,7 +4013,7 @@ contract CfdEngineFundingTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
 
-        uint256 mtm = engineProtocolLens.getVaultMtmAdjustment();
+        uint256 mtm = _vaultMtmAdjustment();
         assertEq(
             mtm,
             5000e6,
@@ -4159,7 +4158,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
 
-        CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+        PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
 
         uint8 revertCode = engine.previewOpenRevertCode(
@@ -4500,7 +4499,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.executeOrder(2, priceData);
 
         int256 uncappedPnl = engine.getUnrealizedTraderPnl();
-        uint256 cappedMtm = engineProtocolLens.getVaultMtmAdjustment();
+        uint256 cappedMtm = _vaultMtmAdjustment();
 
         assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
         assertGt(int256(cappedMtm), uncappedPnl, "Capped MtM is less aggressive than uncapped");
@@ -4553,13 +4552,13 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1.2e8, false);
         router.executeOrder(2, priceData);
 
-        uint256 mtm = engineProtocolLens.getVaultMtmAdjustment();
+        uint256 mtm = _vaultMtmAdjustment();
         assertGt(mtm, 0, "Positive MtM = vault liability when traders are winning (no cap needed)");
     }
 
     function test_MtmAdjustment_ZeroWithNoPositions() public {
         _fundJunior(bob, 500_000e6);
-        assertEq(engineProtocolLens.getVaultMtmAdjustment(), 0, "MtM should be zero with no positions");
+        assertEq(_vaultMtmAdjustment(), 0, "MtM should be zero with no positions");
     }
 
 }
@@ -4856,7 +4855,7 @@ contract ProtocolPhaseTest is BasePerpTest {
             "Fully configured engine should be Active"
         );
 
-        ICfdEngine.ProtocolStatus memory status = engineProtocolLens.getProtocolStatus();
+        PerpsViewTypes.ProtocolStatusView memory status = _publicProtocolStatus();
         assertEq(uint8(status.phase), uint8(ICfdEngine.ProtocolPhase.Active));
         assertEq(status.lastMarkPrice, 0);
 

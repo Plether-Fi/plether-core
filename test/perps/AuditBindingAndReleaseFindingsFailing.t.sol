@@ -25,9 +25,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(address(engine));
         router.syncMarginQueue(aliceId);
 
-        assertEq(
-            router.committedMargins(1), 0, "Consumed committed margin should be charged to the queued order itself"
-        );
+        assertEq(_remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself");
 
         uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceId);
 

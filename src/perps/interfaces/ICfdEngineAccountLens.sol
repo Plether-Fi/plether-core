@@ -2,22 +2,20 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../CfdEngine.sol";
-import {ICfdEngine} from "./ICfdEngine.sol";
-
+import {AccountLensViewTypes} from "./AccountLensViewTypes.sol";
 interface ICfdEngineAccountLens {
 
-    function engine() external view returns (address);
+    /// @dev Legacy detailed account lens kept for internal tooling, tests, and migration.
+    ///      Product-facing consumers should prefer `IPerpsTraderViews` via `PerpsPublicLens`.
 
-    function getAccountCollateralView(
-        bytes32 accountId
-    ) external view returns (CfdEngine.AccountCollateralView memory viewData);
+    function getAccountCollateralView(bytes32 accountId) external view returns (CfdEngine.AccountCollateralView memory viewData);
 
     function getAccountLedgerView(
         bytes32 accountId
-    ) external view returns (ICfdEngine.AccountLedgerView memory viewData);
+    ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData);
 
     function getAccountLedgerSnapshot(
         bytes32 accountId
-    ) external view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot);
+    ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot);
 
 }

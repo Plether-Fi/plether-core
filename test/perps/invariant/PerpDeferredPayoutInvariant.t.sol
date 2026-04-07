@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
+import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
@@ -34,12 +35,12 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
     function invariant_DeferredPayoutStatusMatchesEngineAndVaultLiquidity() public view {
         uint256 totalDeferredPayoutUsdc;
-        ICfdEngine.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
         bool headHasLiquidity = vault.totalAssets() > 0 && headClaim.remainingUsdc > 0;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(accountId, address(handler));
+            DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(accountId, address(handler));
             uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
             uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(address(handler));
 
@@ -47,14 +48,14 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             assertEq(
                 status.traderPayoutClaimableNow,
                 deferredPayoutUsdc > 0 && headHasLiquidity
-                    && uint8(headClaim.claimType) == uint8(ICfdEngine.DeferredClaimType.TraderPayout)
+                    && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout)
                     && headClaim.accountId == accountId,
                 "Deferred payout claimability mismatch"
             );
             assertEq(
                 status.liquidationBountyClaimableNow,
                 deferredClearerBountyUsdc > 0 && headHasLiquidity
-                    && uint8(headClaim.claimType) == uint8(ICfdEngine.DeferredClaimType.ClearerBounty)
+                    && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty)
                     && headClaim.keeper == address(handler),
                 "Deferred clearer bounty claimability mismatch"
             );
@@ -101,11 +102,11 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             }
 
             assertGt(claimId, 0, "Accounts with deferred payout must have a trader deferred claim pointer");
-            (ICfdEngine.DeferredClaimType claimType, bytes32 claimAccountId,, uint256 remainingUsdc,,) =
+            (DeferredEngineViewTypes.DeferredClaimType claimType, bytes32 claimAccountId,, uint256 remainingUsdc,,) =
                 engine.deferredClaims(claimId);
             assertEq(
                 uint8(claimType),
-                uint8(ICfdEngine.DeferredClaimType.TraderPayout),
+                uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout),
                 "Trader deferred claim pointer must point to a trader payout node"
             );
             assertEq(claimAccountId, accountId, "Trader deferred claim pointer must belong to the tracked account");
@@ -126,11 +127,11 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         }
 
         assertGt(claimId, 0, "Keepers with deferred bounty must have a clearer deferred claim pointer");
-        (ICfdEngine.DeferredClaimType claimType,, address claimKeeper, uint256 remainingUsdc,,) =
+        (DeferredEngineViewTypes.DeferredClaimType claimType,, address claimKeeper, uint256 remainingUsdc,,) =
             engine.deferredClaims(claimId);
         assertEq(
             uint8(claimType),
-            uint8(ICfdEngine.DeferredClaimType.ClearerBounty),
+            uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty),
             "Clearer deferred claim pointer must point to a clearer bounty node"
         );
         assertEq(claimKeeper, keeper, "Clearer deferred claim pointer must belong to the tracked keeper");
@@ -146,7 +147,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         while (claimId != 0) {
             (
-                ICfdEngine.DeferredClaimType claimType,
+                DeferredEngineViewTypes.DeferredClaimType claimType,
                 bytes32 claimAccountId,
                 address claimKeeper,
                 uint256 remainingUsdc,
@@ -157,7 +158,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             assertEq(storedPrevClaimId, prevClaimId, "Deferred queue prev-link must match traversal state");
             assertGt(remainingUsdc, 0, "Deferred queue must not retain zero-amount claims");
 
-            if (claimType == ICfdEngine.DeferredClaimType.TraderPayout) {
+            if (claimType == DeferredEngineViewTypes.DeferredClaimType.TraderPayout) {
                 traderClaimCount++;
                 assertEq(
                     engine.traderDeferredClaimIdByAccount(claimAccountId),

@@ -200,10 +200,10 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
 
-        uint256 committedBefore = router.committedMargins(1);
+        uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
 
-        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        uint256 freeSettlement = _freeSettlementUsdc(accountId);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
         _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
@@ -224,7 +224,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
 
-        uint256 committedBefore = router.committedMargins(1);
+        uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 50_000e18, 1.08e8);
@@ -268,7 +268,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(
-            clearinghouse.getFreeSettlementBalanceUsdc(accountId), 0, "Trader should be fully utilized before commit"
+            _freeSettlementUsdc(accountId), 0, "Trader should be fully utilized before commit"
         );
     }
 
@@ -281,7 +281,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(accountId), 1e6, "Close bounty should be prefunded");
+        assertEq(_freeSettlementUsdc(accountId), 1e6, "Close bounty should be prefunded");
     }
 
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
@@ -293,7 +293,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
-        assertEq(router.executionBountyReserves(1), 1e6, "Close order should still escrow the keeper bounty");
+        assertEq(_executionBountyReserve(1), 1e6, "Close order should still escrow the keeper bounty");
         assertEq(marginAfter, marginBefore - 1e6, "Fully utilized close should source bounty from position margin");
     }
 
@@ -304,8 +304,8 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
         uint64 headOrderId = router.nextExecuteId();
-        uint256 reservedBounty = router.executionBountyReserves(headOrderId);
-        uint256 freeSettlement = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        uint256 reservedBounty = _executionBountyReserve(headOrderId);
+        uint256 freeSettlement = _freeSettlementUsdc(accountId);
 
         assertGe(
             reservedBounty + freeSettlement,
@@ -313,7 +313,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             "Head close order should be economically backed the moment it enters FIFO"
         );
         assertEq(
-            router.getOrderRecord(headOrderId).executionBountyUsdc,
+            _orderRecord(headOrderId).executionBountyUsdc,
             router.quoteCloseOrderExecutionBountyUsdc(),
             "Close orders should escrow the full bounty in router custody"
         );
@@ -336,9 +336,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
         assertEq(keeperBounty, 0, "Retryable slippage miss should not pay the keeper bounty");
         assertEq(router.nextExecuteId(), 1, "Single queued retryable miss should remain the current head");
-        assertEq(router.executionBountyReserves(1), 1e6, "Escrowed close bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 1e6, "Escrowed close bounty should remain in router custody");
         assertGt(
-            router.getOrderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown"
+            _orderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown"
         );
     }
 
@@ -365,7 +365,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         assertEq(keeperBounty, 1e6, "Expired head close should still pay the keeper bounty");
 
         assertEq(
-            clearinghouse.getFreeSettlementBalanceUsdc(accountId),
+            _freeSettlementUsdc(accountId),
             0,
             "Escrowed close bounty should be consumed from prefunded free settlement"
         );
@@ -394,7 +394,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
             "Router should transfer exactly the escrowed close bounty on liquidation"
         );
 
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(1);
+        OrderRouter.OrderRecord memory record = _orderRecord(1);
         assertEq(record.executionBountyUsdc, 0, "Deferred bounty should be cleared on liquidation");
     }
 

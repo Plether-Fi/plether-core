@@ -28,7 +28,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
             7900e6,
             "Full close should consume queued committed margin before socializing shortfall"
         );
-        assertEq(router.executionBountyReserves(1), 50_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 50_000, "Queued execution bounty should remain in router custody");
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             0,
@@ -57,7 +57,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
-        assertEq(router.executionBountyReserves(1), 50_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 50_000, "Queued execution bounty should remain in router custody");
         assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
             7900e6,
@@ -125,7 +125,7 @@ contract AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees is BaseP
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
 
-        uint256 forfeitedBounty = router.executionBountyReserves(1);
+        uint256 forfeitedBounty = _executionBountyReserve(1);
         uint256 feesBefore = engine.accumulatedFeesUsdc();
 
         bytes[] memory priceData = new bytes[](1);
@@ -226,7 +226,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         assertEq(
             router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
         );
-        assertEq(router.executionBountyReserves(1), 1e6, "Close commits should escrow the flat clearer bounty");
+        assertEq(_executionBountyReserve(1), 1e6, "Close commits should escrow the flat clearer bounty");
     }
 
     function test_H5_CloseKeeperRewardMustDeferInsteadOfRevertingOnCashShortage() public {

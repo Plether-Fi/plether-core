@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
+import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
 contract ArchitectureRegression_EscrowShielding is BasePerpTest {
@@ -102,7 +103,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         usdc.mint(address(pool), deferredPayout);
 
-        CfdEngine.DeferredPayoutStatus memory status = engineProtocolLens.getDeferredPayoutStatus(aliceId, keeper);
+        DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(aliceId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "oldest queue head should become claimable under partial liquidity");
         assertFalse(status.liquidationBountyClaimableNow, "later claims must remain blocked behind the queue head");
 
@@ -175,7 +176,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(bobId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 0, "setup must leave no idle settlement");
+        assertEq(_freeSettlementUsdc(aliceId), 0, "setup must leave no idle settlement");
         (, uint256 marginBefore,,,,,,) = engine.positions(aliceId);
 
         vm.prank(alice);
@@ -183,7 +184,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
 
         (, uint256 marginAfter,,,,,,) = engine.positions(aliceId);
         assertEq(marginAfter, marginBefore - 1e6, "close commit should source bounty from active margin");
-        assertEq(router.executionBountyReserves(1), 1e6, "close commit must still escrow the keeper bounty");
+        assertEq(_executionBountyReserve(1), 1e6, "close commit must still escrow the keeper bounty");
     }
 
 }

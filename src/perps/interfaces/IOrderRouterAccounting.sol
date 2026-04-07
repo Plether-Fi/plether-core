@@ -4,6 +4,9 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "../CfdTypes.sol";
 
 /// @notice Shared accounting-facing subset of OrderRouter used by engine views and margin bookkeeping.
+/// @dev This remains an internal/admin integration surface.
+///      Product-facing consumers should prefer `IPerpsTraderViews` via `PerpsPublicLens` and
+///      avoid depending on queue-accounting internals directly.
 interface IOrderRouterAccounting {
 
     enum OrderStatus {

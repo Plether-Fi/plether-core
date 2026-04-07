@@ -2,14 +2,12 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "./CfdEngine.sol";
-import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
-import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {AccountLensViewTypes} from "./interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineAccountLens} from "./interfaces/ICfdEngineAccountLens.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
-import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
+import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 
 contract CfdEngineAccountLens is ICfdEngineAccountLens {
@@ -22,10 +20,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         engineContract = CfdEngine(engine_);
     }
 
-    function engine() external view returns (address) {
-        return address(engineContract);
-    }
-
     function getAccountCollateralView(
         bytes32 accountId
     ) external view returns (CfdEngine.AccountCollateralView memory viewData) {
@@ -36,8 +30,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
-        viewData.closeReachableUsdc = engineContract.clearinghouse().getFreeSettlementBalanceUsdc(accountId);
-        viewData.terminalReachableUsdc = engineContract.clearinghouse().getTerminalReachableUsdc(accountId);
+        viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
+        viewData.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
         viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(accountId);
         viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(accountId);
         viewData.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
@@ -45,8 +39,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     function getAccountLedgerView(
         bytes32 accountId
-    ) external view returns (ICfdEngine.AccountLedgerView memory viewData) {
-        ICfdEngine.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(accountId);
+    ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(accountId);
         viewData.settlementBalanceUsdc = snapshot.settlementBalanceUsdc;
         viewData.freeSettlementUsdc = snapshot.freeSettlementUsdc;
         viewData.activePositionMarginUsdc = snapshot.activePositionMarginUsdc;
@@ -59,13 +53,13 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     function getAccountLedgerSnapshot(
         bytes32 accountId
-    ) external view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
+    ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
         return _buildAccountLedgerSnapshot(accountId);
     }
 
     function _buildAccountLedgerSnapshot(
         bytes32 accountId
-    ) internal view returns (ICfdEngine.AccountLedgerSnapshot memory snapshot) {
+    ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
         CfdTypes.Position memory pos = _position(accountId);
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
@@ -84,8 +78,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.committedMarginUsdc = escrow.committedMarginUsdc;
         snapshot.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
         snapshot.pendingOrderCount = escrow.pendingOrderCount;
-        snapshot.closeReachableUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
-        snapshot.terminalReachableUsdc = clearinghouse.getTerminalReachableUsdc(accountId);
+        snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
+        snapshot.terminalReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets);
         snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(accountId);
         snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
 
@@ -132,16 +126,4 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             params.bountyBps
         ) = engineContract.riskParams();
     }
-
-    function _sideSnapshot(
-        ICfdEngine.SideState memory side
-    ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        snap = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: side.maxProfitUsdc,
-            openInterest: side.openInterest,
-            entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin
-        });
-    }
-
 }

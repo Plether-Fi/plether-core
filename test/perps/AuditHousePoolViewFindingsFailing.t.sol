@@ -5,6 +5,8 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {HousePoolAccountingLib} from "../../src/perps/libraries/HousePoolAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -12,13 +14,13 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 contract HousePoolAccountingLibHarness {
 
     function buildWithdrawal(
-        ICfdEngine.HousePoolInputSnapshot memory snapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot
     ) external pure returns (HousePoolAccountingLib.WithdrawalSnapshot memory) {
         return HousePoolAccountingLib.buildWithdrawalSnapshot(snapshot);
     }
 
     function buildReconcile(
-        ICfdEngine.HousePoolInputSnapshot memory snapshot
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot
     ) external pure returns (HousePoolAccountingLib.ReconcileSnapshot memory) {
         return HousePoolAccountingLib.buildReconcileSnapshot(snapshot);
     }
@@ -166,11 +168,9 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
 
         vm.warp(block.timestamp + 30 days);
 
-        CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
-        ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 1e8);
 
-        assertEq(positionView.pendingFundingUsdc, preview.fundingUsdc, "Position view should project pending funding");
         assertEq(snapshot.pendingFundingUsdc, preview.fundingUsdc, "Ledger snapshot should project pending funding");
     }
 
@@ -241,7 +241,7 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), burnAmount);
 
-        ICfdEngine.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
 

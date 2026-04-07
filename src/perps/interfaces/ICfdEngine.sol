@@ -3,101 +3,22 @@ pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
+import {DeferredEngineViewTypes} from "./DeferredEngineViewTypes.sol";
+import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Stateful CFD trading engine: processes orders, settles funding, and liquidates positions.
+/// @notice Stateful CFD trading engine: processes orders and liquidates positions.
+/// @dev This remains a rich internal/admin integration interface.
+///      Product-facing consumers should prefer the slim public surfaces in
+///      `IPerpsTraderActions`, `IPerpsTraderViews`, `IPerpsLPActions`, `IPerpsLPViews`,
+///      `IPerpsKeeper`, `IProtocolViews`, and `IMarginAccount`.
+///      Live protocol contracts should prefer smaller role-specific interfaces like `ICfdEngineCore`.
 interface ICfdEngine {
 
     error CfdEngine__TypedOrderFailure(
         CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
     );
     error CfdEngine__MarkPriceOutOfOrder();
-
-    /// @notice Compact per-account ledger view spanning trader-owned settlement buckets and router-reserved order state.
-    /// @dev `settlementBalanceUsdc`, `freeSettlementUsdc`, `activePositionMarginUsdc`, `otherLockedMarginUsdc`, and
-    ///      `deferredPayoutUsdc` are trader-owned value or obligations recorded by the protocol.
-    ///      `activePositionMarginUsdc` is the canonical clearinghouse custody bucket for live position backing, while
-    ///      engine economic position margin is exposed separately on `AccountLedgerSnapshot.margin`.
-    ///      `executionEscrowUsdc` is router-custodied order bounty escrow attributed to the account.
-    ///      `committedMarginUsdc` remains trader-owned settlement reserved for queued orders inside the clearinghouse.
-    struct AccountLedgerView {
-        uint256 settlementBalanceUsdc;
-        uint256 freeSettlementUsdc;
-        uint256 activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc;
-        uint256 executionEscrowUsdc;
-        uint256 committedMarginUsdc;
-        uint256 deferredPayoutUsdc;
-        uint256 pendingOrderCount;
-    }
-
-    /// @notice Expanded per-account ledger snapshot for debugging account health, reachability, and queued-order state.
-    /// @dev Extends `AccountLedgerView` with typed clearinghouse locked-margin buckets, terminal settlement reachability,
-    ///      equity, buying power, and live position risk.
-    ///      `margin` is the engine's economic position margin, while `positionMarginBucketUsdc` is the clearinghouse
-    ///      custody bucket that should back it.
-    struct AccountLedgerSnapshot {
-        uint256 settlementBalanceUsdc;
-        uint256 freeSettlementUsdc;
-        uint256 activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc;
-        uint256 positionMarginBucketUsdc;
-        uint256 committedOrderMarginBucketUsdc;
-        uint256 reservedSettlementBucketUsdc;
-        uint256 executionEscrowUsdc;
-        uint256 committedMarginUsdc;
-        uint256 deferredPayoutUsdc;
-        uint256 pendingOrderCount;
-        uint256 closeReachableUsdc;
-        uint256 terminalReachableUsdc;
-        uint256 accountEquityUsdc;
-        uint256 freeBuyingPowerUsdc;
-        bool hasPosition;
-        CfdTypes.Side side;
-        uint256 size;
-        uint256 margin;
-        uint256 entryPrice;
-        int256 unrealizedPnlUsdc;
-        int256 pendingFundingUsdc;
-        int256 netEquityUsdc;
-        bool liquidatable;
-    }
-
-    struct ProtocolAccountingSnapshot {
-        uint256 vaultAssetsUsdc;
-        uint256 netPhysicalAssetsUsdc;
-        uint256 maxLiabilityUsdc;
-        uint256 effectiveSolvencyAssetsUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 freeUsdc;
-        uint256 accumulatedFeesUsdc;
-        uint256 accumulatedBadDebtUsdc;
-        int256 cappedFundingPnlUsdc;
-        uint256 liabilityOnlyFundingPnlUsdc;
-        uint256 totalDeferredPayoutUsdc;
-        uint256 totalDeferredClearerBountyUsdc;
-        bool degradedMode;
-        bool hasLiveLiability;
-    }
-
-    struct HousePoolInputSnapshot {
-        uint256 physicalAssetsUsdc;
-        uint256 netPhysicalAssetsUsdc;
-        uint256 maxLiabilityUsdc;
-        uint256 withdrawalFundingLiabilityUsdc;
-        uint256 unrealizedMtmLiabilityUsdc;
-        uint256 deferredTraderPayoutUsdc;
-        uint256 deferredClearerBountyUsdc;
-        uint256 protocolFeesUsdc;
-        bool markFreshnessRequired;
-        uint256 maxMarkStaleness;
-    }
-
-    struct HousePoolStatusSnapshot {
-        uint64 lastMarkTime;
-        bool oracleFrozen;
-        bool degradedMode;
-    }
 
     struct SideState {
         uint256 maxProfitUsdc;
@@ -129,34 +50,6 @@ interface ICfdEngine {
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
         int256 solvencyFundingPnlUsdc;
-    }
-
-    enum DeferredClaimType {
-        TraderPayout,
-        ClearerBounty
-    }
-
-    struct DeferredClaim {
-        DeferredClaimType claimType;
-        bytes32 accountId;
-        address keeper;
-        uint256 remainingUsdc;
-        uint64 prevClaimId;
-        uint64 nextClaimId;
-    }
-
-    struct DeferredTraderStatus {
-        uint64 claimId;
-        uint256 deferredPayoutUsdc;
-        bool isHead;
-        bool claimableNow;
-    }
-
-    struct DeferredClearerStatus {
-        uint64 claimId;
-        uint256 deferredBountyUsdc;
-        bool isHead;
-        bool claimableNow;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
@@ -220,15 +113,7 @@ interface ICfdEngine {
         uint256 amountUsdc
     ) external;
 
-    function getDeferredClaimHead() external view returns (DeferredClaim memory claim);
-
-    function getDeferredTraderStatus(
-        bytes32 accountId
-    ) external view returns (DeferredTraderStatus memory status);
-
-    function getDeferredClearerStatus(
-        address keeper
-    ) external view returns (DeferredClearerStatus memory status);
+    function getDeferredClaimHead() external view returns (DeferredEngineViewTypes.DeferredClaim memory claim);
 
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
@@ -280,29 +165,10 @@ interface ICfdEngine {
 
     /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
     function getMaxLiability() external view returns (uint256);
-    /// @notice Compact per-account ledger view spanning clearinghouse, router escrow, and deferred trader payout state.
-    function getAccountLedgerView(
-        bytes32 accountId
-    ) external view returns (AccountLedgerView memory viewData);
-    /// @notice Expanded per-account ledger snapshot for debugging account health and settlement reachability across protocol components.
-    function getAccountLedgerSnapshot(
-        bytes32 accountId
-    ) external view returns (AccountLedgerSnapshot memory snapshot);
-    /// @notice Canonical protocol-wide accounting snapshot across physical assets, liabilities, fees, bad debt, and deferred obligations.
-    function getProtocolAccountingSnapshot() external view returns (ProtocolAccountingSnapshot memory snapshot);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
     /// @notice Total withdrawal reserve required by current protocol liabilities.
     function getWithdrawalReservedUsdc() external view returns (uint256);
-
-    /// @notice Canonical accounting snapshot consumed by HousePool.
-    /// @param markStalenessLimit Normal live-market staleness limit configured by HousePool.
-    function getHousePoolInputSnapshot(
-        uint256 markStalenessLimit
-    ) external view returns (HousePoolInputSnapshot memory snapshot);
-
-    /// @notice Canonical non-accounting market/status snapshot consumed by HousePool.
-    function getHousePoolStatusSnapshot() external view returns (HousePoolStatusSnapshot memory snapshot);
 
     /// @notice Deferred profitable-close payouts still owed to traders.
     function totalDeferredPayoutUsdc() external view returns (uint256);
@@ -315,24 +181,6 @@ interface ICfdEngine {
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
     function getUnrealizedTraderPnl() external view returns (int256);
-
-    /// @notice Aggregate unrealized funding PnL across all open positions.
-    ///         Positive = traders are net funding receivers (vault liability).
-    function getUnrealizedFundingPnl() external view returns (int256);
-
-    /// @notice Aggregate unrealized funding PnL with negative per-side funding capped by backing margin.
-    ///         Positive = traders are net funding receivers after clipping uncollectible debts.
-    function getCappedFundingPnl() external view returns (int256);
-
-    /// @notice Aggregate funding liabilities only, excluding any trader debts owed to the vault.
-    ///         Used by withdrawal firewalls that must assume funding receivables are uncollectible
-    ///         until physically seized.
-    function getLiabilityOnlyFundingPnl() external view returns (uint256);
-
-    /// @notice Combined MtM liability: per-side (PnL + funding), clamped at zero.
-    ///         Positive = vault owes traders (unrealized liability). Zero = traders losing or neutral.
-    ///         Unrealized trader losses are not counted as vault assets.
-    function getVaultMtmAdjustment() external view returns (uint256);
 
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
@@ -392,17 +240,8 @@ interface ICfdEngine {
         Degraded
     }
 
-    struct ProtocolStatus {
-        ProtocolPhase phase;
-        uint64 lastMarkTime;
-        uint256 lastMarkPrice;
-        bool oracleFrozen;
-        bool fadWindow;
-        uint256 fadMaxStaleness;
-    }
-
     function getProtocolPhase() external view returns (ProtocolPhase);
 
-    function getProtocolStatus() external view returns (ProtocolStatus memory);
+    function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory);
 
 }

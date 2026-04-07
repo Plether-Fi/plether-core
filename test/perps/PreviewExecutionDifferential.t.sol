@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
+import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 
@@ -183,7 +184,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
 
-        uint256 committedBefore = router.committedMargins(2);
+        uint256 committedBefore = _remainingCommittedMargin(2);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1.1e8));
 
@@ -193,9 +194,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
-        assertEq(
-            router.committedMargins(2), committedBefore, "Queued open-order committed margin must remain untouched"
-        );
+        assertEq(_remainingCommittedMargin(2), committedBefore, "Queued open-order committed margin must remain untouched");
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
@@ -359,7 +358,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.stopPrank();
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
-        ICfdEngine.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);

@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -181,7 +182,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             uint8 ghostState = handler.ghostOrderLifecycleState(orderId);
             uint256 ghostRemaining = handler.ghostOrderRemainingCommittedMargin(orderId);
-            uint256 liveRemaining = router.committedMargins(orderId);
+            uint256 liveRemaining = _remainingCommittedMargin(orderId);
             uint256 reservationRemaining = handler.reservationRemainingCommittedMargin(orderId);
 
             if (ghostState == 1) {
@@ -192,15 +193,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                     "Pending order reservation remaining must match router remaining margin"
                 );
                 if (ghostRemaining > 0) {
-                    assertTrue(
-                        router.isInMarginQueue(orderId), "Pending ghost order with margin must stay in margin queue"
-                    );
+                    assertTrue(_isInMarginQueue(orderId), "Pending ghost order with margin must stay in margin queue");
                 }
             } else {
                 assertEq(ghostRemaining, 0, "Terminal ghost orders must have zero remaining committed margin");
                 assertEq(liveRemaining, 0, "Terminal ghost orders must have zero router committed margin");
                 assertEq(reservationRemaining, 0, "Terminal orders must have zero reservation remaining margin");
-                assertFalse(router.isInMarginQueue(orderId), "Terminal ghost orders must not stay in margin queue");
+                assertFalse(_isInMarginQueue(orderId), "Terminal ghost orders must not stay in margin queue");
             }
         }
     }
@@ -281,7 +280,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
             if (shouldBeInMarginQueue) {
                 assertTrue(
-                    router.isInMarginQueue(orderId),
+                    _isInMarginQueue(orderId),
                     "Active pending reservations with remaining balance must appear in margin queue"
                 );
             }
@@ -339,7 +338,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function invariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
             IMarginClearinghouse.AccountReservationSummary memory summary =
                 clearinghouse.getAccountReservationSummary(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
@@ -373,7 +372,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint64 current = head;
             uint64 previous;
             while (current != 0) {
-                OrderRouter.OrderRecord memory record = router.getOrderRecord(current);
+                OrderRouter.OrderRecord memory record = _orderRecord(current);
                 assertEq(record.core.accountId, accountId, "Pending queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
@@ -399,8 +398,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(tail, 0, "Empty pending queue must have zero tail");
             } else {
                 assertEq(previous, tail, "Pending queue tail must equal last traversed order");
-                assertEq(router.getOrderRecord(head).prevPendingOrderId, 0, "Pending head must have zero prev pointer");
-                assertEq(router.getOrderRecord(tail).nextPendingOrderId, 0, "Pending tail must have zero next pointer");
+                assertEq(_orderRecord(head).prevPendingOrderId, 0, "Pending head must have zero prev pointer");
+                assertEq(_orderRecord(tail).nextPendingOrderId, 0, "Pending tail must have zero next pointer");
             }
         }
     }
@@ -416,7 +415,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint64 current = head;
             uint64 previous;
             while (current != 0) {
-                OrderRouter.OrderRecord memory record = router.getOrderRecord(current);
+                OrderRouter.OrderRecord memory record = _orderRecord(current);
                 assertEq(record.core.accountId, accountId, "Margin queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
@@ -424,7 +423,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                     "Margin queue may only contain pending orders"
                 );
                 assertTrue(record.inMarginQueue, "Margin queue traversal must only include in-queue orders");
-                assertGt(router.committedMargins(current), 0, "Margin queue orders must retain committed margin");
+                assertGt(_remainingCommittedMargin(current), 0, "Margin queue orders must retain committed margin");
                 assertEq(record.prevMarginOrderId, previous, "Margin prev pointer must match traversal");
                 if (previous != 0) {
                     assertGt(current, previous, "Margin queue must preserve FIFO commit order");
@@ -443,19 +442,19 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(tail, 0, "Empty margin queue must have zero tail");
             } else {
                 assertEq(previous, tail, "Margin queue tail must equal last traversed order");
-                assertEq(router.getOrderRecord(head).prevMarginOrderId, 0, "Margin head must have zero prev pointer");
-                assertEq(router.getOrderRecord(tail).nextMarginOrderId, 0, "Margin tail must have zero next pointer");
+                assertEq(_orderRecord(head).prevMarginOrderId, 0, "Margin head must have zero prev pointer");
+                assertEq(_orderRecord(tail).nextMarginOrderId, 0, "Margin tail must have zero next pointer");
             }
         }
     }
 
     function _sumPendingExecutionBounties() internal view returns (uint256 totalBounties) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 accountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (accountId == bytes32(0) || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId == bytes32(0) || record.core.sizeDelta == 0) {
                 continue;
             }
-            totalBounties += router.executionBountyReserves(orderId);
+            totalBounties += record.executionBountyUsdc;
         }
     }
 

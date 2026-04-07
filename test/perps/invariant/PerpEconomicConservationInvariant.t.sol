@@ -4,6 +4,9 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
+import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -122,7 +125,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
 
-            ICfdEngine.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
+            AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
 
@@ -167,7 +170,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 totalDeferredPayoutUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            ICfdEngine.AccountLedgerView memory ledgerView =
+            AccountLensViewTypes.AccountLedgerView memory ledgerView =
                 engineAccountLens.getAccountLedgerView(_accountId(handler.actorAt(i)));
             totalSettlementUsdc += ledgerView.settlementBalanceUsdc;
             totalExecutionEscrowUsdc += ledgerView.executionEscrowUsdc;
@@ -237,11 +240,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
-            ICfdEngine.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
             CfdEngine.AccountCollateralView memory collateralView =
                 engineAccountLens.getAccountCollateralView(accountId);
-            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
             IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets =
                 clearinghouse.getLockedMarginBuckets(accountId);
 
@@ -320,7 +323,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 collateralView.freeBuyingPowerUsdc,
                 "Account snapshot buying power mismatch"
             );
-            assertEq(snapshot.hasPosition, positionView.exists, "Account snapshot position flag mismatch");
+            assertEq(snapshot.hasPosition, positionView.hasPosition, "Account snapshot position flag mismatch");
             assertEq(uint256(snapshot.side), uint256(positionView.side), "Account snapshot side mismatch");
             assertEq(snapshot.size, positionView.size, "Account snapshot size mismatch");
             assertEq(snapshot.margin, positionView.margin, "Account snapshot margin mismatch");
@@ -371,7 +374,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
     function invariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
-            ICfdEngine.AccountLedgerSnapshot memory snapshot =
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(_accountId(handler.actorAt(i)));
             if (snapshot.hasPosition || snapshot.pendingOrderCount != 0) {
                 continue;
@@ -404,11 +407,11 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            ICfdEngine.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
-            ICfdEngine.AccountLedgerView memory compactView = engineAccountLens.getAccountLedgerView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerView memory compactView = engineAccountLens.getAccountLedgerView(accountId);
             CfdEngine.AccountCollateralView memory collateralView =
                 engineAccountLens.getAccountCollateralView(accountId);
-            CfdEngine.PositionView memory positionView = engineProtocolLens.getPositionView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
 
             assertEq(
                 snapshot.settlementBalanceUsdc,
@@ -438,7 +441,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Snapshot must subsume collateral equity"
             );
-            assertEq(snapshot.hasPosition, positionView.exists, "Snapshot must subsume position existence");
+            assertEq(snapshot.hasPosition, positionView.hasPosition, "Snapshot must subsume position existence");
             assertEq(snapshot.size, positionView.size, "Snapshot must subsume position size");
             assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc, "Snapshot must subsume position net equity");
             assertEq(snapshot.liquidatable, positionView.liquidatable, "Snapshot must subsume liquidatable flag");
@@ -446,8 +449,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
-        ICfdEngine.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
-        ICfdEngine.ProtocolAccountingSnapshot memory protocolSnapshot =
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 vaultAssetsUsdc = vault.totalAssets();
         uint256 feesUsdc = engine.accumulatedFeesUsdc();
@@ -466,7 +469,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             protocolSnapshot.freeUsdc,
-            engineProtocolLens.getProtocolAccountingView().freeUsdc,
+            engineProtocolLens.getProtocolAccountingSnapshot().freeUsdc,
             "Protocol snapshot free USDC mismatch"
         );
         assertEq(snapshot.protocolFeesUsdc, feesUsdc, "House-pool snapshot fees must match engine fees");
@@ -520,7 +523,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
-        ICfdEngine.HousePoolStatusSnapshot memory snapshot = engineProtocolLens.getHousePoolStatusSnapshot();
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot = engineProtocolLens.getHousePoolStatusSnapshot();
 
         assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "House-pool status last mark time mismatch");
         assertEq(snapshot.oracleFrozen, engine.isOracleFrozen(), "House-pool status oracle frozen mismatch");

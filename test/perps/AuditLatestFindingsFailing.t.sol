@@ -71,7 +71,7 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
             expectedMtm += uint256(bearPnl);
         }
 
-        assertEq(engineProtocolLens.getVaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");
+        assertEq(_vaultMtmAdjustment(), expectedMtm, "Realized bad debt should already be priced into MtM");
     }
 
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {

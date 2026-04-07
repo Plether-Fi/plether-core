@@ -2,6 +2,9 @@
 pragma solidity 0.8.33;
 
 /// @notice USDC-only cross-margin account system that holds settlement balances and settles PnL for CFD positions.
+/// @dev This is the full operator/integration surface.
+///      Product-facing consumers should prefer `IMarginAccount` and avoid depending on
+///      reservation buckets, internal custody buckets, or settlement-path helpers.
 interface IMarginClearinghouse {
 
     enum MarginBucket {
@@ -203,24 +206,6 @@ interface IMarginClearinghouse {
     /// @notice Returns strictly free buying power after subtracting locked margin (6 decimals)
     function getFreeBuyingPowerUsdc(
         bytes32 accountId
-    ) external view returns (uint256);
-
-    /// @notice Returns free settlement-asset balance after subtracting locked margin (6 decimals)
-    function getFreeSettlementBalanceUsdc(
-        bytes32 accountId
-    ) external view returns (uint256);
-
-    /// @notice Returns settlement-asset balance reachable during a terminal settlement path.
-    function getTerminalReachableUsdc(
-        bytes32 accountId
-    ) external view returns (uint256);
-
-    /// @notice Returns settlement-asset balance reachable for a terminal or partial settlement path.
-    /// @dev Protects only the explicitly supplied remaining locked margin bucket and treats all
-    ///      other settlement-asset balance as reachable for loss collection.
-    function getSettlementReachableUsdc(
-        bytes32 accountId,
-        uint256 protectedLockedMarginUsdc
     ) external view returns (uint256);
 
 }

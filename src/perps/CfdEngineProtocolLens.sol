@@ -2,16 +2,12 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "./CfdEngine.sol";
-import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
-import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
-import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
-import {CfdEnginePlanLib} from "./libraries/CfdEnginePlanLib.sol";
-import {CfdEngineSnapshotsLib} from "./libraries/CfdEngineSnapshotsLib.sol";
-import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
+import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
+import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
 
@@ -25,114 +21,17 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         engineContract = CfdEngine(engine_);
     }
 
-    function engine() external view returns (address) {
-        return address(engineContract);
-    }
-
-    function getPositionView(
-        bytes32 accountId
-    ) external view returns (CfdEngine.PositionView memory viewData) {
-        CfdTypes.Position memory pos = _position(accountId);
-        if (pos.size == 0) {
-            return viewData;
-        }
-
-        uint256 reachableUsdc = engineContract.clearinghouse().getTerminalReachableUsdc(accountId);
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos,
-            engineContract.lastMarkPrice(),
-            engineContract.CAP_PRICE(),
-            reachableUsdc,
-            engineContract.isFadWindow() ? _riskParams().fadMarginBps : _riskParams().maintMarginBps
-        );
-
-        viewData.exists = true;
-        viewData.side = pos.side;
-        viewData.size = pos.size;
-        viewData.margin = engineContract.clearinghouse().getLockedMarginBuckets(accountId).positionMarginUsdc;
-        viewData.entryPrice = pos.entryPrice;
-        viewData.entryNotionalUsdc = (pos.size * pos.entryPrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        viewData.physicalReachableCollateralUsdc = reachableUsdc;
-        viewData.nettableDeferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
-        viewData.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
-        viewData.pendingFundingUsdc = 0;
-        viewData.netEquityUsdc = riskState.equityUsdc;
-        viewData.maxProfitUsdc =
-            CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, engineContract.CAP_PRICE());
-        viewData.liquidatable = riskState.liquidatable;
-    }
-
-    function getDeferredPayoutStatus(
-        bytes32 accountId,
-        address keeper
-    ) external view returns (CfdEngine.DeferredPayoutStatus memory status) {
-        ICfdEngine.DeferredTraderStatus memory traderStatus = getDeferredTraderStatus(accountId);
-        ICfdEngine.DeferredClearerStatus memory clearerStatus = getDeferredClearerStatus(keeper);
-        status.deferredTraderPayoutUsdc = traderStatus.deferredPayoutUsdc;
-        status.traderPayoutClaimableNow = traderStatus.claimableNow;
-        status.deferredClearerBountyUsdc = clearerStatus.deferredBountyUsdc;
-        status.liquidationBountyClaimableNow = clearerStatus.claimableNow;
-    }
-
-    function getDeferredTraderStatus(
-        bytes32 accountId
-    ) public view returns (ICfdEngine.DeferredTraderStatus memory status) {
-        status.claimId = engineContract.traderDeferredClaimIdByAccount(accountId);
-        status.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
-        uint64 headId = engineContract.deferredClaimHeadId();
-        status.isHead = status.claimId != 0 && status.claimId == headId;
-        status.claimableNow = status.isHead && _claimableHeadAmountUsdc() > 0;
-    }
-
-    function getDeferredClearerStatus(
-        address keeper
-    ) public view returns (ICfdEngine.DeferredClearerStatus memory status) {
-        status.claimId = engineContract.clearerDeferredClaimIdByKeeper(keeper);
-        status.deferredBountyUsdc = engineContract.deferredClearerBountyUsdc(keeper);
-        uint64 headId = engineContract.deferredClaimHeadId();
-        status.isHead = status.claimId != 0 && status.claimId == headId;
-        status.claimableNow = status.isHead && _claimableHeadAmountUsdc() > 0;
-    }
-
-    function getVaultMtmAdjustment() external view returns (uint256 mtmLiabilityUsdc) {
-        mtmLiabilityUsdc = _getVaultMtmLiability();
-    }
-
-    function getProtocolStatus() external view returns (ICfdEngine.ProtocolStatus memory status) {
-        status.phase = _getProtocolPhase();
-        status.lastMarkTime = engineContract.lastMarkTime();
-        status.lastMarkPrice = engineContract.lastMarkPrice();
-        status.oracleFrozen = engineContract.isOracleFrozen();
-        status.fadWindow = engineContract.isFadWindow();
-        status.fadMaxStaleness = engineContract.fadMaxStaleness();
-    }
-
-    function getProtocolAccountingView() external view returns (CfdEngine.ProtocolAccountingView memory viewData) {
-        ICfdEngine.ProtocolAccountingSnapshot memory snapshot = _buildProtocolAccountingSnapshot();
-        viewData.vaultAssetsUsdc = snapshot.vaultAssetsUsdc;
-        viewData.maxLiabilityUsdc = snapshot.maxLiabilityUsdc;
-        viewData.withdrawalReservedUsdc = snapshot.withdrawalReservedUsdc;
-        viewData.freeUsdc = snapshot.freeUsdc;
-        viewData.accumulatedFeesUsdc = snapshot.accumulatedFeesUsdc;
-        viewData.cappedFundingPnlUsdc = snapshot.cappedFundingPnlUsdc;
-        viewData.liabilityOnlyFundingPnlUsdc = snapshot.liabilityOnlyFundingPnlUsdc;
-        viewData.totalDeferredPayoutUsdc = snapshot.totalDeferredPayoutUsdc;
-        viewData.totalDeferredClearerBountyUsdc = snapshot.totalDeferredClearerBountyUsdc;
-        viewData.degradedMode = snapshot.degradedMode;
-        viewData.hasLiveLiability = snapshot.hasLiveLiability;
-    }
-
     function getProtocolAccountingSnapshot()
         external
         view
-        returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot)
+        returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
         return _buildProtocolAccountingSnapshot();
     }
 
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
-    ) external view returns (ICfdEngine.HousePoolInputSnapshot memory snapshot) {
+    ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
         snapshot.physicalAssetsUsdc = vaultAssetsUsdc;
         snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
@@ -152,43 +51,14 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         }
     }
 
-    function getHousePoolStatusSnapshot() external view returns (ICfdEngine.HousePoolStatusSnapshot memory snapshot) {
+    function getHousePoolStatusSnapshot()
+        external
+        view
+        returns (HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot)
+    {
         snapshot.lastMarkTime = engineContract.lastMarkTime();
         snapshot.oracleFrozen = engineContract.isOracleFrozen();
         snapshot.degradedMode = engineContract.degradedMode();
-    }
-
-    function _claimableHeadAmountUsdc() internal view returns (uint256) {
-        uint64 claimId = engineContract.deferredClaimHeadId();
-        if (claimId == 0) {
-            return 0;
-        }
-        (,,, uint256 remainingUsdc,,) = engineContract.deferredClaims(claimId);
-        CashPriorityLib.SeniorCashReservation memory reservation = CashPriorityLib.reserveDeferredHeadClaim(
-            engineContract.vault().totalAssets(),
-            engineContract.accumulatedFeesUsdc(),
-            engineContract.totalDeferredPayoutUsdc(),
-            engineContract.totalDeferredClearerBountyUsdc(),
-            remainingUsdc
-        );
-        return reservation.headClaimServiceableUsdc;
-    }
-
-    function _position(
-        bytes32 accountId
-    ) internal view returns (CfdTypes.Position memory pos) {
-        int256 ignoredEntryFundingIndex;
-        (
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            ignoredEntryFundingIndex,
-            pos.side,
-            pos.lastUpdateTime,
-            pos.vpiAccrued
-        ) = engineContract.positions(accountId);
-        ignoredEntryFundingIndex;
     }
 
     function _getVaultMtmLiability() internal view returns (uint256) {
@@ -215,23 +85,10 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         return uint256(bullTotal) + uint256(bearTotal);
     }
 
-    function _getProtocolPhase() internal view returns (ICfdEngine.ProtocolPhase) {
-        if (address(engineContract.vault()) == address(0) || engineContract.orderRouter() == address(0)) {
-            return ICfdEngine.ProtocolPhase.Configuring;
-        }
-        if (engineContract.degradedMode()) {
-            return ICfdEngine.ProtocolPhase.Degraded;
-        }
-        if (!engineContract.vault().canIncreaseRisk()) {
-            return ICfdEngine.ProtocolPhase.Configuring;
-        }
-        return ICfdEngine.ProtocolPhase.Active;
-    }
-
     function _buildProtocolAccountingSnapshot()
         internal
         view
-        returns (ICfdEngine.ProtocolAccountingSnapshot memory snapshot)
+        returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
         uint256 maxLiabilityUsdc = engineContract.getMaxLiability();
@@ -269,17 +126,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             engineContract.totalDeferredPayoutUsdc(),
             engineContract.totalDeferredClearerBountyUsdc()
         );
-    }
-
-    function _sideSnapshot(
-        ICfdEngine.SideState memory side
-    ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        snap = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: side.maxProfitUsdc,
-            openInterest: side.openInterest,
-            entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin
-        });
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

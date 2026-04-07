@@ -9,8 +9,13 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
+import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
+import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -18,7 +23,7 @@ import {Test} from "forge-std/Test.sol";
 abstract contract BasePerpTest is Test {
 
     struct CloseParitySnapshot {
-        ICfdEngine.ProtocolAccountingSnapshot protocol;
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
         uint256 settlementUsdc;
         uint256 deferredPayoutUsdc;
     }
@@ -35,7 +40,7 @@ abstract contract BasePerpTest is Test {
     }
 
     struct LiquidationParitySnapshot {
-        ICfdEngine.ProtocolAccountingSnapshot protocol;
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
         uint256 settlementUsdc;
         uint256 deferredPayoutUsdc;
         uint256 keeperWalletUsdc;
@@ -71,6 +76,7 @@ abstract contract BasePerpTest is Test {
     TrancheVault seniorVault;
     TrancheVault juniorVault;
     OrderRouter router;
+    PerpsPublicLens publicLens;
 
     /// @dev Monday 2024-03-04 10:00 UTC. Avoids FAD window.
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
@@ -106,6 +112,7 @@ abstract contract BasePerpTest is Test {
         );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
+        publicLens = new PerpsPublicLens(address(engineAccountLens), address(engine), address(router), address(pool));
 
         _bypassAllTimelocks();
 
@@ -339,7 +346,7 @@ abstract contract BasePerpTest is Test {
         bytes32 accountId,
         CloseParitySnapshot memory beforeSnapshot
     ) internal view returns (CloseParityObserved memory observed) {
-        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize, observed.remainingMargin,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
@@ -437,7 +444,7 @@ abstract contract BasePerpTest is Test {
         address keeper,
         LiquidationParitySnapshot memory beforeSnapshot
     ) internal view returns (LiquidationParityObserved memory observed) {
-        ICfdEngine.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize,,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
@@ -639,6 +646,79 @@ abstract contract BasePerpTest is Test {
         CfdTypes.Side side
     ) internal view returns (uint256) {
         return _sideState(side).maxProfitUsdc;
+    }
+
+    function _orderRecord(
+        uint64 orderId
+    ) internal view returns (OrderRouter.OrderRecord memory record) {
+        return router.getOrderRecord(orderId);
+    }
+
+    function _remainingCommittedMargin(
+        uint64 orderId
+    ) internal view returns (uint256) {
+        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+    }
+
+    function _executionBountyReserve(
+        uint64 orderId
+    ) internal view returns (uint256) {
+        return _orderRecord(orderId).executionBountyUsdc;
+    }
+
+    function _isInMarginQueue(
+        uint64 orderId
+    ) internal view returns (bool) {
+        return _orderRecord(orderId).inMarginQueue;
+    }
+
+    function _freeSettlementUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+    }
+
+    function _terminalReachableUsdc(
+        bytes32 accountId
+    ) internal view returns (uint256) {
+        return clearinghouse.getAccountUsdcBuckets(accountId).settlementBalanceUsdc;
+    }
+
+    function _publicPosition(
+        bytes32 accountId
+    ) internal view returns (PerpsViewTypes.PositionView memory viewData) {
+        return publicLens.getPosition(accountId);
+    }
+
+    function _publicProtocolStatus(
+    ) internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
+        return publicLens.getProtocolStatus();
+    }
+
+    function _deferredPayoutStatus(
+        bytes32 accountId,
+        address keeper
+    ) internal view returns (DeferredEngineViewTypes.DeferredPayoutStatus memory status) {
+        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
+        bool headHasLiquidity = pool.totalAssets() > 0 && headClaim.remainingUsdc > 0;
+
+        uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
+        uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+
+        status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
+        status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && headHasLiquidity
+            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout)
+            && headClaim.accountId == accountId;
+        status.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
+        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && headHasLiquidity
+            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty)
+            && headClaim.keeper == keeper;
+    }
+
+    function _vaultMtmAdjustment() internal view returns (uint256) {
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        return snapshot.unrealizedMtmLiabilityUsdc;
     }
 
 }

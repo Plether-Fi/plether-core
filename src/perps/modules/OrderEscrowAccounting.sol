@@ -2,7 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../CfdTypes.sol";
-import {ICfdEngine} from "../interfaces/ICfdEngine.sol";
+import {ICfdEngineCore} from "../interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../interfaces/IOrderRouterAccounting.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -26,7 +26,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         bool inMarginQueue;
     }
 
-    ICfdEngine public immutable engine;
+    ICfdEngineCore public immutable engine;
     IMarginClearinghouse internal immutable clearinghouse;
     IERC20 internal immutable USDC;
 
@@ -40,11 +40,11 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     constructor(
         address _engine
     ) {
-        engine = ICfdEngine(_engine);
+        engine = ICfdEngineCore(_engine);
         clearinghouse = _engine.code.length == 0
             ? IMarginClearinghouse(address(0))
-            : IMarginClearinghouse(ICfdEngine(_engine).clearinghouse());
-        USDC = _engine.code.length == 0 ? IERC20(address(0)) : ICfdEngine(_engine).USDC();
+            : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
+        USDC = _engine.code.length == 0 ? IERC20(address(0)) : ICfdEngineCore(_engine).USDC();
     }
 
     function getAccountEscrow(
@@ -128,7 +128,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         if (isClose) {
             _reserveCloseExecutionBounty(accountId, executionBountyUsdc);
         } else {
-            if (clearinghouse.getFreeSettlementBalanceUsdc(accountId) < executionBountyUsdc) {
+            if (clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc < executionBountyUsdc) {
                 _revertInsufficientFreeEquity();
             }
             clearinghouse.seizeUsdc(accountId, executionBountyUsdc, address(this));

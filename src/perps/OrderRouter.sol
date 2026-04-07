@@ -5,8 +5,10 @@ import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
+import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
+import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
@@ -23,13 +25,13 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 /// @notice Manages Commit-Reveal, MEV protection, and the un-brickable FIFO queue.
 /// @dev Holds only non-trader-owned keeper execution reserves. Trader collateral remains in MarginClearinghouse.
 /// @custom:security-contact contact@plether.com
-contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
+contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausable, OrderEscrowAccounting {
 
     using SafeERC20 for IERC20;
 
     bytes4 internal constant PANIC_SELECTOR = 0x4e487b71;
-    bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngine.CfdEngine__TypedOrderFailure.selector;
-    bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngine.CfdEngine__MarkPriceOutOfOrder.selector;
+    bytes4 internal constant TYPED_ORDER_FAILURE_SELECTOR = ICfdEngineCore.CfdEngine__TypedOrderFailure.selector;
+    bytes4 internal constant MARK_PRICE_OUT_OF_ORDER_SELECTOR = ICfdEngineCore.CfdEngine__MarkPriceOutOfOrder.selector;
 
     struct QueuedPositionView {
         bool exists;
@@ -304,6 +306,27 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         uint256 targetPrice,
         bool isClose
     ) external {
+        _commitOrder(side, sizeDelta, marginDelta, targetPrice, isClose);
+    }
+
+    /// @notice Trader-facing wrapper that maps the simplified action surface onto the current router semantics.
+    function submitOrder(
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDeltaUsdc,
+        uint256 acceptablePrice,
+        bool isReduceOnly
+    ) external {
+        _commitOrder(side, sizeDelta, marginDeltaUsdc, acceptablePrice, isReduceOnly);
+    }
+
+    function _commitOrder(
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 targetPrice,
+        bool isClose
+    ) internal {
         if (!isClose) {
             _requireNotPaused();
             if (engine.degradedMode()) {
@@ -399,42 +422,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         return _quoteCloseOrderExecutionBountyUsdc();
     }
 
-    function orders(
-        uint64 orderId
-    ) external view returns (bytes32, uint256, uint256, uint256, uint64, uint64, uint64, CfdTypes.Side, bool) {
-        CfdTypes.Order memory order = orderRecords[orderId].core;
-        return (
-            order.accountId,
-            order.sizeDelta,
-            order.marginDelta,
-            order.targetPrice,
-            order.commitTime,
-            order.commitBlock,
-            order.orderId,
-            order.side,
-            order.isClose
-        );
-    }
-
-    function committedMargins(
-        uint64 orderId
-    ) external view returns (uint256) {
-        // Compatibility getter only: remaining committed margin is owned by the clearinghouse reservation ledger.
-        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
-    }
-
-    function executionBountyReserves(
-        uint64 orderId
-    ) external view returns (uint256) {
-        return orderRecords[orderId].executionBountyUsdc;
-    }
-
-    function isInMarginQueue(
-        uint64 orderId
-    ) external view returns (bool) {
-        return orderRecords[orderId].inMarginQueue;
-    }
-
+    /// @dev Legacy raw order-record getter kept for tests and migration only.
     function getOrderRecord(
         uint64 orderId
     ) external view returns (OrderRecord memory) {
@@ -1256,7 +1244,7 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
         bytes32 accountId,
         uint256 executionBountyUsdc
     ) internal override {
-        uint256 freeSettlementUsdc = clearinghouse.getFreeSettlementBalanceUsdc(accountId);
+        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
         uint256 freeBackedBountyUsdc =
             freeSettlementUsdc > executionBountyUsdc ? executionBountyUsdc : freeSettlementUsdc;
         if (freeBackedBountyUsdc > 0) {

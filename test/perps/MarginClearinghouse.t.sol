@@ -627,7 +627,7 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockPositionMargin(aliceId, 100 * 1e6);
 
-        assertEq(clearinghouse.getFreeSettlementBalanceUsdc(aliceId), 0, "setup must start with zero free settlement");
+        assertEq(clearinghouse.getAccountUsdcBuckets(aliceId).freeSettlementUsdc, 0, "setup must start with zero free settlement");
 
         vm.prank(engine);
         int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, 0, int256(20 * 1e6), engine);

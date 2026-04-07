@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
-import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
+import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
+import {IMarginAccount} from "./interfaces/IMarginAccount.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IWithdrawGuard} from "./interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
@@ -14,7 +15,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// @notice USDC-only cross-margin account manager for Plether.
 /// @dev Holds settlement balances and locked margin for CFD accounts.
 /// @custom:security-contact contact@plether.com
-contract MarginClearinghouse is Ownable2Step {
+contract MarginClearinghouse is IMarginAccount, Ownable2Step {
 
     using SafeERC20 for IERC20;
 
@@ -73,7 +74,7 @@ contract MarginClearinghouse is Ownable2Step {
         if (engine_ == address(0)) {
             revert MarginClearinghouse__NotOperator();
         }
-        if (msg.sender != engine_ && msg.sender != ICfdEngine(engine_).orderRouter()) {
+        if (msg.sender != engine_ && msg.sender != ICfdEngineCore(engine_).orderRouter()) {
             revert MarginClearinghouse__NotOperator();
         }
         _;
@@ -110,17 +111,14 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amount
     ) external {
-        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
-            revert MarginClearinghouse__NotAccountOwner();
-        }
-        if (amount == 0) {
-            revert MarginClearinghouse__ZeroAmount();
-        }
+        _deposit(accountId, msg.sender, amount);
+    }
 
-        settlementBalances[accountId] += amount;
-        IERC20(settlementAsset).safeTransferFrom(msg.sender, address(this), amount);
-
-        emit Deposit(accountId, settlementAsset, amount);
+    /// @notice Trader-facing wrapper that deposits into the caller's canonical account id.
+    function depositMargin(
+        uint256 amount
+    ) external {
+        _deposit(bytes32(uint256(uint160(msg.sender))), msg.sender, amount);
     }
 
     /// @notice Withdraws settlement USDC from a margin account.
@@ -130,7 +128,40 @@ contract MarginClearinghouse is Ownable2Step {
         bytes32 accountId,
         uint256 amount
     ) external {
-        if (bytes32(uint256(uint160(msg.sender))) != accountId) {
+        _withdraw(accountId, msg.sender, amount);
+    }
+
+    /// @notice Trader-facing wrapper that withdraws from the caller's canonical account id.
+    function withdrawMargin(
+        uint256 amount
+    ) external {
+        _withdraw(bytes32(uint256(uint160(msg.sender))), msg.sender, amount);
+    }
+
+    function _deposit(
+        bytes32 accountId,
+        address owner,
+        uint256 amount
+    ) internal {
+        if (bytes32(uint256(uint160(owner))) != accountId) {
+            revert MarginClearinghouse__NotAccountOwner();
+        }
+        if (amount == 0) {
+            revert MarginClearinghouse__ZeroAmount();
+        }
+
+        settlementBalances[accountId] += amount;
+        IERC20(settlementAsset).safeTransferFrom(owner, address(this), amount);
+
+        emit Deposit(accountId, settlementAsset, amount);
+    }
+
+    function _withdraw(
+        bytes32 accountId,
+        address owner,
+        uint256 amount
+    ) internal {
+        if (bytes32(uint256(uint160(owner))) != accountId) {
             revert MarginClearinghouse__NotAccountOwner();
         }
         if (settlementBalances[accountId] < amount) {
@@ -153,7 +184,7 @@ contract MarginClearinghouse is Ownable2Step {
             revert MarginClearinghouse__InsufficientUsdcForSettlement();
         }
 
-        IERC20(settlementAsset).safeTransfer(msg.sender, amount);
+        IERC20(settlementAsset).safeTransfer(owner, amount);
         emit Withdraw(accountId, settlementAsset, amount);
     }
 
@@ -181,37 +212,18 @@ contract MarginClearinghouse is Ownable2Step {
         return equity > encumbered ? equity - encumbered : 0;
     }
 
+    /// @notice Trader-facing alias for free withdrawable settlement after margin locks.
+    function getWithdrawableUsdc(
+        bytes32 accountId
+    ) external view returns (uint256) {
+        return getFreeBuyingPowerUsdc(accountId);
+    }
+
     /// @notice Returns the explicit USDC bucket split after subtracting the clearinghouse's typed locked-margin buckets.
     function getAccountUsdcBuckets(
         bytes32 accountId
     ) public view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
         buckets = _buildAccountUsdcBuckets(accountId);
-    }
-
-    function getFreeSettlementBalanceUsdc(
-        bytes32 accountId
-    ) public view returns (uint256) {
-        return getAccountUsdcBuckets(accountId).freeSettlementUsdc;
-    }
-
-    /// @notice Returns settlement balance reachable by a terminal settlement path.
-    function getTerminalReachableUsdc(
-        bytes32 accountId
-    ) public view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(_buildAccountUsdcBuckets(accountId));
-    }
-
-    /// @notice Returns settlement balance reachable after protecting only an explicitly remaining margin bucket.
-    /// @dev This is the canonical helper for terminal settlement paths: full closes and liquidations
-    ///      should pass zero protected margin, while partial closes should protect only the residual
-    ///      position margin that remains open after settlement.
-    function getSettlementReachableUsdc(
-        bytes32 accountId,
-        uint256 protectedLockedMarginUsdc
-    ) public view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getSettlementReachableUsdc(
-            _buildAccountUsdcBuckets(accountId), protectedLockedMarginUsdc
-        );
     }
 
     // ==========================================
@@ -509,7 +521,7 @@ contract MarginClearinghouse is Ownable2Step {
 
         if (tradeCostUsdc > 0) {
             uint256 costUsdc = uint256(tradeCostUsdc);
-            if (costUsdc > getFreeSettlementBalanceUsdc(accountId)) {
+            if (costUsdc > _buildAccountUsdcBuckets(accountId).freeSettlementUsdc) {
                 revert MarginClearinghouse__InsufficientFreeEquity();
             }
             settlementBalances[accountId] -= costUsdc;
@@ -863,7 +875,7 @@ contract MarginClearinghouse is Ownable2Step {
         if (settlementBalances[accountId] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
-        if (amount > getFreeSettlementBalanceUsdc(accountId)) {
+        if (amount > _buildAccountUsdcBuckets(accountId).freeSettlementUsdc) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
 

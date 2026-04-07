@@ -8,6 +8,7 @@ import {CfdEnginePlanTypes} from "../../../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../../../src/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "../../../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../../../src/perps/OrderRouter.sol";
+import {AccountLensViewTypes} from "../../../../src/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "../../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../../src/perps/interfaces/IOrderRouterAccounting.sol";
@@ -161,11 +162,11 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot =
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
         uint256 amount = bound(amountFuzz, 1e6, 250_000e6);
         _mintAndDepositTrader(actor, amount);
-        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot =
+        AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(_accountId(actor));
         _recordReachabilityTransition(_accountId(actor), REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
     }
@@ -187,7 +188,7 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
         WithdrawParityAttempt memory attempt;
         attempt.active = true;
@@ -201,7 +202,7 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try clearinghouse.withdraw(accountId, amount) {
             attempt.withdrawPasses = true;
-            ICfdEngine.AccountLedgerSnapshot memory afterSnapshot =
+            AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
                 engineAccountLens.getAccountLedgerSnapshot(accountId);
             _recordReachabilityTransition(accountId, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
         } catch (bytes memory err) {
@@ -327,14 +328,18 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        (bytes32 accountId, uint256 sizeDelta, uint256 marginDelta, uint256 targetPrice,,,,, bool isClose) =
-            router.orders(orderId);
+        OrderRouter.OrderRecord memory orderRecord = _orderRecord(orderId);
+        bytes32 accountId = orderRecord.core.accountId;
+        uint256 sizeDelta = orderRecord.core.sizeDelta;
+        uint256 marginDelta = orderRecord.core.marginDelta;
+        uint256 targetPrice = orderRecord.core.targetPrice;
+        bool isClose = orderRecord.core.isClose;
         uint256 deferredTraderPayoutUsdc;
         uint256 allowedDeferredAfterUsdc;
         uint256 expectedBadDebtDeltaUsdc;
         uint256 expectedFinalResidualUsdc;
         bool terminalClose;
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(address(uint160(uint256(accountId))));
         if (isClose && marginDelta == 0) {
             CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, targetPrice);
@@ -588,11 +593,11 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) public view returns (uint256 totalEscrowUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (queuedAccountId != accountId || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
                 continue;
             }
-            totalEscrowUsdc += router.executionBountyReserves(orderId);
+            totalEscrowUsdc += record.executionBountyUsdc;
         }
     }
 
@@ -600,11 +605,11 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,,) = router.orders(orderId);
-            if (queuedAccountId != accountId || sizeDelta == 0) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId != accountId || record.core.sizeDelta == 0) {
                 continue;
             }
-            if (router.executionBountyReserves(orderId) > 0 || router.committedMargins(orderId) > 0) {
+            if (record.executionBountyUsdc > 0 || _remainingCommittedMargin(orderId) > 0) {
                 count++;
             }
         }
@@ -745,7 +750,7 @@ contract PerpAccountingHandler is Test {
             return GHOST_ORDER_NONE;
         }
 
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
             return GHOST_ORDER_PENDING;
         }
@@ -758,9 +763,9 @@ contract PerpAccountingHandler is Test {
     function ghostOrderRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
-            return router.committedMargins(orderId);
+            return _remainingCommittedMargin(orderId);
         }
         return 0;
     }
@@ -897,7 +902,7 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (
                 ghostOrderOwner[orderId] == accountId
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)
@@ -911,11 +916,11 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
             if (
                 ghostOrderOwner[orderId] == accountId
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue
-                    && router.committedMargins(orderId) > 0
+                    && _remainingCommittedMargin(orderId) > 0
             ) {
                 count++;
             }
@@ -1000,8 +1005,8 @@ contract PerpAccountingHandler is Test {
     function _recordReachabilityTransition(
         bytes32 accountId,
         uint8 action,
-        ICfdEngine.AccountLedgerSnapshot memory beforeSnapshot,
-        ICfdEngine.AccountLedgerSnapshot memory afterSnapshot
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot,
+        AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot
     ) internal {
         reachabilityTransitions[accountId] = ReachabilityTransition({
             action: action,
@@ -1075,7 +1080,7 @@ contract PerpAccountingHandler is Test {
         uint64 upperBound = endExecuteId == 0 ? router.nextCommitId() : endExecuteId;
         if (upperBound > startExecuteId) {
             for (uint64 orderId = startExecuteId; orderId < upperBound; orderId++) {
-                OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
                 if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                     continue;
                 }
@@ -1138,7 +1143,7 @@ contract PerpAccountingHandler is Test {
     function _ghostTerminalStateForOrder(
         uint64 orderId
     ) internal view returns (uint8) {
-        OrderRouter.OrderRecord memory record = router.getOrderRecord(orderId);
+        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed)) {
             return GHOST_ORDER_EXECUTED;
         }
@@ -1173,12 +1178,24 @@ contract PerpAccountingHandler is Test {
         bytes32 accountId
     ) internal view returns (uint64 orderId) {
         for (orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            (bytes32 queuedAccountId, uint256 sizeDelta,,,,,,, bool isClose) = router.orders(orderId);
-            if (queuedAccountId == accountId && sizeDelta > 0 && isClose) {
+            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            if (record.core.accountId == accountId && record.core.sizeDelta > 0 && record.core.isClose) {
                 return orderId;
             }
         }
         return 0;
+    }
+
+    function _orderRecord(
+        uint64 orderId
+    ) internal view returns (OrderRouter.OrderRecord memory record) {
+        return router.getOrderRecord(orderId);
+    }
+
+    function _remainingCommittedMargin(
+        uint64 orderId
+    ) internal view returns (uint256) {
+        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
     }
 
     function _accountId(
