@@ -131,6 +131,16 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.withdraw(aliceId, 1000 * 1e6);
     }
 
+    function test_IMarginAccount_ExposesFreeBuyingPowerInsteadOfWithdrawableAlias() public {
+        vm.prank(alice);
+        clearinghouse.deposit(aliceId, 5000 * 1e6);
+
+        vm.prank(engine);
+        clearinghouse.lockPositionMargin(aliceId, 4200 * 1e6);
+
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(aliceId), 800 * 1e6, "free buying power should remain exposed");
+    }
+
     function test_GetAccountUsdcBuckets_SplitsTypedLockedMarginBuckets() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceId, 2000 * 1e6);
@@ -627,7 +637,11 @@ contract MarginClearinghouseTest is Test {
         vm.prank(engine);
         clearinghouse.lockPositionMargin(aliceId, 100 * 1e6);
 
-        assertEq(clearinghouse.getAccountUsdcBuckets(aliceId).freeSettlementUsdc, 0, "setup must start with zero free settlement");
+        assertEq(
+            clearinghouse.getAccountUsdcBuckets(aliceId).freeSettlementUsdc,
+            0,
+            "setup must start with zero free settlement"
+        );
 
         vm.prank(engine);
         int256 netMarginChangeUsdc = clearinghouse.applyOpenCost(aliceId, 0, int256(20 * 1e6), engine);

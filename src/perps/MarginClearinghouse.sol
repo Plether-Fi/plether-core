@@ -212,13 +212,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         return equity > encumbered ? equity - encumbered : 0;
     }
 
-    /// @notice Trader-facing alias for free withdrawable settlement after margin locks.
-    function getWithdrawableUsdc(
-        bytes32 accountId
-    ) external view returns (uint256) {
-        return getFreeBuyingPowerUsdc(accountId);
-    }
-
     /// @notice Returns the explicit USDC bucket split after subtracting the clearinghouse's typed locked-margin buckets.
     function getAccountUsdcBuckets(
         bytes32 accountId

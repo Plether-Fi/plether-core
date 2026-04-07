@@ -9,3 +9,4 @@
 - When simplifying accounting architectures, re-check the no-claimant fallback and wiped-but-seeded tranche pricing paths explicitly; reducing machinery can accidentally drop assets on the floor or leave ERC4626 re-entry pricing broken even if tests stay green.
 - When docs describe a single accounting policy, verify stale/fresh branch behavior matches that wording exactly; if pending buckets or admin flows intentionally bypass part of the freshness gate, state that nuance explicitly instead of implying stronger uniformity than the code has.
 - When introducing a shared cash-reservation helper, audit every caller class separately: fresh payouts, deferred claims, liquidation bounties, previews, and fee withdrawals often need the same inputs but not the same serviceability rule.
+- When the contracts are undeployed, do not preserve misleading or redundant APIs for backward compatibility; prefer renaming/removing the wrong surface and updating callers in the same pass.
