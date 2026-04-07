@@ -38,7 +38,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         bytes32 accountId
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(accountId);
-        viewData.equityUsdc = snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0;
+        viewData.equityUsdc = snapshot.hasPosition
+            ? (snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0)
+            : snapshot.accountEquityUsdc;
         viewData.withdrawableUsdc = ENGINE.getWithdrawableUsdc(accountId);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(accountId);

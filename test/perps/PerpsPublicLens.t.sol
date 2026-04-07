@@ -58,6 +58,19 @@ contract PerpsPublicLensTest is BasePerpTest {
         clearinghouse.withdraw(accountId, 1);
     }
 
+    function test_GetTraderAccount_FlatAccountUsesSettlementEquity() public {
+        address trader = address(0xF1A7);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 12_345e6);
+
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+
+        assertEq(viewData.equityUsdc, 12_345e6, "flat accounts should report settlement equity");
+        assertEq(viewData.withdrawableUsdc, 12_345e6, "flat accounts should expose full engine withdrawability");
+        assertFalse(viewData.hasOpenPosition, "flat account should not report an open position");
+    }
+
     function test_GetPosition_PopulatesMaintenanceMargin() public {
         address trader = address(0xB0B);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
