@@ -71,8 +71,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
-    uint256 internal constant MAX_EXPIRED_ORDER_SKIPS_PER_CALL = 32;
-    uint256 internal constant MAX_BATCH_ORDER_SCANS = 64;
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL = 64;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
@@ -484,7 +482,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
-        _skipStaleOrders(orderId, MAX_EXPIRED_ORDER_SKIPS_PER_CALL);
+        _skipStaleOrders(orderId);
         if (nextExecuteId == 0) {
             revert OrderRouter__NoOrdersToExecute();
         }
@@ -557,10 +555,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 capPrice = engine.CAP_PRICE();
         uint256 clampedPrice = executionPrice > capPrice ? capPrice : executionPrice;
 
-        uint256 scanned;
-        uint256 maxScans = MAX_BATCH_ORDER_SCANS;
-        while (nextExecuteId != 0 && nextExecuteId <= maxOrderId && scanned < maxScans) {
-            scanned++;
+        while (nextExecuteId != 0 && nextExecuteId <= maxOrderId) {
             uint64 orderId = nextExecuteId;
             OrderRecord storage record = _orderRecord(orderId);
             CfdTypes.Order memory order = record.core;
@@ -585,11 +580,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     // ==========================================
 
     function _skipStaleOrders(
-        uint64 upToId,
-        uint256 maxSkips
+        uint64 upToId
     ) internal returns (uint256 skipped) {
         uint256 age = maxOrderAge;
-        while (nextExecuteId != 0 && nextExecuteId <= upToId && skipped < maxSkips) {
+        while (nextExecuteId != 0 && nextExecuteId <= upToId) {
             uint64 headId = nextExecuteId;
             OrderRecord storage record = _orderRecord(headId);
             if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
@@ -767,7 +761,26 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (boundedPrunes == 0) {
             return;
         }
-        _skipStaleOrders(upToId, boundedPrunes);
+        uint256 pruned;
+        uint256 age = maxOrderAge;
+        while (nextExecuteId != 0 && nextExecuteId <= upToId && pruned < boundedPrunes) {
+            uint64 headId = nextExecuteId;
+            OrderRecord storage record = _orderRecord(headId);
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending) {
+                nextExecuteId = record.nextGlobalOrderId;
+                continue;
+            }
+            if (headId == upToId || age == 0) {
+                break;
+            }
+            CfdTypes.Order memory order = record.core;
+            if (block.timestamp - order.commitTime <= age) {
+                break;
+            }
+            emit OrderFailed(headId, OrderFailReason.Expired);
+            _cleanupOrder(headId, false, FailedOrderOutcome.ClearerFull);
+            pruned++;
+        }
     }
 
     function _resolveOraclePrice(
