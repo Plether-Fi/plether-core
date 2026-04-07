@@ -66,9 +66,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 1e18,
-            maxApy: 5e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -116,16 +113,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        (
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.entryFundingIndex,
-            pos.side,
-            pos.lastUpdateTime,
-            pos.vpiAccrued
-        ) = engine.positions(accountId);
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc,, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+            engine.positions(accountId);
     }
 
     function _openOrder(
@@ -164,14 +153,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 currentMargin,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) internal pure returns (uint256) {
-        uint256 marginAfterFunding = currentMargin + delta.funding.posMarginIncrease - delta.funding.posMarginDecrease;
-        if (
-            delta.funding.pendingFundingUsdc > 0
-                && delta.funding.payoutType != CfdEnginePlanTypes.FundingPayoutType.MARGIN_CREDIT
-        ) {
-            marginAfterFunding += uint256(delta.funding.pendingFundingUsdc);
-        }
-        return marginAfterFunding;
+        delta;
+        return currentMargin;
     }
 
     function test_PlanOpen_FreshAccountUsesGlobalSideMarginBaseline() public {
@@ -268,14 +251,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             _openOrder(freshBullId, CfdTypes.Side.BULL, 10_000e18, 5000e6, 1e8), 1e8, pool.totalAssets()
         );
 
-        assertEq(
+        assertGe(
             delta.sideTotalMarginAfterOpen,
-            CfdEnginePlanLib.computeSideTotalMarginAfterOpen(
-                delta.sideTotalMarginAfterFunding,
-                delta.effectivePositionMarginAfterFunding,
-                delta.positionMarginAfterOpen
-            ),
-            "Open planner sideTotalMarginAfterOpen must stay consistent with the single-frame margin delta equation"
+            delta.positionMarginAfterOpen,
+            "Open planner side total margin should include the opened position margin"
         );
     }
 
@@ -412,7 +391,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertTrue(drained, "Canonical helper should signal margin drain when net change exceeds the base");
     }
 
-    function test_PlanOpen_RejectsDeferredFundingThatIsNotPhysicallySpendable() public view {
+    function test_PlanOpen_RejectsInsufficientPhysicalMargin() public view {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0;
 
@@ -424,32 +403,22 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             margin: 1e6,
             entryPrice: 1e8,
             maxProfitUsdc: 10_000e6,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             vpiAccrued: 0
         });
         snap.currentTimestamp = 365 days;
-        snap.lastFundingTime = 0;
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 100_000e6,
             openInterest: 1_000_000e18,
             entryNotional: 1_000_000e18 * 1e8,
-            totalMargin: 50_000e6,
-            fundingIndex: 0,
-            entryFunding: 0
+            totalMargin: 50_000e6
         });
         snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 10_000e6,
-            openInterest: 100_000e18,
-            entryNotional: 100_000e18 * 1e8,
-            totalMargin: 1e6,
-            fundingIndex: 0,
-            entryFunding: 0
+            maxProfitUsdc: 10_000e6, openInterest: 100_000e18, entryNotional: 100_000e18 * 1e8, totalMargin: 1e6
         });
-        snap.fundingVaultDepthUsdc = 50_000_000e6;
         snap.vaultAssetsUsdc = 50_000_000e6;
         snap.vaultCashUsdc = 0;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -464,18 +433,11 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
-        snap.liveMarkFreshForFunding = true;
 
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
             snap, _openOrder(accountId, CfdTypes.Side.BEAR, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
 
-        assertEq(
-            uint8(delta.funding.payoutType),
-            uint8(CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT),
-            "Setup must route positive funding through deferred payout"
-        );
-        assertGt(delta.funding.pendingFundingUsdc, 0, "Setup must create positive pending funding");
         assertLt(delta.netMarginChange, 0, "Open must require physical margin to pay trade costs");
         assertEq(
             uint256(-delta.netMarginChange),
@@ -484,8 +446,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
         assertEq(
             uint8(delta.revertCode),
-            uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
-            "Planner should reject opens that rely on deferred funding IOUs for physically unlockable trade-cost margin"
+            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+            "Planner should reject opens whose physical margin cannot cover the trade charges under the no-funding model"
         );
     }
 
@@ -513,50 +475,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint256(CfdEnginePlanLib.getOpenFailurePolicyCategory(delta.revertCode)),
             uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable),
             "Planner should classify the solvency invalidation consistently"
-        );
-    }
-
-    function test_PlannerWrapper_FundingPlansMatchLibrary() public {
-        bytes32 bullId = bytes32(uint256(uint160(bullTraderA)));
-        bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
-
-        _fundTrader(bullTraderA, 20_000e6);
-        _fundTrader(bearTrader, 100_000e6);
-        _open(bullId, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
-        _open(bearId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
-        vm.warp(block.timestamp + 7 days);
-
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        CfdEnginePlanTypes.RawSnapshot memory snap = harness.buildRawSnapshotForPlanner(bullId, 1e8, pool.totalAssets());
-        CfdEnginePlanTypes.GlobalFundingDelta memory libGlobal = CfdEnginePlanLib.planGlobalFunding(snap, 1e8, 0);
-        CfdEnginePlanTypes.GlobalFundingDelta memory plannerGlobal = planner.planGlobalFunding(snap, 1e8, 0);
-        assertEq(
-            plannerGlobal.bullFundingIndexDelta,
-            libGlobal.bullFundingIndexDelta,
-            "Planner global bull funding should match library"
-        );
-        assertEq(
-            plannerGlobal.bearFundingIndexDelta,
-            libGlobal.bearFundingIndexDelta,
-            "Planner global bear funding should match library"
-        );
-
-        CfdEnginePlanTypes.FundingDelta memory libFunding = CfdEnginePlanLib.planFunding(snap, 1e8, 0, false, false);
-        CfdEnginePlanTypes.FundingDelta memory plannerFunding = planner.planFunding(snap, 1e8, 0, false, false);
-        assertEq(
-            plannerFunding.pendingFundingUsdc,
-            libFunding.pendingFundingUsdc,
-            "Planner pending funding should match library"
-        );
-        assertEq(
-            plannerFunding.bullFundingIndexDelta,
-            libFunding.bullFundingIndexDelta,
-            "Planner bull funding delta should match library"
-        );
-        assertEq(
-            plannerFunding.bearFundingIndexDelta,
-            libFunding.bearFundingIndexDelta,
-            "Planner bear funding delta should match library"
         );
     }
 

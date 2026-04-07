@@ -35,9 +35,6 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -178,9 +175,6 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 10,
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
@@ -221,9 +215,6 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 1e18,
-            maxApy: 5e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -260,19 +251,16 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         CfdTypes.Position memory bullPosB;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
-                engine.positions(bullIdA);
-            bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdA);
+            bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
-                engine.positions(bullIdB);
-            bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdB);
+            bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
-                engine.positions(bearId);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
+            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
         }
 
         int256 bullFundingA = engine.getPendingFunding(bullPosA);
@@ -403,7 +391,6 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
 
     function test_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = params.maxApy + 1;
 
         vm.expectRevert();
         engine.proposeRiskParams(params);

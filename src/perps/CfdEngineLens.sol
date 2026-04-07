@@ -92,7 +92,7 @@ contract CfdEngineLens is ICfdEngineLens {
         });
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, oraclePrice, 0);
 
-        preview.fundingUsdc = delta.funding.pendingFundingUsdc;
+        preview.fundingUsdc = 0;
         preview.realizedPnlUsdc = delta.realizedPnlUsdc;
         preview.remainingMargin = delta.posMarginAfter;
         preview.remainingSize = pos.size - sizeDelta;
@@ -113,19 +113,12 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
         preview.deferredPayoutUsdc =
             delta.existingDeferredRemainingUsdc + (delta.freshPayoutIsDeferred ? delta.freshTraderPayoutUsdc : 0);
-        if (delta.funding.payoutType == CfdEnginePlanTypes.FundingPayoutType.DEFERRED_PAYOUT) {
-            preview.deferredPayoutUsdc += uint256(delta.funding.pendingFundingUsdc);
-        }
-
         if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             preview.seizedCollateralUsdc = delta.lossResult.seizedUsdc;
             preview.badDebtUsdc = delta.badDebtUsdc;
         }
 
-        if (
-            delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER
-                || delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.FUNDING_PARTIAL_CLOSE_UNDERWATER
-        ) {
+        if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER) {
             preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnderwater;
             return preview;
         }
@@ -135,7 +128,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
-        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
+        preview.solvencyFundingPnlUsdc = 0;
     }
 
     function _previewLiquidation(
@@ -157,7 +150,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.liquidatable = delta.liquidatable;
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
-        preview.fundingUsdc = delta.riskState.pendingFundingUsdc;
+        preview.fundingUsdc = 0;
         preview.equityUsdc = delta.riskState.equityUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
         preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
@@ -175,7 +168,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
-        preview.solvencyFundingPnlUsdc = delta.solvency.solvencyFundingPnlUsdc;
+        preview.solvencyFundingPnlUsdc = 0;
     }
 
     function _buildRawSnapshot(
@@ -196,7 +189,6 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.position = _position(accountId);
         snap.accountId = accountId;
         snap.currentTimestamp = block.timestamp;
-        snap.lastFundingTime = engineContract.lastFundingTime();
         snap.lastMarkPrice = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         if (lastMarkPrice != 0) {
             snap.lastMarkPrice = lastMarkPrice;
@@ -204,7 +196,6 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
         snap.bullSide = _sideSnapshot(bull);
         snap.bearSide = _sideSnapshot(bear);
-        snap.fundingVaultDepthUsdc = vaultDepthUsdc;
         snap.vaultAssetsUsdc = vaultDepthUsdc;
         snap.vaultCashUsdc = vaultDepthUsdc;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
@@ -219,7 +210,8 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();
         snap.isFadWindow = engineContract.isFadWindow();
-        snap.liveMarkFreshForFunding = liveMarkAge <= maxStaleness;
+        liveMarkAge;
+        maxStaleness;
     }
 
     function _applyLiquidationPreviewForfeiture(
@@ -234,7 +226,6 @@ contract CfdEngineLens is ICfdEngineLens {
         if (forfeitedUsdc == 0) {
             return;
         }
-        snap.fundingVaultDepthUsdc += forfeitedUsdc;
         snap.vaultAssetsUsdc += forfeitedUsdc;
         snap.vaultCashUsdc += forfeitedUsdc;
         snap.accumulatedFeesUsdc += forfeitedUsdc;
@@ -243,16 +234,18 @@ contract CfdEngineLens is ICfdEngineLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
+        int256 ignoredEntryFundingIndex;
         (
             pos.size,
             pos.margin,
             pos.entryPrice,
             pos.maxProfitUsdc,
-            pos.entryFundingIndex,
+            ignoredEntryFundingIndex,
             pos.side,
             pos.lastUpdateTime,
             pos.vpiAccrued
         ) = engineContract.positions(accountId);
+        ignoredEntryFundingIndex;
     }
 
     function _sideSnapshot(
@@ -262,9 +255,7 @@ contract CfdEngineLens is ICfdEngineLens {
             maxProfitUsdc: side.maxProfitUsdc,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin,
-            fundingIndex: side.fundingIndex,
-            entryFunding: side.entryFunding
+            totalMargin: side.totalMargin
         });
     }
 
@@ -272,9 +263,6 @@ contract CfdEngineLens is ICfdEngineLens {
         (
             params.vpiFactor,
             params.maxSkewRatio,
-            params.kinkSkewRatio,
-            params.baseApy,
-            params.maxApy,
             params.maintMarginBps,
             params.initMarginBps,
             params.fadMarginBps,

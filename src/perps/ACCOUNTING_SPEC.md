@@ -42,7 +42,7 @@ Use the following terms consistently:
 - `rawAssets`: the actual USDC token balance currently sitting in `HousePool`
 - `accountedAssets`: the canonical protocol-owned asset ledger maintained by controlled protocol paths
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance sitting in the pool
-- `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: the effective economic vault backing recognized by funding, solvency, reconciliation, and withdrawal logic
+- `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: the effective economic vault backing recognized by solvency, reconciliation, and withdrawal logic
 - `protocolFees`: `accumulatedFeesUsdc`, which are owned by the protocol and not LP equity
 - `netPhysicalAssets = physicalAssets - protocolFees`
 
@@ -56,7 +56,7 @@ Controlled inflow families must remain distinct:
 
 - `recordProtocolInflow`: protocol-owned fees or ambiguous accounted inflows that are not LP equity,
 - `recordRecapitalizationInflow`: governance recapitalization intended to restore senior-first economics,
-- `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture, seized losses, collectible funding losses).
+- `recordTradingRevenueInflow`: LP-owned realized trading revenue (trade cost capture and seized losses).
 
 These inflow entrypoints must not mutate LP principal through ad hoc path-specific logic. They should translate external events into a small explicit pending-accounting state that flows through the `HousePool` settlement entrypoint, with freshness gating applied only to mark-dependent reconcile math.
 
@@ -77,46 +77,13 @@ Current policy details:
 
 This is the bounded directional liability surface.
 
-### Funding Views
-
-Funding has two distinct representations.
-
-#### 1. Solvency Funding
-
-Used only for economic solvency decisions.
-
-- Positive funding means the vault owes traders.
-- Negative funding means traders owe the vault.
-- Negative funding may be counted only up to collectible backing, i.e. capped by side margin.
-
-Definition:
-
-- `solvencyFunding = cappedBullFunding + cappedBearFunding`
-- where each side's negative value is clipped at `-totalSideMargin`
-
-This is the funding input for `effectiveAssets` and degraded-mode decisions.
-
-#### 2. Withdrawal Funding Liability
-
-Used only for LP withdrawal firewalls.
-
-- Positive funding liabilities must be reserved.
-- Negative funding receivables must be ignored until physically seized.
-
-Definition:
-
-- `withdrawalFundingLiability = max(bullFunding, 0) + max(bearFunding, 0)`
-
-This view is intentionally more conservative than solvency funding.
-
 ### Unrealized MtM Liability
 
 The vault may recognize unrealized trader profits only as liabilities, never unrealized trader losses as assets.
 
 Definition:
 
-- cap each side's negative funding at collectible backing (`-totalSideMargin`),
-- compute `(PnL + cappedFunding)` per side,
+- compute unrealized `PnL` per side,
 - clamp each side at zero,
 - sum the remaining positive values.
 
@@ -163,7 +130,7 @@ Field semantics:
 
 - `netPhysicalAssetsUsdc`: vault cash net of protocol-owned fees; starting point for LP-facing accounting
 - `maxLiabilityUsdc`: bounded directional payout ceiling from live positions; the main withdrawal reserve component
-- `withdrawalFundingLiabilityUsdc`: funding liabilities only, with trader debts ignored until collected; conservative LP withdrawal reserve input
+- `withdrawalFundingLiabilityUsdc`: always zero in the no-funding baseline; reserved only for any future explicit carry model
 - `unrealizedMtmLiabilityUsdc`: conservative unrealized mark-to-market liability used for tranche reconciliation, not risk-increasing solvency
 - `deferredTraderPayoutUsdc`: profitable-close payouts already owed to traders but not yet paid; senior claim on vault cash
 - `deferredClearerBountyUsdc`: unpaid liquidation bounties; also a senior claim on vault cash
@@ -271,7 +238,7 @@ Question answered:
 
 Definition:
 
-- `effectiveSolvencyAssets = netPhysicalAssets - positive(solvencyFunding) + negativeCredit(solvencyFunding)`
+- `effectiveSolvencyAssets = netPhysicalAssets`
 - where `negativeCredit(x)` means adding `abs(x)` when `x < 0`
 
 Rule:
@@ -280,7 +247,7 @@ Rule:
 
 Notes:
 
-- This view may count collectible funding receivables.
+- This view does not count any funding receivables in the no-funding baseline.
 - It must not count unrealized trader losses beyond collectible bounds.
 
 ### B. LP Withdrawal View
@@ -291,7 +258,7 @@ Question answered:
 
 Definition:
 
-- `freeUSDC = netPhysicalAssets - maxLiability - positive(withdrawalFundingLiability)`
+- `freeUSDC = netPhysicalAssets - maxLiability`
 
 Rule:
 
@@ -362,16 +329,13 @@ Failed-open bounty policy:
 
 Liquidation preview/live depth policy:
 
-- queued execution-bounty escrow forfeited during liquidation belongs to a staged transition: funding runs first on pre-forfeiture depth, then the escrow transfer increases physical vault assets/cash and protocol fees, then payout and solvency classification run on that post-forfeiture state,
-- canonical liquidation preview and hypothetical liquidation simulation should mirror that same two-stage model so preview/live parity does not depend on whether the fee-tagged escrow is injected too early or too late,
-- live liquidation should not mix pre-sweep funding depth with post-sweep payout/solvency state, and preview should not collapse those stages into one synthetic balance.
+- queued execution-bounty escrow forfeited during liquidation belongs to a staged transition: the escrow transfer increases physical vault assets/cash and protocol fees before payout and solvency classification run on the post-forfeiture state,
+- canonical liquidation preview and hypothetical liquidation simulation should mirror that same staged model so preview/live parity does not depend on whether the fee-tagged escrow is injected too early or too late,
+- live liquidation should not mix pre-sweep cash state with post-sweep payout/solvency state, and preview should not collapse those stages into one synthetic balance.
 
 Funding freshness policy:
 
-- weekday/live funding accrual may only advance while the live mark remains within the engine freshness limit,
-- once the live mark is stale, funding freezes until a fresh mark update arrives,
-- the first fresh mark update after a stale live window must checkpoint the funding clock instead of retroactively accruing over the stale interval,
-- frozen/FAD oracle policy may still permit broader staleness according to the dedicated frozen-window rules.
+- In the no-funding baseline there is no side-to-side funding accrual. Oracle freshness still gates execution, liquidation, and HousePool reconciliation, but no funding clock is advanced across live, stale, or frozen windows.
 
 Margin-threshold policy:
 

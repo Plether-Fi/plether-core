@@ -43,9 +43,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
             maxSkewRatio: 0.5e18,
-            kinkSkewRatio: 0.3e18,
-            baseApy: 0.2e18,
-            maxApy: 4e18,
             maintMarginBps: 200,
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
@@ -62,9 +59,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
             maxSkewRatio: 0.5e18,
-            kinkSkewRatio: 0.3e18,
-            baseApy: 0.2e18,
-            maxApy: 4e18,
             maintMarginBps: 200,
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
@@ -83,9 +77,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
             maxSkewRatio: 0.5e18,
-            kinkSkewRatio: 0.3e18,
-            baseApy: 0.2e18,
-            maxApy: 4e18,
             maintMarginBps: 200,
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
@@ -98,7 +89,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         engine.finalizeRiskParams();
 
-        (,,,,, uint256 maintMarginBps,,,,,) = engine.riskParams();
+        (,, uint256 maintMarginBps,,,,,) = engine.riskParams();
         assertEq(maintMarginBps, 200);
         assertEq(engine.riskParamsActivationTime(), 0);
     }
@@ -112,9 +103,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
             maxSkewRatio: 0.5e18,
-            kinkSkewRatio: 0.3e18,
-            baseApy: 0.2e18,
-            maxApy: 4e18,
             maintMarginBps: 200,
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
@@ -135,9 +123,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -155,9 +140,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory first = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 200,
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 300,
@@ -174,9 +156,6 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory second = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 300,
             initMarginBps: ((300) * 15) / 10,
             fadMarginBps: 500,

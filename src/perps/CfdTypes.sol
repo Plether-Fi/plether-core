@@ -21,7 +21,6 @@ library CfdTypes {
         uint256 margin; // [6 dec] Isolated margin backing this position
         uint256 entryPrice; // [8 dec] Oracle price of BEAR at execution
         uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
-        int256 entryFundingIndex; // [18 dec WAD] Global funding index at the time of entry
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
         int256 vpiAccrued; // [6 dec] Cumulative VPI charges (+) and rebates (-) across the position's lifetime
@@ -48,13 +47,10 @@ library CfdTypes {
         DustPosition
     }
 
-    /// @notice Global configuration parameters for the VPI, funding, and carry engines
+    /// @notice Global configuration parameters for the VPI and carry engines
     struct RiskParams {
         uint256 vpiFactor; // [18 dec WAD] Impact severity 'k'
         uint256 maxSkewRatio; // [18 dec WAD] Hard cliff e.g., 40% (0.40e18)
-        uint256 kinkSkewRatio; // [18 dec WAD] Inflection point e.g., 25% (0.25e18)
-        uint256 baseApy; // [18 dec WAD] Rate at the kink e.g., 15% (0.15e18)
-        uint256 maxApy; // [18 dec WAD] Rate at the wall e.g., 300% (3.00e18)
         uint256 maintMarginBps; // e.g., 100 (1%)
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)

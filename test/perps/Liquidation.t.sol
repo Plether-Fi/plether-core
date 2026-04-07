@@ -179,9 +179,6 @@ contract LiquidationTest is BasePerpTest {
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 0.15e18,
-                maxApy: 3.0e18,
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,

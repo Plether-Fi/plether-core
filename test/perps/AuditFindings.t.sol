@@ -36,9 +36,6 @@ contract AuditC01_HwmInflation is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -273,9 +270,6 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

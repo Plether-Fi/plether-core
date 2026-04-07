@@ -76,7 +76,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -117,7 +117,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
     function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = vault.totalAssets();
-        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -151,7 +151,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_ValidPartialCloseWithPositiveFundingImpliesVaultCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -181,7 +181,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
     function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -215,54 +215,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_FundingSettlementFieldsConsistent() public view {
-        uint256 vaultDepthUsdc = vault.totalAssets();
-
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
-            if (size == 0) {
-                continue;
-            }
-
-            CfdEnginePlanTypes.FundingDelta memory partialFs =
-                harness.exposed_planFunding(accountId, true, false, vaultDepthUsdc);
-            CfdEnginePlanTypes.FundingDelta memory fullFs =
-                harness.exposed_planFunding(accountId, true, true, vaultDepthUsdc);
-
-            assertEq(
-                partialFs.pendingFundingUsdc,
-                fullFs.pendingFundingUsdc,
-                "Pending funding must be identical for full and partial"
-            );
-
-            if (partialFs.pendingFundingUsdc >= 0) {
-                assertEq(
-                    partialFs.fundingLossConsumedFromMargin + partialFs.fundingLossConsumedFromFree,
-                    0,
-                    "Non-negative partial funding must not produce inflow"
-                );
-                assertEq(
-                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
-                    0,
-                    "Non-negative full funding must not produce inflow"
-                );
-            } else {
-                assertEq(
-                    fullFs.fundingLossConsumedFromMargin + fullFs.fundingLossConsumedFromFree,
-                    0,
-                    "Full close negative funding uses closeFundingSettlement, not vault transfer"
-                );
-            }
-
-            assertEq(fullFs.fundingVaultPayoutUsdc, 0, "Full close never produces vault funding outflow");
-        }
-    }
-
     function invariant_ImmediateDeferredSplitMatchesAdjustedCash() public view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 vaultDepthUsdc = vault.totalAssets();
-        (,,,,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -300,10 +256,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
             return;
         }
 
-        CfdEnginePlanTypes.FundingDelta memory fs =
-            harness.exposed_planFunding(accountId, true, isFullClose, vaultDepthUsdc);
-        uint256 adjustedCash = vault.totalAssets() + fs.fundingLossConsumedFromMargin + fs.fundingLossConsumedFromFree
-            - fs.fundingVaultPayoutUsdc;
+        uint256 adjustedCash = vault.totalAssets();
         uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
@@ -382,9 +335,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.02e18,
-            maxApy: 0.1e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

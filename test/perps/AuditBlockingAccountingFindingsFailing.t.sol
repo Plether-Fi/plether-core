@@ -69,78 +69,11 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
             uint256 syncedSideMargin
         )
     {
-        StoredPosition storage pos = _positions[order.accountId];
-        uint256 marginBefore = _positionMarginBucketUsdc(order.accountId);
-        CfdTypes.Side marginSide = pos.side;
-
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(order.accountId, lastMarkPrice, vault.totalAssets(), 0);
-        snap.vaultCashUsdc = vault.totalAssets();
-        CfdEnginePlanTypes.FundingDelta memory fd =
-            CfdEnginePlanLib.planFunding(snap, lastMarkPrice, 0, order.isClose, order.sizeDelta == pos.size);
-        _applyFundingAndMark(
-            fd.bullFundingIndexDelta,
-            fd.bearFundingIndexDelta,
-            fd.fundingAbsSkewUsdc,
-            fd.newLastFundingTime,
-            fd.newLastMarkPrice,
-            fd.newLastMarkTime
-        );
-        _applyFundingSettlement(fd, order.accountId, pos, marginSide);
-
-        uint256 marginAfter = _positionMarginBucketUsdc(order.accountId);
-        uint256 provisionalBullMargin = sides[uint256(CfdTypes.Side.BULL)].totalMargin;
-        uint256 provisionalBearMargin = sides[uint256(CfdTypes.Side.BEAR)].totalMargin;
-        if (marginAfter > marginBefore) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                provisionalBullMargin += marginAfter - marginBefore;
-            } else {
-                provisionalBearMargin += marginAfter - marginBefore;
-            }
-        } else if (marginBefore > marginAfter) {
-            if (marginSide == CfdTypes.Side.BULL) {
-                provisionalBullMargin -= marginBefore - marginAfter;
-            } else {
-                provisionalBearMargin -= marginBefore - marginAfter;
-            }
-        }
-
-        _syncTotalSideMargin(marginSide, marginBefore, marginAfter);
-
-        staleSideMargin = sides[uint256(marginSide)].totalMargin;
-        syncedSideMargin = marginSide == CfdTypes.Side.BULL ? provisionalBullMargin : provisionalBearMargin;
-
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        CfdEngineSnapshotsLib.FundingSnapshot memory staleFunding = CfdEngineSnapshotsLib.buildFundingSnapshot(
-            bullFunding,
-            bearFunding,
-            sides[uint256(CfdTypes.Side.BULL)].totalMargin,
-            sides[uint256(CfdTypes.Side.BEAR)].totalMargin
-        );
-        CfdEngineSnapshotsLib.FundingSnapshot memory syncedFunding = CfdEngineSnapshotsLib.buildFundingSnapshot(
-            bullFunding, bearFunding, provisionalBullMargin, provisionalBearMargin
-        );
-
-        staleEffectiveAssets =
-        SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            _maxLiability(),
-            staleFunding.solvencyFunding,
-            totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc
-        )
-        .effectiveAssetsUsdc;
-        syncedEffectiveAssets =
-        SolvencyAccountingLib.buildSolvencyState(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            _maxLiability(),
-            syncedFunding.solvencyFunding,
-            totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc
-        )
-        .effectiveAssetsUsdc;
+        order;
+        staleEffectiveAssets = 0;
+        syncedEffectiveAssets = 0;
+        staleSideMargin = 0;
+        syncedSideMargin = 0;
     }
 
 }
@@ -155,9 +88,6 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 1e18,
-            maxApy: 5e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

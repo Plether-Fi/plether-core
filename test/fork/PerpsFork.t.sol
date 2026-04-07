@@ -96,9 +96,6 @@ contract PerpsForkTest is Test {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -228,9 +225,6 @@ contract PerpsForkTest is Test {
         (
             uint256 vpiFactor,
             uint256 maxSkewRatio,
-            uint256 kinkSkewRatio,
-            uint256 baseApy,
-            uint256 maxApy,
             uint256 maintMarginBps,
             uint256 initMarginBps,
             uint256 fadMarginBps,
@@ -241,9 +235,6 @@ contract PerpsForkTest is Test {
         return CfdTypes.RiskParams({
             vpiFactor: vpiFactor,
             maxSkewRatio: maxSkewRatio,
-            kinkSkewRatio: kinkSkewRatio,
-            baseApy: baseApy,
-            maxApy: maxApy,
             maintMarginBps: maintMarginBps,
             initMarginBps: initMarginBps,
             fadMarginBps: fadMarginBps,

@@ -33,9 +33,6 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 1e18,
-            maxApy: 5e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -62,14 +59,12 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         CfdTypes.Position memory bullPos;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
-                engine.positions(bullId);
-            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullId);
+            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) =
-                engine.positions(bearId);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, entryFunding, side, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
+            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
         }
 
         int256 bullFunding = engine.getPendingFunding(bullPos);
@@ -96,9 +91,6 @@ contract AuditVerifiedFindingsFailing_F2_SkewCapBypass is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -127,9 +119,6 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.15e18,
-            kinkSkewRatio: 0.1e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -257,9 +246,6 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -372,9 +358,6 @@ contract AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode is BasePerpTest
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 10,
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 300,

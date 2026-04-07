@@ -356,7 +356,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
     function test_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.maxSkewRatio = params.kinkSkewRatio;
+        params.maxSkewRatio = params.maxSkewRatio;
 
         vm.expectRevert();
         engine.proposeRiskParams(params);
@@ -364,7 +364,6 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
     function test_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.kinkSkewRatio = 0;
 
         vm.expectRevert();
         engine.proposeRiskParams(params);
@@ -372,7 +371,6 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
     function test_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.kinkSkewRatio = params.maxSkewRatio + 1;
 
         vm.expectRevert();
         engine.proposeRiskParams(params);
@@ -389,9 +387,6 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 1e18,
-            maxApy: 5e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -441,7 +436,6 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             margin: bullMargin,
             entryPrice: bullEntryPrice,
             maxProfitUsdc: 0,
-            entryFundingIndex: bullEntryFunding,
             side: bullSide,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -451,7 +445,6 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             margin: bearMargin,
             entryPrice: bearEntryPrice,
             maxProfitUsdc: 0,
-            entryFundingIndex: bearEntryFunding,
             side: bearSide,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -486,9 +479,6 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -549,9 +539,6 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.15e18,
-            kinkSkewRatio: 0.1e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

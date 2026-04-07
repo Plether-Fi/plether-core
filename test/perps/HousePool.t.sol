@@ -39,9 +39,6 @@ contract HousePoolTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -385,7 +382,7 @@ contract HousePoolTest is BasePerpTest {
         );
     }
 
-    function test_FinalizeSeniorRate_SyncsFundingBeforeReconcile() public {
+    function test_FinalizeSeniorRate_NoFundingSyncNeededBeforeReconcile() public {
         address trader = address(0x4444);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -406,13 +403,8 @@ contract HousePoolTest is BasePerpTest {
 
         pool.finalizeSeniorRate();
 
-        assertGt(
-            engine.lastFundingTime(),
-            fundingBefore,
-            "Stale mark refresh should move funding time forward before finalization continues"
-        );
-        assertGe(
-            engine.lastFundingTime(), fundingBefore, "Funding timestamp must not move backward during finalization"
+        assertEq(
+            engine.lastFundingTime(), fundingBefore, "No-funding model should not update funding time during reconcile"
         );
     }
 
@@ -1352,9 +1344,6 @@ contract HousePoolTest is BasePerpTest {
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 1e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 1e18,
-                maxApy: 5e18,
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
@@ -1393,14 +1382,11 @@ contract HousePoolTest is BasePerpTest {
     // C-03: getFreeUSDC RESERVES POSITIVE UNREALIZED FUNDING
     // ==========================================
 
-    function test_C03_GetFreeUSDC_ReservesPositiveUnrealizedFunding() public {
+    function test_C03_GetFreeUSDC_NoFundingReserveInNoFundingModel() public {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 1e18,
-                maxApy: 5e18,
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
@@ -1433,29 +1419,21 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 30);
 
         uint256 fundingLiability = engineProtocolLens.getLiabilityOnlyFundingPnl();
-        assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
+        assertEq(fundingLiability, 0, "No-funding model should not create a funding liability reserve");
 
         uint256 freeUSDC = pool.getFreeUSDC();
-        uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.BEAR);
-        uint256 fees = engine.accumulatedFeesUsdc();
-        uint256 naiveFree = bal - maxLiab - fees;
-
-        assertLt(freeUSDC, naiveFree, "getFreeUSDC must reserve positive unrealized funding");
+        assertGt(freeUSDC, 0, "getFreeUSDC should remain positive in the no-funding model");
     }
 
     // ==========================================
     // C-03b: _reconcile RESERVES POSITIVE UNREALIZED FUNDING FROM DISTRIBUTABLE
     // ==========================================
 
-    function test_C03b_Reconcile_ReservesPositiveUnrealizedFunding() public {
+    function test_C03b_Reconcile_NoFundingReserveInNoFundingModel() public {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 1e18,
-                maxApy: 5e18,
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
@@ -1487,7 +1465,7 @@ contract HousePoolTest is BasePerpTest {
         vm.warp(block.timestamp + 30);
 
         uint256 fundingLiability = engineProtocolLens.getLiabilityOnlyFundingPnl();
-        assertGt(fundingLiability, 0, "Open receivers should create positive funding liability after fresh sync");
+        assertEq(fundingLiability, 0, "No-funding model should not create a funding liability reserve");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -1496,7 +1474,7 @@ contract HousePoolTest is BasePerpTest {
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
         uint256 fees = engine.accumulatedFeesUsdc();
-        uint256 reserved = fees + fundingLiability;
+        uint256 reserved = fees;
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }
 
@@ -1738,9 +1716,6 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -2346,9 +2321,6 @@ contract HousePoolAuditTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -2688,8 +2660,6 @@ contract HousePoolAuditTest is BasePerpTest {
     // Regression: C-02 — negative funding must not inflate junior principal
     function test_NegativeFundingDoesNotInflateJuniorPrincipal() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 100_000e18;
-        params.maxApy = 100_000e18;
         _setRiskParams(params);
 
         _fundJunior(bob, 1_000_000e6);
@@ -2716,7 +2686,7 @@ contract HousePoolAuditTest is BasePerpTest {
         router.executeOrder(3, price);
 
         int256 unrealizedFunding = engineProtocolLens.getUnrealizedFundingPnl();
-        assertLt(unrealizedFunding, 0, "house is owed funding by remaining bears");
+        assertEq(unrealizedFunding, 0, "No-funding model should not report unrealized funding");
 
         uint256 juniorBefore = pool.juniorPrincipal();
         vm.prank(address(juniorVault));

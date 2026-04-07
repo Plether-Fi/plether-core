@@ -1086,7 +1086,6 @@ contract OrderRouter is Ownable2Step, Pausable, OrderEscrowAccounting {
             return;
         }
 
-        engine.syncFunding();
         USDC.safeTransfer(address(vault), forfeitedUsdc);
         vault.recordProtocolInflow(forfeitedUsdc);
         engine.recordRouterProtocolFee(forfeitedUsdc);

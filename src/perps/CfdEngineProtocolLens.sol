@@ -42,7 +42,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             pos,
             engineContract.lastMarkPrice(),
             engineContract.CAP_PRICE(),
-            _getProjectedPendingFunding(accountId, pos),
             reachableUsdc,
             engineContract.isFadWindow() ? _riskParams().fadMarginBps : _riskParams().maintMarginBps
         );
@@ -56,7 +55,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         viewData.physicalReachableCollateralUsdc = reachableUsdc;
         viewData.nettableDeferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
         viewData.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
-        viewData.pendingFundingUsdc = riskState.pendingFundingUsdc;
+        viewData.pendingFundingUsdc = 0;
         viewData.netEquityUsdc = riskState.equityUsdc;
         viewData.maxProfitUsdc =
             CfdMath.calculateMaxProfit(pos.size, pos.entryPrice, pos.side, engineContract.CAP_PRICE());
@@ -96,16 +95,15 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     }
 
     function getUnrealizedFundingPnl() external view returns (int256 fundingPnlUsdc) {
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        fundingPnlUsdc = bullFunding + bearFunding;
+        fundingPnlUsdc = 0;
     }
 
     function getCappedFundingPnl() external view returns (int256 fundingPnlUsdc) {
-        fundingPnlUsdc = _buildFundingSnapshot().solvencyFunding;
+        fundingPnlUsdc = 0;
     }
 
     function getLiabilityOnlyFundingPnl() external view returns (uint256 fundingLiabilityUsdc) {
-        fundingLiabilityUsdc = _buildFundingSnapshot().withdrawalFundingLiability;
+        fundingLiabilityUsdc = 0;
     }
 
     function getVaultMtmAdjustment() external view returns (uint256 mtmLiabilityUsdc) {
@@ -153,7 +151,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.netPhysicalAssetsUsdc =
             vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
         snapshot.maxLiabilityUsdc = engineContract.getMaxLiability();
-        snapshot.withdrawalFundingLiabilityUsdc = _buildFundingSnapshot().withdrawalFundingLiability;
+        snapshot.withdrawalFundingLiabilityUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.deferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
@@ -191,94 +189,18 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
+        int256 ignoredEntryFundingIndex;
         (
             pos.size,
             pos.margin,
             pos.entryPrice,
             pos.maxProfitUsdc,
-            pos.entryFundingIndex,
+            ignoredEntryFundingIndex,
             pos.side,
             pos.lastUpdateTime,
             pos.vpiAccrued
         ) = engineContract.positions(accountId);
-    }
-
-    function _computeGlobalFundingPnl() internal view returns (int256 bullFunding, int256 bearFunding) {
-        (int256 bullFundingIndex, int256 bearFundingIndex) = _getProjectedFundingIndices();
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
-        bullFunding = (int256(bullState.openInterest) * bullFundingIndex - bullState.entryFunding)
-            / int256(CfdMath.FUNDING_INDEX_SCALE);
-        bearFunding = (int256(bearState.openInterest) * bearFundingIndex - bearState.entryFunding)
-            / int256(CfdMath.FUNDING_INDEX_SCALE);
-    }
-
-    function _getProjectedFundingIndices() internal view returns (int256 bullFundingIndex, int256 bearFundingIndex) {
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
-        bullFundingIndex = bullState.fundingIndex;
-        bearFundingIndex = bearState.fundingIndex;
-
-        if (block.timestamp <= engineContract.lastFundingTime() || engineContract.lastMarkPrice() == 0) {
-            return (bullFundingIndex, bearFundingIndex);
-        }
-
-        if (!_canProjectFundingStep()) {
-            return (bullFundingIndex, bearFundingIndex);
-        }
-
-        PositionRiskAccountingLib.FundingStepResult memory step =
-            _buildFundingStep(engineContract.lastMarkPrice(), engineContract.vault().totalAssets());
-
-        bullFundingIndex += step.bullFundingIndexDelta;
-        bearFundingIndex += step.bearFundingIndexDelta;
-    }
-
-    function _buildFundingSnapshot() internal view returns (CfdEngineSnapshotsLib.FundingSnapshot memory snapshot) {
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
-        return CfdEngineSnapshotsLib.buildFundingSnapshot(
-            bullFunding, bearFunding, bullState.totalMargin, bearState.totalMargin
-        );
-    }
-
-    function _buildFundingStep(
-        uint256 price,
-        uint256 vaultDepthUsdc
-    ) internal view returns (PositionRiskAccountingLib.FundingStepResult memory step) {
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
-        step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: price,
-                bullOi: bullState.openInterest,
-                bearOi: bearState.openInterest,
-                timeDelta: block.timestamp - engineContract.lastFundingTime(),
-                vaultDepthUsdc: vaultDepthUsdc,
-                riskParams: _riskParams()
-            })
-        );
-    }
-
-    function _canProjectFundingStep() internal view returns (bool) {
-        uint64 lastMarkTime = engineContract.lastMarkTime();
-        uint256 age = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        return age <= _fundingMarkStalenessLimit();
-    }
-
-    function _fundingMarkStalenessLimit() internal view returns (uint256 maxStaleness) {
-        maxStaleness = _liveMarkStalenessLimit();
-        if (engineContract.isOracleFrozen()) {
-            maxStaleness = engineContract.fadMaxStaleness();
-        }
-    }
-
-    function _liveMarkStalenessLimit() internal view returns (uint256) {
-        return
-            engineContract.isOracleFrozen()
-                ? engineContract.fadMaxStaleness()
-                : engineContract.engineMarkStalenessLimit();
+        ignoredEntryFundingIndex;
     }
 
     function _getVaultMtmLiability() internal view returns (uint256) {
@@ -294,18 +216,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             bearPnl = (int256(bearState.openInterest * price) - int256(bearState.entryNotional))
                 / int256(CfdMath.USDC_TO_TOKEN_SCALE);
         }
-
-        (int256 bullFunding, int256 bearFunding) = _computeGlobalFundingPnl();
-
-        if (bullFunding < -int256(bullState.totalMargin)) {
-            bullFunding = -int256(bullState.totalMargin);
-        }
-        if (bearFunding < -int256(bearState.totalMargin)) {
-            bearFunding = -int256(bearState.totalMargin);
-        }
-
-        int256 bullTotal = bullPnl + bullFunding;
-        int256 bearTotal = bearPnl + bearFunding;
+        int256 bullTotal = bullPnl;
+        int256 bearTotal = bearPnl;
         if (bullTotal < 0) {
             bullTotal = 0;
         }
@@ -335,12 +247,10 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
         uint256 maxLiabilityUsdc = engineContract.getMaxLiability();
-        CfdEngineSnapshotsLib.FundingSnapshot memory funding = _buildFundingSnapshot();
         WithdrawalAccountingLib.WithdrawalState memory withdrawalState = WithdrawalAccountingLib.buildWithdrawalState(
             vaultAssetsUsdc,
             maxLiabilityUsdc,
             engineContract.accumulatedFeesUsdc(),
-            funding.withdrawalFundingLiability,
             engineContract.totalDeferredPayoutUsdc(),
             engineContract.totalDeferredClearerBountyUsdc()
         );
@@ -353,8 +263,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.freeUsdc = withdrawalState.freeUsdc;
         snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
-        snapshot.cappedFundingPnlUsdc = funding.solvencyFunding;
-        snapshot.liabilityOnlyFundingPnlUsdc = withdrawalState.fundingLiabilityUsdc;
+        snapshot.cappedFundingPnlUsdc = 0;
+        snapshot.liabilityOnlyFundingPnlUsdc = 0;
         snapshot.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.totalDeferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
@@ -368,7 +278,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             engineContract.vault().totalAssets(),
             engineContract.accumulatedFeesUsdc(),
             engineContract.getMaxLiability(),
-            _buildFundingSnapshot().solvencyFunding,
             engineContract.totalDeferredPayoutUsdc(),
             engineContract.totalDeferredClearerBountyUsdc()
         );
@@ -381,9 +290,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             maxProfitUsdc: side.maxProfitUsdc,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin,
-            fundingIndex: side.fundingIndex,
-            entryFunding: side.entryFunding
+            totalMargin: side.totalMargin
         });
     }
 
@@ -391,9 +298,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         (
             params.vpiFactor,
             params.maxSkewRatio,
-            params.kinkSkewRatio,
-            params.baseApy,
-            params.maxApy,
             params.maintMarginBps,
             params.initMarginBps,
             params.fadMarginBps,
@@ -401,48 +305,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             params.minBountyUsdc,
             params.bountyBps
         ) = engineContract.riskParams();
-    }
-
-    function _getProjectedPendingFunding(
-        bytes32 accountId,
-        CfdTypes.Position memory pos
-    ) internal view returns (int256 fundingUsdc) {
-        if (pos.size == 0) {
-            return 0;
-        }
-        uint256 vaultAssets = engineContract.vault().totalAssets();
-        CfdEnginePlanTypes.RawSnapshot memory snap = CfdEnginePlanTypes.RawSnapshot({
-            position: _position(accountId),
-            accountId: accountId,
-            currentTimestamp: block.timestamp,
-            lastFundingTime: engineContract.lastFundingTime(),
-            lastMarkPrice: engineContract.lastMarkPrice(),
-            lastMarkTime: engineContract.lastMarkTime(),
-            bullSide: _sideSnapshot(engineContract.getSideState(CfdTypes.Side.BULL)),
-            bearSide: _sideSnapshot(engineContract.getSideState(CfdTypes.Side.BEAR)),
-            fundingVaultDepthUsdc: vaultAssets,
-            vaultAssetsUsdc: vaultAssets,
-            vaultCashUsdc: vaultAssets,
-            accountBuckets: engineContract.clearinghouse().getAccountUsdcBuckets(accountId),
-            lockedBuckets: engineContract.clearinghouse().getLockedMarginBuckets(accountId),
-            marginReservationIds: new uint64[](0),
-            accumulatedFeesUsdc: engineContract.accumulatedFeesUsdc(),
-            accumulatedBadDebtUsdc: engineContract.accumulatedBadDebtUsdc(),
-            totalDeferredPayoutUsdc: engineContract.totalDeferredPayoutUsdc(),
-            totalDeferredClearerBountyUsdc: engineContract.totalDeferredClearerBountyUsdc(),
-            deferredPayoutForAccount: engineContract.deferredPayoutUsdc(accountId),
-            degradedMode: engineContract.degradedMode(),
-            capPrice: engineContract.CAP_PRICE(),
-            riskParams: _riskParams(),
-            isFadWindow: engineContract.isFadWindow(),
-            liveMarkFreshForFunding: true
-        });
-        CfdEnginePlanTypes.GlobalFundingDelta memory fundingDelta =
-            ICfdEnginePlanner(engineContract.planner()).planGlobalFunding(snap, engineContract.lastMarkPrice(), 0);
-        int256 postFundingIndex = pos.side == CfdTypes.Side.BULL
-            ? snap.bullSide.fundingIndex + fundingDelta.bullFundingIndexDelta
-            : snap.bearSide.fundingIndex + fundingDelta.bearFundingIndexDelta;
-        fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
     }
 
 }

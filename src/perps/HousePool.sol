@@ -219,7 +219,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (block.timestamp < seniorRateActivationTime) {
             revert HousePool__TimelockNotReady();
         }
-        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -365,7 +364,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount == 0) {
             revert HousePool__NoExcessAssets();
         }
-        ENGINE.syncFunding();
         accountedAssets += amount;
         emit ExcessAccounted(amount, accountedAssets);
     }
@@ -525,7 +523,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
             revert HousePool__BootstrapSharesZero();
         }
 
-        ENGINE.syncFunding();
         USDC.safeTransferFrom(msg.sender, address(this), amount);
 
         accountedAssets += amount;
@@ -552,7 +549,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function depositSenior(
         uint256 amount
     ) external onlyVault whenNotPaused {
-        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -586,7 +582,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         if (amount == 0) {
             return;
         }
-        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -610,7 +605,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     function depositJunior(
         uint256 amount
     ) external onlyVault whenNotPaused {
-        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -630,7 +624,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
         uint256 amount,
         address receiver
     ) external onlyVault {
-        ENGINE.syncFunding();
         (
             ICfdEngine.HousePoolInputSnapshot memory accountingSnapshot,
             ICfdEngine.HousePoolStatusSnapshot memory statusSnapshot
@@ -734,7 +727,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     /// @notice Distributes revenue (senior yield first, junior gets surplus) or absorbs losses
     ///         (junior first-loss, senior last-loss). Called before any deposit/withdrawal.
     function reconcile() external onlyVault {
-        ENGINE.syncFunding();
         _reconcile(_getHousePoolInputSnapshot());
     }
 
@@ -802,7 +794,6 @@ contract HousePool is ICfdVault, IHousePool, Ownable2Step, Pausable {
     }
 
     function _syncAndBuildHousePoolContext() internal returns (HousePoolContext memory ctx) {
-        ENGINE.syncFunding();
         return _buildCurrentHousePoolContext();
     }
 

@@ -31,9 +31,6 @@ contract OrderRouterTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -1126,9 +1123,6 @@ contract OrderRouterPythTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -1775,7 +1769,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
         assertEq(afterRevertEscrow.pendingOrderCount, 2, "All queued escrow should remain after stale revert");
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1050);
         vm.warp(1050);
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
@@ -2382,9 +2376,6 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -2552,10 +2543,9 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         assertEq(
             engine.lastFundingTime(),
-            uint64(block.timestamp),
-            "liquidation path should settle the funding clock for the elapsed interval"
+            fundingBefore,
+            "No-funding model should not advance the funding clock during liquidation"
         );
-        assertGt(engine.lastFundingTime(), fundingBefore, "liquidation should advance the funding clock");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
@@ -2673,9 +2663,6 @@ contract FadStalenessTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -3451,9 +3438,6 @@ contract OrderRouterAuditTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -3588,9 +3572,6 @@ contract StaleOrderExpiryTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -3819,9 +3800,6 @@ contract MarkPriceStalenessTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -3907,9 +3885,6 @@ contract StalenessGriefTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -4018,9 +3993,6 @@ contract VpiImrBypassTest is Test {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 1e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -4152,9 +4124,6 @@ contract KeeperFeeRefundTest is Test {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -4354,9 +4323,6 @@ contract WeekendArbitrageTest is Test {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

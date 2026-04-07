@@ -4,14 +4,13 @@ pragma solidity 0.8.33;
 import {CfdTypes} from "./CfdTypes.sol";
 
 /// @title CfdMath
-/// @notice Pure stateless math library for PnL, Price Impact, and Funding
+/// @notice Pure stateless math library for PnL and price impact
 /// @custom:security-contact contact@plether.com
 library CfdMath {
 
     uint256 internal constant WAD = 1e18;
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
     uint256 internal constant USDC_TO_TOKEN_SCALE = 1e20; // Resolves Size(18)*Price(8) -> USDC(6)
-    uint256 internal constant FUNDING_INDEX_SCALE = 1e30; // Resolves Size(18)*Index(18) -> USDC(6)
 
     // ==========================================
     // 1. PNL & SOLVENCY MATH
@@ -123,51 +122,6 @@ library CfdMath {
 
         // Intentionally uncapped negative values to allow massive MM rebates
         vpiUsdc = int256(postCost) - int256(preCost);
-    }
-
-    // ==========================================
-    // 3. PROGRESSIVE FUNDING CURVE
-    // ==========================================
-
-    /// @notice Returns the annualized funding rate based on the kinked curve.
-    ///         Linear ramp up to kinkSkewRatio, quadratic acceleration above it.
-    /// @param absSkewUsdc Absolute directional imbalance in USDC (6 decimals)
-    /// @param depthUsdc Total pool depth in USDC (6 decimals)
-    /// @param params Risk parameters defining the funding curve shape
-    /// @return annualizedRateWad Annualized rate (18 decimals WAD)
-    function getAnnualizedFundingRate(
-        uint256 absSkewUsdc,
-        uint256 depthUsdc,
-        CfdTypes.RiskParams memory params
-    ) internal pure returns (uint256 annualizedRateWad) {
-        if (depthUsdc == 0 || absSkewUsdc == 0) {
-            return 0;
-        }
-
-        uint256 skewRatio = (absSkewUsdc * WAD) / depthUsdc;
-        if (skewRatio > params.maxSkewRatio) {
-            skewRatio = params.maxSkewRatio;
-        }
-
-        if (skewRatio <= params.kinkSkewRatio) {
-            // Zone 1: Linear Ramp -> BaseApy * (skewRatio / kinkRatio)
-            annualizedRateWad = (params.baseApy * skewRatio) / params.kinkSkewRatio;
-        } else {
-            // Zone 2: True Quadratic Hockey Stick
-            uint256 excessSkew = skewRatio - params.kinkSkewRatio;
-            uint256 dangerZoneSize = params.maxSkewRatio - params.kinkSkewRatio;
-
-            // Ratio of how far we are into the danger zone (WAD)
-            uint256 excessRatio = (excessSkew * WAD) / dangerZoneSize;
-
-            // Quadratic acceleration (WAD)
-            uint256 quadraticFactor = (excessRatio * excessRatio) / WAD;
-
-            uint256 apyRange = params.maxApy - params.baseApy;
-            uint256 premiumApy = (apyRange * quadraticFactor) / WAD;
-
-            annualizedRateWad = params.baseApy + premiumApy;
-        }
     }
 
 }

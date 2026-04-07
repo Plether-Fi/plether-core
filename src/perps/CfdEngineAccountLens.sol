@@ -98,7 +98,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             pos,
             engineContract.lastMarkPrice(),
             engineContract.CAP_PRICE(),
-            _getProjectedPendingFunding(accountId, pos),
             snapshot.terminalReachableUsdc,
             engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
         );
@@ -109,7 +108,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.margin = lockedBuckets.positionMarginUsdc;
         snapshot.entryPrice = pos.entryPrice;
         snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
-        snapshot.pendingFundingUsdc = riskState.pendingFundingUsdc;
+        snapshot.pendingFundingUsdc = 0;
         snapshot.netEquityUsdc = riskState.equityUsdc;
         snapshot.liquidatable = riskState.liquidatable;
     }
@@ -117,25 +116,14 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        (
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.entryFundingIndex,
-            pos.side,
-            pos.lastUpdateTime,
-            pos.vpiAccrued
-        ) = engineContract.positions(accountId);
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc,, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+            engineContract.positions(accountId);
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
         (
             params.vpiFactor,
             params.maxSkewRatio,
-            params.kinkSkewRatio,
-            params.baseApy,
-            params.maxApy,
             params.maintMarginBps,
             params.initMarginBps,
             params.fadMarginBps,
@@ -145,47 +133,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         ) = engineContract.riskParams();
     }
 
-    function _getProjectedPendingFunding(
-        bytes32 accountId,
-        CfdTypes.Position memory pos
-    ) internal view returns (int256 fundingUsdc) {
-        if (pos.size == 0) {
-            return 0;
-        }
-        CfdEnginePlanTypes.RawSnapshot memory snap = CfdEnginePlanTypes.RawSnapshot({
-            position: _position(accountId),
-            accountId: accountId,
-            currentTimestamp: block.timestamp,
-            lastFundingTime: engineContract.lastFundingTime(),
-            lastMarkPrice: engineContract.lastMarkPrice(),
-            lastMarkTime: engineContract.lastMarkTime(),
-            bullSide: _sideSnapshot(engineContract.getSideState(CfdTypes.Side.BULL)),
-            bearSide: _sideSnapshot(engineContract.getSideState(CfdTypes.Side.BEAR)),
-            fundingVaultDepthUsdc: engineContract.vault().totalAssets(),
-            vaultAssetsUsdc: engineContract.vault().totalAssets(),
-            vaultCashUsdc: engineContract.vault().totalAssets(),
-            accountBuckets: engineContract.clearinghouse().getAccountUsdcBuckets(accountId),
-            lockedBuckets: engineContract.clearinghouse().getLockedMarginBuckets(accountId),
-            marginReservationIds: new uint64[](0),
-            accumulatedFeesUsdc: engineContract.accumulatedFeesUsdc(),
-            accumulatedBadDebtUsdc: engineContract.accumulatedBadDebtUsdc(),
-            totalDeferredPayoutUsdc: engineContract.totalDeferredPayoutUsdc(),
-            totalDeferredClearerBountyUsdc: engineContract.totalDeferredClearerBountyUsdc(),
-            deferredPayoutForAccount: engineContract.deferredPayoutUsdc(accountId),
-            degradedMode: engineContract.degradedMode(),
-            capPrice: engineContract.CAP_PRICE(),
-            riskParams: _riskParams(),
-            isFadWindow: engineContract.isFadWindow(),
-            liveMarkFreshForFunding: true
-        });
-        CfdEnginePlanTypes.GlobalFundingDelta memory fundingDelta =
-            CfdEnginePlanLib.planGlobalFunding(snap, engineContract.lastMarkPrice(), 0);
-        int256 postFundingIndex = pos.side == CfdTypes.Side.BULL
-            ? snap.bullSide.fundingIndex + fundingDelta.bullFundingIndexDelta
-            : snap.bearSide.fundingIndex + fundingDelta.bearFundingIndexDelta;
-        fundingUsdc = PositionRiskAccountingLib.getPendingFunding(pos, postFundingIndex);
-    }
-
     function _sideSnapshot(
         ICfdEngine.SideState memory side
     ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
@@ -193,9 +140,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             maxProfitUsdc: side.maxProfitUsdc,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin,
-            fundingIndex: side.fundingIndex,
-            entryFunding: side.entryFunding
+            totalMargin: side.totalMargin
         });
     }
 

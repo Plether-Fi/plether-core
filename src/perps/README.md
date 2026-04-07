@@ -1,6 +1,6 @@
 # Plether Perpetuals Engine
 
-Bounded synthetic perpetuals with zero-slippage execution. Traders take leveraged directional exposure through `plDXY-BULL` and `plDXY-BEAR` against a tranched USDC House Pool.
+Bounded synthetic directional markets with zero-slippage execution. Traders take leveraged `plDXY-BULL` and `plDXY-BEAR` exposure against a tranched USDC House Pool.
 
 ## Core Insight: Bounded Solvency
 
@@ -14,13 +14,12 @@ For the accounting model that should govern future refactors, see [`ACCOUNTING_S
 
 ### Accounting Domains
 
-- `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, funding settlement, execution fees, and net trader settlement.
+- `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, execution fees, and net trader settlement.
 - `LiquidationAccountingLib`: shared kernel for preview/live liquidation settlement, including reachable collateral, keeper bounty, residual payout, and bad debt.
 - `SolvencyAccountingLib`: protocol-level balance-sheet view used for max-liability checks, effective-asset construction, and degraded-mode decisions.
-- `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees, deferred liabilities, and withdrawal-only funding liabilities.
-- Planner previews follow the same staged transition model as live execution: funding first on pre-mutation depth, then protocol/router cash mutations, then payout and solvency classification on the post-mutation state.
-- Deferred funding receivables may count toward trader equity/risk, but opens cannot rely on deferred IOUs as if they were unlocked position margin for paying physical trade costs.
-- Carry migration note: the repo now includes additive Phase 1 plumbing for a future `baseCarryBps` LP-capital-usage carry model, but live protocol behavior still uses the existing funding model until a later migration phase switches settlement and guard semantics.
+- `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees and deferred liabilities.
+- Planner previews follow the same staged transition model as live execution: router cash mutations happen before payout and solvency classification on the post-mutation state.
+- The current no-funding baseline reserves real liabilities only. Any future LP-capital carry model should be introduced as a fresh feature on top of this baseline rather than reviving classic side-to-side funding.
 
 These domains answer different questions and must not silently share assumptions.
 
@@ -51,7 +50,7 @@ The House Pool is the USDC counterparty for trader payouts. It has senior and ju
 
 **Withdrawal Firewall**: `maxWithdraw` / `maxRedeem` compute `freeUSDC = totalAssets() - maxSystemLiability`. LPs can withdraw only unencumbered capital. At 100% utilization, capital is locked to cover active trader payouts.
 
-**Canonical Pool Depth**: `HousePool` distinguishes `rawAssets` (token balance), `accountedAssets` (canonical protocol-owned depth), `excessAssets` (unaccounted positive balance), and `totalAssets()` / physical assets (`min(rawAssets, accountedAssets)`). Unsolicited positive transfers stay quarantined as excess until explicitly accounted or swept. Raw-balance shortfalls reduce effective backing immediately. Funding, solvency, reconcile, and withdrawal-firewall paths all consume this controlled depth source.
+**Canonical Pool Depth**: `HousePool` distinguishes `rawAssets` (token balance), `accountedAssets` (canonical protocol-owned depth), `excessAssets` (unaccounted positive balance), and `totalAssets()` / physical assets (`min(rawAssets, accountedAssets)`). Unsolicited positive transfers stay quarantined as excess until explicitly accounted or swept. Raw-balance shortfalls reduce effective backing immediately. Solvency, reconcile, and withdrawal-firewall paths all consume this controlled depth source.
 
 **Senior High-Water Mark**: `seniorHighWaterMark` tracks peak senior principal. After senior impairment, revenue restores `seniorPrincipal` to that mark before any surplus flows to junior. The mark increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets cleanly after a full wipeout and recapitalization. Deposits remain blocked while senior is partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`).
 
@@ -140,9 +139,8 @@ Core state machine. **Holds zero physical funds.** It receives validated intents
 
 **Side-State / Engine Accounting**
 
-- `SideState` remains symmetric and conservative: side-local mirrors (`maxProfitUsdc`, `openInterest`, `entryNotional`, `totalMargin`, `fundingIndex`, `entryFunding`) must stay consistent with the aggregate live position set.
+- `SideState` remains symmetric and conservative: side-local mirrors (`maxProfitUsdc`, `openInterest`, `entryNotional`, `totalMargin`) must stay consistent with the aggregate live position set.
 - `sides[BULL].totalMargin + sides[BEAR].totalMargin` must equal the sum of `pos.margin` across all live positions.
-- Funding remains zero-sum at the side level: previewed/live bull and bear funding index motion must remain symmetric, with one side paying what the other side receives before clipping.
 - Preview/live parity must hold for the close and liquidation accounting kernels, including degraded-mode checks.
 - Terminal close and liquidation settlement must conserve value across trader payout, vault assets, protocol fees, deferred liabilities, and bad debt.
 
@@ -161,7 +159,7 @@ Core state machine. **Holds zero physical funds.** It receives validated intents
 
 **HousePool / LP Accounting**
 
-- HousePool withdrawal limits can only expose unencumbered USDC after accounting for protocol fees, max liability, funding withdrawal reserve, and deferred liabilities.
+- HousePool withdrawal limits can only expose unencumbered USDC after accounting for protocol fees, max liability, and deferred liabilities.
 - Senior high-water-mark accounting must prevent junior from extracting value while senior capital remains impaired.
 - HousePool reconciliation, NAV, and withdrawal-firewall paths must consume the same canonical engine snapshots for accounting inputs.
 
@@ -177,7 +175,7 @@ Because prices cannot exceed CAP or drop below zero, this check bounds solvency 
 
 [`CfdMath.sol`](CfdMath.sol)
 
-Pure stateless math library for PnL limits, virtual price impact (VPI), and piecewise funding curves.
+Pure stateless math library for PnL limits and virtual price impact (VPI).
 
 ## Market Balancing: The Economic Repulsion Engine
 
@@ -197,35 +195,17 @@ C(S) = 0.5 · k · S² / D
 
 **Depth Manipulation Resistance**: Each position tracks `vpiAccrued`, the cumulative VPI charges and rebates across its lifetime. On close, the engine bounds VPI so the user cannot extract a net rebate greater than what they paid. Inflating or deflating depth between open and close therefore cannot produce VPI profit because the bound enforces `accruedVpi + closeVpi >= 0`.
 
-### Kinked Convex Funding Curve
-
-Funding rates scale on skew ratio (`S/D`) and become steep before the hard limit:
-
-| Zone | Skew Ratio | Rate | Shape |
-|------|-----------|------|-------|
-| 1 | 0% → 25% | 0 → 15% APY | Linear ramp |
-| 2 | 25% → 40% | 15% → 300% APY | Quadratic explosion |
-
-Zone 2 creates a "wall of APY" that forces arbitrageurs to delta-neutralize the pool before the 40% hard cap.
-
-### Continuous Funding Without Loops
-
-Dual `int256` accumulators (`bullFundingIndex`, `bearFundingIndex`) track funding owed per unit of size at 18-decimal precision. User funding PnL = `size × (currentIndex - entryIndex) / FUNDING_INDEX_SCALE`. No loops over users.
-
 ## Conservative Mark-to-Market
 
-The engine values LP equity with O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`, funding indexes), giving real-time aggregate PnL without iterating positions.
+The engine values LP equity with O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`) plus bounded payout accounting, giving real-time aggregate PnL without iterating positions.
 
 ### Per-Side Zero Clamp
 
-The MtM function (`getVaultMtmAdjustment`) computes per-side `PnL + funding`, caps negative funding by collectible side margin, then clamps each side at zero. The vault therefore never recognizes unrealized trader losses as assets or uncollectible funding receivables as offsets:
+The MtM function (`getVaultMtmAdjustment`) computes per-side unrealized `PnL`, then clamps each side at zero. The vault therefore never recognizes unrealized trader losses as assets:
 
 ```
-if bullFunding < -bullTotalMargin: bullFunding = -bullTotalMargin
-if bearFunding < -bearTotalMargin: bearFunding = -bearTotalMargin
-
-bullTotal = bullPnl + bullFunding
-bearTotal = bearPnl + bearFunding
+bullTotal = bullPnl
+bearTotal = bearPnl
 
 if bullTotal < 0: bullTotal = 0
 if bearTotal < 0: bearTotal = 0
@@ -235,9 +215,7 @@ return bullTotal + bearTotal
 
 The return value is the vault's aggregate unrealized liability to profitable traders. When traders are losing on net, MtM returns zero rather than a positive vault asset. Realized losses flow through physical USDC transfers and naturally increase pool balance.
 
-**Why cap negative funding by side margin first?** Uncollectible funding receivables should not offset real unrealized liabilities in LP NAV. Capping negative funding by collectible side margin prevents impossible trader debt from suppressing true vault liability while keeping the per-side zero clamp conservative.
-
-**Trade-off**: The vault temporarily undercounts assets when traders owe unrealized funding or have unrealized losses. This is conservative: junior principal may dip until traders close or are liquidated, at which point physical USDC transfers restore balance. That is preferable to letting paper profits inflate LP principal and be withdrawn as real USDC.
+**Trade-off**: The vault temporarily undercounts assets when traders have unrealized losses. This is conservative: junior principal may dip until traders close or are liquidated, at which point physical USDC transfers restore balance. That is preferable to letting paper profits inflate LP principal and be withdrawn as real USDC.
 
 ### Layered Conservatism
 
@@ -246,8 +224,8 @@ Different protocol functions use different conservatism levels:
 | Function | Purpose | Approach | Rationale |
 |----------|---------|----------|-----------|
 | `_reconcile()` | LP equity valuation | Zero-clamped MtM | Conservative share pricing — vault only counts liabilities, never unrealized gains |
-| `getFreeUSDC()` | LP withdrawal limits | Asymmetric (liabilities only) | Cash leaving the vault must exist physically — never offset reserves by uncollected receivables |
-| `_getEffectiveAssets()` | Position solvency | Capped symmetric funding | Economic solvency allows counting receivables up to margin cap |
+| `getFreeUSDC()` | LP withdrawal limits | Asymmetric (liabilities only) | Cash leaving the vault must exist physically — never offset reserves by paper claims |
+| `_getEffectiveAssets()` | Position solvency | Direct collateral + PnL | Solvency counts only economically real resources |
 
 The junior tranche absorbs realized bad debt through the reconciliation waterfall. No insurance fund or ADL is required.
 
@@ -297,7 +275,6 @@ This prevents the Friday 19:00-22:00 interval from becoming an MEV gap while mar
 | Fee | Rate | Source |
 |-----|------|--------|
 | Execution Fee | 4 bps (0.04%) | Charged on notional size at open/close |
-| Funding | Variable | Majority side pays the minority side proportional to unhedged skew |
 
 Open and close execution fees accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Keeper execution is compensated separately through reserved router order bounties.
 
@@ -341,13 +318,11 @@ Only the owner can pause or unpause. Protective actions (closes, liquidations, w
 | `maintMarginBps` | 100 (1%) | Maintenance margin requirement |
 | `initMarginBps` | 150 (1.5%) | Initial margin requirement configured explicitly in risk params |
 | `fadMarginBps` | 300 (3%) | FAD window maintenance margin |
+| `baseCarryBps` | 500 (5%) | Reserved for future LP-capital carry design; inactive in current no-funding baseline |
 | `bountyBps` | 15 (0.15%) | Liquidation keeper bounty |
 | `minBountyUsdc` | 5,000,000 ($5) | Keeper bounty floor |
 | `vpiFactor` | WAD-scaled | VPI severity `k` |
-| `kinkSkewRatio` | 0.25e18 (25%) | Funding curve inflection point |
 | `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
-| `baseApy` | 0.15e18 (15%) | Funding rate at kink |
-| `maxApy` | 3.00e18 (300%) | Funding rate at wall |
 | IMR | `initMarginBps` | Initial margin requirement |
 | Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
 | Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |

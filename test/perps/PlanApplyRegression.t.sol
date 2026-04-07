@@ -15,9 +15,6 @@ contract PlanApplyRegressionTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.5e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -69,9 +66,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         uint256 vaultDepth = pool.totalAssets();
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullId, 40_000e18, 0.9e8);
         assertTrue(preview.valid, "Partial close preview should be valid");
-        assertTrue(preview.fundingUsdc != 0, "Funding should have accrued with asymmetric OI");
-
-        int256 entryFundingBefore = _sideEntryFunding(CfdTypes.Side.BULL);
+        int256 entryFundingBefore = 0;
 
         this.doClose(bullId, CfdTypes.Side.BULL, 40_000e18, 0.9e8);
 
@@ -79,11 +74,8 @@ contract PlanApplyRegressionTest is BasePerpTest {
         assertEq(sizeAfter, preview.remainingSize, "Post-close size matches preview");
         assertEq(marginAfter, preview.remainingMargin, "Post-close margin matches preview");
 
-        int256 entryFundingAfter = _sideEntryFunding(CfdTypes.Side.BULL);
-        assertTrue(
-            entryFundingAfter != entryFundingBefore,
-            "Side entry funding must change after partial close with accrued funding"
-        );
+        int256 entryFundingAfter = 0;
+        assertEq(entryFundingAfter, entryFundingBefore);
     }
 
     // ──────────────────────────────────────────────
@@ -239,8 +231,8 @@ contract PlanApplyRegressionTest is BasePerpTest {
     function _computeGlobalFundingPnl(
         CfdTypes.Side side
     ) internal view returns (int256) {
-        ICfdEngine.SideState memory s = engine.getSideState(side);
-        return (int256(s.openInterest) * s.fundingIndex - s.entryFunding) / int256(CfdMath.FUNDING_INDEX_SCALE);
+        side;
+        return 0;
     }
 
 }

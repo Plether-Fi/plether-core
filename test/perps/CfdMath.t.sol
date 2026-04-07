@@ -16,10 +16,7 @@ contract CfdMathTest is Test {
         // Set up standard institutional risk parameters
         params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18, // 5 bps impact factor
-            maxSkewRatio: 0.4e18, // 40% Hard wall
-            kinkSkewRatio: 0.25e18, // 25% Inflection point
-            baseApy: 0.15e18, // 15% APY at the kink
-            maxApy: 3.0e18, // 300% APY at the wall
+            maxSkewRatio: 0.4e18, // 40% Hard wall // 25% Inflection point // 15% APY at the kink // 300% APY at the wall
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -40,7 +37,6 @@ contract CfdMathTest is Test {
             margin: 2000 * 1e6, // $2k margin (50x leverage)
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -63,7 +59,6 @@ contract CfdMathTest is Test {
             margin: 2000 * 1e6,
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -142,50 +137,6 @@ contract CfdMathTest is Test {
     }
 
     // ==========================================
-    // 3. PROGRESSIVE CONVEX FUNDING CURVE
-    // ==========================================
-
-    function test_FundingCurve_HockeyStick() public view {
-        uint256 depthUsdc = 10_000_000 * 1e6; // $10M Vault Depth
-
-        // 1. Zone 1: Gentle Slope (10% Skew = $1M)
-        // Expected: (10 / 25) * 15% = 6.0% APY
-        uint256 apy10 = CfdMath.getAnnualizedFundingRate(1_000_000 * 1e6, depthUsdc, params);
-        assertEq(apy10, 0.06e18, "10% Skew should be 6% APY");
-
-        // 2. The Kink (25% Skew = $2.5M)
-        // Expected: Exactly Base APY (15%)
-        uint256 apy25 = CfdMath.getAnnualizedFundingRate(2_500_000 * 1e6, depthUsdc, params);
-        assertEq(apy25, 0.15e18, "25% Skew should be 15% APY");
-
-        // 3. Zone 2 Start: The Acceleration (30% Skew = $3M)
-        // Excess ratio: 5% / 15% = 33.33%
-        // Quadratic factor: 0.3333^2 = 11.11%
-        // Premium: 11.11% * (300% - 15%) = 31.66%
-        // Total APY: 15% + 31.66% = ~46.66% APY
-        uint256 apy30 = CfdMath.getAnnualizedFundingRate(3_000_000 * 1e6, depthUsdc, params);
-        assertApproxEqAbs(apy30, 0.4666e18, 0.01e18, "30% Skew should be ~46% APY");
-
-        // 4. The "Wall of APY" (39% Skew = $3.9M)
-        // Excess ratio: 14% / 15% = 93.33%
-        // Quadratic factor: 0.9333^2 = 87.11%
-        // Premium: 87.11% * 285% = 248.26%
-        // Total APY: 15% + 248.26% = ~263.26% APY
-        uint256 apy39 = CfdMath.getAnnualizedFundingRate(3_900_000 * 1e6, depthUsdc, params);
-        assertApproxEqAbs(apy39, 2.6326e18, 0.01e18, "39% Skew should be ~263% APY");
-
-        // 5. The Hard Wall (40% Skew = $4M)
-        // Expected: Exactly Max APY (300%)
-        uint256 apy40 = CfdMath.getAnnualizedFundingRate(4_000_000 * 1e6, depthUsdc, params);
-        assertEq(apy40, 3.0e18, "40% Skew should be 300% APY");
-
-        // 6. Over the limit safety check (e.g. 45% Skew)
-        // Expected: Clamped at Max APY (300%)
-        uint256 apy45 = CfdMath.getAnnualizedFundingRate(4_500_000 * 1e6, depthUsdc, params);
-        assertEq(apy45, 3.0e18, "45% Skew should clamp to 300% APY");
-    }
-
-    // ==========================================
     // 4. BEAR PNL & EDGE CASES
     // ==========================================
 
@@ -195,7 +146,6 @@ contract CfdMathTest is Test {
             margin: 2000 * 1e6,
             entryPrice: 0.8e8,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -218,7 +168,6 @@ contract CfdMathTest is Test {
             margin: 0,
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
             vpiAccrued: 0

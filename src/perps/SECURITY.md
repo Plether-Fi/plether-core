@@ -17,7 +17,7 @@ All perpetuals contracts are **non-upgradeable**. Once deployed, the bytecode ca
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `riskParams` (VPI, funding curve, margins, bounty) | CfdEngine | `onlyOwner` — 48-hour propose-finalize timelock |
+| `riskParams` (VPI, carry settings, margins, bounty) | CfdEngine | `onlyOwner` — 48-hour propose-finalize timelock |
 | `fadDayOverrides` | CfdEngine | `onlyOwner` — 48-hour propose-finalize timelock |
 | `fadMaxStaleness` | CfdEngine | `onlyOwner`, must be > 0 — 48-hour timelock |
 | `fadRunwaySeconds` | CfdEngine | `onlyOwner`, max 24 hours — 48-hour timelock |
@@ -49,7 +49,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Vault Solvency** | `vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` is enforced on risk-increasing opens, where `vault.totalAssets()` is canonical physical backing (`min(rawAssets, accountedAssets)`) rather than raw token balance. If a profitable close later reveals insolvency, `degradedMode` contains the breach instead of trapping the close |
 | **Degraded Containment** | If a close realizes cash outflow that pushes `effectiveAssets` below the remaining liability bound, `degradedMode` latches: new opens and risky withdrawals are blocked until recapitalization restores solvency and the owner clears the mode |
 | **Bounded Payout** | No trade's maximum profit exceeds `size × CAP_PRICE / USDC_TO_TOKEN_SCALE` — payouts are deterministic at inception |
-| **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees - fundingWithdrawalReserve - deferredPayoutLiabilities` — LPs cannot withdraw encumbered capital |
+| **Withdrawal Firewall** | `freeUSDC = balance - max(bullMaxProfit, bearMaxProfit) - accumulatedFees - deferredPayoutLiabilities` — LPs cannot withdraw encumbered capital |
 | **Senior High-Water Mark** | After a loss impairs `seniorPrincipal`, revenue restores it to `seniorHighWaterMark` before any surplus flows to junior. Increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets on the first post-wipeout recapitalization. Deposits stay blocked while partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`) |
 
 ### Position Invariants
@@ -67,16 +67,9 @@ These properties must always hold. Violation indicates a critical bug.
 
 | Invariant | Description |
 |-----------|-------------|
-| **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` caps negative funding by collectible side margin, then computes per-side `(PnL + funding)` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets or uncollectible funding receivables as offsets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
-| **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive funding/PnL). Illiquid receivables never reduce physical reserves |
+| **Per-Side Zero Clamp** | `getVaultMtmAdjustment()` computes per-side unrealized `PnL` and clamps negative totals to zero — the vault never recognizes unrealized trader losses as assets. Conservative: may temporarily undercount assets until traders settle, but eliminates phantom profits from per-side netting |
+| **Asymmetric Withdrawals** | `getFreeUSDC()` only reserves for vault liabilities (positive trader PnL / bounded max liability / deferred claims). Paper receivables never reduce physical reserves |
 | **Margin Tracking** | `sides[BULL].totalMargin + sides[BEAR].totalMargin == Σ pos.margin` across all open positions, maintained through `processOrder` and `liquidatePosition` |
-
-### Funding Invariants
-
-| Invariant | Description |
-|-----------|-------------|
-| **Zero-Sum Funding** | `bullFundingIndex` and `bearFundingIndex` move symmetrically — majority side pays, minority side receives |
-| **No Silent Drain** | If funding debt exceeds margin on an open order, the engine reverts with `FundingExceedsMargin` (position must be liquidated instead) |
 
 ### Clearinghouse Invariants
 
@@ -123,7 +116,7 @@ These properties must always hold. Violation indicates a critical bug.
 #### Owner/Admin Role
 
 The protocol owner can (all subject to 48-hour timelock):
-- Adjust all risk parameters (`vpiFactor`, funding curve, margin BPS, bounty)
+- Adjust all risk parameters (`vpiFactor`, carry settings, margin BPS, bounty)
 - Add/remove FAD day overrides for FX market holidays
 - Configure `fadMaxStaleness` and `fadRunwaySeconds`
 - Set the senior tranche interest rate and mark staleness limit
@@ -156,7 +149,7 @@ Keepers are permissionless — anyone can execute orders and liquidations:
 - **Liquidation**: Keepers trigger liquidations and receive USDC bounties from the vault
 - **MEV Protection**: Commit-Reveal prevents keepers from seeing user intent before committing oracle prices in live markets. Frozen-oracle windows are an intentional exception: no fresh oracle publish exists, so the protocol preserves close liveness at the last valid oracle price instead of enforcing an impossible publish-time ordering check.
 - **Failed Orders**: Retryable market-state misses such as slippage do not burn the order or pay the clearer; they emit `OrderSkipped`, keep the order pending with its escrow intact, and requeue it behind the current tail with a short retry cooldown. A shared order-failure policy now classifies both router-local pre-execution failures and engine-typed reverts, and the engine/planner expose semantic policy categories rather than router-owned raw code lists: `previewOpenFailurePolicyCategory(...)` returns `CfdEnginePlanTypes.OpenFailurePolicyCategory`, while `processOrderTyped()` reverts with `CfdEngine__TypedOrderFailure(CfdEnginePlanTypes.ExecutionFailurePolicyCategory, uint8, bool)`. Commit-time open rejection is intentionally limited to `CommitTimeRejectable` current-state failures, while execution-time `ProtocolStateInvalidated` opens (including close-only transitions detected in the router) refund the trader bounty. Expired and otherwise terminal `UserInvalid` orders pay their reserved execution bounty to the executor from router escrow. Because close orders now prefund the flat clearer bounty in router escrow, terminal invalid and expired closes no longer tax LP equity or depend on vault liquidity, even when the bounty was sourced from active position margin rather than idle free settlement.
-- **Canonical Transition Staging**: Mark refresh, preview, and live settlement paths are expected to share the same economic stage ordering: funding may only accrue across fresh live-mark windows, router escrow forfeiture/liquidity moves happen after any required funding checkpoint, and preview/live paths must agree on when protocol-fee tagging becomes visible to solvency math.
+- **Canonical Transition Staging**: Mark refresh, preview, and live settlement paths are expected to share the same economic stage ordering: router escrow forfeiture/liquidity moves happen after any required mark refresh, and preview/live paths must agree on when protocol-fee tagging becomes visible to solvency math.
 - **Spendability vs Equity**: Deferred trader receivables improve economic equity but are not physically spendable margin until paid. Planner validation must therefore reject opens that could pass a pure-equity check yet still fail later when the clearinghouse tries to unlock physical position margin.
 
 #### Engine / Router Trust Boundary
@@ -192,19 +185,16 @@ These actors **cannot**:
 
 #### Temporary Junior NAV Dilution
 
-- **Behavior**: `getVaultMtmAdjustment()` first caps each side's negative funding at collectible side margin, then clamps each side's unrealized `(PnL + funding)` at zero. When the vault has physically paid out to winning traders but losing traders have not fully settled yet, the MtM still refuses to recognize those unrealized receivables as assets beyond collectible backing.
+- **Behavior**: `getVaultMtmAdjustment()` clamps each side's unrealized `PnL` at zero. When the vault has physically paid out to winning traders but losing traders have not fully settled yet, the MtM still refuses to recognize those unrealized receivables as assets.
 - **Impact**: `_reconcile()` sees `distributable < claimedEquity` and triggers `_absorbLoss()`, writing down `juniorPrincipal`. When losers eventually settle (close or liquidation), cash flows in as revenue, but recovery goes through the waterfall (senior restoration → senior yield → junior), so junior doesn't recover dollar-for-dollar.
-- **Severity**: Proportional to unsettled funding. In testing: ~0.3% dip ($3k on $1M) after 90 days of skewed funding with one side settled. Could be larger with sustained heavy skew.
+- **Severity**: Proportional to unsettled unrealized losses. Junior principal can dip until losing traders close or are liquidated.
 - **Secondary effect**: New LP depositors during the dip get underpriced shares, diluting existing junior LPs.
 - **Rationale**: Accepted trade-off to eliminate phantom profit bugs (C-02/C-03). The vault can never overestimate its position, which is strictly safer than the alternative where paper MtM profits get withdrawn as real USDC. This follows the accounting conservatism principle: recognize liabilities (trader profits), don't recognize unrealized assets (trader losses) until realized through physical settlement.
-- **Why this is the chosen O(1) solution**: The ideal fix would be per-position capping (`Σ min(loss_i, margin_i)`), but `min()` is nonlinear — each position clips at a different threshold depending on its entry price and margin, so it cannot be decomposed into global accumulators. The live implementation therefore uses a conservative two-step approximation: cap negative funding by aggregate collectible side margin, then zero-clamp each side's `(PnL + funding)` total. This can still undercount assets, but it prevents phantom profits from uncollectible funding receivables while keeping the accounting O(1).
+- **Why this is the chosen O(1) solution**: The ideal fix would be fully per-position realization, but that would require iterating positions. The live implementation therefore uses a conservative zero-clamp on per-side unrealized PnL. This can still undercount assets, but it prevents phantom profits while keeping the accounting O(1).
 
-### Funding Precision
+### No-Funding Baseline
 
-Funding accumulators use 18-decimal precision (WAD). At extreme low values:
-- `fundingDelta = (annRate × timeDelta) / SECONDS_PER_YEAR` — at 0.01% APY with 1-second blocks, this is ~3.17e5 (non-zero)
-- `step = (price × fundingDelta) / 1e8` — with price=1e8, step=3.17e5 per second. Accumulates correctly.
-- **Lower bound**: Funding truncates to zero only when `annRate × timeDelta < SECONDS_PER_YEAR / price`, which at $1.00 means annRate × timeDelta < 315. At 12s blocks, this requires annRate < 26, i.e., < 2.6e-17 APY. Practically unreachable.
+The current perpetuals engine no longer uses a side-to-side funding mechanism. Any future LP-capital carry model should be introduced as an explicit new feature rather than reusing legacy funding semantics.
 
 ### Liquidation Mechanics
 
@@ -221,7 +211,7 @@ This means keepers may receive less than `minBountyUsdc` when equity is small bu
 When a position goes underwater (equity < 0):
 - **Liquidation**: Vault seizes all position margin + available free USDC from clearinghouse. Remaining deficit is absorbed as bad debt by the House Pool.
 - **Self-Close**: `_processDecrease` seizes `min(available, owed)` from the user. Any shortfall is absorbed by the vault.
-- **Risk**: Sustained bad debt erodes LP capital. The funding curve's "wall of APY" at 40% skew is designed to prevent this by forcing deleveraging before extremes.
+- **Risk**: Sustained bad debt erodes LP capital. In the no-funding baseline, skew control relies on VPI, margin rules, liquidation, and external spot-market inventory incentives rather than a funding curve.
 
 #### Deferred Profitable Close Payouts
 
@@ -260,11 +250,11 @@ When a position goes underwater (equity < 0):
 - **Behavior**: Before liquidation, the router forfeits any queued execution-bounty escrow for the liquidated account into the vault. Liquidation preview and live execution now both use the same post-forfeiture vault-depth view.
 - **Impact**: Keeper tooling and live liquidation agree on keeper bounty, deferred payout, bad debt, and post-op solvency outputs instead of mixing pre-sweep and post-sweep depth.
 
-#### Stale-Mark Funding Policy
+#### No-Funding Mark Policy
 
-- **Behavior**: Outside genuine frozen/FAD oracle mode, funding accrual stops once the live mark becomes older than the engine's live staleness limit. Funding resumes only after a fresh mark update arrives.
-- **Effect**: Funding can no longer keep advancing off stale weekday marks while other protocol paths are already freshness-gated.
-- **Trade-off**: Tests and integrations must not assume long stale intervals keep accumulating funding during ordinary live-market operation.
+- **Behavior**: The no-funding baseline does not advance any side-to-side funding clock. Mark freshness still gates execution, liquidation, and HousePool reconciliation.
+- **Effect**: Stale and frozen oracle windows affect execution liveness and LP accounting freshness, but not any separate funding accrual.
+- **Trade-off**: If a future LP-capital carry model is introduced, it must be specified independently rather than reusing legacy funding semantics.
 
 #### Bounded Queue Cleanup
 
@@ -450,7 +440,7 @@ Fees are hardcoded (execution = 4 bps, bounty = 15 bps). Funding curve parameter
 
 ### Extreme Skew
 
-1. The funding curve's quadratic Zone 2 (25%→40% skew) creates a "wall of APY" at up to 300% annualized
+1. The carry settings's quadratic Zone 2 (25%→40% skew) creates a "wall of APY" at up to 300% annualized
 2. At 40% skew ratio, no new orders on the majority side are accepted (VPI becomes extremely expensive)
 3. If skew persists, owner can adjust `maxSkewRatio` downward to force earlier rejection
 4. MMs are financially incentivized to heal skew via VPI rebates

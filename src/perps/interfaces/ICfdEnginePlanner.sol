@@ -11,20 +11,6 @@ interface ICfdEnginePlanner {
         int256 netMarginChange
     ) external pure returns (bool drained, uint256 marginAfter);
 
-    function planGlobalFunding(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime
-    ) external pure returns (CfdEnginePlanTypes.GlobalFundingDelta memory gfd);
-
-    function planFunding(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime,
-        bool isClose,
-        bool isFullClose
-    ) external pure returns (CfdEnginePlanTypes.FundingDelta memory fd);
-
     function planOpen(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,

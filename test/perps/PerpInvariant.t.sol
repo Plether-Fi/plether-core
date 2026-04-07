@@ -171,9 +171,6 @@ contract PerpInvariantTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -486,7 +483,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_LivePositionsRemainLargeEnoughForLiquidationEconomics() public view {
-        (,,,,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
+        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps) = engine.riskParams();
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
             oraclePrice = 1e8;
@@ -950,9 +947,6 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

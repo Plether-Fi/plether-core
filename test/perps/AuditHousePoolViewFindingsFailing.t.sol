@@ -150,9 +150,6 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.5e18,
-            maxApy: 3e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -193,9 +190,6 @@ contract AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness is BasePerpTest
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

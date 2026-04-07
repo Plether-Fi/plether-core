@@ -141,7 +141,6 @@ contract MarginClearinghouse is Ownable2Step {
 
         address engine_ = engine;
         if (engine_ != address(0)) {
-            ICfdEngine(engine_).syncFunding();
             IWithdrawGuard(engine_).checkWithdraw(accountId);
         }
 

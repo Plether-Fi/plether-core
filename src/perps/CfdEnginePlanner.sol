@@ -15,24 +15,6 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterFunding, netMarginChange);
     }
 
-    function planGlobalFunding(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime
-    ) external pure returns (CfdEnginePlanTypes.GlobalFundingDelta memory gfd) {
-        return CfdEnginePlanLib.planGlobalFunding(snap, executionPrice, publishTime);
-    }
-
-    function planFunding(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime,
-        bool isClose,
-        bool isFullClose
-    ) external pure returns (CfdEnginePlanTypes.FundingDelta memory fd) {
-        return CfdEnginePlanLib.planFunding(snap, executionPrice, publishTime, isClose, isFullClose);
-    }
-
     function planOpen(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,

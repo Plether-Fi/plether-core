@@ -17,7 +17,6 @@ library OpenAccountingLib {
         uint256 postSkewUsdc;
         uint256 vaultDepthUsdc;
         uint256 executionFeeBps;
-        int256 currentFundingIndex;
         CfdTypes.RiskParams riskParams;
     }
 
@@ -28,7 +27,6 @@ library OpenAccountingLib {
         uint256 newSize;
         uint256 newEntryNotional;
         uint256 postSkewUsdc;
-        int256 positionFundingContribution;
         int256 vpiUsdc;
         uint256 notionalUsdc;
         uint256 executionFeeUsdc;
@@ -54,7 +52,6 @@ library OpenAccountingLib {
         state.newSize = inputs.currentSize + inputs.sizeDelta;
         state.newEntryNotional = state.newSize * state.newEntryPrice;
         state.postSkewUsdc = inputs.postSkewUsdc;
-        state.positionFundingContribution = int256(inputs.sizeDelta) * inputs.currentFundingIndex;
 
         state.vpiUsdc = CfdMath.calculateVPI(
             inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.vaultDepthUsdc, inputs.riskParams.vpiFactor

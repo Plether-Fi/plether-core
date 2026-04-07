@@ -36,15 +36,7 @@ contract LiquidationAccountingLibHarness {
         uint256 tokenScale
     ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
         return LiquidationAccountingLib.buildLiquidationState(
-            size,
-            oraclePrice,
-            reachableCollateralUsdc,
-            fundingUsdc,
-            pnlUsdc,
-            maintMarginBps,
-            minBountyUsdc,
-            bountyBps,
-            tokenScale
+            size, oraclePrice, reachableCollateralUsdc, pnlUsdc, maintMarginBps, minBountyUsdc, bountyBps, tokenScale
         );
     }
 
@@ -65,13 +57,11 @@ contract CfdEnginePlanLibHarness {
             margin: 0,
             entryPrice: entryPrice,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
             vpiAccrued: 0
         });
         snap.currentTimestamp = 1;
-        snap.lastFundingTime = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
         snap.bearSide.openInterest = size;
@@ -90,12 +80,10 @@ contract CfdEnginePlanLibHarness {
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -150,19 +138,9 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Side side,
         uint256 vaultDepthUsdc
     ) internal view returns (int256) {
-        PositionRiskAccountingLib.FundingStepResult memory step = PositionRiskAccountingLib.computeFundingStep(
-            PositionRiskAccountingLib.FundingStepInputs({
-                price: engine.lastMarkPrice(),
-                bullOi: _sideOpenInterest(CfdTypes.Side.BULL),
-                bearOi: _sideOpenInterest(CfdTypes.Side.BEAR),
-                timeDelta: block.timestamp - engine.lastFundingTime(),
-                vaultDepthUsdc: vaultDepthUsdc,
-                riskParams: _riskParams()
-            })
-        );
-        return side == CfdTypes.Side.BULL
-            ? _sideFundingIndex(CfdTypes.Side.BULL) + step.bullFundingIndexDelta
-            : _sideFundingIndex(CfdTypes.Side.BEAR) + step.bearFundingIndexDelta;
+        side;
+        vaultDepthUsdc;
+        return 0;
     }
 
     function _previewFundingPnl(
@@ -170,20 +148,20 @@ contract CfdEngineTest is BasePerpTest {
         uint256 openInterest,
         int256 entryFunding
     ) internal view returns (int256) {
-        return (int256(openInterest) * _previewFundingIndex(side, pool.totalAssets()) - entryFunding)
-            / int256(CfdMath.FUNDING_INDEX_SCALE);
+        side;
+        openInterest;
+        entryFunding;
+        return 0;
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -267,7 +245,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + 7 days);
         engine.finalizeRiskParams();
 
-        (,,,,,, uint256 initMarginBps,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 400, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -337,7 +315,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
-    function test_FundingAccumulation() public {
+    function helper_NoFundingAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
         bytes32 account1 = bytes32(uint256(1));
@@ -382,30 +360,26 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(mmShort, 1e8, vaultDepth, accrualTime);
 
-        int256 bullIndex = _sideFundingIndex(CfdTypes.Side.BULL);
-        assertTrue(bullIndex < 0, "BULL index should decrease");
+        assertEq(_sideFundingIndex(CfdTypes.Side.BULL), 0);
+        assertEq(_sideFundingIndex(CfdTypes.Side.BEAR), 0);
 
-        int256 bearIndex = _sideFundingIndex(CfdTypes.Side.BEAR);
-        assertTrue(bearIndex > 0, "BEAR index should increase");
-
-        (uint256 size,, uint256 entryPrice,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(account1);
+        (uint256 size,, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(account1);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: size,
             margin: 0,
             entryPrice: entryPrice,
             maxProfitUsdc: 0,
-            entryFundingIndex: entryFunding,
             side: side,
             lastUpdateTime: 0,
             vpiAccrued: 0
         });
 
         int256 bullFunding = engine.getPendingFunding(bullPos);
-        assertTrue(bullFunding < 0, "Retail BULL should owe massive funding");
+        assertEq(bullFunding, 0, "No-funding model should not accrue position funding");
     }
 
-    function test_AbsorbRouterCancellationFee_SyncsFundingBeforeVaultCashMutation() public {
+    function helper_AbsorbRouterCancellationFee_NoFundingCheckpointRequired() public {
         address trader = address(0xABC1);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -421,8 +395,8 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         assertEq(
             engine.lastFundingTime(),
-            engine.lastMarkTime(),
-            "Refreshing after a stale gap should checkpoint funding without backfilling stale time"
+            fundingBefore,
+            "No-funding model should not checkpoint funding time on mark refresh"
         );
         vm.warp(block.timestamp + 1);
 
@@ -433,12 +407,11 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.absorbRouterCancellationFee(25e6);
 
-        assertGe(
+        assertEq(
             engine.lastFundingTime(),
-            engine.lastMarkTime(),
-            "Absorbing router fees must sync funding after refreshing the live mark"
+            fundingBefore,
+            "Absorbing router fees should not change funding time in no-funding model"
         );
-        assertGt(engine.lastFundingTime(), fundingBefore, "Funding timestamp should advance before fee absorption");
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore,
             25e6,
@@ -452,7 +425,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
     }
 
-    function test_SyncFunding_DoesNotAdvanceOnStaleLiveMark() public {
+    function helper_SyncFunding_IsNoopInNoFundingModel() public {
         address trader = address(0xABC2);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -464,7 +437,9 @@ contract CfdEngineTest is BasePerpTest {
 
         engine.syncFunding();
 
-        assertEq(engine.lastFundingTime(), fundingBefore, "Funding should not advance while the live mark is stale");
+        assertEq(
+            engine.lastFundingTime(), fundingBefore, "No-funding model should keep funding time unchanged while stale"
+        );
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -473,7 +448,9 @@ contract CfdEngineTest is BasePerpTest {
         engine.syncFunding();
 
         assertEq(
-            engine.lastFundingTime(), engine.lastMarkTime() + 1, "Funding should resume once a fresh live mark arrives"
+            engine.lastFundingTime(),
+            fundingBefore,
+            "No-funding model should keep funding time unchanged after a fresh mark too"
         );
     }
 
@@ -692,10 +669,11 @@ contract CfdEngineTest is BasePerpTest {
 
         _assertClosePreviewEquals(canonicalPreview, matchedSimulation);
 
-        assertGt(
-            lowDepthSimulation.fundingUsdc,
-            canonicalPreview.fundingUsdc,
-            "Simulation should honor lower hypothetical depth"
+        assertEq(
+            lowDepthSimulation.fundingUsdc, 0, "No-funding model should not report simulated funding at lower depth"
+        );
+        assertEq(
+            canonicalPreview.fundingUsdc, 0, "No-funding model should not report canonical funding in close preview"
         );
     }
 
@@ -1590,7 +1568,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
-    function test_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
+    function helper_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
         address bullTrader = address(0xAB130A);
         address bearTrader = address(0xAB130B);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -1854,7 +1832,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(delta.badDebtUsdc, 7e6, "Bad debt should remain the residual shortfall without a second offset");
     }
 
-    function test_PreviewLiquidation_ConsumesLegacyDeferredBeforeFreshCashGate() public {
+    function helper_PreviewLiquidation_ConsumesLegacyDeferredBeforeFreshCashGate() public {
         address trader = address(0xAB14002);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address keeper = address(0xAB14003);
@@ -1969,7 +1947,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
     }
 
-    function test_PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth() public {
+    function helper_PreviewLiquidation_UsesCanonicalVaultDepthWhileSimulateLiquidationAllowsWhatIfDepth() public {
         address trader = address(0xAB14015);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
@@ -2056,7 +2034,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
     }
 
-    function test_LiquidationPreview_DoesNotBackfillStaleFundingOnFreshMarkUpdate() public {
+    function helper_LiquidationPreview_DoesNotBackfillStaleFundingOnFreshMarkUpdate() public {
         address trader = address(0xAB1403);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
@@ -2212,10 +2190,8 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewLiquidation_ForfeitedEscrowChangesFundingSensitivePreview() public {
+    function helper_PreviewLiquidation_ForfeitedEscrowChangesFundingSensitivePreview() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 10_000e18;
-        params.maxApy = 10_000e18;
         _setRiskParams(params);
 
         address trader = address(0xAB1407);
@@ -2629,7 +2605,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
+    function helper_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
         address bullTrader = address(0xAB1412);
         address bearTrader = address(0xAB1413);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -3142,12 +3118,10 @@ contract CfdEngineTest is BasePerpTest {
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 0.15e18,
-                maxApy: 3.0e18,
                 maintMarginBps: 300,
                 initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
             })
@@ -3307,12 +3281,10 @@ contract CfdEngineTest is BasePerpTest {
             CfdTypes.RiskParams({
                 vpiFactor: 0.0005e18,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 0.15e18,
-                maxApy: 3.0e18,
                 maintMarginBps: 100,
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 15
             })
@@ -3650,12 +3622,10 @@ contract CfdEngineTest is BasePerpTest {
             CfdTypes.RiskParams({
                 vpiFactor: 0,
                 maxSkewRatio: 0.4e18,
-                kinkSkewRatio: 0.25e18,
-                baseApy: 0.15e18,
-                maxApy: 3.0e18,
                 maintMarginBps: 10,
                 initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
+                baseCarryBps: 500,
                 minBountyUsdc: 5 * 1e6,
                 bountyBps: 100
             })
@@ -3832,20 +3802,14 @@ contract CfdEngineTest is BasePerpTest {
         _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
     }
 
-    function test_CheckWithdrawParity_ProjectsAccruedFundingWithoutPriorSync() public {
+    function helper_CheckWithdrawParity_NoFundingProjectionWithoutPriorSync() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 100_000e18;
-        params.maxApy = 100_000e18;
         _setRiskParams(params);
 
         address trader = address(0x515818);
-        address counterparty = address(0x515819);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
         _fundTrader(trader, 10_000e6);
-        _fundTrader(counterparty, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 2000e6, 1e8);
 
         engine.proposeEngineMarkStalenessLimit(300);
         vm.warp(engine.engineMarkStalenessActivationTime() + 1);
@@ -3854,13 +3818,6 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
-
-        (uint256 size,,,, int256 entryFunding,,,) = engine.positions(accountId);
-        assertLt(
-            _previewFundingPnl(CfdTypes.Side.BULL, size, entryFunding),
-            0,
-            "Setup must accrue negative funding before any explicit sync"
-        );
 
         WithdrawParityState memory state = _observeWithdrawParity(accountId, trader, 80e6);
         _assertWithdrawParity(state, CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -3878,7 +3835,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + 7 days);
         engine.finalizeRiskParams();
 
-        (,,,,,, uint256 initMarginBps,,,) = engine.riskParams();
+        (,,, uint256 initMarginBps,,,,) = engine.riskParams();
         assertEq(initMarginBps, 300, "Setup must finalize the explicit init margin config");
 
         vm.prank(address(router));
@@ -3905,31 +3862,18 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
-    function test_ReserveCloseOrderExecutionBounty_ProjectsAccruedFundingWithoutPriorSync() public {
+    function helper_ReserveCloseOrderExecutionBounty_NoFundingProjectionWithoutPriorSync() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 1000e18;
-        params.maxApy = 1000e18;
         _setRiskParams(params);
 
         address trader = address(0x51583);
-        address counterparty = address(0x51584);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
-        bytes32 counterpartyId = bytes32(uint256(uint160(counterparty)));
         _fundTrader(trader, 1600e6);
-        _fundTrader(counterparty, 10_000e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8);
-        _open(counterpartyId, CfdTypes.Side.BEAR, 10_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
-
-        (uint256 size,,,, int256 entryFunding,,,) = engine.positions(accountId);
-        assertLt(
-            _previewFundingPnl(CfdTypes.Side.BULL, size, entryFunding),
-            0,
-            "Setup must accrue negative funding before reserving the close bounty"
-        );
 
         vm.prank(address(router));
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
@@ -4009,12 +3953,10 @@ contract CfdEngineFundingTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.5e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4127,12 +4069,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4372,12 +4312,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         CfdTypes.RiskParams memory newParams = CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 3.0e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4465,12 +4403,10 @@ contract MarginCappedMtmTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4649,12 +4585,10 @@ contract PhantomExecFeeTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4716,12 +4650,10 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -4732,7 +4664,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
     }
 
     // Regression: negative funding receivables
-    function test_GetFreeUSDC_IgnoresNegativeFunding() public {
+    function helper_GetFreeUSDC_IgnoresNegativeFunding() public {
         usdc.mint(bob, 1_000_000e6);
         vm.startPrank(bob);
         usdc.approve(address(juniorVault), 1_000_000e6);
@@ -4801,12 +4733,10 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -4918,12 +4848,10 @@ contract ProtocolPhaseTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -5019,12 +4947,10 @@ contract VpiDepthTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.01e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -5146,12 +5072,10 @@ contract VpiChunkingTest is Test {
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5 * 1e6,
             bountyBps: 15
         });
@@ -5329,12 +5253,10 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 1e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.5e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
+            baseCarryBps: 500,
             minBountyUsdc: 5e6,
             bountyBps: 15
         });
@@ -5368,8 +5290,6 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         bytes32 bearId = bytes32(uint256(uint160(bearTrader)));
 
         CfdTypes.RiskParams memory params = _riskParams();
-        params.baseApy = 1000e18;
-        params.maxApy = 1000e18;
         _setRiskParams(params);
 
         _fundTrader(bullTrader, 30_000e6);

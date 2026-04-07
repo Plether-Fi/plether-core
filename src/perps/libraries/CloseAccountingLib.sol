@@ -32,15 +32,13 @@ library CloseAccountingLib {
         uint256 postSkewUsdc,
         uint256 vaultDepthUsdc,
         uint256 vpiFactor,
-        uint256 executionFeeBps,
-        int256 fundingSettlementUsdc
+        uint256 executionFeeBps
     ) internal pure returns (CloseState memory state) {
         CfdTypes.Position memory closedPart = CfdTypes.Position({
             size: sizeDelta,
             margin: positionMarginUsdc,
             entryPrice: entryPrice,
             maxProfitUsdc: maxProfitUsdc,
-            entryFundingIndex: 0,
             side: side,
             lastUpdateTime: 0,
             vpiAccrued: vpiAccrued
@@ -65,8 +63,7 @@ library CloseAccountingLib {
 
         uint256 notionalUsdc = (sizeDelta * oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
         state.executionFeeUsdc = (notionalUsdc * executionFeeBps) / 10_000;
-        state.netSettlementUsdc =
-            state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc) + fundingSettlementUsdc;
+        state.netSettlementUsdc = state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc);
     }
 
 }

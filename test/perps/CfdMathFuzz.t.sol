@@ -16,9 +16,6 @@ contract CfdMathFuzzTest is Test {
         params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0.15e18,
-            maxApy: 3.0e18,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -56,7 +53,6 @@ contract CfdMathFuzzTest is Test {
             margin: 0,
             entryPrice: entryPrice,
             maxProfitUsdc: 0,
-            entryFundingIndex: 0,
             side: side,
             lastUpdateTime: 0,
             vpiAccrued: 0
@@ -68,28 +64,6 @@ contract CfdMathFuzzTest is Test {
         if (isProfit) {
             assertLe(pnlUsdc, maxProfit, "PnL exceeds max profit");
         }
-    }
-
-    function testFuzz_FundingRateNoPanic(
-        uint256 absSkewUsdc,
-        uint256 depthUsdc
-    ) public view {
-        absSkewUsdc = bound(absSkewUsdc, 0, type(uint128).max);
-        depthUsdc = bound(depthUsdc, 0, type(uint128).max);
-
-        CfdMath.getAnnualizedFundingRate(absSkewUsdc, depthUsdc, params);
-    }
-
-    function testFuzz_FundingRateBoundedByMax(
-        uint256 absSkewUsdc,
-        uint256 depthUsdc
-    ) public view {
-        depthUsdc = bound(depthUsdc, 1e6, 1_000_000_000e6);
-        absSkewUsdc = bound(absSkewUsdc, 1e6, depthUsdc);
-
-        uint256 rate = CfdMath.getAnnualizedFundingRate(absSkewUsdc, depthUsdc, params);
-
-        assertLe(rate, params.maxApy, "Funding rate exceeds maxApy");
     }
 
     function testFuzz_MaxProfitBounded(

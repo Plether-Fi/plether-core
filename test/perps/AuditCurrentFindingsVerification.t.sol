@@ -89,9 +89,6 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 10,
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 1000,
@@ -232,9 +229,6 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         return CfdTypes.RiskParams({
             vpiFactor: 0.05e18,
             maxSkewRatio: 0.4e18,
-            kinkSkewRatio: 0.25e18,
-            baseApy: 0,
-            maxApy: 0,
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,

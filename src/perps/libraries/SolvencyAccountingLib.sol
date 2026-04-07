@@ -26,7 +26,6 @@ library SolvencyAccountingLib {
         uint256 protocolFeesUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
-        int256 solvencyFundingPnlUsdc;
         uint256 deferredTraderPayoutUsdc;
         uint256 deferredClearerBountyUsdc;
         uint256 effectiveAssetsUsdc;
@@ -57,7 +56,6 @@ library SolvencyAccountingLib {
         uint256 physicalAssetsUsdc,
         uint256 protocolFeesUsdc,
         uint256 maxLiabilityUsdc,
-        int256 solvencyFundingPnlUsdc,
         uint256 deferredTraderPayoutUsdc,
         uint256 deferredClearerBountyUsdc
     ) internal pure returns (SolvencyState memory state) {
@@ -65,18 +63,9 @@ library SolvencyAccountingLib {
         state.protocolFeesUsdc = protocolFeesUsdc;
         state.netPhysicalAssetsUsdc = physicalAssetsUsdc > protocolFeesUsdc ? physicalAssetsUsdc - protocolFeesUsdc : 0;
         state.maxLiabilityUsdc = maxLiabilityUsdc;
-        state.solvencyFundingPnlUsdc = solvencyFundingPnlUsdc;
         state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
         state.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
         state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc;
-
-        if (solvencyFundingPnlUsdc > 0) {
-            state.effectiveAssetsUsdc = state.effectiveAssetsUsdc > uint256(solvencyFundingPnlUsdc)
-                ? state.effectiveAssetsUsdc - uint256(solvencyFundingPnlUsdc)
-                : 0;
-        } else if (solvencyFundingPnlUsdc < 0) {
-            state.effectiveAssetsUsdc += uint256(-solvencyFundingPnlUsdc);
-        }
 
         uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
         if (deferredLiabilitiesUsdc > 0) {
@@ -125,7 +114,6 @@ library SolvencyAccountingLib {
             physicalAssetsAfterUsdc,
             currentState.protocolFeesUsdc + delta.protocolFeesDeltaUsdc,
             delta.maxLiabilityAfterUsdc,
-            currentState.solvencyFundingPnlUsdc,
             deferredTraderPayoutAfterUsdc,
             deferredClearerBountyAfterUsdc
         );
