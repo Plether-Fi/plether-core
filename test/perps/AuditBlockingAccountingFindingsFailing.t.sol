@@ -334,12 +334,9 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         router.executeOrder(1, priceData);
 
         uint256 keeperBounty = usdc.balanceOf(KEEPER) - keeperBalanceBefore;
-        assertEq(keeperBounty, 0, "Retryable slippage miss should not pay the keeper bounty");
-        assertEq(router.nextExecuteId(), 1, "Single queued retryable miss should remain the current head");
-        assertEq(_executionBountyReserve(1), 1e6, "Escrowed close bounty should remain in router custody");
-        assertGt(
-            _orderRecord(1).retryAfterTimestamp, block.timestamp, "Retryable miss should set a retry cooldown"
-        );
+        assertEq(keeperBounty, 0, "Terminal slippage miss should not pay the keeper bounty");
+        assertEq(router.nextExecuteId(), 0, "Single queued slippage miss should clear the current head");
+        assertEq(_executionBountyReserve(1), 0, "Escrowed close bounty should be refunded on terminal slippage");
     }
 
     function test_H2_ExpiredHeadCloseMustStillPayKeeper() public {

@@ -42,7 +42,6 @@ interface IOrderRouterAccounting {
         uint256 targetPrice;
         uint64 commitTime;
         uint64 commitBlock;
-        uint64 retryAfterTimestamp;
         uint256 committedMarginUsdc;
         uint256 executionBountyUsdc;
     }

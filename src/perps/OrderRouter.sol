@@ -70,7 +70,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 internal constant MAX_EXPIRED_ORDER_SKIPS_PER_CALL = 32;
     uint256 internal constant MAX_BATCH_ORDER_SCANS = 64;
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL = 64;
-    uint64 internal constant RETRYABLE_SKIP_COOLDOWN = 5;
     uint256 internal constant OPEN_ORDER_EXECUTION_BOUNTY_BPS = 1;
     uint256 internal constant MIN_OPEN_ORDER_EXECUTION_BOUNTY_USDC = 50_000;
     uint256 internal constant MAX_OPEN_ORDER_EXECUTION_BOUNTY_USDC = DecimalConstants.ONE_USDC;
@@ -126,7 +125,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     error OrderRouter__CloseOnlyMode();
     error OrderRouter__SeedLifecycleIncomplete();
     error OrderRouter__TradingNotActive();
-    error OrderRouter__RetryCooldownActive();
     error OrderRouter__OraclePublishTimeOutOfOrder();
     error OrderRouter__InvalidStalenessLimit();
     error OrderRouter__PredictableOpenInvalid(uint8 code);
@@ -135,7 +133,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         Expired,
         CloseOnlyOracleFrozen,
         CloseOnlyFad,
-        OraclePriceTooStale,
         SlippageExceeded,
         EnginePanic,
         AccountLiquidated,
@@ -145,8 +142,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     event OrderCommitted(uint64 indexed orderId, bytes32 indexed accountId, CfdTypes.Side side);
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
-    event OrderSkipped(uint64 indexed orderId, OrderFailReason reason, uint64 retryAfterTimestamp);
-
     modifier onlyEngine() {
         if (msg.sender != address(engine)) {
             revert OrderRouter__Unauthorized();
@@ -461,7 +456,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 targetPrice: order.targetPrice,
                 commitTime: order.commitTime,
                 commitBlock: order.commitBlock,
-                retryAfterTimestamp: record.retryAfterTimestamp,
                 committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
                 executionBountyUsdc: record.executionBountyUsdc
             });
@@ -508,26 +502,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             executionContext = _currentRouterExecutionContext();
             if (OrderOraclePolicyLib.isStale(oraclePublishTime, executionContext.policy.maxStaleness, block.timestamp))
             {
-                if (oraclePublishTime < order.commitTime) {
-                    revert OrderRouter__OraclePriceTooStale();
-                }
-                emit OrderFailed(orderId, OrderFailReason.OraclePriceTooStale);
-                _finalizeExecution(
-                    orderId,
-                    pythFee,
-                    false,
-                    _failedOrderBountyPolicy(
-                        _routedRouterPolicyFailure(
-                            order,
-                            OrderFailurePolicyLib.RouterFailureCode.StaleOracle,
-                            executionContext.oracleFrozen,
-                            executionContext.isFadWindow,
-                            executionContext.degradedMode,
-                            executionContext.policy.closeOnly
-                        )
-                    )
-                );
-                return;
+                revert OrderRouter__OraclePriceTooStale();
             }
         }
 
@@ -705,15 +680,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bool revertOnBlockedExecution,
         uint256 pythFee
     ) internal returns (OrderExecutionStepResult result) {
-        OrderRecord storage record = _orderRecord(orderId);
-
-        if (record.retryAfterTimestamp > block.timestamp) {
-            if (revertOnBlockedExecution) {
-                revert OrderRouter__RetryCooldownActive();
-            }
-            return OrderExecutionStepResult.Break;
-        }
-
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
             _finalizeOrCleanupOrder(
@@ -760,12 +726,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
 
         if (!_checkSlippage(order, executionPrice)) {
-            _skipRetryableOrder(orderId, OrderFailReason.SlippageExceeded);
-            if (revertOnBlockedExecution) {
-                _sendEth(msg.sender, msg.value - pythFee);
-                return OrderExecutionStepResult.Return;
-            }
-            return OrderExecutionStepResult.Continue;
+            emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                OrderFailurePolicyLib.FailedOrderBountyPolicy.RefundUser,
+                revertOnBlockedExecution
+            );
+            return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         uint256 forwardedGas = gasleft() - (gasleft() / 64);
@@ -1200,19 +1169,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         record.prevGlobalOrderId = 0;
     }
 
-    function _skipRetryableOrder(
-        uint64 orderId,
-        OrderFailReason reason
-    ) internal {
-        _unlinkGlobalOrder(orderId);
-        _linkGlobalOrder(orderId);
-
-        OrderRecord storage record = _orderRecord(orderId);
-        record.retryAfterTimestamp = uint64(block.timestamp + RETRYABLE_SKIP_COOLDOWN);
-
-        emit OrderSkipped(orderId, reason, record.retryAfterTimestamp);
-    }
-
     function _unlinkPendingOrder(
         bytes32 accountId,
         uint64 orderId
@@ -1278,7 +1234,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         _unlinkGlobalOrder(orderId);
         record.status = terminalStatus;
-        record.retryAfterTimestamp = 0;
         if (accountId != bytes32(0) && pendingOrderCounts[accountId] > 0) {
             pendingOrderCounts[accountId]--;
         }

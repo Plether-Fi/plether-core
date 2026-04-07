@@ -678,7 +678,6 @@ contract AdversarialPerpHandler is Test {
     uint8 public ghost_lastRetryableSlippageOrderStatus;
     uint256 public ghost_lastRetryableSlippageEscrowUsdc;
     uint256 public ghost_lastRetryableSlippageRouterBalanceUsdc;
-    uint64 public ghost_lastRetryableSlippageRetryAfter;
 
     constructor(
         MockUSDC _usdc,
@@ -867,13 +866,12 @@ contract AdversarialPerpHandler is Test {
 
         if (retryableSlippageAtHead) {
             OrderRouter.OrderRecord memory postRecord = _orderRecord(ghost_lastRetryableSlippageOrderId);
-            if (postRecord.retryAfterTimestamp > 0) {
+            if (uint8(postRecord.status) == uint8(IOrderRouterAccounting.OrderStatus.Failed)) {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
                 ghost_lastRetryableSlippageOrderStatus = uint8(postRecord.status);
                 ghost_lastRetryableSlippageEscrowUsdc = postRecord.executionBountyUsdc;
                 ghost_lastRetryableSlippageRouterBalanceUsdc = usdc.balanceOf(address(router));
-                ghost_lastRetryableSlippageRetryAfter = postRecord.retryAfterTimestamp;
             }
         }
 
@@ -1023,28 +1021,21 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialRetryableSlippageMissPreservesHeadAndEscrow() public view {
+    function invariant_AdversarialSlippageFailureClearsHeadAndEscrow() public view {
         if (handler.ghost_lastRetryableSlippageBatch() == 0) {
             return;
         }
 
         assertEq(
             handler.ghost_lastRetryableSlippageOrderStatus(),
-            uint8(IOrderRouterAccounting.OrderStatus.Pending),
-            "Retryable slippage head must remain pending immediately after the batch attempt"
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "Terminal slippage failure must mark the head order failed"
         );
-        assertGt(
-            handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Retryable slippage head must retain escrowed bounty"
-        );
+        assertEq(handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Terminal slippage failure must clear escrowed bounty");
         assertGe(
             handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
             handler.ghost_lastRetryableSlippageEscrowUsdc(),
-            "Router must continue backing retryable slippage escrow immediately after the batch attempt"
-        );
-        assertGt(
-            handler.ghost_lastRetryableSlippageRetryAfter(),
-            0,
-            "Retryable slippage head must record a future cooldown after being skipped"
+            "Router balance must still cover any remaining queued escrow after slippage failure"
         );
     }
 

@@ -72,8 +72,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
                 marginDeltaUsdc: int256(current[i].marginDelta),
                 acceptablePrice: current[i].targetPrice,
                 isReduceOnly: current[i].isClose,
-                status: PerpsViewTypes.OrderStatus.Pending,
-                retryAfterTimestamp: current[i].retryAfterTimestamp
+                status: PerpsViewTypes.OrderStatus.Pending
             });
         }
     }

@@ -16,7 +16,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         CfdTypes.Order core;
         IOrderRouterAccounting.OrderStatus status;
         uint256 executionBountyUsdc;
-        uint64 retryAfterTimestamp;
         uint64 nextPendingOrderId;
         uint64 prevPendingOrderId;
         uint64 nextGlobalOrderId;

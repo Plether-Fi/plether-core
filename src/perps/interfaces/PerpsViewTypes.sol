@@ -42,7 +42,6 @@ library PerpsViewTypes {
         uint256 acceptablePrice;
         bool isReduceOnly;
         OrderStatus status;
-        uint64 retryAfterTimestamp;
     }
 
     struct TrancheView {

@@ -28,8 +28,7 @@ library OrderFailurePolicyLib {
     enum RouterFailureCode {
         None,
         CloseOnlyOracleFrozen,
-        CloseOnlyFad,
-        StaleOracle
+        CloseOnlyFad
     }
 
     struct RoutedFailure {
