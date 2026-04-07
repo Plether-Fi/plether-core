@@ -35,6 +35,28 @@ The supporting interfaces for this simplified surface live in `src/perps/interfa
 
 The existing engine, clearinghouse, router, and house-pool interfaces still expose deeper accounting and lifecycle machinery. Those richer interfaces remain useful for testing, admin operations, and internal integration, but they should not define the long-term product story.
 
+## Intended Boundaries
+
+- `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for protocol state, order execution, liquidation, and high-level protocol status.
+- `PerpsPublicLens` is the canonical product-facing read layer for traders, LPs, and simple protocol status consumers.
+- `MarginClearinghouse` is trader custody plumbing. The slim public surface is `IMarginAccount`; reservation buckets and settlement-path helpers are internal/operator-facing.
+- `OrderRouter` is delayed-order lifecycle and keeper-execution plumbing. Product consumers should use `submitOrder(...)` and compact pending-order views, not raw queue internals.
+- `HousePool` and `TrancheVault` remain the LP product surface. Senior/junior tranche actions are product-facing; bootstrap and seed-lifecycle mechanics are setup/admin concerns.
+- `CfdEngineAccountLens` is the rich account/accounting read layer. It is appropriate for tests, audits, and operator tooling, not the default product API.
+- `CfdEngineProtocolLens` is now a narrow protocol-accounting lens for protocol accounting snapshots and house-pool snapshots. It is not the default source for product status or position views.
+
+## Type Modules
+
+Focused type modules now carry accounting/debug snapshot shapes instead of embedding them in `ICfdEngine`:
+
+- `AccountLensViewTypes.sol`
+- `ProtocolLensViewTypes.sol`
+- `HousePoolEngineViewTypes.sol`
+- `DeferredEngineViewTypes.sol`
+- `EngineStatusViewTypes.sol`
+
+This keeps `ICfdEngine` from acting as a general-purpose type bucket and makes the intended boundaries easier to follow.
+
 ### Accounting Domains
 
 - `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, execution fees, and net trader settlement.

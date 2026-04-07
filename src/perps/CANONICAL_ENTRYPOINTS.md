@@ -54,9 +54,19 @@ Use these interfaces:
 The following remain useful for tests, admin tooling, migration, and deep accounting introspection, but are not the intended long-term product API:
 
 - `ICfdEngine`
+- `ICfdEngineCore` is the live runtime/operator boundary, not the default product read API
 - `IMarginClearinghouse`
 - `ICfdEngineAccountLens`
 - `ICfdEngineProtocolLens`
 - `ICfdEngineLens`
 - `IOrderRouterAccounting`
 - `IHousePool`
+
+## Boundary Summary
+
+- `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
+- `PerpsPublicLens`: canonical product-facing read layer.
+- `CfdEngineAccountLens`: rich account/accounting diagnostics.
+- `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
+- `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
+- `OrderRouter`: delayed-order and keeper-execution plumbing; raw queue state is non-canonical.
