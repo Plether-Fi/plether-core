@@ -10,10 +10,7 @@ library OrderOraclePolicyLib {
     }
 
     struct OracleExecutionPolicy {
-        bool oracleFrozen;
-        bool isFad;
         bool closeOnly;
-        bool mevChecks;
         uint256 maxStaleness;
     }
 
@@ -25,15 +22,8 @@ library OrderOraclePolicyLib {
         uint256 liveLiquidationStaleness,
         uint256 fadMaxStaleness
     ) internal pure returns (OracleExecutionPolicy memory policy) {
-        policy.oracleFrozen = oracleFrozen;
-        policy.isFad = isFad;
-
         if (action == OracleAction.OrderExecution) {
             policy.closeOnly = oracleFrozen || isFad;
-            // During genuine frozen-oracle windows, closes must remain executable against the
-            // last valid oracle price. Commit-time MEV ordering stays enforced in live/FAD
-            // markets but is intentionally bypassed once the oracle has stopped publishing.
-            policy.mevChecks = !oracleFrozen;
             policy.maxStaleness = oracleFrozen ? fadMaxStaleness : liveExecutionStaleness;
             return policy;
         }

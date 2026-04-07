@@ -1175,7 +1175,7 @@ contract OrderRouterPythTest is BasePerpTest {
         updateData[0] = "";
     }
 
-    function test_MevCheck_RevertsInsteadOfCancelling() public {
+    function test_PublishTimeBeforeCommit_DoesNotTriggerMevRevert() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1185,11 +1185,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Order stays in queue for honest keeper");
+        assertEq(router.nextExecuteId(), 0, "Order should execute once same-block MEV risk has passed");
     }
 
     function test_SameBlockExecution_Reverts() public {
@@ -2128,7 +2127,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 10_000 * 1e18, "Only order 1 should execute");
     }
 
-    function test_C1_MevDetected_RevertsEntireTx() public {
+    function test_C1_PublishTimeBeforeCommit_NoLongerReverts() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
@@ -2141,13 +2140,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Order preserved for honest keeper");
-        uint256 sizeDelta = _orderRecord(1).core.sizeDelta;
-        assertEq(sizeDelta, 10_000 * 1e18, "Order should remain pending after MEV revert");
+        assertEq(router.nextExecuteId(), 0, "Order should execute when only publish-time freshness differs");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -2204,7 +2200,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
     }
 
-    function test_WeakestLink_Timestamp_MEV() public {
+    function test_WeakestLink_Timestamp_NoLongerTriggersMev() public {
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
@@ -2215,11 +2211,10 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
-        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 1, "Weakest-link stale feed reverts, order preserved");
+        assertEq(router.nextExecuteId(), 0, "Weakest-link publish time should no longer trigger MEV revert");
     }
 
     function test_WeakestLink_Staleness() public {

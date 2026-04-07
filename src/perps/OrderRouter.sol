@@ -70,7 +70,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 public maxOrderAge;
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     uint256 internal constant MIN_ENGINE_GAS = 600_000;
-    uint256 internal constant MIN_MEV_PUBLISH_DELAY = 5;
     uint256 internal constant DEFAULT_MAX_ORDER_AGE = 60;
     uint256 internal constant MAX_EXPIRED_ORDER_SKIPS_PER_CALL = 32;
     uint256 internal constant MAX_BATCH_ORDER_SCANS = 64;
@@ -679,7 +678,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (executionContext.policy.closeOnly && !order.isClose) {
             emit OrderFailed(
                 orderId,
-                executionContext.policy.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
+                executionContext.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
             );
             _finalizeOrCleanupOrder(
                 orderId,
@@ -691,10 +690,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
-        if (
-            address(pyth) != address(0) && executionContext.policy.mevChecks
-                && (block.number == order.commitBlock || oraclePublishTime <= order.commitTime + MIN_MEV_PUBLISH_DELAY)
-        ) {
+        if (address(pyth) != address(0) && !executionContext.oracleFrozen && block.number == order.commitBlock) {
             if (revertOnBlockedExecution) {
                 revert OrderRouter__MevDetected();
             }
