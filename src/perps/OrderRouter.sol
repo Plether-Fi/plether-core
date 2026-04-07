@@ -90,8 +90,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     uint256 public liquidationStalenessActivationTime;
 
     mapping(address => uint256) public claimableEth;
-    mapping(bytes32 => uint64) public pendingHeadOrderId;
-    mapping(bytes32 => uint64) public pendingTailOrderId;
     uint64 public globalTailOrderId;
 
     error OrderRouter__ZeroSize();
@@ -406,7 +404,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         if (isClose) {
             pendingCloseSize[accountId] += sizeDelta;
         }
-        _linkPendingOrder(accountId, orderId);
         _linkGlobalOrder(orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
@@ -447,9 +444,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     ) external view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingOrderCounts[accountId]);
         uint256 index;
-        uint64 orderId = pendingHeadOrderId[accountId];
-        while (orderId != 0) {
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             OrderRecord storage record = orderRecords[orderId];
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
+                continue;
+            }
             CfdTypes.Order memory order = record.core;
             pending[index] = IOrderRouterAccounting.PendingOrderView({
                 orderId: orderId,
@@ -464,7 +463,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 executionBountyUsdc: record.executionBountyUsdc
             });
             index++;
-            orderId = record.nextPendingOrderId;
         }
     }
 
@@ -832,9 +830,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             queuedPosition.size = engine.getPositionSize(accountId);
         }
 
-        uint64 orderId = pendingHeadOrderId[accountId];
-        while (orderId != 0) {
-            CfdTypes.Order memory order = orderRecords[orderId].core;
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+            OrderRecord storage record = orderRecords[orderId];
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
+                continue;
+            }
+            CfdTypes.Order memory order = record.core;
 
             if (order.isClose) {
                 if (queuedPosition.exists && order.side == queuedPosition.side) {
@@ -851,8 +852,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             } else if (order.side == queuedPosition.side) {
                 queuedPosition.size += order.sizeDelta;
             }
-
-            orderId = orderRecords[orderId].nextPendingOrderId;
         }
     }
 
@@ -959,14 +958,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId
     ) internal {
         uint256 forfeitedUsdc;
-        uint64 orderId = pendingHeadOrderId[accountId];
-        while (orderId != 0) {
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             OrderRecord storage record = orderRecords[orderId];
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
+                continue;
+            }
             if (record.executionBountyUsdc > 0) {
                 forfeitedUsdc += record.executionBountyUsdc;
                 record.executionBountyUsdc = 0;
             }
-            orderId = record.nextPendingOrderId;
         }
 
         if (forfeitedUsdc == 0) {
@@ -981,13 +981,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function _clearLiquidatedAccountOrders(
         bytes32 accountId
     ) internal {
-        uint64 orderId = pendingHeadOrderId[accountId];
-        while (orderId != 0) {
-            uint64 nextOrderId = orderRecords[orderId].nextPendingOrderId;
+        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+            OrderRecord storage record = orderRecords[orderId];
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
+                continue;
+            }
             _releaseCommittedMargin(orderId);
             emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
             _deleteOrder(orderId, orderId == nextExecuteId, IOrderRouterAccounting.OrderStatus.Failed);
-            orderId = nextOrderId;
         }
     }
 
@@ -1036,22 +1037,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         return !OrderOraclePolicyLib.isStale(lastMarkTime, policy.maxStaleness, block.timestamp);
     }
 
-    function _linkPendingOrder(
-        bytes32 accountId,
-        uint64 orderId
-    ) internal {
-        uint64 tailOrderId = pendingTailOrderId[accountId];
-        if (tailOrderId == 0) {
-            pendingHeadOrderId[accountId] = orderId;
-            pendingTailOrderId[accountId] = orderId;
-            return;
-        }
-
-        orderRecords[tailOrderId].nextPendingOrderId = orderId;
-        orderRecords[orderId].prevPendingOrderId = tailOrderId;
-        pendingTailOrderId[accountId] = orderId;
-    }
-
     function _linkGlobalOrder(
         uint64 orderId
     ) internal {
@@ -1096,36 +1081,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         record.prevGlobalOrderId = 0;
     }
 
-    function _unlinkPendingOrder(
-        bytes32 accountId,
-        uint64 orderId
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        uint64 prevOrderId = record.prevPendingOrderId;
-        uint64 nextOrderId = record.nextPendingOrderId;
-        uint64 headOrderId = pendingHeadOrderId[accountId];
-        uint64 tailOrderId = pendingTailOrderId[accountId];
-
-        if (headOrderId == orderId) {
-            pendingHeadOrderId[accountId] = nextOrderId;
-        } else if (prevOrderId != 0) {
-            orderRecords[prevOrderId].nextPendingOrderId = nextOrderId;
-        } else if (tailOrderId != orderId) {
-            revert OrderRouter__PendingOrderLinkCorrupted();
-        }
-
-        if (tailOrderId == orderId) {
-            pendingTailOrderId[accountId] = prevOrderId;
-        } else if (nextOrderId != 0) {
-            orderRecords[nextOrderId].prevPendingOrderId = prevOrderId;
-        } else if (headOrderId != orderId) {
-            revert OrderRouter__PendingOrderLinkCorrupted();
-        }
-
-        record.nextPendingOrderId = 0;
-        record.prevPendingOrderId = 0;
-    }
-
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
         uint256 executionBountyUsdc
@@ -1156,7 +1111,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         OrderRecord storage record = _orderRecord(orderId);
         bytes32 accountId = record.core.accountId;
         if (accountId != bytes32(0)) {
-            _unlinkPendingOrder(accountId, orderId);
             _unlinkMarginOrder(accountId, orderId);
         }
         _unlinkGlobalOrder(orderId);
@@ -1168,6 +1122,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             pendingCloseSize[accountId] -= record.core.sizeDelta;
         }
         advanceHead;
+    }
+
+    function _nextCommitId() internal view override returns (uint64) {
+        return nextCommitId;
     }
 
     function _releaseCommittedMarginForExecution(
@@ -1354,12 +1312,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         _payOrDeferLiquidationBounty(keeperBountyUsdc);
 
         _sendEth(msg.sender, msg.value - pythFee);
-    }
-
-    function _pendingHeadOrderId(
-        bytes32 accountId
-    ) internal view override returns (uint64) {
-        return pendingHeadOrderId[accountId];
     }
 
     function _revertInsufficientFreeEquity() internal pure override {

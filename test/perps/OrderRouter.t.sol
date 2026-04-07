@@ -328,8 +328,6 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(record.core.accountId, bytes32(uint256(uint160(alice))));
         assertEq(_remainingCommittedMargin(1), 1000 * 1e6);
         assertEq(record.executionBountyUsdc, 1_000_000);
-        assertEq(record.nextPendingOrderId, 0);
-        assertEq(record.prevPendingOrderId, 0);
         assertEq(record.nextMarginOrderId, 0);
         assertEq(record.prevMarginOrderId, 0);
         assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
@@ -548,11 +546,6 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
-
-        assertEq(router.pendingHeadOrderId(aliceId), 1, "Alice head should point to her first queued order");
-        assertEq(router.pendingTailOrderId(aliceId), 3, "Alice tail should point to her last queued order");
-        assertEq(router.pendingHeadOrderId(bobId), 2, "Bob head should be isolated from Alice queue state");
-        assertEq(router.pendingTailOrderId(bobId), 2, "Bob tail should equal his only queued order");
 
         IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
@@ -803,11 +796,6 @@ contract OrderRouterTest is BasePerpTest {
         bytes[] memory empty;
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
-
-        assertEq(router.pendingHeadOrderId(aliceId), 3, "Executing Alice head should advance her account-local head");
-        assertEq(router.pendingTailOrderId(aliceId), 3, "Alice tail should collapse to her surviving queued order");
-        assertEq(router.pendingHeadOrderId(bobId), 2, "Foreign account head should stay unchanged");
-        assertEq(router.pendingTailOrderId(bobId), 2, "Foreign account tail should stay unchanged");
 
         IOrderRouterAccounting.PendingOrderView[] memory alicePending = router.getPendingOrdersForAccount(aliceId);
         assertEq(alicePending.length, 1, "Only Alice's trailing queued order should remain");
@@ -2120,11 +2108,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        assertEq(router.nextExecuteId(), 2, "Batch breaks at MEV-stale order, leaving it in queue");
+        assertEq(router.nextExecuteId(), 0, "Batch should continue once only same-block MEV remains enforced");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 10_000 * 1e18, "Only order 1 should execute");
+        assertEq(size, 15_000 * 1e18, "Both queued orders should execute once publish-time MEV is removed");
     }
 
     function test_C1_PublishTimeBeforeCommit_NoLongerReverts() public {

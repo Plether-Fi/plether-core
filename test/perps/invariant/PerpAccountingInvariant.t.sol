@@ -360,47 +360,25 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertLe(router.nextExecuteId(), router.nextCommitId(), "nextExecuteId must not exceed nextCommitId");
     }
 
-    function invariant_PendingQueueLinksAndCountsStayConsistent() public view {
+    function invariant_PendingQueueCountsStayConsistent() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            uint64 head = router.pendingHeadOrderId(accountId);
-            uint64 tail = router.pendingTailOrderId(accountId);
             uint256 expectedCount = router.pendingOrderCounts(accountId);
             uint256 ghostCount = handler.ghostPendingOrderCount(accountId);
 
             uint256 traversed;
-            uint64 current = head;
-            uint64 previous;
-            while (current != 0) {
-                OrderRouter.OrderRecord memory record = _orderRecord(current);
-                assertEq(record.core.accountId, accountId, "Pending queue owner must match traversed account");
-                assertEq(
-                    uint256(record.status),
-                    uint256(IOrderRouterAccounting.OrderStatus.Pending),
-                    "Pending queue may only contain pending orders"
-                );
-                assertEq(record.prevPendingOrderId, previous, "Pending prev pointer must match traversal");
-                if (previous != 0) {
-                    assertGt(current, previous, "Pending queue must preserve FIFO commit order");
+            for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
+                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+                if (
+                    record.core.accountId == accountId
+                        && uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)
+                ) {
+                    traversed++;
                 }
-                previous = current;
-                current = record.nextPendingOrderId;
-                traversed++;
-                assertLe(
-                    traversed, expectedCount == 0 ? 1 : expectedCount, "Pending queue traversal exceeded tracked count"
-                );
             }
 
             assertEq(traversed, expectedCount, "Pending queue traversal count must match pendingOrderCounts");
             assertEq(traversed, ghostCount, "Pending queue traversal count must match ghost pending count");
-            if (traversed == 0) {
-                assertEq(head, 0, "Empty pending queue must have zero head");
-                assertEq(tail, 0, "Empty pending queue must have zero tail");
-            } else {
-                assertEq(previous, tail, "Pending queue tail must equal last traversed order");
-                assertEq(_orderRecord(head).prevPendingOrderId, 0, "Pending head must have zero prev pointer");
-                assertEq(_orderRecord(tail).nextPendingOrderId, 0, "Pending tail must have zero next pointer");
-            }
         }
     }
 

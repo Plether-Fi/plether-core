@@ -16,8 +16,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         CfdTypes.Order core;
         IOrderRouterAccounting.OrderStatus status;
         uint256 executionBountyUsdc;
-        uint64 nextPendingOrderId;
-        uint64 prevPendingOrderId;
         uint64 nextGlobalOrderId;
         uint64 prevGlobalOrderId;
         uint64 nextMarginOrderId;
@@ -81,9 +79,11 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             bool hasTerminalCloseQueued
         )
     {
-        uint64 orderId = _pendingHeadOrderId(accountId);
-        while (orderId != 0) {
+        for (uint64 orderId = 1; orderId < _nextCommitId(); orderId++) {
             OrderRecord storage record = orderRecords[orderId];
+            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
+                continue;
+            }
             CfdTypes.Order memory order = record.core;
             pendingOrderCount++;
             executionBountyUsdc += record.executionBountyUsdc;
@@ -91,9 +91,10 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
                 pendingCloseSize_ += order.sizeDelta;
                 hasTerminalCloseQueued = true;
             }
-            orderId = record.nextPendingOrderId;
         }
     }
+
+    function _nextCommitId() internal view virtual returns (uint64);
 
     function getMarginReservationIds(
         bytes32 accountId
@@ -288,10 +289,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     ) internal view virtual returns (OrderRecord storage record) {
         return orderRecords[orderId];
     }
-
-    function _pendingHeadOrderId(
-        bytes32 accountId
-    ) internal view virtual returns (uint64);
 
     function _reserveCloseExecutionBounty(
         bytes32 accountId,
