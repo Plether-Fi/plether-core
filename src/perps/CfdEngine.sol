@@ -417,7 +417,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @notice Applies proposed risk parameters after timelock expires; settles funding first
     function finalizeRiskParams() external onlyOwner {
         _requireTimelockReady(riskParamsActivationTime);
-        _syncFunding();
         riskParams = pendingRiskParams;
         delete pendingRiskParams;
         riskParamsActivationTime = 0;
@@ -581,7 +580,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function withdrawFees(
         address recipient
     ) external onlyOwner {
-        _syncFunding();
         uint256 fees = accumulatedFeesUsdc;
         if (fees == 0) {
             revert CfdEngine__NoFeesToWithdraw();
@@ -602,7 +600,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return;
         }
 
-        _syncFunding();
         USDC.safeTransferFrom(msg.sender, address(vault), amountUsdc);
         vault.recordProtocolInflow(amountUsdc);
         accumulatedFeesUsdc += amountUsdc;
@@ -828,29 +825,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     // ==========================================
-    // 1. CONTINUOUS FUNDING SYSTEM
-    // ==========================================
-
-    /// @notice Materializes accrued funding into storage so subsequent reads reflect current state.
-    ///         O(1) gas, idempotent (no-op if called twice in the same block).
-    function syncFunding() external {
-        _syncFunding();
-    }
-
-    function _syncFunding() internal pure {}
-
-    /// @notice Returns unsettled funding owed to (+) or by (-) a position in USDC (6 decimals)
-    /// @param pos The position to compute pending funding for
-    /// @return fundingUsdc Positive if the position is owed funding, negative if it owes
-    function getPendingFunding(
-        CfdTypes.Position memory pos
-    ) public view returns (int256 fundingUsdc) {
-        pos;
-        fundingUsdc = 0;
-    }
-
-    // ==========================================
-    // 2. ORDER PROCESSING & NETTING
+    // 1. ORDER PROCESSING & NETTING
     // ==========================================
 
     /// @notice Executes an order: settles funding, then increases or decreases the position.

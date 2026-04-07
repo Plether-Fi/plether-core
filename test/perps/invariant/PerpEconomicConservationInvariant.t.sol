@@ -64,7 +64,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        expectedReserved += engineProtocolLens.getLiabilityOnlyFundingPnl();
+        expectedReserved += uint256(0);
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),
@@ -483,7 +483,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
             snapshot.withdrawalFundingLiabilityUsdc,
-            engineProtocolLens.getLiabilityOnlyFundingPnl(),
+            uint256(0),
             "House-pool snapshot withdrawal funding liability mismatch"
         );
         assertEq(

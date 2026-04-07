@@ -94,18 +94,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         status.claimableNow = status.isHead && _claimableHeadAmountUsdc() > 0;
     }
 
-    function getUnrealizedFundingPnl() external view returns (int256 fundingPnlUsdc) {
-        fundingPnlUsdc = 0;
-    }
-
-    function getCappedFundingPnl() external view returns (int256 fundingPnlUsdc) {
-        fundingPnlUsdc = 0;
-    }
-
-    function getLiabilityOnlyFundingPnl() external view returns (uint256 fundingLiabilityUsdc) {
-        fundingLiabilityUsdc = 0;
-    }
-
     function getVaultMtmAdjustment() external view returns (uint256 mtmLiabilityUsdc) {
         mtmLiabilityUsdc = _getVaultMtmLiability();
     }

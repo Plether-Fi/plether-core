@@ -25,12 +25,6 @@ interface ICfdEngineProtocolLens {
         address keeper
     ) external view returns (ICfdEngine.DeferredClearerStatus memory status);
 
-    function getUnrealizedFundingPnl() external view returns (int256 fundingPnlUsdc);
-
-    function getCappedFundingPnl() external view returns (int256 fundingPnlUsdc);
-
-    function getLiabilityOnlyFundingPnl() external view returns (uint256 fundingLiabilityUsdc);
-
     function getVaultMtmAdjustment() external view returns (uint256 mtmLiabilityUsdc);
 
     function getProtocolStatus() external view returns (ICfdEngine.ProtocolStatus memory status);

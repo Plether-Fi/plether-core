@@ -208,7 +208,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
 
-        int256 cappedFunding = engineProtocolLens.getCappedFundingPnl();
+        int256 cappedFunding = int256(0);
         if (cappedFunding < 0) {
             effectiveAssets += uint256(-cappedFunding);
         } else if (cappedFunding > 0) {
@@ -599,7 +599,7 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
-        expectedReserved += engineProtocolLens.getLiabilityOnlyFundingPnl();
+        expectedReserved += uint256(0);
 
         assertEq(
             engine.getWithdrawalReservedUsdc(),

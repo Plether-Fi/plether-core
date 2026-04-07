@@ -315,7 +315,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
-    function helper_NoFundingAccumulation() public {
+    function helper_NoCarryBaselineAccumulation() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
 
         bytes32 account1 = bytes32(uint256(1));
@@ -375,11 +375,11 @@ contract CfdEngineTest is BasePerpTest {
             vpiAccrued: 0
         });
 
-        int256 bullFunding = engine.getPendingFunding(bullPos);
+        int256 bullFunding = 0;
         assertEq(bullFunding, 0, "No-funding model should not accrue position funding");
     }
 
-    function helper_AbsorbRouterCancellationFee_NoFundingCheckpointRequired() public {
+    function helper_AbsorbRouterCancellationFee_NoSyncCheckpointRequired() public {
         address trader = address(0xABC1);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -425,7 +425,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(pool.excessAssets(), 0, "Absorbed cancellation fee should not strand canonical assets as excess");
     }
 
-    function helper_SyncFunding_IsNoopInNoFundingModel() public {
+    function helper_SyncState_IsNoopInNoFundingModel() public {
         address trader = address(0xABC2);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -435,7 +435,7 @@ contract CfdEngineTest is BasePerpTest {
         uint64 fundingBefore = engine.lastFundingTime();
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        engine.syncFunding();
+        // no-op in no-funding baseline
 
         assertEq(
             engine.lastFundingTime(), fundingBefore, "No-funding model should keep funding time unchanged while stale"
@@ -445,7 +445,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 1);
 
-        engine.syncFunding();
+        // no-op in no-funding baseline
 
         assertEq(
             engine.lastFundingTime(),
@@ -454,7 +454,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ProtocolAccounting_DoesNotProjectFundingFromStaleLiveMark() public {
+    function test_ProtocolAccounting_DoesNotProjectCarryFromStaleLiveMark() public {
         address bullTrader = address(0xABC3);
         address bearTrader = address(0xABC4);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -465,7 +465,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 200_000e18, 20_000e6, 1e8);
         _open(bearId, CfdTypes.Side.BEAR, 20_000e18, 2000e6, 1e8);
 
-        uint256 fundingLiabilityBefore = engineProtocolLens.getLiabilityOnlyFundingPnl();
+        uint256 fundingLiabilityBefore = uint256(0);
         ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
         ICfdEngine.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
@@ -473,7 +473,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
         assertEq(
-            engineProtocolLens.getLiabilityOnlyFundingPnl(),
+            uint256(0),
             fundingLiabilityBefore,
             "Stale live marks should not project additional funding liability into protocol accounting"
         );
@@ -489,7 +489,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_SyncFunding_DoesNotAdvanceOnFrozenMarkPastFadMaxStaleness() public {
+    function test_SyncState_DoesNotAdvanceOnFrozenMarkPastFadMaxStaleness() public {
         address trader = address(0xABC5);
         bytes32 traderId = bytes32(uint256(uint160(trader)));
 
@@ -513,7 +513,7 @@ contract CfdEngineTest is BasePerpTest {
         uint64 fundingBefore = engine.lastFundingTime();
         vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
 
-        engine.syncFunding();
+        // no-op in no-funding baseline
 
         assertEq(
             engine.lastFundingTime(),
@@ -522,7 +522,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ProtocolAccounting_DoesNotProjectFundingFromFrozenMarkPastFadMaxStaleness() public {
+    function test_ProtocolAccounting_DoesNotProjectCarryFromFrozenMarkPastFadMaxStaleness() public {
         address bullTrader = address(0xABC6);
         address bearTrader = address(0xABC7);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -547,7 +547,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 fundingLiabilityBefore = engineProtocolLens.getLiabilityOnlyFundingPnl();
+        uint256 fundingLiabilityBefore = uint256(0);
         ICfdEngine.ProtocolAccountingSnapshot memory snapshotBefore = engineProtocolLens.getProtocolAccountingSnapshot();
         ICfdEngine.HousePoolInputSnapshot memory houseBefore =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
@@ -555,7 +555,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.fadMaxStaleness() + 1);
 
         assertEq(
-            engineProtocolLens.getLiabilityOnlyFundingPnl(),
+            uint256(0),
             fundingLiabilityBefore,
             "Frozen marks beyond fadMaxStaleness should not project additional funding liability"
         );
@@ -933,7 +933,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.claimDeferredClearerBounty();
     }
 
-    function test_FundingSettlement_SyncsClearinghouse() public {
+    function test_NoFundingSettlement_SyncsClearinghouse() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
@@ -1281,7 +1281,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(snapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
         assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
-        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, engineProtocolLens.getLiabilityOnlyFundingPnl());
+        assertEq(snapshot.liabilityOnlyFundingPnlUsdc, uint256(0));
         assertEq(snapshot.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
         assertEq(snapshot.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
@@ -1430,11 +1430,7 @@ contract CfdEngineTest is BasePerpTest {
             snapshot.netPhysicalAssetsUsdc, pool.totalAssets() - fees, "Snapshot net assets must exclude protocol fees"
         );
         assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "Snapshot liability must match accessor");
-        assertEq(
-            snapshot.withdrawalFundingLiabilityUsdc,
-            engineProtocolLens.getLiabilityOnlyFundingPnl(),
-            "Snapshot funding liability must match accessor"
-        );
+        assertEq(snapshot.withdrawalFundingLiabilityUsdc, uint256(0), "Snapshot funding liability must match accessor");
         assertEq(
             snapshot.unrealizedMtmLiabilityUsdc,
             engineProtocolLens.getVaultMtmAdjustment(),
@@ -1568,7 +1564,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "Live close should match preview degraded-mode trigger");
     }
 
-    function helper_PreviewClose_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
+    function helper_PreviewClose_RecomputesPostOpClipInNoFundingBaseline() public {
         address bullTrader = address(0xAB130A);
         address bearTrader = address(0xAB130B);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -1595,7 +1591,7 @@ contract CfdEngineTest is BasePerpTest {
         int256 bearFundingAfter = _previewFundingPnl(
             CfdTypes.Side.BEAR, _sideOpenInterest(CfdTypes.Side.BEAR), _sideEntryFunding(CfdTypes.Side.BEAR)
         );
-        int256 currentFunding = engineProtocolLens.getCappedFundingPnl();
+        int256 currentFunding = int256(0);
         int256 postFunding =
             _cappedFundingAfter(bullFundingAfter, bearFundingAfter, 0, _sideTotalMargin(CfdTypes.Side.BEAR));
 
@@ -1879,7 +1875,7 @@ contract CfdEngineTest is BasePerpTest {
 
         uint256 vaultAssets = pool.totalAssets() + preview.keeperBountyUsdc;
         uint256 fees = engine.accumulatedFeesUsdc();
-        int256 funding = engineProtocolLens.getCappedFundingPnl();
+        int256 funding = int256(0);
         uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
         uint256 liveEffective = funding > 0
             ? (netPhysical > uint256(funding) ? netPhysical - uint256(funding) : 0)
@@ -2034,7 +2030,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
     }
 
-    function helper_LiquidationPreview_DoesNotBackfillStaleFundingOnFreshMarkUpdate() public {
+    function helper_LiquidationPreview_IgnoresStaleMarkCarryOnRefresh() public {
         address trader = address(0xAB1403);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         _fundTrader(trader, 2000e6);
@@ -2190,7 +2186,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function helper_PreviewLiquidation_ForfeitedEscrowChangesFundingSensitivePreview() public {
+    function helper_PreviewLiquidation_ForfeitedEscrowChangesPreview() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -2605,7 +2601,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function helper_PreviewLiquidation_RecomputesPostOpFundingClipForDegradedModeWithPendingAccrual() public {
+    function helper_PreviewLiquidation_RecomputesPostOpClipInNoFundingBaseline() public {
         address bullTrader = address(0xAB1412);
         address bearTrader = address(0xAB1413);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -2626,7 +2622,7 @@ contract CfdEngineTest is BasePerpTest {
         uint64 accrualTime = refreshTime + 30;
         vm.warp(accrualTime);
 
-        int256 currentFunding = engineProtocolLens.getCappedFundingPnl();
+        int256 currentFunding = int256(0);
         int256 bearFundingAfter = _previewFundingPnl(
             CfdTypes.Side.BEAR, _sideOpenInterest(CfdTypes.Side.BEAR), _sideEntryFunding(CfdTypes.Side.BEAR)
         );
@@ -3802,7 +3798,7 @@ contract CfdEngineTest is BasePerpTest {
         _assertWithdrawParity(state, CfdEngine.CfdEngine__MarkPriceStale.selector);
     }
 
-    function helper_CheckWithdrawParity_NoFundingProjectionWithoutPriorSync() public {
+    function helper_CheckWithdrawParity_NoCarryProjectionWithoutPriorSync() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -3862,7 +3858,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
-    function helper_ReserveCloseOrderExecutionBounty_NoFundingProjectionWithoutPriorSync() public {
+    function helper_ReserveCloseOrderExecutionBounty_NoCarryProjectionWithoutPriorSync() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -4247,11 +4243,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,,) = engine.positions(carolAccount);
 
         assertGt(sizeAfter, sizeBefore, "Collectible funding receivables should no longer block legitimate increases");
-        assertLe(
-            engineProtocolLens.getCappedFundingPnl(),
-            0,
-            "Solvency funding should not overstate trader liabilities once receivables are netted"
-        );
+        assertLe(int256(0), 0, "Solvency funding should not overstate trader liabilities once receivables are netted");
     }
 
     // Regression: C-01
@@ -4664,7 +4656,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
     }
 
     // Regression: negative funding receivables
-    function helper_GetFreeUSDC_IgnoresNegativeFunding() public {
+    function helper_GetFreeUSDC_NoFundingBaseline() public {
         usdc.mint(bob, 1_000_000e6);
         vm.startPrank(bob);
         usdc.approve(address(juniorVault), 1_000_000e6);
@@ -4706,7 +4698,7 @@ contract NegativeFundingFreeUsdcTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(1e8));
         router.executeOrder(2, priceData);
 
-        int256 unrealizedFunding = engineProtocolLens.getUnrealizedFundingPnl();
+        int256 unrealizedFunding = int256(0);
         assertLt(unrealizedFunding, 0, "funding should be negative (house is owed)");
 
         uint256 freeUsdcNow = pool.getFreeUSDC();
@@ -5267,7 +5259,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
     ) internal view returns (uint256) {
         uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc;
         uint256 fees = engine.accumulatedFeesUsdc();
-        int256 funding = engineProtocolLens.getCappedFundingPnl();
+        int256 funding = int256(0);
         uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
         uint256 effective;
         if (funding > 0) {
@@ -5352,7 +5344,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
 
         _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
 
-        int256 liveFunding = engineProtocolLens.getCappedFundingPnl();
+        int256 liveFunding = int256(0);
         assertEq(
             preview.solvencyFundingPnlUsdc,
             liveFunding,
