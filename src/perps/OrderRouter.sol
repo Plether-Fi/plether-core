@@ -131,8 +131,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     enum OrderFailReason {
         Expired,
-        CloseOnlyOracleFrozen,
-        CloseOnlyFad,
+        CloseOnly,
         SlippageExceeded,
         EnginePanic,
         AccountLiquidated,
@@ -668,10 +667,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
 
         if (executionContext.policy.closeOnly && !order.isClose) {
-            emit OrderFailed(
-                orderId,
-                executionContext.oracleFrozen ? OrderFailReason.CloseOnlyOracleFrozen : OrderFailReason.CloseOnlyFad
-            );
+            emit OrderFailed(orderId, OrderFailReason.CloseOnly);
             _finalizeOrCleanupOrder(
                 orderId,
                 pythFee,
