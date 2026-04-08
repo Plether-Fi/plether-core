@@ -28,6 +28,8 @@ library SolvencyAccountingLib {
         uint256 maxLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
         uint256 deferredClearerBountyUsdc;
+        uint256 withdrawalReservedUsdc;
+        uint256 freeWithdrawableUsdc;
         uint256 effectiveAssetsUsdc;
     }
 
@@ -65,14 +67,15 @@ library SolvencyAccountingLib {
         state.maxLiabilityUsdc = maxLiabilityUsdc;
         state.deferredTraderPayoutUsdc = deferredTraderPayoutUsdc;
         state.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
-        state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc;
 
         uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
-        if (deferredLiabilitiesUsdc > 0) {
-            state.effectiveAssetsUsdc = state.effectiveAssetsUsdc > deferredLiabilitiesUsdc
-                ? state.effectiveAssetsUsdc - deferredLiabilitiesUsdc
-                : 0;
-        }
+        state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredLiabilitiesUsdc;
+        state.freeWithdrawableUsdc = physicalAssetsUsdc > state.withdrawalReservedUsdc
+            ? physicalAssetsUsdc - state.withdrawalReservedUsdc
+            : 0;
+        state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc > deferredLiabilitiesUsdc
+            ? state.netPhysicalAssetsUsdc - deferredLiabilitiesUsdc
+            : 0;
     }
 
     function effectiveAssetsAfterPendingPayout(

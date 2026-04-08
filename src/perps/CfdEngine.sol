@@ -19,7 +19,6 @@ import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseA
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
-import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -1162,14 +1161,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     }
 
     function _getWithdrawalReservedUsdc() internal view returns (uint256 reservedUsdc) {
-        return WithdrawalAccountingLib.buildWithdrawalState(
-            vault.totalAssets(),
-            _maxLiability(),
-            accumulatedFeesUsdc,
-            totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc
-        )
-        .reservedUsdc;
+        return _buildAdjustedSolvencyState().withdrawalReservedUsdc;
     }
 
     function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {

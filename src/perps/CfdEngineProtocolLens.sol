@@ -9,7 +9,6 @@ import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
 import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
-import {WithdrawalAccountingLib} from "./libraries/WithdrawalAccountingLib.sol";
 
 contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
@@ -92,20 +91,13 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
         uint256 maxLiabilityUsdc = engineContract.getMaxLiability();
-        WithdrawalAccountingLib.WithdrawalState memory withdrawalState = WithdrawalAccountingLib.buildWithdrawalState(
-            vaultAssetsUsdc,
-            maxLiabilityUsdc,
-            engineContract.accumulatedFeesUsdc(),
-            engineContract.totalDeferredPayoutUsdc(),
-            engineContract.totalDeferredClearerBountyUsdc()
-        );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
         snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
-        snapshot.withdrawalReservedUsdc = withdrawalState.reservedUsdc;
-        snapshot.freeUsdc = withdrawalState.freeUsdc;
+        snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
+        snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
         snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
         snapshot.cappedFundingPnlUsdc = 0;
