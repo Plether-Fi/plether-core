@@ -349,7 +349,7 @@ contract OrderRouterTest is BasePerpTest {
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
     }
 
-    function test_GetAccountOrderSummary_ReturnsAggregateOrderState() public {
+    function test_GetPendingOrdersAndEscrow_ReturnAggregateOrderState() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
         vm.startPrank(alice);
@@ -357,11 +357,13 @@ contract OrderRouterTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
         vm.stopPrank();
 
-        IOrderRouterAccounting.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
-        assertEq(summary.pendingOrderCount, 2);
-        assertEq(summary.committedMarginUsdc, 1000 * 1e6);
-        assertEq(summary.executionBountyUsdc, 2_000_000);
-        assertTrue(summary.hasTerminalCloseQueued);
+        IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
+        IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+        assertEq(escrow.pendingOrderCount, 2);
+        assertEq(escrow.committedMarginUsdc, 1000 * 1e6);
+        assertEq(escrow.executionBountyUsdc, 2_000_000);
+        assertEq(pending.length, 2);
+        assertTrue(pending[1].isClose);
     }
 
     function test_CloseCommit_ReservesPrefundedKeeperBounty() public {

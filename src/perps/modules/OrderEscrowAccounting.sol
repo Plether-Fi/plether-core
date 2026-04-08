@@ -53,20 +53,6 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         (escrow.pendingOrderCount, escrow.executionBountyUsdc,,) = _summarizePendingOrders(accountId);
     }
 
-    function getAccountOrderSummary(
-        bytes32 accountId
-    ) public view returns (IOrderRouterAccounting.AccountOrderSummary memory summary) {
-        // Use the clearinghouse reservation summary as the primary committed-margin source rather than re-summing queue links.
-        summary.committedMarginUsdc =
-        clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc;
-        (
-            summary.pendingOrderCount,
-            summary.executionBountyUsdc,
-            summary.pendingCloseSize,
-            summary.hasTerminalCloseQueued
-        ) = _summarizePendingOrders(accountId);
-    }
-
     function _summarizePendingOrders(
         bytes32 accountId
     )

@@ -25,14 +25,6 @@ interface IOrderRouterAccounting {
         uint256 pendingOrderCount;
     }
 
-    struct AccountOrderSummary {
-        uint256 pendingOrderCount;
-        uint256 pendingCloseSize;
-        uint256 committedMarginUsdc;
-        uint256 executionBountyUsdc;
-        bool hasTerminalCloseQueued;
-    }
-
     struct PendingOrderView {
         uint64 orderId;
         bool isClose;
@@ -55,12 +47,6 @@ interface IOrderRouterAccounting {
     function getAccountEscrow(
         bytes32 accountId
     ) external view returns (AccountEscrowView memory escrow);
-
-    /// @notice Returns aggregate queued order state attributed to an account.
-    /// @dev Committed margin value is derived from the clearinghouse reservation summary; the router only owns queue structure.
-    function getAccountOrderSummary(
-        bytes32 accountId
-    ) external view returns (AccountOrderSummary memory summary);
 
     /// @notice Returns pending orders for an account with escrow-aware queue details.
     function getPendingOrdersForAccount(

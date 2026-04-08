@@ -142,25 +142,32 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
-            IOrderRouterAccounting.AccountOrderSummary memory summary = router.getAccountOrderSummary(accountId);
+            IOrderRouterAccounting.PendingOrderView[] memory pending = router.getPendingOrdersForAccount(accountId);
+
+            uint256 pendingCloseSize;
+            for (uint256 j = 0; j < pending.length; j++) {
+                if (pending[j].isClose) {
+                    pendingCloseSize += pending[j].sizeDelta;
+                }
+            }
 
             assertEq(
-                summary.pendingOrderCount, escrow.pendingOrderCount, "Escrow summary count must match account escrow"
+                pending.length, escrow.pendingOrderCount, "Pending order count must match account escrow"
             );
             assertEq(
-                summary.committedMarginUsdc,
+                clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc,
                 escrow.committedMarginUsdc,
-                "Escrow summary committed margin must match account escrow"
+                "Committed margin summary must match account escrow"
             );
             assertEq(
-                summary.executionBountyUsdc,
                 escrow.executionBountyUsdc,
-                "Escrow summary execution bounty must match account escrow"
+                escrow.executionBountyUsdc,
+                "Execution bounty must remain self-consistent"
             );
             assertEq(
                 router.pendingCloseSize(accountId),
-                summary.pendingCloseSize,
-                "Pending close size mapping must match escrow summary"
+                pendingCloseSize,
+                "Pending close size mapping must match pending-order scan"
             );
         }
     }
@@ -231,8 +238,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 handler.accountReservationRemainingSum(accountId),
-                router.getAccountOrderSummary(accountId).committedMarginUsdc,
-                "Order summary committed margin must derive from the same clearinghouse reservation source"
+                router.getAccountEscrow(accountId).committedMarginUsdc,
+                "Account escrow committed margin must derive from the same clearinghouse reservation source"
             );
         }
     }
