@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {DeferredEngineViewTypes} from "./DeferredEngineViewTypes.sol";
 import {EngineStatusViewTypes} from "./EngineStatusViewTypes.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -113,8 +112,6 @@ interface ICfdEngine {
         uint256 amountUsdc
     ) external;
 
-    function getDeferredClaimHead() external view returns (DeferredEngineViewTypes.DeferredClaim memory claim);
-
     /// @notice Reserves close-order execution bounty from free settlement first, then active position margin.
     function reserveCloseOrderExecutionBounty(
         bytes32 accountId,
@@ -175,8 +172,6 @@ interface ICfdEngine {
 
     /// @notice Deferred liquidation bounties still owed after failed immediate payout.
     function totalDeferredClearerBountyUsdc() external view returns (uint256);
-
-    function deferredClaimHeadId() external view returns (uint64);
 
     /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
     ///         Positive = traders winning (house liability). Negative = traders losing (house asset).

@@ -933,9 +933,14 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), deferred);
 
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
         vm.prank(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__DeferredClaimNotAtHead.selector);
         engine.claimDeferredClearerBounty();
+        assertGt(
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
+            0,
+            "Deferred clearer bounty should no longer require head-of-queue priority"
+        );
     }
 
     function test_NoFundingSettlement_SyncsClearinghouse() public {
@@ -1841,16 +1846,6 @@ contract CfdEngineTest is BasePerpTest {
         vm.store(address(engine), deferredPayoutSlot, bytes32(uint256(10e6)));
         vm.store(address(engine), bytes32(uint256(32)), bytes32(uint256(10e6)));
 
-        bytes32 claimBaseSlot = keccak256(abi.encode(uint256(1), uint256(35)));
-        vm.store(address(engine), claimBaseSlot, bytes32(uint256(0)));
-        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 1), accountId);
-        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 2), bytes32(uint256(0)));
-        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 3), bytes32(uint256(10e6)));
-        vm.store(address(engine), bytes32(uint256(claimBaseSlot) + 4), bytes32(uint256(0)));
-        vm.store(address(engine), bytes32(uint256(36)), bytes32(uint256(2) | (uint256(1) << 64) | (uint256(1) << 128)));
-        stdstore.target(address(engine)).sig("traderDeferredClaimIdByAccount(bytes32)").with_key(accountId)
-            .checked_write(uint256(1));
-
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 30e6);
@@ -2353,7 +2348,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_Close_ConsumesInterleavedDeferredPayoutWithoutTouchingGlobalHead() public {
+    function test_Close_ConsumesDeferredPayoutBalancesWithoutQueueOrdering() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD241));
         bytes32 bearId = bytes32(uint256(0xD242));
@@ -2373,55 +2368,31 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.recordDeferredClearerBounty(keeper, 1e6);
 
-        uint64 bountyClaimId = engine.deferredClaimHeadId();
-        assertEq(
-            engine.traderDeferredClaimIdByAccount(bearId), 0, "Bear account should start without trader payout claims"
-        );
-
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
-        uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
-        assertGt(bearClaimId, 0, "Bear account should track its deferred trader payout off the global queue");
-        assertGt(bearClaimId, bountyClaimId, "Bear deferred claim should sit behind the unrelated queue head");
+        uint256 deferredBefore = engine.deferredPayoutUsdc(bearId);
+        assertGt(deferredBefore, 0, "Bear account should accrue deferred trader payout balance");
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
-        assertEq(
-            engine.traderDeferredClaimIdByAccount(bearId),
-            bearClaimId,
-            "Additional deferred payout for the same account should coalesce into its existing queue node"
-        );
+        uint256 deferredAfterAccrual = engine.deferredPayoutUsdc(bearId);
+        assertGe(deferredAfterAccrual, deferredBefore, "Additional deferred payout should coalesce into the same balance");
 
         uint256 reducedSettlement = clearinghouse.balanceUsdc(bearId) - 4700e6;
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId)
             .checked_write(reducedSettlement);
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 80_000_000, vaultDepth, refreshTime);
-
-        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
-        assertEq(
-            uint8(headClaim.claimType),
-            uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty),
-            "Consuming a later trader payout must not disturb the unrelated global queue head"
+        assertLe(
+            engine.deferredPayoutUsdc(bearId),
+            deferredAfterAccrual,
+            "Consuming deferred trader payout should only reduce the tracked balance"
         );
-        assertEq(headClaim.keeper, keeper, "Original bounty head should remain at the front of the queue");
-        uint64 bearClaimIdAfter = engine.traderDeferredClaimIdByAccount(bearId);
-        if (engine.deferredPayoutUsdc(bearId) == 0) {
-            assertEq(
-                bearClaimIdAfter, 0, "Claim pointer should clear when the coalesced trader deferred node is exhausted"
-            );
-        } else {
-            assertEq(
-                bearClaimIdAfter,
-                bearClaimId,
-                "Partially consumed trader deferred payout should keep using the same coalesced queue node"
-            );
-        }
     }
 
-    function test_DeferredTraderPayout_CoalescingRetainsExistingQueuePosition() public {
+    function test_DeferredTraderPayout_CoalescesPerAccountWithoutQueuePosition() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD261));
         bytes32 bearId = bytes32(uint256(0xD262));
@@ -2445,28 +2416,17 @@ contract CfdEngineTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
         _closeAt(bearId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
-        uint64 bearClaimId = engine.traderDeferredClaimIdByAccount(bearId);
-        assertGt(bearClaimId, 0, "Initial deferred payout should create a queue node for bearId");
+        uint256 bearDeferredBefore = engine.deferredPayoutUsdc(bearId);
+        assertGt(bearDeferredBefore, 0, "Initial deferred payout should create tracked deferred balance for bearId");
 
         _closeAt(laterId, CfdTypes.Side.BEAR, 5000e18, 120_000_000, vaultDepth, refreshTime);
-        uint64 laterClaimId = engine.traderDeferredClaimIdByAccount(laterId);
-        assertGt(laterClaimId, bearClaimId, "Later claimant should enter behind the earlier deferred trader node");
+        uint256 laterDeferred = engine.deferredPayoutUsdc(laterId);
+        assertGt(laterDeferred, 0, "Later claimant should also accrue deferred balance");
 
-        uint256 bearDeferredBefore = engine.deferredPayoutUsdc(bearId);
         _closeAt(bearId, CfdTypes.Side.BEAR, 2500e18, 120_000_000, vaultDepth, refreshTime);
         uint256 bearDeferredAfter = engine.deferredPayoutUsdc(bearId);
 
-        assertEq(
-            engine.traderDeferredClaimIdByAccount(bearId),
-            bearClaimId,
-            "Additional deferred payout for the same account should reuse the existing queue node"
-        );
         assertGe(bearDeferredAfter, bearDeferredBefore, "Coalescing should not move the account behind later claimants");
-        assertEq(
-            engine.getDeferredClaimHead().accountId,
-            bearId,
-            "The account keeps its existing queue position after deferred payout coalescing"
-        );
     }
 
     function test_Close_RecoversExecutionFeeShortfallFromExistingDeferredPayout() public {
@@ -2689,7 +2649,7 @@ contract CfdEngineTest is BasePerpTest {
         assertTrue(statusAfter.traderPayoutClaimableNow);
     }
 
-    function test_GetDeferredPayoutStatus_OnlyExposesHeadClaim() public {
+    function test_GetDeferredPayoutStatus_ExposesClaimabilityWithoutHeadOrdering() public {
         address trader = address(0xAB16);
         address keeper = address(0xAB17);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -2708,13 +2668,8 @@ contract CfdEngineTest is BasePerpTest {
         usdc.mint(address(pool), deferred);
 
         DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(accountId, keeper);
-        assertTrue(
-            status.traderPayoutClaimableNow, "Oldest deferred trader claim should be claimable under partial liquidity"
-        );
-        assertFalse(
-            status.liquidationBountyClaimableNow,
-            "Later deferred clearer claim should remain queued behind the trader head"
-        );
+        assertTrue(status.traderPayoutClaimableNow, "Deferred trader claim should be claimable under partial liquidity");
+        assertTrue(status.liquidationBountyClaimableNow, "Deferred clearer claim should also be claimable without FIFO ordering");
     }
 
     function test_DeferredClearerBounty_Lifecycle() public {
@@ -2750,7 +2705,7 @@ contract CfdEngineTest is BasePerpTest {
 
         bytes32 keeperId = bytes32(uint256(uint160(keeper)));
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperId);
-        vm.prank(relayer);
+        vm.prank(keeper);
         engine.claimDeferredClearerBounty();
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolViewAfter = engineProtocolLens.getProtocolAccountingSnapshot();
@@ -2759,24 +2714,16 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(protocolViewAfter.totalDeferredClearerBountyUsdc, 0);
     }
 
-    function test_DeferredClearerBounty_CoalescesPerKeeperAndSupportsPartialHeadClaims() public {
+    function test_DeferredClearerBounty_CoalescesPerKeeperAndSupportsPartialClaims() public {
         address keeper = address(0xAB1605);
         bytes32 keeperId = bytes32(uint256(uint160(keeper)));
 
         vm.startPrank(address(router));
         engine.recordDeferredClearerBounty(keeper, 25e6);
-        uint64 initialClaimId = engine.clearerDeferredClaimIdByKeeper(keeper);
         engine.recordDeferredClearerBounty(keeper, 5e6);
         vm.stopPrank();
 
-        assertEq(
-            engine.clearerDeferredClaimIdByKeeper(keeper), initialClaimId, "Keeper bounty should coalesce to one node"
-        );
         assertEq(engine.deferredClearerBountyUsdc(keeper), 30e6, "Keeper liability should aggregate across events");
-
-        DeferredEngineViewTypes.DeferredClaim memory headBefore = engine.getDeferredClaimHead();
-        assertEq(headBefore.keeper, keeper, "Coalesced keeper node should remain at queue head");
-        assertEq(headBefore.remainingUsdc, 30e6, "Head node should equal the aggregated keeper liability");
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -2795,15 +2742,6 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             engine.deferredClearerBountyUsdc(keeper), 20e6, "Partial claim should preserve remaining keeper liability"
         );
-        assertEq(
-            engine.clearerDeferredClaimIdByKeeper(keeper),
-            initialClaimId,
-            "Partial claim should retain the same coalesced node"
-        );
-
-        DeferredEngineViewTypes.DeferredClaim memory headAfter = engine.getDeferredClaimHead();
-        assertEq(headAfter.keeper, keeper, "Partially serviced coalesced node should remain at head");
-        assertEq(headAfter.remainingUsdc, 20e6, "Head node should shrink by the claimed amount");
     }
 
     function test_ClaimDeferredClearerBounty_IgnoresKeeperWalletTransferBlacklist() public {
@@ -2838,9 +2776,9 @@ contract CfdEngineTest is BasePerpTest {
             "Deferred clearer bounty should settle to clearinghouse credit without direct keeper transfer"
         );
         assertEq(
-            engine.getDeferredClaimHead().keeper,
-            laterKeeper,
-            "Claiming a blacklisted keeper head should not brick the deferred queue"
+            engine.deferredClearerBountyUsdc(laterKeeper),
+            5e6,
+            "Claiming one keeper should not affect unrelated deferred clearer balances"
         );
     }
 

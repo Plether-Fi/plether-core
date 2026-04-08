@@ -4,7 +4,6 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {DeferredEngineViewTypes} from "../../../src/perps/interfaces/DeferredEngineViewTypes.sol";
-import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {CashPriorityLib} from "../../../src/perps/libraries/CashPriorityLib.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -35,8 +34,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
     function invariant_DeferredPayoutStatusMatchesEngineAndVaultLiquidity() public view {
         uint256 totalDeferredPayoutUsdc;
-        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
-        bool headHasLiquidity = vault.totalAssets() > 0 && headClaim.remainingUsdc > 0;
+        bool anyLiquidity = vault.totalAssets() > 0;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
@@ -47,16 +45,12 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
             assertEq(status.deferredTraderPayoutUsdc, deferredPayoutUsdc, "Deferred payout status amount mismatch");
             assertEq(
                 status.traderPayoutClaimableNow,
-                deferredPayoutUsdc > 0 && headHasLiquidity
-                    && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout)
-                    && headClaim.accountId == accountId,
+                deferredPayoutUsdc > 0 && anyLiquidity,
                 "Deferred payout claimability mismatch"
             );
             assertEq(
                 status.liquidationBountyClaimableNow,
-                deferredClearerBountyUsdc > 0 && headHasLiquidity
-                    && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty)
-                    && headClaim.keeper == address(handler),
+                deferredClearerBountyUsdc > 0 && anyLiquidity,
                 "Deferred clearer bounty claimability mismatch"
             );
 
@@ -88,120 +82,6 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         assertEq(
             engine.totalDeferredPayoutUsdc(), ghostTotalDeferredPayoutUsdc, "Engine deferred payout total mismatch"
         );
-    }
-
-    function invariant_TraderDeferredClaimPointersMatchTrackedTraderPayoutState() public view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            bytes32 accountId = _accountId(handler.actorAt(i));
-            uint64 claimId = engine.traderDeferredClaimIdByAccount(accountId);
-            uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
-
-            if (deferredPayoutUsdc == 0) {
-                assertEq(claimId, 0, "Accounts without deferred payout must not retain trader deferred claim pointers");
-                continue;
-            }
-
-            assertGt(claimId, 0, "Accounts with deferred payout must have a trader deferred claim pointer");
-            (DeferredEngineViewTypes.DeferredClaimType claimType, bytes32 claimAccountId,, uint256 remainingUsdc,,) =
-                engine.deferredClaims(claimId);
-            assertEq(
-                uint8(claimType),
-                uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout),
-                "Trader deferred claim pointer must point to a trader payout node"
-            );
-            assertEq(claimAccountId, accountId, "Trader deferred claim pointer must belong to the tracked account");
-            assertEq(
-                remainingUsdc, deferredPayoutUsdc, "Coalesced trader deferred node must equal tracked deferred payout"
-            );
-        }
-    }
-
-    function invariant_ClearerDeferredClaimPointersMatchTrackedClearerState() public view {
-        address keeper = address(handler);
-        uint64 claimId = engine.clearerDeferredClaimIdByKeeper(keeper);
-        uint256 deferredBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
-
-        if (deferredBountyUsdc == 0) {
-            assertEq(claimId, 0, "Keepers without deferred bounty must not retain clearer claim pointers");
-            return;
-        }
-
-        assertGt(claimId, 0, "Keepers with deferred bounty must have a clearer deferred claim pointer");
-        (DeferredEngineViewTypes.DeferredClaimType claimType,, address claimKeeper, uint256 remainingUsdc,,) =
-            engine.deferredClaims(claimId);
-        assertEq(
-            uint8(claimType),
-            uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty),
-            "Clearer deferred claim pointer must point to a clearer bounty node"
-        );
-        assertEq(claimKeeper, keeper, "Clearer deferred claim pointer must belong to the tracked keeper");
-        assertEq(remainingUsdc, deferredBountyUsdc, "Coalesced clearer deferred node must equal tracked liability");
-    }
-
-    function invariant_GlobalDeferredQueueLinksRemainConsistent() public view {
-        uint64 claimId = engine.deferredClaimHeadId();
-        uint64 prevClaimId;
-        uint64 lastClaimId;
-        uint256 traversedClaims;
-        uint256 traderClaimCount;
-
-        while (claimId != 0) {
-            (
-                DeferredEngineViewTypes.DeferredClaimType claimType,
-                bytes32 claimAccountId,
-                address claimKeeper,
-                uint256 remainingUsdc,
-                uint64 storedPrevClaimId,
-                uint64 nextClaimId
-            ) = engine.deferredClaims(claimId);
-
-            assertEq(storedPrevClaimId, prevClaimId, "Deferred queue prev-link must match traversal state");
-            assertGt(remainingUsdc, 0, "Deferred queue must not retain zero-amount claims");
-
-            if (claimType == DeferredEngineViewTypes.DeferredClaimType.TraderPayout) {
-                traderClaimCount++;
-                assertEq(
-                    engine.traderDeferredClaimIdByAccount(claimAccountId),
-                    claimId,
-                    "Each trader account should have exactly one coalesced deferred claim node"
-                );
-                assertEq(
-                    remainingUsdc,
-                    engine.deferredPayoutUsdc(claimAccountId),
-                    "Trader deferred node amount must match account state"
-                );
-            } else {
-                assertEq(claimAccountId, bytes32(0), "Clearer bounty claims must not carry trader account ids");
-                assertEq(
-                    engine.clearerDeferredClaimIdByKeeper(claimKeeper),
-                    claimId,
-                    "Each clearer should have exactly one coalesced deferred claim node"
-                );
-                assertEq(
-                    remainingUsdc,
-                    engine.deferredClearerBountyUsdc(claimKeeper),
-                    "Clearer deferred node amount must match keeper state"
-                );
-            }
-
-            prevClaimId = claimId;
-            lastClaimId = claimId;
-            claimId = nextClaimId;
-            traversedClaims++;
-
-            assertLe(traversedClaims, engine.nextDeferredClaimId(), "Deferred queue traversal must remain acyclic");
-        }
-
-        assertEq(engine.deferredClaimTailId(), lastClaimId, "Deferred queue tail must equal the final traversed node");
-        if (lastClaimId == 0) {
-            assertEq(engine.totalDeferredPayoutUsdc(), 0, "Empty deferred queue cannot retain deferred trader payouts");
-            assertEq(
-                engine.totalDeferredClearerBountyUsdc(),
-                0,
-                "Empty deferred queue cannot retain deferred clearer bounties"
-            );
-        }
-        assertLe(traderClaimCount, traversedClaims, "Trader payout claims must be a subset of the global queue");
     }
 
     function invariant_FullClosePreviewUsesAllOrNothingVaultLiquidityGating() public view {

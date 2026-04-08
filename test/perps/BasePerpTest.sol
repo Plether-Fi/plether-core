@@ -699,20 +699,14 @@ abstract contract BasePerpTest is Test {
         bytes32 accountId,
         address keeper
     ) internal view returns (DeferredEngineViewTypes.DeferredPayoutStatus memory status) {
-        DeferredEngineViewTypes.DeferredClaim memory headClaim = engine.getDeferredClaimHead();
-        bool headHasLiquidity = pool.totalAssets() > 0 && headClaim.remainingUsdc > 0;
-
         uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
         uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(keeper);
+        bool anyLiquidity = pool.totalAssets() > 0;
 
         status.deferredTraderPayoutUsdc = deferredPayoutUsdc;
-        status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && headHasLiquidity
-            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.TraderPayout)
-            && headClaim.accountId == accountId;
+        status.traderPayoutClaimableNow = deferredPayoutUsdc > 0 && anyLiquidity;
         status.deferredClearerBountyUsdc = deferredClearerBountyUsdc;
-        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && headHasLiquidity
-            && uint8(headClaim.claimType) == uint8(DeferredEngineViewTypes.DeferredClaimType.ClearerBounty)
-            && headClaim.keeper == keeper;
+        status.liquidationBountyClaimableNow = deferredClearerBountyUsdc > 0 && anyLiquidity;
     }
 
     function _vaultMtmAdjustment() internal view returns (uint256) {

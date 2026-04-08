@@ -5,7 +5,6 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "./CfdEnginePlanner.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {DeferredEngineViewTypes} from "./interfaces/DeferredEngineViewTypes.sol";
 import {EngineStatusViewTypes} from "./interfaces/EngineStatusViewTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEnginePlanner} from "./interfaces/ICfdEnginePlanner.sol";
@@ -193,13 +192,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     uint256 public totalDeferredPayoutUsdc;
     mapping(address => uint256) public deferredClearerBountyUsdc;
     uint256 public totalDeferredClearerBountyUsdc;
-    mapping(uint64 => DeferredEngineViewTypes.DeferredClaim) public deferredClaims;
-    uint64 public nextDeferredClaimId = 1;
-    uint64 public deferredClaimHeadId;
-    uint64 public deferredClaimTailId;
-    mapping(bytes32 => uint64) public traderDeferredClaimIdByAccount;
-    mapping(address => uint64) public clearerDeferredClaimIdByKeeper;
-
     address public orderRouter;
 
     mapping(uint256 => bool) public fadDayOverrides;
@@ -235,7 +227,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__NoDeferredPayout();
     error CfdEngine__InsufficientVaultLiquidity();
     error CfdEngine__NoDeferredClearerBounty();
-    error CfdEngine__DeferredClaimNotAtHead();
     error CfdEngine__MustCloseOpposingPosition();
     error CfdEngine__FundingExceedsMargin();
     error CfdEngine__VaultSolvencyExceeded();
@@ -653,25 +644,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (amount == 0) {
             revert CfdEngine__NoDeferredPayout();
         }
-        uint64 claimId = deferredClaimHeadId;
-        DeferredEngineViewTypes.DeferredClaim storage claim = deferredClaims[claimId];
-        if (claim.claimType != DeferredEngineViewTypes.DeferredClaimType.TraderPayout || claim.accountId != accountId) {
-            revert CfdEngine__DeferredClaimNotAtHead();
-        }
-
-        uint256 claimAmountUsdc = _claimableHeadAmountUsdc();
+        uint256 claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientVaultLiquidity();
         }
 
         deferredPayoutUsdc[accountId] -= claimAmountUsdc;
         totalDeferredPayoutUsdc -= claimAmountUsdc;
-        claim.remainingUsdc -= claimAmountUsdc;
         vault.payOut(address(clearinghouse), claimAmountUsdc);
         clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
-        if (claim.remainingUsdc == 0) {
-            _popDeferredClaimHead();
-        }
 
         emit DeferredPayoutClaimed(accountId, claimAmountUsdc);
     }
@@ -680,33 +661,21 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @dev Deferred keeper bounties settle to clearinghouse credit for the recorded keeper address-derived account,
     ///      rather than attempting a direct USDC wallet transfer.
     function claimDeferredClearerBounty() external nonReentrant {
-        uint64 claimId = deferredClaimHeadId;
-        DeferredEngineViewTypes.DeferredClaim storage claim = deferredClaims[claimId];
-        if (claim.claimType != DeferredEngineViewTypes.DeferredClaimType.ClearerBounty) {
-            revert CfdEngine__DeferredClaimNotAtHead();
-        }
-        address beneficiary = claim.keeper;
-        if (clearerDeferredClaimIdByKeeper[beneficiary] != claimId) {
-            revert CfdEngine__DeferredClaimNotAtHead();
-        }
+        address beneficiary = msg.sender;
         uint256 amount = deferredClearerBountyUsdc[beneficiary];
         if (amount == 0) {
             revert CfdEngine__NoDeferredClearerBounty();
         }
 
-        uint256 claimAmountUsdc = _claimableHeadAmountUsdc();
+        uint256 claimAmountUsdc = amount < vault.totalAssets() ? amount : vault.totalAssets();
         if (claimAmountUsdc == 0) {
             revert CfdEngine__InsufficientVaultLiquidity();
         }
 
         deferredClearerBountyUsdc[beneficiary] -= claimAmountUsdc;
         totalDeferredClearerBountyUsdc -= claimAmountUsdc;
-        claim.remainingUsdc -= claimAmountUsdc;
         vault.payOut(address(clearinghouse), claimAmountUsdc);
         clearinghouse.settleUsdc(bytes32(uint256(uint160(beneficiary))), int256(claimAmountUsdc));
-        if (claim.remainingUsdc == 0) {
-            _popDeferredClaimHead();
-        }
 
         emit DeferredClearerBountyClaimed(beneficiary, claimAmountUsdc);
     }
@@ -940,17 +909,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) internal {
         deferredPayoutUsdc[accountId] += amountUsdc;
         totalDeferredPayoutUsdc += amountUsdc;
-
-        uint64 claimId = traderDeferredClaimIdByAccount[accountId];
-        if (claimId == 0) {
-            claimId = _enqueueDeferredClaim(
-                DeferredEngineViewTypes.DeferredClaimType.TraderPayout, accountId, address(0), amountUsdc
-            );
-            traderDeferredClaimIdByAccount[accountId] = claimId;
-            return;
-        }
-
-        deferredClaims[claimId].remainingUsdc += amountUsdc;
     }
 
     function _enqueueOrAccrueDeferredClearerBounty(
@@ -959,17 +917,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) internal {
         deferredClearerBountyUsdc[keeper] += amountUsdc;
         totalDeferredClearerBountyUsdc += amountUsdc;
-
-        uint64 claimId = clearerDeferredClaimIdByKeeper[keeper];
-        if (claimId == 0) {
-            claimId = _enqueueDeferredClaim(
-                DeferredEngineViewTypes.DeferredClaimType.ClearerBounty, bytes32(0), keeper, amountUsdc
-            );
-            clearerDeferredClaimIdByKeeper[keeper] = claimId;
-            return;
-        }
-
-        deferredClaims[claimId].remainingUsdc += amountUsdc;
     }
 
     function _accountVaultCashInflow(
@@ -1007,105 +954,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return _freshVaultReservation().freeCashUsdc;
     }
 
-    function _claimableHeadAmountUsdc() internal view returns (uint256) {
-        uint64 claimId = deferredClaimHeadId;
-        if (claimId == 0) {
-            return 0;
-        }
-
-        return _headDeferredClaimReservation(deferredClaims[claimId].remainingUsdc).headClaimServiceableUsdc;
-    }
-
     function _freshVaultReservation() internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
         return CashPriorityLib.reserveFreshPayouts(
             vault.totalAssets(), accumulatedFeesUsdc, totalDeferredPayoutUsdc, totalDeferredClearerBountyUsdc
         );
-    }
-
-    function _headDeferredClaimReservation(
-        uint256 headClaimAmountUsdc
-    ) internal view returns (CashPriorityLib.SeniorCashReservation memory reservation) {
-        return CashPriorityLib.reserveDeferredHeadClaim(
-            vault.totalAssets(),
-            accumulatedFeesUsdc,
-            totalDeferredPayoutUsdc,
-            totalDeferredClearerBountyUsdc,
-            headClaimAmountUsdc
-        );
-    }
-
-    function _enqueueDeferredClaim(
-        DeferredEngineViewTypes.DeferredClaimType claimType,
-        bytes32 accountId,
-        address keeper,
-        uint256 amountUsdc
-    ) internal returns (uint64 claimId) {
-        claimId = nextDeferredClaimId++;
-        deferredClaims[claimId] = DeferredEngineViewTypes.DeferredClaim({
-            claimType: claimType,
-            accountId: accountId,
-            keeper: keeper,
-            remainingUsdc: amountUsdc,
-            prevClaimId: deferredClaimTailId,
-            nextClaimId: 0
-        });
-
-        if (deferredClaimTailId == 0) {
-            deferredClaimHeadId = claimId;
-            deferredClaimTailId = claimId;
-            return claimId;
-        }
-
-        deferredClaims[deferredClaimTailId].nextClaimId = claimId;
-        deferredClaimTailId = claimId;
-        return claimId;
-    }
-
-    function _popDeferredClaimHead() internal {
-        uint64 claimId = deferredClaimHeadId;
-        if (claimId == 0) {
-            return;
-        }
-
-        _unlinkDeferredClaim(claimId);
-    }
-
-    function _unlinkDeferredClaim(
-        uint64 claimId
-    ) internal {
-        if (claimId == 0) {
-            return;
-        }
-
-        DeferredEngineViewTypes.DeferredClaim storage claim = deferredClaims[claimId];
-        uint64 prevClaimId = claim.prevClaimId;
-        uint64 nextClaimId = claim.nextClaimId;
-
-        if (prevClaimId == 0) {
-            deferredClaimHeadId = nextClaimId;
-        } else {
-            deferredClaims[prevClaimId].nextClaimId = nextClaimId;
-        }
-
-        if (nextClaimId == 0) {
-            deferredClaimTailId = prevClaimId;
-        } else {
-            deferredClaims[nextClaimId].prevClaimId = prevClaimId;
-        }
-
-        if (claim.claimType == DeferredEngineViewTypes.DeferredClaimType.TraderPayout) {
-            bytes32 accountId = claim.accountId;
-            if (traderDeferredClaimIdByAccount[accountId] == claimId) {
-                delete traderDeferredClaimIdByAccount[accountId];
-            }
-        } else {
-            address keeper = claim.keeper;
-            if (clearerDeferredClaimIdByKeeper[keeper] == claimId) {
-                delete clearerDeferredClaimIdByKeeper[keeper];
-            }
-        }
-
-        delete deferredClaims[claimId];
     }
 
     // ==========================================
@@ -1209,10 +1061,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         });
         CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, oraclePrice, publishTime);
         return planner.getOpenFailurePolicyCategory(delta.revertCode);
-    }
-
-    function getDeferredClaimHead() external view returns (DeferredEngineViewTypes.DeferredClaim memory claim) {
-        return deferredClaims[deferredClaimHeadId];
     }
 
     function getPositionSide(
@@ -1730,21 +1578,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         deferredPayoutUsdc[accountId] -= amountUsdc;
         totalDeferredPayoutUsdc -= amountUsdc;
-
-        uint64 claimId = traderDeferredClaimIdByAccount[accountId];
-        if (claimId == 0) {
-            revert CfdEngine__DeferredClaimNotAtHead();
-        }
-
-        DeferredEngineViewTypes.DeferredClaim storage claim = deferredClaims[claimId];
-        if (claim.remainingUsdc < amountUsdc) {
-            revert CfdEngine__DeferredClaimNotAtHead();
-        }
-
-        claim.remainingUsdc -= amountUsdc;
-        if (claim.remainingUsdc == 0) {
-            _unlinkDeferredClaim(claimId);
-        }
     }
 
     function _validateRiskParams(

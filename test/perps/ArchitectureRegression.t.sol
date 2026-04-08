@@ -104,15 +104,20 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         usdc.mint(address(pool), deferredPayout);
 
         DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(aliceId, keeper);
-        assertTrue(status.traderPayoutClaimableNow, "oldest queue head should become claimable under partial liquidity");
-        assertFalse(status.liquidationBountyClaimableNow, "later claims must remain blocked behind the queue head");
+        assertTrue(status.traderPayoutClaimableNow, "Deferred trader payout should be claimable when liquidity exists");
+        assertTrue(status.liquidationBountyClaimableNow, "Deferred clearer bounty should also be claimable without FIFO gating");
 
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
         vm.prank(keeper);
-        vm.expectRevert(CfdEngine.CfdEngine__DeferredClaimNotAtHead.selector);
         engine.claimDeferredClearerBounty();
+        assertGt(
+            clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper)))) - keeperSettlementBefore,
+            0,
+            "Keeper should be able to claim directly without head-of-queue ordering"
+        );
     }
 
-    function test_DeferredClaimQueue_MustServiceOldestClaimFirstUnderPartialLiquidity() public {
+    function test_DeferredClaims_NoLongerEnforceOldestFirstUnderPartialLiquidity() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         bytes32 bobId = bytes32(uint256(uint160(bob)));
 
@@ -144,10 +149,16 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         assertEq(
             engine.deferredPayoutUsdc(aliceId), aliceDeferred - aliceClaimed, "head claim should shrink by paid amount"
         );
-        assertEq(
-            engine.deferredPayoutUsdc(bobId),
-            bobDeferred,
-            "later claim must remain untouched until older claim is serviced"
+        assertEq(engine.deferredPayoutUsdc(bobId), bobDeferred, "Unclaimed later balance should remain unchanged");
+
+        usdc.mint(address(pool), bobDeferred / 2);
+        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobId);
+        vm.prank(bob);
+        engine.claimDeferredPayout(bobId);
+        assertGt(
+            clearinghouse.balanceUsdc(bobId) - bobSettlementBefore,
+            0,
+            "Later deferred claimant should also be able to claim available liquidity without FIFO ordering"
         );
     }
 
