@@ -145,6 +145,7 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     error InvarCoin__SpotDeviationTooHigh();
     error InvarCoin__UseLpWithdraw();
     error InvarCoin__Unauthorized();
+    error InvarCoin__NoStakers();
     error InvarCoin__GaugeTimelockActive();
     error InvarCoin__StakingTimelockActive();
     error InvarCoin__GaugeRewardsTimelockActive();
@@ -849,6 +850,10 @@ contract InvarCoin is ERC20, ERC20Permit, Ownable2Step, Pausable, ReentrancyGuar
     function _mintAndDonate(
         uint256 amount
     ) private {
+        if (stakedInvarCoin.totalSupply() == 0) {
+            revert InvarCoin__NoStakers();
+        }
+
         _mint(address(this), amount);
         IERC20(this).approve(address(stakedInvarCoin), amount);
         stakedInvarCoin.donateYield(amount);
