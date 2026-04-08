@@ -205,24 +205,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 _maxOrderAge
     ) external onlyOwner {
         pendingMaxOrderAge = _maxOrderAge;
-        maxOrderAgeActivationTime = block.timestamp + TIMELOCK_DELAY;
+        maxOrderAgeActivationTime = _timelockReadyAt();
     }
 
     /// @notice Finalizes the pending maxOrderAge after timelock expires.
     function finalizeMaxOrderAge() external onlyOwner {
-        if (maxOrderAgeActivationTime == 0) {
-            revert OrderRouter__NoProposal();
-        }
-        if (block.timestamp < maxOrderAgeActivationTime) {
-            revert OrderRouter__TimelockNotReady();
-        }
+        _requireTimelockReady(maxOrderAgeActivationTime);
         maxOrderAge = pendingMaxOrderAge;
-        pendingMaxOrderAge = 0;
-        maxOrderAgeActivationTime = 0;
-    }
-
-    /// @notice Cancels the pending maxOrderAge proposal.
-    function cancelMaxOrderAgeProposal() external onlyOwner {
         pendingMaxOrderAge = 0;
         maxOrderAgeActivationTime = 0;
     }
@@ -234,22 +223,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__InvalidStalenessLimit();
         }
         pendingOrderExecutionStalenessLimit = limit;
-        orderExecutionStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        orderExecutionStalenessActivationTime = _timelockReadyAt();
     }
 
     function finalizeOrderExecutionStalenessLimit() external onlyOwner {
-        if (orderExecutionStalenessActivationTime == 0) {
-            revert OrderRouter__NoProposal();
-        }
-        if (block.timestamp < orderExecutionStalenessActivationTime) {
-            revert OrderRouter__TimelockNotReady();
-        }
+        _requireTimelockReady(orderExecutionStalenessActivationTime);
         orderExecutionStalenessLimit = pendingOrderExecutionStalenessLimit;
-        pendingOrderExecutionStalenessLimit = 0;
-        orderExecutionStalenessActivationTime = 0;
-    }
-
-    function cancelOrderExecutionStalenessLimitProposal() external onlyOwner {
         pendingOrderExecutionStalenessLimit = 0;
         orderExecutionStalenessActivationTime = 0;
     }
@@ -261,22 +240,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             revert OrderRouter__InvalidStalenessLimit();
         }
         pendingLiquidationStalenessLimit = limit;
-        liquidationStalenessActivationTime = block.timestamp + TIMELOCK_DELAY;
+        liquidationStalenessActivationTime = _timelockReadyAt();
     }
 
     function finalizeLiquidationStalenessLimit() external onlyOwner {
-        if (liquidationStalenessActivationTime == 0) {
-            revert OrderRouter__NoProposal();
-        }
-        if (block.timestamp < liquidationStalenessActivationTime) {
-            revert OrderRouter__TimelockNotReady();
-        }
+        _requireTimelockReady(liquidationStalenessActivationTime);
         liquidationStalenessLimit = pendingLiquidationStalenessLimit;
-        pendingLiquidationStalenessLimit = 0;
-        liquidationStalenessActivationTime = 0;
-    }
-
-    function cancelLiquidationStalenessLimitProposal() external onlyOwner {
         pendingLiquidationStalenessLimit = 0;
         liquidationStalenessActivationTime = 0;
     }
@@ -805,6 +774,21 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 price = mockFallbackPrice;
             }
             publishTime = uint64(block.timestamp);
+        }
+    }
+
+    function _timelockReadyAt() internal view returns (uint256) {
+        return block.timestamp + TIMELOCK_DELAY;
+    }
+
+    function _requireTimelockReady(
+        uint256 readyAt
+    ) internal view {
+        if (readyAt == 0) {
+            revert OrderRouter__NoProposal();
+        }
+        if (block.timestamp < readyAt) {
+            revert OrderRouter__TimelockNotReady();
         }
     }
 
