@@ -65,6 +65,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 ## Boundary Summary
 
 - `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
+- `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
 - `PerpsPublicLens`: canonical product-facing read layer.
 - `CfdEngineAccountLens`: rich account/accounting diagnostics.
 - `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.

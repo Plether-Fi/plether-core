@@ -60,7 +60,7 @@ These properties must always hold. Violation indicates a critical bug.
 | **Minimum Notional** | Every position's notional × `bountyBps` >= `minBountyUsdc × 10,000` — keeper bounty is always economically viable |
 | **No Dust Positions** | Partial closes revert if remaining `pos.margin < minBountyUsdc` — prevents unliquidatable dust where keeper bounty < gas cost |
 | **Margin Sufficiency** | `pos.margin >= IMR` after every open (checked post-fee against final position state), where `IMR` should come from an explicit `initMarginBps` policy surface rather than being implicitly derived from `MMR` |
-| **Queue Execution** | Execution always starts from the current global queue head. Retryable slippage misses are requeued behind the global tail with cooldown instead of being terminally failed, while terminal invalid / expired orders still consume escrow according to policy. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders also reserve a flat `1.00 USDC` bounty upfront at commit time, sourcing it from free settlement first and then active position margin if needed, so head-of-queue execution stays economically backed even for fully margined accounts |
+| **Queue Execution** | Execution always starts from the current global queue head. Slippage-invalid orders fail terminally instead of requeueing, while blocked same-block MEV and stale-oracle conditions still revert. Risk-increasing orders reserve an execution bounty bounded to `[0.05 USDC, 1.00 USDC]` by seizing free settlement into router custody. Close orders also reserve a flat `1.00 USDC` bounty upfront at commit time, sourcing it from free settlement first and then active position margin if needed |
 | **VPI Stateful Bound** | Each position tracks `vpiAccrued` (cumulative charges/rebates). On close, `proportionalAccrued + closeVpi` is bounded ≥ 0 — users can never extract net VPI profit regardless of depth changes |
 
 ### Mark-to-Market Invariants
@@ -194,7 +194,13 @@ These actors **cannot**:
 
 ### No-Funding Baseline
 
-The current perpetuals engine no longer uses a side-to-side funding mechanism. Any future LP-capital carry model should be introduced as an explicit new feature rather than reusing legacy funding semantics.
+The perpetuals engine uses LP-capital carry instead of side-to-side funding.
+
+- **Carry base**: `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
+- **Clock**: continuous wall-clock accrual
+- **Freshness**: carry does not pause when oracle data is stale/frozen
+- **Realization**: open, close, add-margin, and withdraw-margin paths
+- **Destination**: realized carry becomes LP trading revenue
 
 ### Liquidation Mechanics
 
@@ -211,19 +217,19 @@ This means keepers may receive less than `minBountyUsdc` when equity is small bu
 When a position goes underwater (equity < 0):
 - **Liquidation**: Vault seizes all position margin + available free USDC from clearinghouse. Remaining deficit is absorbed as bad debt by the House Pool.
 - **Self-Close**: `_processDecrease` seizes `min(available, owed)` from the user. Any shortfall is absorbed by the vault.
-- **Risk**: Sustained bad debt erodes LP capital. In the no-funding baseline, skew control relies on VPI, margin rules, liquidation, and external spot-market inventory incentives rather than a funding curve.
+- **Risk**: Sustained bad debt erodes LP capital. Skew control relies on VPI, margin rules, liquidation, carry, and external spot-market inventory incentives rather than a funding curve.
 
 #### Deferred Profitable Close Payouts
 
 - **Behavior**: If a profitable close realizes more USDC than the House Pool can immediately transfer, the position is still closed and the unpaid gain is recorded in `deferredPayoutUsdc[accountId]`
-- **Claim path**: Deferred payouts are serviced through an oldest-first queue. Once liquidity returns, anyone may call `claimDeferredPayout(accountId)` for the queue head and the vault pays the currently available amount into the `MarginClearinghouse`, which credits the recorded trader's USDC balance there. Trader deferred payouts are coalesced to one active queue node per account, so additional deferred value for an already-queued account inherits that account's current queue position rather than appending as a fresh later-aged node. Partial returning liquidity still services the current queue head before later claimants, and queue-head servicing is senior to protocol-fee withdrawals.
+- **Claim path**: Deferred payouts are tracked as beneficiary balances, not queue nodes. Once liquidity returns, anyone may call `claimDeferredPayout(accountId)` and the vault pays up to the available amount into the `MarginClearinghouse`, which credits the recorded trader's USDC balance there.
 - **Impact**: Traders are not forced to remain exposed just because the vault is temporarily illiquid, but payment finality becomes a two-step process: economic close first, clearinghouse settlement later
-- **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on future vault liquidity and are counted in reserve/solvency accounting
+- **Operational note**: Monitoring should track deferred payout balances and available free cash, since deferred balances represent senior claims on vault liquidity and are counted in reserve/solvency accounting
 
 #### Deferred Liquidation Bounties
 
 - **Behavior**: If the House Pool cannot immediately fund a liquidation bounty from cash left after reserving existing deferred claims and protocol-fee inventory, the state transition still completes and the unpaid amount is recorded in the deferred bounty liability bucket. Order-execution bounties are router-custodied and therefore do not share this vault-liability path.
-- **Claim path**: Deferred clearer bounties share the same oldest-first queue and coalesce to one active node per keeper. Once liquidity returns and a clearer bounty reaches the queue head, anyone may call `claimDeferredClearerBounty()` and the currently available USDC is paid into `MarginClearinghouse`, which credits the recorded keeper's address-derived account there. Queue-head servicing remains senior to protocol-fee withdrawals and no longer depends on direct USDC wallet transfer success for the keeper.
+- **Claim path**: Deferred clearer bounties are tracked as beneficiary balances, not queue nodes. Once liquidity returns, anyone may call `claimDeferredClearerBounty()` and the available USDC is paid into `MarginClearinghouse`, which credits the recorded keeper's address-derived account there.
 - **Impact**: Terminal execution remains live during temporary vault illiquidity; clearer bounty payment finality becomes deferred rather than blocking the state transition
 - **Operational note**: Deferred liquidation bounties are counted in reserve, solvency, and LP reconciliation accounting until paid
 
@@ -252,9 +258,8 @@ When a position goes underwater (equity < 0):
 
 #### No-Funding Mark Policy
 
-- **Behavior**: The no-funding baseline does not advance any side-to-side funding clock. Mark freshness still gates execution, liquidation, and HousePool reconciliation.
-- **Effect**: Stale and frozen oracle windows affect execution liveness and LP accounting freshness, but not any separate funding accrual.
-- **Trade-off**: If a future LP-capital carry model is introduced, it must be specified independently rather than reusing legacy funding semantics.
+- **Behavior**: Mark freshness still gates execution, liquidation, and HousePool reconciliation, but LP-capital carry continues accruing by wall clock even when the oracle is stale or frozen.
+- **Effect**: stale and frozen oracle windows affect execution liveness and LP accounting freshness, but not carry accrual.
 
 #### Bounded Queue Cleanup
 

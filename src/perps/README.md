@@ -10,12 +10,12 @@ Traditional perpetuals have unbounded upside tail risk. Plether constrains payou
 
 Five contracts separate custody, execution, and ledger math.
 
-For the accounting model that should govern future refactors, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For a one-page map of custody buckets, mutators, accounting readers, and cross-domain value flows, see [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
+For the accounting model that governs the system, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For a one-page map of custody buckets, mutators, accounting readers, and cross-domain value flows, see [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
 For the intended product-facing integration surface, see [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md).
 
 ## Simplified Public API
 
-The intended product surface is smaller than the current internal accounting surface.
+The product surface is smaller than the internal accounting surface.
 
 - Traders use `MarginClearinghouse.depositMargin(...)`, `MarginClearinghouse.withdrawMargin(...)`, and `OrderRouter.submitOrder(...)`.
 - Keepers use `OrderRouter.executeOrder(...)`, `OrderRouter.executeOrderBatch(...)`, and `OrderRouter.executeLiquidation(...)`.
@@ -38,6 +38,7 @@ The existing engine, clearinghouse, router, and house-pool interfaces still expo
 ## Intended Boundaries
 
 - `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for protocol state, order execution, liquidation, and high-level protocol status.
+- `CfdEngineSettlementModule` is the externalized settlement path for close/liquidation runtime orchestration. `CfdEngine` remains the storage owner and applies core state through narrow settlement-host hooks.
 - `PerpsPublicLens` is the canonical product-facing read layer for traders, LPs, and simple protocol status consumers.
 - `MarginClearinghouse` is trader custody plumbing. The slim public surface is `IMarginAccount`; reservation buckets and settlement-path helpers are internal/operator-facing.
 - `OrderRouter` is delayed-order lifecycle and keeper-execution plumbing. Product consumers should use `submitOrder(...)` and compact pending-order views, not raw queue internals.
@@ -61,16 +62,15 @@ This keeps `ICfdEngine` from acting as a general-purpose type bucket and makes t
 
 - `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, execution fees, and net trader settlement.
 - `LiquidationAccountingLib`: shared kernel for preview/live liquidation settlement, including reachable collateral, keeper bounty, residual payout, and bad debt.
-- `SolvencyAccountingLib`: protocol-level balance-sheet view used for max-liability checks, effective-asset construction, and degraded-mode decisions.
-- `WithdrawalAccountingLib`: LP cash-firewall view used for withdrawal reserves and free vault cash after fees and deferred liabilities.
+- `SolvencyAccountingLib`: canonical protocol cash-state builder used for max-liability checks, effective-asset construction, withdrawal reserves, and free withdrawable vault cash.
 - Planner previews follow the same staged transition model as live execution: router cash mutations happen before payout and solvency classification on the post-mutation state.
-- The current no-funding baseline reserves real liabilities only. Any future LP-capital carry model should be introduced as a fresh feature on top of this baseline rather than reviving classic side-to-side funding.
+- The engine uses LP-capital carry rather than side-to-side funding. Carry accrues continuously by wall-clock time on `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`, affects risk/guard checks before realization, and is realized on open, close, add-margin, and withdraw-margin paths. Realized carry flows to LP trading revenue.
 
 These domains answer different questions and must not silently share assumptions.
 
 ### Accounting Glossary
 
-- `raw assets`: the literal USDC token balance currently sitting in `HousePool`.
+- `raw assets`: the literal USDC token balance sitting in `HousePool`.
 - `accounted assets`: canonical protocol-owned USDC recognized by `HousePool` accounting; unsolicited positive transfers do not enter here until explicitly accounted.
 - `excess assets`: raw USDC held above `accountedAssets`; quarantined surplus that can be swept or explicitly admitted into protocol economics later.
 - `net physical assets`: the physically backed vault depth after applying the canonical accounting boundary, i.e. `min(rawAssets, accountedAssets)` before any higher-level solvency adjustments.
@@ -156,19 +156,19 @@ Core state machine. **Holds zero physical funds.** It receives validated intents
 
 **Degraded Mode**: If a profitable close pushes `effectiveAssets` below the remaining worst-case liability bound, the close succeeds and the engine latches `degradedMode`. While degraded, new opens and position-backed withdrawals are blocked. Closes, liquidations, mark updates, and recapitalization remain available until the owner clears the mode after solvency is restored.
 
-**Deferred Close Payouts**: A profitable close never fails solely because the House Pool is short on free cash. If the vault cannot immediately fund realized gain after reserving outstanding deferred claims and protocol-fee inventory, the position is destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are outstanding protocol liabilities in reserve and solvency accounting. Claims are serviced through a global oldest-first queue, but each account keeps one active queue node: added deferred value inherits that account's existing queue position. Partial liquidity services the queue head first. `claimDeferredPayout(accountId)` is permissionless, and paid value settles into the trader's `MarginClearinghouse` balance.
+**Deferred Close Payouts**: A profitable close never fails solely because the House Pool is short on free cash. If the vault cannot immediately fund realized gain after reserving outstanding deferred liabilities and protocol-fee inventory, the position is destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are outstanding protocol liabilities in reserve and solvency accounting. Claims are balance-based rather than queue-ordered: `claimDeferredPayout(accountId)` is permissionless and may service up to the currently available vault cash for that beneficiary without FIFO ordering.
 
-**Fail-Soft Keeper Bounties**: Liquidations are fail-soft if the House Pool cannot immediately fund the liquidation bounty after reserving outstanding deferred claims and protocol-fee inventory. The state transition completes and the unpaid amount becomes a deferred bounty claim in the same oldest-first queue. Each keeper keeps one active queue node, so additional shortfalls inherit queue position. Servicing is permissionless, senior to fee withdrawals, and settles into `MarginClearinghouse` credit rather than direct wallet transfer. Order-execution bounties remain router-custodied user escrow and do not depend on vault liquidity.
+**Fail-Soft Keeper Bounties**: Liquidations are fail-soft if the House Pool cannot immediately fund the liquidation bounty after reserving outstanding deferred liabilities and protocol-fee inventory. The state transition completes and the unpaid amount becomes a deferred clearer-bounty balance for that keeper. Servicing is permissionless, settles into `MarginClearinghouse` credit rather than direct wallet transfer, and no longer relies on beneficiary FIFO ordering. Order-execution bounties remain router-custodied user escrow and do not depend on vault liquidity.
 
-**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty claims are included in withdrawal reserve, solvency, and HousePool reconciliation / NAV paths. A shared senior-cash reservation kernel gates fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing. Deferred queue heads are senior to fee withdrawals, while fresh non-fee payouts reserve both queued senior claims and protocol-fee inventory.
+**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty balances are included in withdrawal reserve, solvency, and HousePool reconciliation / NAV paths. A shared senior-cash reservation kernel gates fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-liability servicing.
 
 **Three-Bucket Liquidation Residuals**: Liquidation planning carries three trader-value buckets: `settlementRetainedUsdc` for reachable settlement left in the clearinghouse ledger, `existingDeferredRemainingUsdc` for pre-existing deferred payout that survives liquidation, and `freshTraderPayoutUsdc` for new trader payout created by liquidation equity in excess of reachable settlement after the keeper bounty. This keeps preview, execution, and solvency accounting aligned.
 
-**Accounting Domains**: `CfdEngine` uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), solvency (`SolvencyAccountingLib`), and withdrawal reserves (`WithdrawalAccountingLib`). This separates execution and balance-sheet policy by domain.
+**Accounting Domains**: `CfdEngine` uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), and a unified protocol cash-state / solvency builder (`SolvencyAccountingLib`). Runtime close/liquidation orchestration is further externalized through `CfdEngineSettlementModule` while `CfdEngine` retains storage ownership.
 
 **Preview Solvency Signals**: Canonical `previewClose()` / `previewLiquidation()` and hypothetical `simulateClose()` / `simulateLiquidation()` expose both the transition-only `triggersDegradedMode` flag and the raw post-op solvency result (`postOpDegradedMode`, `effectiveAssetsAfterUsdc`, `maxLiabilityAfterUsdc`). Integrators can therefore distinguish "this action newly latches degraded mode" from "the system remains degraded after this action."
 
-**Canonical vs Hypothetical Views**: Canonical `previewClose()` / `previewLiquidation()` read vault depth from `HousePool.totalAssets()` and answer current-state behavior. Hypothetical `simulateClose()` / `simulateLiquidation()` are explicit what-if APIs for caller-supplied depth assumptions.
+**Canonical vs Hypothetical Views**: Canonical `previewClose()` / `previewLiquidation()` read vault depth from `HousePool.totalAssets()` and answer live-state behavior. Hypothetical `simulateClose()` / `simulateLiquidation()` are explicit what-if APIs for caller-supplied depth assumptions.
 
 **Position View Semantics**: `getPositionView()` separates `physicalReachableCollateralUsdc` from `nettableDeferredPayoutUsdc`. Generic position-health and withdraw-facing views use only physically reachable clearinghouse collateral. Existing deferred payout is shown separately so UIs and audits can reason about same-account terminal netting without treating that IOU as instantly withdrawable collateral.
 
@@ -363,7 +363,7 @@ Only the owner can pause or unpause. Protective actions (closes, liquidations, w
 | `maintMarginBps` | 100 (1%) | Maintenance margin requirement |
 | `initMarginBps` | 150 (1.5%) | Initial margin requirement configured explicitly in risk params |
 | `fadMarginBps` | 300 (3%) | FAD window maintenance margin |
-| `baseCarryBps` | 500 (5%) | Reserved for future LP-capital carry design; inactive in current no-funding baseline |
+| `baseCarryBps` | 500 (5%) | Fixed global annualized carry rate applied to LP-backed notional |
 | `bountyBps` | 15 (0.15%) | Liquidation keeper bounty |
 | `minBountyUsdc` | 5,000,000 ($5) | Keeper bounty floor |
 | `vpiFactor` | WAD-scaled | VPI severity `k` |

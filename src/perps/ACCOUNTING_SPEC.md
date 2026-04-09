@@ -1,13 +1,14 @@
 # Perps Accounting Spec
 
-This document defines the target accounting model for the Plether Perpetuals Engine. It is the source of truth for solvency, withdrawable cash, liquidation equity, and queued-order escrow semantics.
+This document defines the target accounting model for the Plether Perpetuals Engine. It is the source of truth for solvency, withdrawable cash, liquidation equity, queued-order escrow semantics, and LP-capital carry.
 
-The engine accounting model has four domains:
+The engine accounting model has five domains:
 
 - close settlement,
 - liquidation settlement,
 - protocol solvency,
 - LP withdrawal reserves.
+- LP-capital carry.
 
 This spec defines each domain boundary and the allowed interaction points.
 
@@ -39,7 +40,7 @@ All values below are denominated in 6-decimal USDC unless stated otherwise.
 
 Use the following terms consistently:
 
-- `rawAssets`: the actual USDC token balance currently sitting in `HousePool`
+- `rawAssets`: the actual USDC token balance sitting in `HousePool`
 - `accountedAssets`: the canonical protocol-owned asset ledger maintained by controlled protocol paths
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance sitting in the pool
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: the effective economic vault backing recognized by solvency, reconciliation, and withdrawal logic
@@ -130,13 +131,13 @@ Field semantics:
 
 - `netPhysicalAssetsUsdc`: vault cash net of protocol-owned fees; starting point for LP-facing accounting
 - `maxLiabilityUsdc`: bounded directional payout ceiling from live positions; the main withdrawal reserve component
-- `withdrawalFundingLiabilityUsdc`: always zero in the no-funding baseline; reserved only for any future explicit carry model
+- `withdrawalFundingLiabilityUsdc`: always zero; carry is modeled separately as time-based LP-capital rent rather than a funding liability bucket
 - `unrealizedMtmLiabilityUsdc`: conservative unrealized mark-to-market liability used for tranche reconciliation, not risk-increasing solvency
 - `deferredTraderPayoutUsdc`: profitable-close payouts already owed to traders but not yet paid; senior claim on vault cash
 - `deferredClearerBountyUsdc`: unpaid liquidation bounties; also a senior claim on vault cash
 - `protocolFeesUsdc`: protocol-owned fees excluded from LP equity
 - `markFreshnessRequired`: true when live bounded liability depends on a fresh mark, so stale-mark LP actions must be blocked or deferred
-- `maxMarkStaleness`: action-specific staleness threshold chosen by the engine for the current oracle regime
+- `maxMarkStaleness`: action-specific staleness threshold chosen by the engine for the active oracle regime
 
 Design rule:
 
@@ -187,7 +188,7 @@ Field semantics:
 
 - `effectiveAssetsAfterUsdc`: post-action solvency assets after applying the previewed transition
 - `maxLiabilityAfterUsdc`: post-action bounded liability after applying the same transition
-- `postOpDegradedMode`: whether the protocol would be degraded after the action
+- `postOpDegradedMode`: whether the protocol is degraded after the action
 - `triggersDegradedMode`: whether the action newly crosses into degraded mode from a previously healthy state
 
 Design rule:
@@ -247,7 +248,7 @@ Rule:
 
 Notes:
 
-- This view does not count any funding receivables in the no-funding baseline.
+- This view does not count any side-to-side funding receivables.
 - It must not count unrealized trader losses beyond collectible bounds.
 
 ### B. LP Withdrawal View
@@ -273,7 +274,7 @@ Notes:
 
 Question answered:
 
-- what is current tranche equity for share pricing and revenue distribution?
+- what is tranche equity for share pricing and revenue distribution?
 
 Definition:
 
@@ -297,17 +298,35 @@ Required liabilities in this view:
 - deferred trader payouts,
 - deferred liquidation bounties.
 
-These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-claim servicing so these paths cannot drift on what cash is actually free.
+These deferred liabilities are senior claims on vault cash and must be subtracted before tranche equity or share pricing is derived. One canonical senior-cash reservation kernel should feed fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-liability servicing so these paths cannot drift on what cash is actually free.
 
 Deferred servicing rule:
 
-- deferred clearer bounties are coalesced to at most one active queue node per keeper, while trader deferred payouts are coalesced to at most one active queue node per account,
-- if an account with an existing deferred trader queue node accrues additional deferred payout, that additional amount inherits the account's current queue position instead of appending as a fresh later-aged node,
-- fresh vault cash may only fund new non-fee payouts above the queued senior-claim remainder and reserved protocol-fee inventory,
-- deferred head-claim servicing is senior to protocol-fee withdrawal and may consume any currently available physical cash up to the queue head amount,
-- fee withdrawals may only consume physical cash that remains after reserving queued senior claims and servicing the queue head,
-- direct claim calls may only service the current queue head but servicing itself is permissionless and must still pay the recorded beneficiary,
-- if only partial liquidity is available, that partial liquidity services the queue head before any later claim becomes claimable.
+- deferred trader payouts and deferred clearer bounties are tracked as beneficiary balances, not FIFO queue nodes,
+- fresh vault cash may only fund non-fee payouts above the reserved deferred-liability and protocol-fee inventory,
+- fee withdrawals may only consume physical cash that remains after reserving deferred liabilities and protocol-fee inventory,
+- direct claim calls are permissionless and may service up to the currently available vault cash for the claimant,
+- there is no beneficiary FIFO ordering for deferred claims.
+
+## LP-Capital Carry
+
+The protocol uses LP-capital carry rather than side-to-side funding.
+
+Definition:
+
+- `positionNotionalUsdc = size * markPrice / scale`
+- `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
+- `pendingCarryUsdc = lpBackedNotionalUsdc * baseCarryBps * elapsedSeconds / (10_000 * 365 days)`
+
+Rules:
+
+- carry accrues continuously by wall-clock timestamp,
+- carry does not pause when the oracle is stale or frozen,
+- both sides pay carry whenever they consume LP-backed capital,
+- pending carry reduces risk/guard equity before realization,
+- carry is realized on open, close, add-margin, and withdraw-margin paths,
+- carry is not realized through a separate liquidation settlement path,
+- realized carry is booked as LP trading revenue.
 
 Close-order bounty policy:
 
@@ -318,9 +337,9 @@ Close-order bounty policy:
 
 Failed-open bounty policy:
 
-- commit-time rejection is narrower than execution-time ownership: only deterministic current-state open failures should be rejected before queueing,
+- commit-time rejection is narrower than execution-time ownership: only deterministic live-state open failures should be rejected before queueing,
 - planner/engine semantic policy categories now drive that split: `previewOpenFailurePolicyCategory(...)` exposes `CfdEnginePlanTypes.OpenFailurePolicyCategory` (`CommitTimeRejectable`, `ExecutionTimeUserInvalid`, `ExecutionTimeProtocolStateInvalidated`), and typed execution failures expose `CfdEnginePlanTypes.ExecutionFailurePolicyCategory` (`UserInvalid`, `ProtocolStateInvalidated`),
-- the centralized policy helper currently treats `MUST_CLOSE_OPPOSING`, `POSITION_TOO_SMALL`, `SKEW_TOO_HIGH`, `INSUFFICIENT_INITIAL_MARGIN`, and `SOLVENCY_EXCEEDED` as commit-time rejectable when the cached mark is still fresh,
+- the centralized policy helper treats `MUST_CLOSE_OPPOSING`, `POSITION_TOO_SMALL`, `SKEW_TOO_HIGH`, `INSUFFICIENT_INITIAL_MARGIN`, and `SOLVENCY_EXCEEDED` as commit-time rejectable when the cached mark is fresh,
 - open planning may count deferred receivables toward equity/risk, but it must separately reject any negative net-margin change that cannot be paid from physically unlockable position margin,
 - user-invalid open failures should pay the clearer from user escrow,
 - only genuine post-commit protocol-state invalidations should refund the trader bounty,
@@ -335,7 +354,7 @@ Liquidation preview/live depth policy:
 
 Funding freshness policy:
 
-- In the no-funding baseline there is no side-to-side funding accrual. Oracle freshness still gates execution, liquidation, and HousePool reconciliation, but no funding clock is advanced across live, stale, or frozen windows.
+- There is no side-to-side funding accrual. Oracle freshness still gates execution, liquidation, and HousePool reconciliation, but no funding clock is advanced across live, stale, or frozen windows.
 
 Margin-threshold policy:
 
@@ -345,8 +364,8 @@ Margin-threshold policy:
 
 Global queue cleanup policy:
 
-- expired-order cleanup work must be bounded per call,
-- batch execution must use a fixed scan budget rather than `O(total queued orders)` work,
+- explicit expired-order pruning work must be bounded per call,
+- batch execution stops on the first blocking condition or queue end rather than using a fixed scan budget,
 - the system should expose an explicit bounded prune path so keepers can advance expired queue heads in slices.
 
 Seed lifecycle policy:
@@ -417,7 +436,7 @@ Each account must have conceptually distinct balances even if the implementation
 
 - Trader-owned domain:
   - `balance`: physical collateral deposited in the clearinghouse
-  - `activePositionMargin`: collateral backing currently open positions
+- `activePositionMargin`: collateral backing live positions
   - `committedMargin`: collateral reserved for pending orders in clearinghouse-owned reservation records and still owned by the trader until terminal settlement or valid refund
 - Non-trader-owned domain:
   - `keeperExecutionReserve`: USDC reserved to pay order executors and no longer economically owned by the trader once committed
@@ -440,7 +459,7 @@ Canonical invariant:
 
 Operational consequence:
 
-- no future order-deletion path may return value that has already crossed into the non-trader-owned domain.
+- no order-deletion path may return value that has already crossed into the non-trader-owned domain.
 - user-cancelled keeper reserves should route to explicit protocol-owned revenue rather than back to the trader.
 - once committed, keeper reserves should live in a dedicated queue-fee custody domain rather than inside trader collateral accounting.
 - committed order reservations should be owned and released by the clearinghouse reservation ledger, with the router limited to queue membership and execution ordering.
@@ -583,7 +602,7 @@ Required transition rules:
 - user cancellation is disallowed once an order is pending,
 - expiry releases user margin and applies the configured execution-bounty policy,
 - non-terminal failures caused by missing or stale oracle data do not destroy a valid pending order,
-- retryable slippage misses also leave the order pending, must not consume its escrowed execution bounty, and should be requeued behind the current global tail with an explicit cooldown rather than pinning the FIFO head.
+- slippage-invalid orders fail terminally, consume no keeper bounty, and must not pin the FIFO head.
 
 Current bounty policy notes:
 
