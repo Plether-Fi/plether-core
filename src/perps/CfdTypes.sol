@@ -23,6 +23,7 @@ library CfdTypes {
         uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
+        uint64 lastCarryTimestamp; // [uint64] Timestamp through which carry has been realized
         int256 vpiAccrued; // [6 dec] Cumulative VPI charges (+) and rebates (-) across the position's lifetime
     }
 

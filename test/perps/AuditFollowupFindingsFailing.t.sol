@@ -252,15 +252,15 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         CfdTypes.Position memory bearPos;
         {
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdA);
-            bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
+            bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdB);
-            bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
+            bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
+            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
         int256 bullFundingA = 0;

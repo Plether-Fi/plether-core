@@ -373,15 +373,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
     function test_PendingCarry_IncreasesWithHigherLeverage() public pure {
         uint256 lowLeverageCarry =
-            PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 50_000e6, 500, 30 days);
+            PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 50_000e6), 500, 30 days);
         uint256 highLeverageCarry =
-            PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 30 days);
+            PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 30 days);
         assertGt(highLeverageCarry, lowLeverageCarry, "Higher leverage should report more carry");
     }
 
     function test_PendingCarry_IncreasesWithTime() public pure {
-        uint256 shortCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 1 days);
-        uint256 longCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 30 days);
+        uint256 shortCarry = PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 1 days);
+        uint256 longCarry = PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 30 days);
         assertGt(longCarry, shortCarry, "Longer time should report more carry");
     }
 
@@ -405,6 +405,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             maxProfitUsdc: 10_000e6,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
         snap.currentTimestamp = 365 days;

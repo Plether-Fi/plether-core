@@ -60,11 +60,11 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         CfdTypes.Position memory bearPos;
         {
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullId);
-            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
+            bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0);
+            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
         int256 bullFunding = 0;

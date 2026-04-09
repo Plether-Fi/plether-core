@@ -41,6 +41,7 @@ library CloseAccountingLib {
             maxProfitUsdc: maxProfitUsdc,
             side: side,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: vpiAccrued
         });
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(closedPart, oraclePrice, capPrice);

@@ -438,6 +438,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             maxProfitUsdc: 0,
             side: bullSide,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
         CfdTypes.Position memory bearPos = CfdTypes.Position({
@@ -447,6 +448,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             maxProfitUsdc: 0,
             side: bearSide,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 

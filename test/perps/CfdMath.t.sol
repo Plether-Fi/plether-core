@@ -39,6 +39,7 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
@@ -61,6 +62,7 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
@@ -148,6 +150,7 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
@@ -170,6 +173,7 @@ contract CfdMathTest is Test {
             maxProfitUsdc: 0,
             side: CfdTypes.Side.BULL,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 

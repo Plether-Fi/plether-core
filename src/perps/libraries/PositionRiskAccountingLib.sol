@@ -17,23 +17,20 @@ library PositionRiskAccountingLib {
     function computeLpBackedNotionalUsdc(
         uint256 size,
         uint256 price,
-        uint256 marginUsdc
+        uint256 reachableCollateralUsdc
     ) internal pure returns (uint256 lpBackedNotionalUsdc) {
         uint256 notionalUsdc = (size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        lpBackedNotionalUsdc = notionalUsdc > marginUsdc ? notionalUsdc - marginUsdc : 0;
+        lpBackedNotionalUsdc = notionalUsdc > reachableCollateralUsdc ? notionalUsdc - reachableCollateralUsdc : 0;
     }
 
     function computePendingCarryUsdc(
-        uint256 size,
-        uint256 price,
-        uint256 marginUsdc,
+        uint256 lpBackedNotionalUsdc,
         uint256 baseCarryBps,
         uint256 timeDelta
     ) internal pure returns (uint256 carryUsdc) {
-        if (timeDelta == 0 || size == 0 || price == 0 || baseCarryBps == 0) {
+        if (timeDelta == 0 || lpBackedNotionalUsdc == 0 || baseCarryBps == 0) {
             return 0;
         }
-        uint256 lpBackedNotionalUsdc = computeLpBackedNotionalUsdc(size, price, marginUsdc);
         carryUsdc = (baseCarryBps * lpBackedNotionalUsdc * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
     }
 

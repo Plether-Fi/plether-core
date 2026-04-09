@@ -64,6 +64,7 @@ contract CfdEnginePlanLibHarness {
             maxProfitUsdc: 0,
             side: CfdTypes.Side.BEAR,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
         snap.currentTimestamp = 1;
@@ -192,13 +193,13 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_OpenPosition_SolvencyCheck() public {
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 20_000 * 1e6);
 
         // maxProfit = 1.2M tokens * $1 entry = $1.2M > vault's $1M balance
         CfdTypes.Order memory tooLarge = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 1_200_000 * 1e18,
-            marginDelta: 2000 * 1e6,
+            marginDelta: 5000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -294,7 +295,7 @@ contract CfdEngineTest is BasePerpTest {
 
     function test_ProcessOrderTyped_ProtocolStateFailureUsesTypedTaxonomy() public {
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 20_000 * 1e6);
 
         CfdTypes.Order memory tooLarge = CfdTypes.Order({
             accountId: accountId,
@@ -342,7 +343,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.processOrder(retailLong, 1e8, vaultDepth, uint64(block.timestamp));
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -377,6 +378,7 @@ contract CfdEngineTest is BasePerpTest {
             maxProfitUsdc: 0,
             side: side,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
@@ -625,7 +627,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -656,7 +658,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -946,7 +948,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_NoFundingSettlement_SyncsClearinghouse() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 20_000 * 1e6);
 
         // Open BULL $100k at $1.00
         CfdTypes.Order memory openOrder = CfdTypes.Order({
@@ -1580,7 +1582,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 500_000e18, 8000e6, 1e8);
         _open(bearId, CfdTypes.Side.BEAR, 50_000e18, 20_000e6, 1e8);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2102,7 +2104,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2226,7 +2228,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2296,7 +2298,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2359,7 +2361,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2405,7 +2407,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
         _open(laterId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2439,7 +2441,7 @@ contract CfdEngineTest is BasePerpTest {
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, vaultDepth);
         _open(bearId, CfdTypes.Side.BEAR, 10_000e18, 500e6, 1e8, vaultDepth);
 
-        uint64 refreshTime = uint64(block.timestamp + 365 days);
+        uint64 refreshTime = uint64(block.timestamp + 1 days);
         vm.warp(refreshTime);
 
         vm.prank(address(router));
@@ -2822,7 +2824,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory bearOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 10_000 * 1e18,
-            marginDelta: 1000 * 1e6,
+            marginDelta: 5000 * 1e6,
             targetPrice: 0.8e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -2836,7 +2838,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory bullOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 10_000 * 1e18,
-            marginDelta: 1000 * 1e6,
+            marginDelta: 5000 * 1e6,
             targetPrice: 0.8e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -2893,7 +2895,7 @@ contract CfdEngineTest is BasePerpTest {
     function test_FundingSettlement_DoesNotBackfillAfterFreshCheckpoint() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 accountId = bytes32(uint256(1));
-        _fundTrader(address(uint160(uint256(accountId))), 5000 * 1e6);
+        _fundTrader(address(uint160(uint256(accountId))), 20_000 * 1e6);
 
         CfdTypes.Order memory openOrder = CfdTypes.Order({
             accountId: accountId,
@@ -2921,7 +2923,7 @@ contract CfdEngineTest is BasePerpTest {
         CfdTypes.Order memory addOrder = CfdTypes.Order({
             accountId: accountId,
             sizeDelta: 10_000 * 1e18,
-            marginDelta: 1000 * 1e6,
+            marginDelta: 5000 * 1e6,
             targetPrice: 1e8,
             commitTime: accrualTime,
             commitBlock: uint64(block.number),

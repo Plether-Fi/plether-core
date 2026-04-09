@@ -203,14 +203,16 @@ library CfdEnginePlanLib {
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
+        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0 && snap.currentTimestamp > snap.position.lastCarryTimestamp
+            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
+            : 0;
+        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+            snap.position.size, price, snap.accountBuckets.settlementBalanceUsdc
+        );
         delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            snap.position.size,
-            price,
-            snap.position.margin,
+            carryBaseUsdc,
             snap.riskParams.baseCarryBps,
-            snap.currentTimestamp > snap.position.lastUpdateTime
-                ? snap.currentTimestamp - snap.position.lastUpdateTime
-                : 0
+            carryTimeDelta
         );
 
         if (snap.position.size > 0 && snap.position.side != order.side) {
@@ -395,14 +397,16 @@ library CfdEnginePlanLib {
         delta.accountId = order.accountId;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
+        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0 && snap.currentTimestamp > snap.position.lastCarryTimestamp
+            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
+            : 0;
+        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+            snap.position.size, price, snap.accountBuckets.settlementBalanceUsdc
+        );
         delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            snap.position.size,
-            price,
-            snap.position.margin,
+            carryBaseUsdc,
             snap.riskParams.baseCarryBps,
-            snap.currentTimestamp > snap.position.lastUpdateTime
-                ? snap.currentTimestamp - snap.position.lastUpdateTime
-                : 0
+            carryTimeDelta
         );
 
         CfdTypes.Position memory pos = snap.position;
@@ -482,14 +486,16 @@ library CfdEnginePlanLib {
         )
         .freeCashUsdc;
 
-        if (cs.netSettlementUsdc > 0) {
+        int256 carryAdjustedSettlementUsdc = cs.netSettlementUsdc - int256(delta.pendingCarryUsdc);
+
+        if (carryAdjustedSettlementUsdc > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
-            delta.freshTraderPayoutUsdc = uint256(cs.netSettlementUsdc);
+            delta.freshTraderPayoutUsdc = uint256(carryAdjustedSettlementUsdc);
             delta.freshPayoutIsImmediate = availableCashForFreshPayouts >= delta.freshTraderPayoutUsdc;
             delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
-        } else if (cs.netSettlementUsdc < 0) {
+        } else if (carryAdjustedSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
-            uint256 lossUsdc = uint256(-cs.netSettlementUsdc);
+            uint256 lossUsdc = uint256(-carryAdjustedSettlementUsdc);
             bool includeOtherLockedMargin = remainingSize == 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
@@ -611,15 +617,6 @@ library CfdEnginePlanLib {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
         delta.accountId = snap.accountId;
         delta.price = price;
-        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            snap.position.size,
-            price,
-            snap.position.margin,
-            snap.riskParams.baseCarryBps,
-            snap.currentTimestamp > snap.position.lastUpdateTime
-                ? snap.currentTimestamp - snap.position.lastUpdateTime
-                : 0
-        );
 
         CfdTypes.Position memory pos = snap.position;
         if (pos.size == 0) {
@@ -639,6 +636,17 @@ library CfdEnginePlanLib {
         uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
         uint256 reachableCollateralUsdc = settlementReachableUsdc + snap.deferredPayoutForAccount;
         delta.liquidationReachableCollateralUsdc = reachableCollateralUsdc;
+        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0 && snap.currentTimestamp > snap.position.lastCarryTimestamp
+            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
+            : 0;
+        uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
+            snap.position.size, price, reachableCollateralUsdc
+        );
+        delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+            carryBaseUsdc,
+            snap.riskParams.baseCarryBps,
+            carryTimeDelta
+        );
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskState(
             pos, price, snap.capPrice, reachableCollateralUsdc, maintMarginBps

@@ -9,6 +9,6 @@ interface IWithdrawGuard {
     /// @param accountId Cross-margin account to check
     function checkWithdraw(
         bytes32 accountId
-    ) external view;
+    ) external;
 
 }

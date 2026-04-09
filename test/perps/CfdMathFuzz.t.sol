@@ -55,6 +55,7 @@ contract CfdMathFuzzTest is Test {
             maxProfitUsdc: 0,
             side: side,
             lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 

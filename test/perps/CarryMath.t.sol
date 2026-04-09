@@ -20,13 +20,13 @@ contract CarryMathTest is Test {
     }
 
     function test_ComputePendingCarry_ZeroAtZeroTime() public pure {
-        uint256 carryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 0);
+        uint256 carryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 0);
         assertEq(carryUsdc, 0);
     }
 
     function test_ComputePendingCarry_GrowsLinearlyWithTime() public pure {
-        uint256 oneDayCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 1 days);
-        uint256 twoDayCarry = PositionRiskAccountingLib.computePendingCarryUsdc(100_000e18, 1e8, 10_000e6, 500, 2 days);
+        uint256 oneDayCarry = PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 1 days);
+        uint256 twoDayCarry = PositionRiskAccountingLib.computePendingCarryUsdc(PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, 10_000e6), 500, 2 days);
         assertEq(twoDayCarry, oneDayCarry * 2);
         assertGt(oneDayCarry, 0);
     }
