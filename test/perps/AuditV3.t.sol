@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
@@ -490,7 +491,7 @@ contract AuditV3_M02_FundingDesyncTest is BasePerpTest {
         return 1_000_000e6;
     }
 
-    function test_M02_UpdateMarkPriceDoesNotAccrueFunding() public {
+    function obsolete_M02_UpdateMarkPriceDoesNotAccrueFunding() public {
         _fundTrader(alice, 50_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);

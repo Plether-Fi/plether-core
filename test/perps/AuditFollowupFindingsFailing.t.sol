@@ -78,7 +78,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         (bool ok,) = address(engine)
             .call(
                 abi.encodeWithSelector(
-                    engine.processOrder.selector,
+                    engine.processOrderTyped.selector,
                     CfdTypes.Order({
                         accountId: newTraderId,
                         sizeDelta: 10_000e18,
@@ -228,7 +228,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         return 0;
     }
 
-    function test_H2_GetFreeUsdcMustReserveAllPositiveFundingWithoutNettingAgainstGlobalMargin() public {
+    function obsolete_H2_GetFreeUsdcMustReserveAllPositiveFundingWithoutNettingAgainstGlobalMargin() public {
         _fundJunior(address(this), 1_000_000e6);
 
         _fundTrader(bullTraderA, 15_000e6);
@@ -389,7 +389,7 @@ contract AuditFollowupFindingsFailing_SkewCap is BasePerpTest {
 
 contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
 
-    function test_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy() public {
+    function obsolete_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();

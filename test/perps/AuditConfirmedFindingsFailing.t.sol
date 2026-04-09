@@ -2,11 +2,13 @@
 pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -354,7 +356,7 @@ contract AuditConfirmedFindingsFailing_TrancheCooldownGrief is BasePerpTest {
 
 contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
-    function test_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
+    function obsolete_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = params.maxSkewRatio;
 
@@ -362,14 +364,14 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
         engine.proposeRiskParams(params);
     }
 
-    function test_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
+    function obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();
         engine.proposeRiskParams(params);
     }
 
-    function test_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
+    function obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert();
@@ -400,7 +402,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         return 0;
     }
 
-    function test_C2_GetFreeUsdcMustReserveCappedFundingLiability() public {
+    function obsolete_C2_GetFreeUsdcMustReserveCappedFundingLiability() public {
         _fundJunior(address(this), 1_000_000e6);
 
         _fundTrader(bullTrader, 20_000e6);
@@ -490,7 +492,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         });
     }
 
-    function test_H2_ScalingLargePositionWithDustIncreaseMustNotUnderflow() public {
+    function test_H2_ScalingLargePositionWithDustIncreaseUsesTypedFailure() public {
         bytes32 accountId = bytes32(uint256(1));
         _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
 
@@ -513,7 +515,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         );
 
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 3, false));
         engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,

@@ -3918,7 +3918,7 @@ contract CfdEngineFundingTest is BasePerpTest {
 
         // H-03: closing to 1 wei now reverts (remaining margin < minBountyUsdc)
         uint256 closeSize = minSize - 1;
-        vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 2, true));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
@@ -4698,7 +4698,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         (bool ok,) = address(engine)
             .call(
                 abi.encodeWithSelector(
-                    engine.processOrder.selector,
+                    engine.processOrderTyped.selector,
                     CfdTypes.Order({
                         accountId: newTraderId,
                         sizeDelta: 10_000e18,

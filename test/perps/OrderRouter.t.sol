@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {BasketOracle} from "../../src/oracles/BasketOracle.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -2263,7 +2264,7 @@ contract BasketPriceHarness is OrderRouter {
         uint256[] memory _quantities,
         uint256[] memory _basePrices,
         bool[] memory _inversions
-    ) OrderRouter(address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
+    ) OrderRouter(address(1), address(1), address(1), _pyth, _feedIds, _quantities, _basePrices, _inversions) {}
 
     function computeBasketPrice() external view returns (uint256, uint256) {
         return _computeBasketPrice();
@@ -2275,7 +2276,7 @@ contract NormalizePythHarness is OrderRouter {
 
     constructor()
         OrderRouter(
-            address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0)
+            address(1), address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0)
         )
     {}
 
@@ -3925,7 +3926,7 @@ contract VpiImrBypassTest is Test {
         engine.setVault(address(pool));
         router = new OrderRouter(
             address(engine),
-            address(engineLens),
+            address(new CfdEngineLens(address(engine))),
             address(pool),
             address(0),
             new bytes32[](0),
@@ -4056,7 +4057,7 @@ contract KeeperFeeRefundTest is Test {
         engine.setVault(address(pool));
         router = new OrderRouter(
             address(engine),
-            address(engineLens),
+            address(new CfdEngineLens(address(engine))),
             address(pool),
             address(0),
             new bytes32[](0),

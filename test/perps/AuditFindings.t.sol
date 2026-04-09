@@ -7,6 +7,7 @@ import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -139,7 +140,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
         // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
@@ -396,7 +397,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         // H-03 FIX: partial close now reverts to prevent unliquidatable dust
         uint256 closeSize = (posSize * 995) / 1000;
         uint256 depth = pool.totalAssets();
-        vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 2, true));
         vm.prank(address(router));
         engine.processOrderTyped(
             CfdTypes.Order({
