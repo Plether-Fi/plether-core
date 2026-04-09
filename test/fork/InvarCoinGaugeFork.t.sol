@@ -211,7 +211,7 @@ contract InvarCoinGaugeForkTest is BaseForkTest {
         uint256 aliceBearBefore = IERC20(bearToken).balanceOf(alice);
 
         vm.prank(alice);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(withdrawShares, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(withdrawShares, 0, 0, alice);
 
         assertGt(usdcReturned, 0, "Should receive USDC");
         assertGt(bearReturned, 0, "Should receive BEAR");

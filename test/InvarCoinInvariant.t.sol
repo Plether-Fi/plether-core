@@ -165,7 +165,7 @@ contract InvarCoinHandler is Test {
         }
 
         uint256 supplyBefore2 = ic.totalSupply();
-        try ic.lpWithdraw(amount, minUsdc, minBear) returns (uint256 usdcOut, uint256 bearOut) {
+        try ic.lpWithdraw(amount, minUsdc, minBear, currentActor) returns (uint256 usdcOut, uint256 bearOut) {
             ghost_totalWithdrawn += usdcOut + bearOut * curve.priceMultiplier() / 1e30;
             ghost_totalInvarBurned += amount;
             ghost_totalInvarMinted += (ic.totalSupply() + amount) - supplyBefore2;

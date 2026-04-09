@@ -172,7 +172,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 whaleBearBefore = IERC20(bearToken).balanceOf(whale);
 
         vm.prank(whale);
-        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(whaleShares, 0, 0);
+        (uint256 usdcReturned, uint256 bearReturned) = ic.lpWithdraw(whaleShares, 0, 0, whale);
 
         uint256 usdcFromWhale = IERC20(USDC).balanceOf(whale) - whaleUsdcBefore;
         uint256 bearFromWhale = IERC20(bearToken).balanceOf(whale) - whaleBearBefore;
@@ -207,7 +207,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         uint256 whaleShares = ic.balanceOf(whale);
         vm.prank(whale);
-        ic.lpWithdraw(whaleShares, 0, 0);
+        ic.lpWithdraw(whaleShares, 0, 0, whale);
 
         uint256 navAfter = (ic.totalAssets() * 1e18) / ic.totalSupply();
 
@@ -226,7 +226,7 @@ contract InvarCoinForkTest is BaseForkTest {
 
         vm.prank(whale);
         vm.expectRevert(InvarCoin.InvarCoin__SlippageExceeded.selector);
-        ic.lpWithdraw(whaleShares, 990_000e6, 0);
+        ic.lpWithdraw(whaleShares, 990_000e6, 0, whale);
     }
 
     // ==========================================
@@ -457,7 +457,7 @@ contract InvarCoinForkTest is BaseForkTest {
         uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
         uint256 aliceBearBefore = IERC20(bearToken).balanceOf(alice);
         vm.prank(alice);
-        (uint256 aliceUsdc, uint256 aliceBear) = ic.lpWithdraw(invarRedeemed, 0, 0);
+        (uint256 aliceUsdc, uint256 aliceBear) = ic.lpWithdraw(invarRedeemed, 0, 0, alice);
 
         assertEq(IERC20(USDC).balanceOf(alice) - aliceUsdcBefore, aliceUsdc, "Alice USDC transfer matches");
         assertEq(IERC20(bearToken).balanceOf(alice) - aliceBearBefore, aliceBear, "Alice BEAR transfer matches");
