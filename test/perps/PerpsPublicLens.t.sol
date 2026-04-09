@@ -29,7 +29,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertGt(clearinghouse.getFreeBuyingPowerUsdc(accountId), 0, "setup should leave free buying power");
         assertEq(viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "public equity should use net economic equity");
         assertEq(
-            viewData.withdrawableUsdc, engine.getWithdrawableUsdc(accountId), "lens should use engine withdrawability"
+            viewData.withdrawableUsdc,
+            engineAccountLens.getWithdrawableUsdc(accountId),
+            "lens should use account-lens withdrawability"
         );
         assertEq(viewData.withdrawableUsdc, 0, "withdrawable should zero when engine withdraws are stale-blocked");
     }
@@ -44,11 +46,11 @@ contract PerpsPublicLensTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engine.getWithdrawableUsdc(accountId);
+        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(accountId);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
 
         assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
-        assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the engine");
+        assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens");
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, withdrawableUsdc);
@@ -84,7 +86,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(accountId);
         assertEq(
             viewData.maintenanceMarginUsdc,
-            engine.getMaintenanceMarginUsdc(viewData.size, engine.lastMarkPrice()),
+            _maintenanceMarginUsdc(viewData.size, engine.lastMarkPrice()),
             "position view should expose the live maintenance margin requirement"
         );
     }

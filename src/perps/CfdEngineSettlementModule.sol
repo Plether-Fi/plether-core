@@ -12,99 +12,60 @@ import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 
 contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
-    function buildOpenApplyPlan(
-        CfdEngineSettlementTypes.OpenApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan) {
-        CfdEnginePlanTypes.OpenDelta calldata delta = inputs.delta;
-        plan.position = CfdEngineSettlementTypes.PositionState({
-            deletePosition: false,
-            size: delta.newPosSize,
-            entryPrice: delta.newPosEntryPrice,
-            maxProfitUsdc: inputs.currentPosition.maxProfitUsdc + delta.posMaxProfitIncrease,
-            lastUpdateTime: uint64(inputs.timestampNow),
-            lastCarryTimestamp: uint64(inputs.timestampNow),
-            vpiAccrued: inputs.currentPosition.vpiAccrued + delta.posVpiAccruedDelta,
-            side: inputs.currentPosition.size == 0 ? delta.posSide : inputs.currentPosition.side
-        });
-        plan.sideDelta = CfdEngineSettlementTypes.SideDelta({
-            side: delta.posSide,
-            maxProfitDelta: int256(delta.sideMaxProfitIncrease),
-            openInterestDelta: int256(delta.sideOiIncrease),
-            entryNotionalDelta: delta.sideEntryNotionalDelta
-        });
-        plan.vaultInflow = CfdEngineSettlementTypes.VaultInflow({
-            physicalCashReceivedUsdc: 0,
-            protocolOwnedUsdc: 0,
-            lpOwnedUsdc: 0
-        });
-        plan.accumulatedFeesDeltaUsdc = delta.executionFeeUsdc;
-    }
+    function executeOpen(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.OpenDelta calldata delta,
+        CfdTypes.Position calldata currentPosition,
+        uint64 publishTime
+    ) external {
+        host.settlementApplyFundingAndMark(delta.price, publishTime);
+        CfdTypes.Side marginSide = currentPosition.size > 0 ? currentPosition.side : delta.posSide;
+        uint256 marginBefore = IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.accountId).positionMarginUsdc;
 
-    function buildCloseApplyPlan(
-        CfdEngineSettlementTypes.CloseApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan) {
-        CfdEnginePlanTypes.CloseDelta calldata delta = inputs.delta;
-        uint256 newSize = inputs.currentPosition.size - delta.posSizeDelta;
-        plan.position = CfdEngineSettlementTypes.PositionState({
-            deletePosition: delta.deletePosition,
-            size: newSize,
-            entryPrice: inputs.currentPosition.entryPrice,
-            maxProfitUsdc: inputs.currentPosition.maxProfitUsdc - delta.posMaxProfitReduction,
-            lastUpdateTime: uint64(inputs.timestampNow),
-            lastCarryTimestamp: uint64(inputs.timestampNow),
-            vpiAccrued: inputs.currentPosition.vpiAccrued - delta.posVpiAccruedReduction,
-            side: inputs.currentPosition.side
-        });
-        plan.sideDelta = CfdEngineSettlementTypes.SideDelta({
-            side: delta.side,
-            maxProfitDelta: -int256(delta.sideMaxProfitReduction),
-            openInterestDelta: -int256(delta.sideOiDecrease),
-            entryNotionalDelta: -int256(delta.sideEntryNotionalReduction)
-        });
-        plan.deferred = CfdEngineSettlementTypes.DeferredDelta({
-            accountId: delta.accountId,
-            existingDeferredConsumedUsdc: delta.existingDeferredConsumedUsdc,
-            freshDeferredPayoutUsdc: delta.freshTraderPayoutUsdc
-        });
-        plan.vaultInflow = CfdEngineSettlementTypes.VaultInflow({
-            physicalCashReceivedUsdc: 0,
-            protocolOwnedUsdc: 0,
-            lpOwnedUsdc: 0
-        });
-        plan.accumulatedFeesDeltaUsdc = delta.executionFeeUsdc;
-        plan.badDebtDeltaUsdc = delta.badDebtUsdc;
-        plan.syncMarginQueueAmountUsdc = delta.syncMarginQueueAmount;
-    }
+        if (delta.vaultRebatePayoutUsdc > 0) {
+            ICfdVault(host.vault()).payOut(host.clearinghouse(), delta.vaultRebatePayoutUsdc);
+        }
 
-    function buildLiquidationApplyPlan(
-        CfdEngineSettlementTypes.LiquidationApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan) {
-        CfdEnginePlanTypes.LiquidationDelta calldata delta = inputs.delta;
-        plan.position = CfdEngineSettlementTypes.PositionState({
-            deletePosition: true,
-            size: 0,
-            entryPrice: 0,
-            maxProfitUsdc: 0,
-            lastUpdateTime: uint64(inputs.timestampNow),
-            lastCarryTimestamp: uint64(inputs.timestampNow),
-            vpiAccrued: 0,
-            side: delta.side
-        });
-        plan.sideDelta = CfdEngineSettlementTypes.SideDelta({
-            side: delta.side,
-            maxProfitDelta: -int256(delta.sideMaxProfitDecrease),
-            openInterestDelta: -int256(delta.sideOiDecrease),
-            entryNotionalDelta: -int256(delta.sideEntryNotionalReduction)
-        });
-        plan.deferred = CfdEngineSettlementTypes.DeferredDelta({
-            accountId: delta.accountId,
-            existingDeferredConsumedUsdc: delta.existingDeferredConsumedUsdc,
-            freshDeferredPayoutUsdc: delta.freshTraderPayoutUsdc
-        });
-        plan.keeperBountyUsdc = delta.keeperBountyUsdc;
-        plan.badDebtDeltaUsdc = delta.badDebtUsdc;
-        plan.syncMarginQueueAmountUsdc = delta.syncMarginQueueAmount;
-        plan.pendingVaultPayoutUsdc = delta.keeperBountyUsdc;
+        int256 netMarginChange = IMarginClearinghouse(host.clearinghouse()).applyOpenCost(
+            delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, host.vault()
+        );
+        if (delta.tradeCostUsdc > 0) {
+            uint256 protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
+                ? delta.executionFeeUsdc
+                : uint256(delta.tradeCostUsdc);
+            if (protocolFeeInflowUsdc > 0) {
+                ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
+            }
+            if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
+                ICfdVault(host.vault()).recordTradingRevenueInflow(uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc);
+            }
+        }
+
+        uint256 marginAfterOpen =
+            netMarginChange >= 0 ? marginBefore + uint256(netMarginChange) : marginBefore - uint256(-netMarginChange);
+        host.settlementSyncTotalSideMargin(marginSide, marginBefore, marginAfterOpen);
+        host.settlementApplySideDelta(
+            delta.posSide,
+            int256(delta.sideMaxProfitIncrease),
+            int256(delta.sideOiIncrease),
+            delta.sideEntryNotionalDelta
+        );
+        if (delta.executionFeeUsdc > 0) {
+            host.settlementAccumulateFees(delta.executionFeeUsdc);
+        }
+        host.settlementWritePosition(
+            delta.accountId,
+            CfdEngineSettlementTypes.PositionState({
+                deletePosition: false,
+                size: delta.newPosSize,
+                entryPrice: delta.newPosEntryPrice,
+                maxProfitUsdc: currentPosition.maxProfitUsdc + delta.posMaxProfitIncrease,
+                lastUpdateTime: uint64(block.timestamp),
+                lastCarryTimestamp: uint64(block.timestamp),
+                vpiAccrued: currentPosition.vpiAccrued + delta.posVpiAccruedDelta,
+                side: currentPosition.size == 0 ? delta.posSide : currentPosition.side
+            })
+        );
     }
 
     function executeClose(

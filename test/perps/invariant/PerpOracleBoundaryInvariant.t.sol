@@ -41,7 +41,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     function invariant_FadWindowMatchesMaintenanceMarginMode() public view {
         uint256 price = 1e8;
         uint256 size = 10_000e18;
-        uint256 maint = engine.getMaintenanceMarginUsdc(size, price);
+        uint256 maint = _maintenanceMarginUsdc(size, price);
         uint256 notionalUsdc = (size * price) / 1e20;
         uint256 expectedBps = engine.isFadWindow() ? 300 : 100;
         assertEq(maint, (notionalUsdc * expectedBps) / 10_000, "Maintenance margin must switch with FAD mode");
@@ -69,7 +69,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            uint256 expectedMaint = engine.getMaintenanceMarginUsdc(snapshot.size, engine.lastMarkPrice());
+            uint256 expectedMaint = _maintenanceMarginUsdc(snapshot.size, engine.lastMarkPrice());
             uint256 weekdayMaint = (((snapshot.size * engine.lastMarkPrice()) / 1e20) * 100) / 10_000;
             uint256 fadMaint = (((snapshot.size * engine.lastMarkPrice()) / 1e20) * 300) / 10_000;
             if (engine.isFadWindow()) {

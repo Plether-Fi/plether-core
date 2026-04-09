@@ -128,7 +128,7 @@ contract GasProfileTest is Test {
         w[0] = 1e18;
         uint256[] memory b = new uint256[](1);
         b[0] = 1e8;
-        router = new OrderRouter(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
+        router = new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(pyth), feedIds, w, b, new bool[](1));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

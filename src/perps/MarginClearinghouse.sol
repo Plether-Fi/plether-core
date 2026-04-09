@@ -74,7 +74,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         if (engine_ == address(0)) {
             revert MarginClearinghouse__NotOperator();
         }
-        if (msg.sender != engine_ && msg.sender != ICfdEngineCore(engine_).orderRouter()) {
+        if (
+            msg.sender != engine_ && msg.sender != ICfdEngineCore(engine_).orderRouter()
+                && msg.sender != ICfdEngineCore(engine_).settlementModule()
+        ) {
             revert MarginClearinghouse__NotOperator();
         }
         _;

@@ -116,6 +116,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
 
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(pool),
             address(0),
             new bytes32[](0),

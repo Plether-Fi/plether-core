@@ -10,6 +10,8 @@ interface ICfdEngineAccountLens {
 
     function getAccountCollateralView(bytes32 accountId) external view returns (CfdEngine.AccountCollateralView memory viewData);
 
+    function getWithdrawableUsdc(bytes32 accountId) external view returns (uint256 withdrawableUsdc);
+
     function getAccountLedgerView(
         bytes32 accountId
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData);

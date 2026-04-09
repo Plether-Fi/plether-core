@@ -64,13 +64,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
-            engine.getWithdrawalReservedUsdc(),
+            _withdrawalReservedUsdc(),
             expectedReserved,
             "Withdrawal reserve must include liabilities, fees, and deferred obligations"
         );
@@ -464,7 +464,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             protocolSnapshot.withdrawalReservedUsdc,
-            engine.getWithdrawalReservedUsdc(),
+            _withdrawalReservedUsdc(),
             "Protocol snapshot withdrawal reserve mismatch"
         );
         assertEq(
@@ -483,7 +483,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             engine.totalDeferredClearerBountyUsdc(),
             "House-pool snapshot deferred clearer bounty mismatch"
         );
-        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "House-pool snapshot max liability mismatch");
+        assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
             snapshot.withdrawalFundingLiabilityUsdc,
             uint256(0),

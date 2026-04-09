@@ -18,18 +18,11 @@ interface ICfdEngineCore {
 
     function orderRouter() external view returns (address);
 
+    function settlementModule() external view returns (address);
+
     function USDC() external view returns (IERC20);
 
     function lastMarkPrice() external view returns (uint256);
-
-    function getMaintenanceMarginUsdc(
-        uint256 size,
-        uint256 currentOraclePrice
-    ) external view returns (uint256);
-
-    function getWithdrawableUsdc(
-        bytes32 accountId
-    ) external view returns (uint256);
 
     function riskParams()
         external
@@ -51,24 +44,6 @@ interface ICfdEngineCore {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external;
-
-    function previewOpenRevertCode(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (uint8 code);
-
-    function previewOpenFailurePolicyCategory(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
     function recordDeferredClearerBounty(
         address keeper,

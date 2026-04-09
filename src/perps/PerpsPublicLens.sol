@@ -41,7 +41,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.equityUsdc = snapshot.hasPosition
             ? (snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0)
             : snapshot.accountEquityUsdc;
-        viewData.withdrawableUsdc = ENGINE.getWithdrawableUsdc(accountId);
+        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(accountId);
 
         IOrderRouterAccounting.AccountEscrowView memory escrow = ORDER_ROUTER.getAccountEscrow(accountId);
         viewData.pendingOrderMarginUsdc = escrow.committedMarginUsdc;
@@ -119,7 +119,14 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.marginUsdc = snapshot.margin;
         viewData.unrealizedPnlUsdc = snapshot.unrealizedPnlUsdc;
         viewData.liquidatable = snapshot.liquidatable;
-        viewData.maintenanceMarginUsdc = ENGINE.getMaintenanceMarginUsdc(snapshot.size, ENGINE.lastMarkPrice());
+        (uint256 vpiFactor, uint256 maxSkewRatio, uint256 maintMarginBps, uint256 initMarginBps, uint256 fadMarginBps,,,) =
+            ENGINE.riskParams();
+        vpiFactor;
+        maxSkewRatio;
+        initMarginBps;
+        uint256 requiredBps = ENGINE.isFadWindow() ? fadMarginBps : maintMarginBps;
+        uint256 notionalUsdc = (snapshot.size * ENGINE.lastMarkPrice()) / 1e20;
+        viewData.maintenanceMarginUsdc = (notionalUsdc * requiredBps) / 10_000;
     }
 
     function _getTrancheView(

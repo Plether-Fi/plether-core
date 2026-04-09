@@ -7,6 +7,7 @@ import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
+import {ICfdEngineLens} from "./interfaces/ICfdEngineLens.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
@@ -58,6 +59,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     }
 
     ICfdVault internal immutable vault;
+    ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
     bytes32[] public pythFeedIds;
     uint256[] public quantities;
@@ -157,6 +159,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     /// @param _inversions Whether to invert each feed (e.g. USD/JPY -> JPY/USD)
     constructor(
         address _engine,
+        address _engineLens,
         address _vault,
         address _pyth,
         bytes32[] memory _feedIds,
@@ -165,6 +168,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bool[] memory _inversions
     ) Ownable(msg.sender) OrderEscrowAccounting(_engine) {
         vault = ICfdVault(_vault);
+        engineLens = ICfdEngineLens(_engineLens);
         pyth = IPyth(_pyth);
         maxOrderAge = DEFAULT_MAX_ORDER_AGE;
 
@@ -320,10 +324,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         }
         bytes32 accountId = bytes32(uint256(uint160(msg.sender)));
         if (!isClose && _canUseCommitMarkForOpenPrefilter()) {
-            CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engine.previewOpenFailurePolicyCategory(
+            CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             );
-            uint8 revertCode = engine.previewOpenRevertCode(
+            uint8 revertCode = engineLens.previewOpenRevertCode(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             );
             if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {

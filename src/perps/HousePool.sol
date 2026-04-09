@@ -392,7 +392,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         address recipient,
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter) {
+        if (
+            msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()
+        ) {
             revert HousePool__Unauthorized();
         }
         accountedAssets -= amount;
@@ -407,7 +409,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function recordProtocolInflow(
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != orderRouter) {
+        if (
+            msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()
+        ) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {
@@ -439,7 +443,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function recordTradingRevenueInflow(
         uint256 amount
     ) external {
-        if (msg.sender != address(ENGINE)) {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {

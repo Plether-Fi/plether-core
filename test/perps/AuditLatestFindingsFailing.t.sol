@@ -237,7 +237,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

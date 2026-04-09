@@ -1202,7 +1202,7 @@ contract HousePoolTest is BasePerpTest {
         HousePool.VaultLiquidityView memory viewData = pool.getVaultLiquidityView();
         assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
         assertEq(viewData.freeUsdc, pool.getFreeUSDC());
-        assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(viewData.seniorPrincipalUsdc, pool.seniorPrincipal());
         assertEq(viewData.juniorPrincipalUsdc, pool.juniorPrincipal());
         assertEq(viewData.unpaidSeniorYieldUsdc, pool.unpaidSeniorYield());
@@ -2381,7 +2381,7 @@ contract HousePoolAuditTest is BasePerpTest {
         uint256 juniorAfter = pool.juniorPrincipal();
 
         assertLt(juniorAfter, juniorBefore, "MtM: junior principal must decrease when traders are winning");
-        assertGt(engine.getUnrealizedTraderPnl(), 0, "Traders should have positive unrealized PnL");
+        assertGt(_unrealizedTraderPnl(), 0, "Traders should have positive unrealized PnL");
     }
 
     // Regression: H-01 + C-03 — unrealized trader losses must not inflate junior principal
@@ -2409,7 +2409,7 @@ contract HousePoolAuditTest is BasePerpTest {
         uint256 juniorAfter = pool.juniorPrincipal();
 
         assertLe(juniorAfter, juniorBefore, "C-03 fix: unrealized trader losses must not inflate junior principal");
-        assertLt(engine.getUnrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
+        assertLt(_unrealizedTraderPnl(), 0, "Traders should have negative unrealized PnL");
     }
 
     // Regression: H-01 — MtM zeroes after all positions closed
@@ -2433,7 +2433,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         assertEq(_sideEntryNotional(CfdTypes.Side.BULL), 0, "Bull entry notional should be zero");
         assertEq(_sideEntryNotional(CfdTypes.Side.BEAR), 0, "Bear entry notional should be zero");
-        assertEq(engine.getUnrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
+        assertEq(_unrealizedTraderPnl(), 0, "Unrealized PnL should be zero with no positions");
     }
 
     // Regression: M-01 — stale mark does not block withdrawal

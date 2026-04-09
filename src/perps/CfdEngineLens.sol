@@ -33,6 +33,55 @@ contract CfdEngineLens is ICfdEngineLens {
         preview = _previewClose(accountId, sizeDelta, oraclePrice, engineContract.vault().totalAssets());
     }
 
+    function previewOpenRevertCode(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (uint8 code) {
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, oraclePrice, engineContract.vault().totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        return uint8(engineContract.planner().planOpen(snap, order, oraclePrice, publishTime).revertCode);
+    }
+
+    function previewOpenFailurePolicyCategory(
+        bytes32 accountId,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(accountId, oraclePrice, engineContract.vault().totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        CfdEnginePlanTypes.OpenDelta memory delta = engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
+        return engineContract.planner().getOpenFailurePolicyCategory(delta.revertCode);
+    }
+
     function simulateClose(
         bytes32 accountId,
         uint256 sizeDelta,
@@ -177,8 +226,12 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngine.SideState memory bull = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bear = engineContract.getSideState(CfdTypes.Side.BEAR);
+        ICfdEngine.SideState memory bull;
+        ICfdEngine.SideState memory bear;
+        (bull.maxProfitUsdc, bull.openInterest, bull.entryNotional, bull.totalMargin, bull.fundingIndex, bull.entryFunding) =
+            engineContract.sides(uint8(CfdTypes.Side.BULL));
+        (bear.maxProfitUsdc, bear.openInterest, bear.entryNotional, bear.totalMargin, bear.fundingIndex, bear.entryFunding) =
+            engineContract.sides(uint8(CfdTypes.Side.BEAR));
         uint256 lastMarkPrice = engineContract.lastMarkPrice();
         uint64 lastMarkTime = engineContract.lastMarkTime();
         uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;

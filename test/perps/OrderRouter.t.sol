@@ -1131,7 +1131,7 @@ contract OrderRouterPythTest is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -1322,7 +1322,7 @@ contract OrderRouterPythTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         assertEq(
-            engine.previewOpenRevertCode(eveId, CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, uint64(block.timestamp)),
+            engineLens.previewOpenRevertCode(eveId, CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, uint64(block.timestamp)),
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
             "Commit-time IMR rejection should match previewOpenRevertCode"
         );
@@ -1358,7 +1358,7 @@ contract OrderRouterPythTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint8 revertCode =
-            engine.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 1e18, 5000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 1e18, 5000e6, 1e8, uint64(block.timestamp));
         assertEq(
             revertCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL),
@@ -1399,7 +1399,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         assertEq(
-            engine.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)),
+            engineLens.previewOpenRevertCode(aliceId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
             "Commit-time skew rejection should match previewOpenRevertCode"
         );
@@ -1427,7 +1427,7 @@ contract OrderRouterPythTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), 700_000e6);
 
         assertEq(
-            engine.previewOpenRevertCode(
+            engineLens.previewOpenRevertCode(
                 aliceId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
@@ -1484,7 +1484,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
 
         assertEq(
-            engine.previewOpenRevertCode(
+            engineLens.previewOpenRevertCode(
                 aliceId, CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
@@ -2642,7 +2642,7 @@ contract FadStalenessTest is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -3746,7 +3746,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -3831,7 +3831,7 @@ contract StalenessGriefTest is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -3925,6 +3925,7 @@ contract VpiImrBypassTest is Test {
         engine.setVault(address(pool));
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(pool),
             address(0),
             new bytes32[](0),
@@ -4055,6 +4056,7 @@ contract KeeperFeeRefundTest is Test {
         engine.setVault(address(pool));
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(pool),
             address(0),
             new bytes32[](0),
@@ -4261,7 +4263,7 @@ contract WeekendArbitrageTest is Test {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

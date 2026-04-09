@@ -261,7 +261,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
 
         assertEq(
-            engine.previewOpenRevertCode(
+            engineLens.previewOpenRevertCode(
                 accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
@@ -274,7 +274,7 @@ contract CfdEngineTest is BasePerpTest {
         _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
 
         assertEq(
-            engine.previewOpenRevertCode(
+            engineLens.previewOpenRevertCode(
                 accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)
             ),
             uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
@@ -1254,12 +1254,12 @@ contract CfdEngineTest is BasePerpTest {
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData = engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(viewData.vaultAssetsUsdc, pool.totalAssets());
-        assertEq(viewData.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(viewData.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(viewData.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(viewData.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
         assertEq(viewData.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
         assertEq(viewData.degradedMode, engine.degradedMode());
-        assertEq(viewData.hasLiveLiability, engine.hasLiveLiability());
+        assertEq(viewData.hasLiveLiability, (_maxLiability() > 0));
     }
 
     function test_GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState() public {
@@ -1286,15 +1286,15 @@ contract CfdEngineTest is BasePerpTest {
                 ? snapshot.vaultAssetsUsdc - snapshot.accumulatedFeesUsdc
                 : 0
         );
-        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability());
-        assertEq(snapshot.withdrawalReservedUsdc, engine.getWithdrawalReservedUsdc());
+        assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
+        assertEq(snapshot.withdrawalReservedUsdc, _withdrawalReservedUsdc());
         assertEq(snapshot.accumulatedFeesUsdc, engine.accumulatedFeesUsdc());
         assertEq(snapshot.accumulatedBadDebtUsdc, engine.accumulatedBadDebtUsdc());
         assertEq(snapshot.liabilityOnlyFundingPnlUsdc, uint256(0));
         assertEq(snapshot.totalDeferredPayoutUsdc, engine.totalDeferredPayoutUsdc());
         assertEq(snapshot.totalDeferredClearerBountyUsdc, engine.totalDeferredClearerBountyUsdc());
         assertEq(snapshot.degradedMode, engine.degradedMode());
-        assertEq(snapshot.hasLiveLiability, engine.hasLiveLiability());
+        assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
         assertEq(snapshot.vaultAssetsUsdc, viewData.vaultAssetsUsdc);
         assertEq(housePoolSnapshot.physicalAssetsUsdc, snapshot.vaultAssetsUsdc);
         assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
@@ -1435,7 +1435,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(
             snapshot.netPhysicalAssetsUsdc, pool.totalAssets() - fees, "Snapshot net assets must exclude protocol fees"
         );
-        assertEq(snapshot.maxLiabilityUsdc, engine.getMaxLiability(), "Snapshot liability must match accessor");
+        assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(snapshot.withdrawalFundingLiabilityUsdc, uint256(0), "Snapshot funding liability must match accessor");
         assertEq(
             snapshot.unrealizedMtmLiabilityUsdc,
@@ -4053,7 +4053,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
 
-        uint8 revertCode = engine.previewOpenRevertCode(
+        uint8 revertCode = engineLens.previewOpenRevertCode(
             accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 101_800_000, uint64(block.timestamp)
         );
         assertEq(
@@ -4101,10 +4101,10 @@ contract CfdEngineAuditTest is BasePerpTest {
         PerpsViewTypes.PositionView memory positionView = _publicPosition(accountId);
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
 
-        uint8 revertCode = engine.previewOpenRevertCode(
+        uint8 revertCode = engineLens.previewOpenRevertCode(
             accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
         );
-        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engine.previewOpenFailurePolicyCategory(
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
             accountId, CfdTypes.Side.BULL, 10_000 * 1e18, 0, 102_000_000, uint64(block.timestamp)
         );
         assertEq(
@@ -4172,7 +4172,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         vm.warp(block.timestamp + 91 days);
 
-        uint8 revertCode = engine.previewOpenRevertCode(
+        uint8 revertCode = engineLens.previewOpenRevertCode(
             carolAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, uint64(block.timestamp)
         );
         assertEq(revertCode, 0, "Preview should keep the increase executable after async funding accrual");
@@ -4438,7 +4438,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0.5e8, false);
         router.executeOrder(2, priceData);
 
-        int256 uncappedPnl = engine.getUnrealizedTraderPnl();
+        int256 uncappedPnl = _unrealizedTraderPnl();
         uint256 cappedMtm = _vaultMtmAdjustment();
 
         assertLt(uncappedPnl, -int256(_sideTotalMargin(CfdTypes.Side.BEAR)), "Uncapped loss exceeds deposited margin");
@@ -4790,7 +4790,7 @@ contract ProtocolPhaseTest is BasePerpTest {
 
     function test_PhaseTransitions() public {
         assertEq(
-            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
             uint8(ICfdEngine.ProtocolPhase.Active),
             "Fully configured engine should be Active"
         );
@@ -4808,7 +4808,7 @@ contract ProtocolPhaseTest is BasePerpTest {
         _close(bullId, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
         assertEq(
-            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
             uint8(ICfdEngine.ProtocolPhase.Degraded),
             "Insolvency-revealing close should latch Degraded"
         );
@@ -4817,7 +4817,7 @@ contract ProtocolPhaseTest is BasePerpTest {
         engine.clearDegradedMode();
 
         assertEq(
-            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
             uint8(ICfdEngine.ProtocolPhase.Active),
             "Recapitalization should restore Active"
         );
@@ -4826,7 +4826,7 @@ contract ProtocolPhaseTest is BasePerpTest {
     function test_ConfiguringPhase() public {
         CfdEngine unconfigured = new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams());
         assertEq(
-            uint8(unconfigured.getProtocolPhase()),
+            unconfigured.getProtocolStatus().phase,
             uint8(ICfdEngine.ProtocolPhase.Configuring),
             "Engine without vault/router should be Configuring"
         );
@@ -4848,7 +4848,7 @@ contract ProtocolPhasePreActivationTest is BasePerpTest {
         assertTrue(pool.isSeedLifecycleComplete(), "setup should finish seed lifecycle");
         assertFalse(pool.isTradingActive(), "setup should leave trading inactive");
         assertEq(
-            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
             uint8(ICfdEngine.ProtocolPhase.Configuring),
             "Configured but inactive trading should still report Configuring"
         );
@@ -4856,7 +4856,7 @@ contract ProtocolPhasePreActivationTest is BasePerpTest {
         pool.activateTrading();
 
         assertEq(
-            uint8(engine.getProtocolPhase()),
+            uint8(ICfdEngine.ProtocolPhase(_publicProtocolStatus().phase)),
             uint8(ICfdEngine.ProtocolPhase.Active),
             "Trading activation should unlock Active phase"
         );

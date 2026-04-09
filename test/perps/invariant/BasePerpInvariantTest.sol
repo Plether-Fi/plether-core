@@ -41,6 +41,7 @@ abstract contract BasePerpInvariantTest is Test {
         vault = new MockInvariantVault(address(usdc), address(engine));
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(vault),
             address(0),
             new bytes32[](0),
@@ -119,6 +120,35 @@ abstract contract BasePerpInvariantTest is Test {
     function _publicProtocolStatus(
     ) internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return publicLens.getProtocolStatus();
+    }
+
+    function _maxLiability() internal view returns (uint256) {
+        (uint256 bullMaxProfit,,,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
+        (uint256 bearMaxProfit,,,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
+        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+    }
+
+    function _withdrawalReservedUsdc() internal view returns (uint256) {
+        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedUsdc;
+    }
+
+    function _unrealizedTraderPnl() internal view returns (int256) {
+        uint256 price = engine.lastMarkPrice();
+        if (price == 0) return 0;
+        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
+        bullMaxProfit;
+        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
+        bearMaxProfit;
+        int256 bullPnl = (int256(bullEntryNotional) - int256(bullOi * price)) / int256(1e20);
+        int256 bearPnl = (int256(bearOi * price) - int256(bearEntryNotional)) / int256(1e20);
+        return bullPnl + bearPnl;
+    }
+
+    function _maintenanceMarginUsdc(uint256 size, uint256 price) internal view returns (uint256) {
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
+        uint256 notionalUsdc = (size * price) / 1e20;
+        return (notionalUsdc * requiredBps) / 10_000;
     }
 
     function _deferredPayoutStatus(

@@ -38,6 +38,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         vault = new MockInvariantVault(address(usdc), address(engine));
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(vault),
             address(0),
             new bytes32[](0),

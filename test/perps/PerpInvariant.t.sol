@@ -220,7 +220,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
 
         if (!engine.degradedMode()) {
-            assertGe(effectiveAssets, engine.getMaxLiability(), "Non-degraded engine must cover worst-case liability");
+            assertGe(effectiveAssets, _maxLiability(), "Non-degraded engine must cover worst-case liability");
         }
     }
 
@@ -259,7 +259,7 @@ contract PerpInvariantTest is BasePerpTest {
         pool.reconcile();
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 bal = pool.totalAssets();
-        int256 traderPnl = engine.getUnrealizedTraderPnl();
+        int256 traderPnl = _unrealizedTraderPnl();
         uint256 effectivePool;
         if (traderPnl >= 0) {
             effectivePool = bal;
@@ -277,7 +277,7 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
         uint256 poolAssets = pool.totalAssets();
-        uint256 reserved = engine.getWithdrawalReservedUsdc();
+        uint256 reserved = _withdrawalReservedUsdc();
         uint256 expectedFree = poolAssets > reserved ? poolAssets - reserved : 0;
 
         assertEq(pool.getFreeUSDC(), expectedFree, "HousePool free USDC must match engine withdrawal reserve");
@@ -306,8 +306,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public view {
-        bool hasLiveLiability = engine.hasLiveLiability();
-        bool hasDirectionalLiability = engine.getMaxLiability() > 0;
+        bool hasLiveLiability = (_maxLiability() > 0);
+        bool hasDirectionalLiability = _maxLiability() > 0;
         assertEq(hasLiveLiability, hasDirectionalLiability, "Live-liability flag must match nonzero bounded liability");
     }
 
@@ -582,10 +582,10 @@ contract PerpInvariantTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
-        assertEq(protocolView.maxLiabilityUsdc, engine.getMaxLiability(), "Protocol view liability must match accessor");
+        assertEq(protocolView.maxLiabilityUsdc, _maxLiability(), "Protocol view liability must match accessor");
         assertEq(
             protocolView.withdrawalReservedUsdc,
-            engine.getWithdrawalReservedUsdc(),
+            _withdrawalReservedUsdc(),
             "Protocol view withdrawal reserve must match accessor"
         );
         assertEq(
@@ -604,13 +604,13 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = engine.getMaxLiability() + engine.accumulatedFeesUsdc()
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
             + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
 
         expectedReserved += uint256(0);
 
         assertEq(
-            engine.getWithdrawalReservedUsdc(),
+            _withdrawalReservedUsdc(),
             expectedReserved,
             "Withdrawal reserve must include liabilities, fees, and deferred obligations"
         );

@@ -37,6 +37,52 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
     }
 
+    function getWithdrawableUsdc(
+        bytes32 accountId
+    ) external view returns (uint256 withdrawableUsdc) {
+        withdrawableUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(accountId);
+
+        CfdTypes.Position memory pos = _position(accountId);
+        if (pos.size == 0) {
+            return withdrawableUsdc;
+        }
+        if (engineContract.degradedMode()) {
+            return 0;
+        }
+
+        uint256 price = engineContract.lastMarkPrice();
+        uint64 lastMarkTime = engineContract.lastMarkTime();
+        if (price == 0) {
+            return 0;
+        }
+        uint256 maxStaleness = engineContract.isOracleFrozen() ? engineContract.fadMaxStaleness() : engineContract.engineMarkStalenessLimit();
+        if (block.timestamp > lastMarkTime + maxStaleness) {
+            return 0;
+        }
+
+        uint256 reachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(
+            engineContract.clearinghouse().getAccountUsdcBuckets(accountId)
+        );
+        uint256 pendingCarryUsdc = 0;
+        if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
+            uint256 lpBackedNotionalUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
+            pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+                lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+            );
+        }
+        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+            pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, _riskParams().initMarginBps
+        );
+
+        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * _riskParams().initMarginBps) / 10_000;
+        if (riskState.equityUsdc <= int256(initialMarginRequirementUsdc)) {
+            return 0;
+        }
+
+        uint256 imrHeadroomUsdc = uint256(riskState.equityUsdc) - initialMarginRequirementUsdc;
+        return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
+    }
+
     function getAccountLedgerView(
         bytes32 accountId
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {

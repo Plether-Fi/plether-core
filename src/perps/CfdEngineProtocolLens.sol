@@ -36,13 +36,15 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.protocolFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.netPhysicalAssetsUsdc =
             vaultAssetsUsdc > snapshot.protocolFeesUsdc ? vaultAssetsUsdc - snapshot.protocolFeesUsdc : 0;
-        snapshot.maxLiabilityUsdc = engineContract.getMaxLiability();
+        snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
+            _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
+        );
         snapshot.withdrawalFundingLiabilityUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.deferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.markFreshnessRequired = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
         if (snapshot.markFreshnessRequired) {
             snapshot.maxMarkStaleness =
@@ -65,8 +67,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
         int256 bullPnl;
         int256 bearPnl;
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         if (price > 0) {
             bullPnl = (int256(bullState.entryNotional) - int256(bullState.openInterest * price))
                 / int256(CfdMath.USDC_TO_TOKEN_SCALE);
@@ -90,7 +92,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
         uint256 vaultAssetsUsdc = engineContract.vault().totalAssets();
-        uint256 maxLiabilityUsdc = engineContract.getMaxLiability();
+        uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
+            _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
+        );
         SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
         snapshot.vaultAssetsUsdc = vaultAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
@@ -105,8 +109,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.totalDeferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngine.SideState memory bullState = engineContract.getSideState(CfdTypes.Side.BULL);
-        ICfdEngine.SideState memory bearState = engineContract.getSideState(CfdTypes.Side.BEAR);
+        ICfdEngine.SideState memory bullState = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bearState = _sideState(CfdTypes.Side.BEAR);
         snapshot.hasLiveLiability = bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
     }
 
@@ -114,10 +118,18 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         return SolvencyAccountingLib.buildSolvencyState(
             engineContract.vault().totalAssets(),
             engineContract.accumulatedFeesUsdc(),
-            engineContract.getMaxLiability(),
+            SolvencyAccountingLib.getMaxLiability(
+                _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
+            ),
             engineContract.totalDeferredPayoutUsdc(),
             engineContract.totalDeferredClearerBountyUsdc()
         );
+    }
+
+    function _sideState(
+        CfdTypes.Side side
+    ) internal view returns (ICfdEngine.SideState memory state) {
+        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin, state.fundingIndex, state.entryFunding) = engineContract.sides(uint8(side));
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

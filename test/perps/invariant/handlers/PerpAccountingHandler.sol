@@ -241,10 +241,10 @@ contract PerpAccountingHandler is Test {
                 && !engine.isFadWindow() && vault.canIncreaseRisk()
                 && router.pendingOrderCounts(accountId) < router.MAX_PENDING_ORDERS(),
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
-            failureCategory: engine.previewOpenFailurePolicyCategory(
+            failureCategory: engineLens.previewOpenFailurePolicyCategory(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             ),
-            revertCode: engine.previewOpenRevertCode(
+            revertCode: engineLens.previewOpenRevertCode(
                 accountId, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
             ),
             commitSucceeded: false

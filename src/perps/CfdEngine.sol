@@ -327,18 +327,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bearState = _sideState(CfdTypes.Side.BEAR);
     }
 
-    function getSideState(
-        CfdTypes.Side side
-    ) public view returns (ICfdEngine.SideState memory state) {
-        SideState storage stored = sides[_sideIndex(side)];
-        state.maxProfitUsdc = stored.maxProfitUsdc;
-        state.openInterest = stored.openInterest;
-        state.entryNotional = stored.entryNotional;
-        state.totalMargin = stored.totalMargin;
-        state.fundingIndex = stored.fundingIndex;
-        state.entryFunding = stored.entryFunding;
-    }
-
     function _requireTimelockReady(
         uint256 activationTime
     ) internal view {
@@ -1040,106 +1028,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return _positions[accountId].size;
     }
 
-    function previewOpenRevertCode(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (uint8 code) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
-        CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: accountId,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: 0,
-            commitTime: 0,
-            commitBlock: 0,
-            orderId: 0,
-            side: side,
-            isClose: false
-        });
-        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, oraclePrice, publishTime);
-        return uint8(delta.revertCode);
-    }
-
-    function previewOpenFailurePolicyCategory(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(accountId, oraclePrice, vault.totalAssets(), publishTime);
-        CfdTypes.Order memory order = CfdTypes.Order({
-            accountId: accountId,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: 0,
-            commitTime: 0,
-            commitBlock: 0,
-            orderId: 0,
-            side: side,
-            isClose: false
-        });
-        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, oraclePrice, publishTime);
-        return planner.getOpenFailurePolicyCategory(delta.revertCode);
-    }
-
     function getPositionSide(
         bytes32 accountId
     ) external view returns (CfdTypes.Side) {
         return _positions[accountId].side;
-    }
-
-    /// @notice Returns the maintenance margin requirement in USDC (6 decimals).
-    ///         Uses fadMarginBps during the FAD window, maintMarginBps otherwise.
-    /// @param size Position size in tokens (18 decimals)
-    /// @param currentOraclePrice Oracle price (8 decimals)
-    function getMaintenanceMarginUsdc(
-        uint256 size,
-        uint256 currentOraclePrice
-    ) public view returns (uint256) {
-        uint256 notionalUsdc = (size * currentOraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 requiredBps = isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps;
-        return (notionalUsdc * requiredBps) / 10_000;
-    }
-
-    /// @notice Returns the maximum settlement USDC the account can withdraw without violating engine guards.
-    /// @dev Mirrors `checkWithdraw()` semantics and returns zero when withdrawals are blocked by engine state.
-    function getWithdrawableUsdc(
-        bytes32 accountId
-    ) external view returns (uint256 withdrawableUsdc) {
-        withdrawableUsdc = clearinghouse.getFreeBuyingPowerUsdc(accountId);
-
-        CfdTypes.Position memory pos = _loadPosition(accountId);
-        if (pos.size == 0) {
-            return withdrawableUsdc;
-        }
-        if (degradedMode) {
-            return 0;
-        }
-
-        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-        if (!priceFresh) {
-            return 0;
-        }
-
-        uint256 reachableUsdc = _physicalReachableCollateralUsdc(accountId);
-        PositionRiskAccountingLib.PositionRiskState memory riskState =
-            _buildProjectedPositionRiskState(accountId, pos, price, reachableUsdc, riskParams.initMarginBps);
-
-        uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
-        if (riskState.equityUsdc <= int256(initialMarginRequirementUsdc)) {
-            return 0;
-        }
-
-        uint256 imrHeadroomUsdc = uint256(riskState.equityUsdc) - initialMarginRequirementUsdc;
-        return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
     /// @notice Liquidates an undercollateralized position.
@@ -1372,66 +1264,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         lastMarkTime = newMarkTime;
     }
 
-    function _executeMinimalApplyPlan(
-        bytes32 accountId,
-        CfdEngineSettlementTypes.MinimalApplyPlan memory plan
-    ) internal {
-        SideState storage sideState = _sideState(plan.sideDelta.side);
-        if (plan.sideDelta.maxProfitDelta >= 0) {
-            sideState.maxProfitUsdc += uint256(plan.sideDelta.maxProfitDelta);
-        } else {
-            sideState.maxProfitUsdc -= uint256(-plan.sideDelta.maxProfitDelta);
-        }
-        if (plan.sideDelta.openInterestDelta >= 0) {
-            sideState.openInterest += uint256(plan.sideDelta.openInterestDelta);
-        } else {
-            sideState.openInterest -= uint256(-plan.sideDelta.openInterestDelta);
-        }
-        if (plan.sideDelta.entryNotionalDelta >= 0) {
-            sideState.entryNotional += uint256(plan.sideDelta.entryNotionalDelta);
-        } else {
-            sideState.entryNotional -= uint256(-plan.sideDelta.entryNotionalDelta);
-        }
-
-        if (plan.deferred.existingDeferredConsumedUsdc > 0) {
-            _consumeDeferredTraderPayout(accountId, plan.deferred.existingDeferredConsumedUsdc);
-        }
-        if (plan.deferred.freshDeferredPayoutUsdc > 0) {
-            _payOrRecordDeferredTraderPayout(accountId, plan.deferred.freshDeferredPayoutUsdc);
-        }
-        if (
-            plan.vaultInflow.physicalCashReceivedUsdc > 0 || plan.vaultInflow.protocolOwnedUsdc > 0
-                || plan.vaultInflow.lpOwnedUsdc > 0
-        ) {
-            _accountVaultCashInflow(
-                VaultCashInflow({
-                    physicalCashReceivedUsdc: plan.vaultInflow.physicalCashReceivedUsdc,
-                    protocolOwnedUsdc: plan.vaultInflow.protocolOwnedUsdc,
-                    lpOwnedUsdc: plan.vaultInflow.lpOwnedUsdc
-                })
-            );
-        }
-        if (plan.syncMarginQueueAmountUsdc > 0) {
-            _syncMarginQueue(accountId, plan.syncMarginQueueAmountUsdc);
-        }
-        accumulatedFeesUsdc += plan.accumulatedFeesDeltaUsdc;
-        accumulatedBadDebtUsdc += plan.badDebtDeltaUsdc;
-
-        if (plan.position.deletePosition) {
-            delete _positions[accountId];
-            return;
-        }
-
-        StoredPosition storage pos = _positions[accountId];
-        pos.size = plan.position.size;
-        pos.entryPrice = plan.position.entryPrice;
-        pos.maxProfitUsdc = plan.position.maxProfitUsdc;
-        pos.side = plan.position.side;
-        pos.lastUpdateTime = plan.position.lastUpdateTime;
-        pos.lastCarryTimestamp = plan.position.lastCarryTimestamp;
-        pos.vpiAccrued = plan.position.vpiAccrued;
-    }
-
     function settlementApplyFundingAndMark(uint256 newMarkPrice, uint64 newMarkTime) external onlySettlementModule {
         _applyFundingAndMark(newMarkPrice, newMarkTime);
     }
@@ -1498,45 +1330,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint64 publishTime
     ) internal {
         StoredPosition storage pos = _positions[delta.accountId];
-        CfdTypes.Side marginSide = pos.size > 0 ? pos.side : delta.posSide;
-        _applyFundingAndMark(delta.price, publishTime);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.accountId);
         if (pos.size > 0) {
             _realizeCarryFromSettlement(delta.accountId, pos, delta.price, _physicalReachableCollateralUsdc(delta.accountId));
             currentPosition = _loadPosition(delta.accountId);
         }
-        uint256 marginBefore = _positionMarginBucketUsdc(delta.accountId);
-        CfdEngineSettlementTypes.MinimalApplyPlan memory plan = settlementModule.buildOpenApplyPlan(
-            CfdEngineSettlementTypes.OpenApplyInputs({
-                delta: delta,
-                currentPosition: currentPosition,
-                timestampNow: block.timestamp
-            })
-        );
-
-        if (delta.vaultRebatePayoutUsdc > 0) {
-            vault.payOut(address(clearinghouse), delta.vaultRebatePayoutUsdc);
-        }
-
-        int256 netMarginChange =
-            clearinghouse.applyOpenCost(delta.accountId, delta.marginDeltaUsdc, delta.tradeCostUsdc, address(vault));
-        if (delta.tradeCostUsdc > 0) {
-            uint256 protocolFeeInflowUsdc = uint256(delta.tradeCostUsdc) > delta.executionFeeUsdc
-                ? delta.executionFeeUsdc
-                : uint256(delta.tradeCostUsdc);
-            _accountVaultCashInflow(
-                VaultCashInflow({
-                    physicalCashReceivedUsdc: uint256(delta.tradeCostUsdc),
-                    protocolOwnedUsdc: protocolFeeInflowUsdc,
-                    lpOwnedUsdc: uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc
-                })
-            );
-        }
-
-        uint256 marginAfterOpen =
-            netMarginChange >= 0 ? marginBefore + uint256(netMarginChange) : marginBefore - uint256(-netMarginChange);
-        _syncTotalSideMargin(marginSide, marginBefore, marginAfterOpen);
-        _executeMinimalApplyPlan(delta.accountId, plan);
+        settlementModule.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
         _assertPostSolvency();
 
         emit PositionOpened(delta.accountId, delta.posSide, delta.sizeDelta, delta.price, delta.marginDeltaUsdc);
@@ -1677,16 +1476,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    /// @notice Returns the protocol's worst-case directional liability.
-    function getMaxLiability() external view returns (uint256) {
-        return _maxLiability();
-    }
-
-    /// @notice Returns the total USDC reserve required for withdrawals.
-    function getWithdrawalReservedUsdc() external view returns (uint256) {
-        return _getWithdrawalReservedUsdc();
-    }
-
     /// @notice Updates the cached mark price without settling funding or processing trades
     /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
     /// @param publishTime Pyth publish timestamp
@@ -1702,31 +1491,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         lastMarkTime = publishTime;
     }
 
-    /// @notice Returns true when the protocol still has live bounded directional liability.
-    function hasLiveLiability() external view returns (bool) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return bullState.maxProfitUsdc + bearState.maxProfitUsdc > 0;
-    }
-
     // ==========================================
     // MARK-TO-MARKET
     // ==========================================
-
-    /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
-    ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
-    /// @return Net trader PnL in USDC (6 decimals), sign from the traders' perspective
-    function getUnrealizedTraderPnl() external view returns (int256) {
-        uint256 price = lastMarkPrice;
-        if (price == 0) {
-            return 0;
-        }
-
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        int256 bullPnl = int256(bullState.entryNotional) - int256(bullState.openInterest * price);
-        int256 bearPnl = int256(bearState.openInterest * price) - int256(bearState.entryNotional);
-
-        return (bullPnl + bearPnl) / int256(CfdMath.USDC_TO_TOKEN_SCALE);
-    }
 
     function _getVaultMtmLiability() internal view returns (uint256) {
         uint256 price = lastMarkPrice;
@@ -1765,10 +1532,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return ICfdEngine.ProtocolPhase.Configuring;
         }
         return ICfdEngine.ProtocolPhase.Active;
-    }
-
-    function getProtocolPhase() external view returns (ICfdEngine.ProtocolPhase) {
-        return _getProtocolPhase();
     }
 
     function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory status) {

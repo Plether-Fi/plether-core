@@ -85,26 +85,6 @@ interface ICfdEngine {
         uint64 publishTime
     ) external;
 
-    /// @notice Returns the current open-path revert code using canonical vault depth and a caller-supplied oracle snapshot.
-    function previewOpenRevertCode(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (uint8 code);
-
-    /// @notice Returns the semantic commit-time policy category for the current open-path invalidation, if any.
-    function previewOpenFailurePolicyCategory(
-        bytes32 accountId,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
-    ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
-
     /// @notice Records a deferred clearer bounty when immediate vault payment is unavailable.
     /// @dev Deferred keeper bounties are later claimed as clearinghouse credit, not direct wallet transfer.
     function recordDeferredClearerBounty(
@@ -155,17 +135,8 @@ interface ICfdEngine {
         uint256 vaultDepthUsdc
     ) external view returns (LiquidationPreview memory preview);
 
-    /// @notice Returns the accounting state for a given side.
-    function getSideState(
-        CfdTypes.Side side
-    ) external view returns (SideState memory);
-
-    /// @notice Worst-case directional liability after taking the max of bull/bear payout bounds.
-    function getMaxLiability() external view returns (uint256);
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
-    /// @notice Total withdrawal reserve required by current protocol liabilities.
-    function getWithdrawalReservedUsdc() external view returns (uint256);
 
     /// @notice Deferred profitable-close payouts still owed to traders.
     function totalDeferredPayoutUsdc() external view returns (uint256);
@@ -173,15 +144,8 @@ interface ICfdEngine {
     /// @notice Deferred liquidation bounties still owed after failed immediate payout.
     function totalDeferredClearerBountyUsdc() external view returns (uint256);
 
-    /// @notice Aggregate unrealized PnL of all open positions at lastMarkPrice.
-    ///         Positive = traders winning (house liability). Negative = traders losing (house asset).
-    function getUnrealizedTraderPnl() external view returns (int256);
-
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
-
-    /// @notice Returns true when the engine currently has open bounded liability that depends on mark freshness.
-    function hasLiveLiability() external view returns (bool);
 
     /// @notice Materializes accrued funding into storage so subsequent reads reflect current state.
     /// @notice Push a fresh mark price without processing an order
@@ -234,8 +198,6 @@ interface ICfdEngine {
         Active,
         Degraded
     }
-
-    function getProtocolPhase() external view returns (ProtocolPhase);
 
     function getProtocolStatus() external view returns (EngineStatusViewTypes.ProtocolStatus memory);
 

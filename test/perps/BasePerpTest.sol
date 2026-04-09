@@ -103,6 +103,7 @@ abstract contract BasePerpTest is Test {
 
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(pool),
             address(0),
             new bytes32[](0),
@@ -606,8 +607,36 @@ abstract contract BasePerpTest is Test {
 
     function _sideState(
         CfdTypes.Side side
-    ) internal view returns (ICfdEngine.SideState memory) {
-        return engine.getSideState(side);
+    ) internal view returns (ICfdEngine.SideState memory state) {
+        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin, state.fundingIndex, state.entryFunding) =
+            engine.sides(uint8(side));
+    }
+
+    function _maxLiability() internal view returns (uint256) {
+        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        return bull.maxProfitUsdc > bear.maxProfitUsdc ? bull.maxProfitUsdc : bear.maxProfitUsdc;
+    }
+
+    function _withdrawalReservedUsdc() internal view returns (uint256) {
+        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedUsdc;
+    }
+
+    function _unrealizedTraderPnl() internal view returns (int256) {
+        uint256 price = engine.lastMarkPrice();
+        if (price == 0) return 0;
+        ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
+        ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
+        int256 bullPnl = (int256(bull.entryNotional) - int256(bull.openInterest * price)) / int256(1e20);
+        int256 bearPnl = (int256(bear.openInterest * price) - int256(bear.entryNotional)) / int256(1e20);
+        return bullPnl + bearPnl;
+    }
+
+    function _maintenanceMarginUsdc(uint256 size, uint256 price) internal view returns (uint256) {
+        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
+        uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
+        uint256 notionalUsdc = (size * price) / 1e20;
+        return (notionalUsdc * requiredBps) / 10_000;
     }
 
     function _sideOpenInterest(

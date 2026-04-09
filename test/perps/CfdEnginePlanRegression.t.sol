@@ -94,6 +94,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         router = new OrderRouter(
             address(engine),
+            address(engineLens),
             address(pool),
             address(0),
             new bytes32[](0),
@@ -284,7 +285,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             "Live open fee collection should match planner execution fee"
         );
         assertEq(
-            engine.getSideState(CfdTypes.Side.BULL).totalMargin,
+            _sideState(CfdTypes.Side.BULL).totalMargin,
             delta.sideTotalMarginAfterOpen,
             "Live side total margin should match planner delta"
         );

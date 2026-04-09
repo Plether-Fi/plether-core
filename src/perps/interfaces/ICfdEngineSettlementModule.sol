@@ -3,22 +3,16 @@ pragma solidity 0.8.33;
 
 import {CfdEnginePlanTypes} from "../CfdEnginePlanTypes.sol";
 import {CfdTypes} from "../CfdTypes.sol";
-import {CfdEngineSettlementTypes} from "./CfdEngineSettlementTypes.sol";
 import {ICfdEngineSettlementHost} from "./ICfdEngineSettlementHost.sol";
 
 interface ICfdEngineSettlementModule {
 
-    function buildOpenApplyPlan(
-        CfdEngineSettlementTypes.OpenApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan);
-
-    function buildCloseApplyPlan(
-        CfdEngineSettlementTypes.CloseApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan);
-
-    function buildLiquidationApplyPlan(
-        CfdEngineSettlementTypes.LiquidationApplyInputs calldata inputs
-    ) external pure returns (CfdEngineSettlementTypes.MinimalApplyPlan memory plan);
+    function executeOpen(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.OpenDelta calldata delta,
+        CfdTypes.Position calldata currentPosition,
+        uint64 publishTime
+    ) external;
 
     function executeClose(
         ICfdEngineSettlementHost host,

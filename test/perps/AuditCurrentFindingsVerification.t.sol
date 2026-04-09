@@ -187,7 +187,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         bases.push(1e8);
 
         router =
-            new OrderRouter(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -254,7 +254,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
         uint8 code =
-            engine.previewOpenRevertCode(bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpenRevertCode(bobId, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp));
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
