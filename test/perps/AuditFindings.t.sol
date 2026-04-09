@@ -141,7 +141,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: aliceId,
                 sizeDelta: 200_000 * 1e18,
@@ -398,7 +398,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: aliceId,
                 sizeDelta: closeSize,

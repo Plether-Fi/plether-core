@@ -271,7 +271,7 @@ abstract contract BasePerpTest is Test {
         uint256 depth
     ) internal {
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: size,
@@ -317,7 +317,7 @@ abstract contract BasePerpTest is Test {
         uint64 publishTime
     ) internal {
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: size,

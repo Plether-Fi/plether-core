@@ -814,21 +814,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     // 1. ORDER PROCESSING & NETTING
     // ==========================================
 
-    /// @notice Executes an order: settles funding, then increases or decreases the position.
-    ///         Called exclusively by OrderRouter after MEV and slippage checks pass.
-    /// @param order The order to execute (account, side, size delta, margin delta, isClose)
-    /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param vaultDepthUsdc HousePool total assets — used to scale funding rate
-    /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
-    function processOrder(
-        CfdTypes.Order memory order,
-        uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
-    ) external onlyRouter nonReentrant {
-        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, false);
-    }
-
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     function processOrderTyped(
         CfdTypes.Order memory order,
@@ -836,15 +821,14 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 vaultDepthUsdc,
         uint64 publishTime
     ) external onlyRouter nonReentrant {
-        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime, true);
+        _processOrder(order, currentOraclePrice, vaultDepthUsdc, publishTime);
     }
 
     function _processOrder(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
         uint256 vaultDepthUsdc,
-        uint64 publishTime,
-        bool typedFailures
+        uint64 publishTime
     ) internal {
         if (publishTime < lastMarkTime) {
             revert CfdEngine__MarkPriceOutOfOrder();
@@ -856,19 +840,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice, publishTime);
-            if (typedFailures) {
-                _revertIfCloseInvalidTyped(delta.revertCode);
-            } else {
-                _revertIfCloseInvalid(delta.revertCode);
-            }
+            _revertIfCloseInvalidTyped(delta.revertCode);
             _applyClose(delta, publishTime);
         } else {
             CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice, publishTime);
-            if (typedFailures) {
-                _revertIfOpenInvalidTyped(delta.revertCode);
-            } else {
-                _revertIfOpenInvalid(delta.revertCode);
-            }
+            _revertIfOpenInvalidTyped(delta.revertCode);
             _applyOpen(delta, publishTime);
         }
     }
@@ -1186,35 +1162,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     // PLAN-APPLY: REVERT DISPATCH + APPLY
     // ==========================================
 
-    function _revertIfOpenInvalid(
-        CfdEnginePlanTypes.OpenRevertCode code
-    ) internal pure {
-        if (code == CfdEnginePlanTypes.OpenRevertCode.OK) {
-            return;
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING) {
-            revert CfdEngine__MustCloseOpposingPosition();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE) {
-            revert CfdEngine__DegradedMode();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL) {
-            revert CfdEngine__PositionTooSmall();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH) {
-            revert CfdEngine__SkewTooHigh();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES) {
-            revert CfdEngine__MarginDrainedByFees();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN) {
-            revert CfdEngine__InsufficientInitialMargin();
-        }
-        if (code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED) {
-            revert CfdEngine__VaultSolvencyExceeded();
-        }
-    }
-
     function _revertIfOpenInvalidTyped(
         CfdEnginePlanTypes.OpenRevertCode code
     ) internal view {
@@ -1225,23 +1172,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         revert ICfdEngine.CfdEngine__TypedOrderFailure(
             planner.getExecutionFailurePolicyCategory(code), uint8(code), false
         );
-    }
-
-    function _revertIfCloseInvalid(
-        CfdEnginePlanTypes.CloseRevertCode code
-    ) internal pure {
-        if (code == CfdEnginePlanTypes.CloseRevertCode.OK) {
-            return;
-        }
-        if (code == CfdEnginePlanTypes.CloseRevertCode.CLOSE_SIZE_EXCEEDS) {
-            revert CfdEngine__CloseSizeExceedsPosition();
-        }
-        if (code == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
-            revert CfdEngine__DustPosition();
-        }
-        if (code == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNDERWATER) {
-            revert CfdEngine__PartialCloseUnderwaterFunding();
-        }
     }
 
     function _revertIfCloseInvalidTyped(

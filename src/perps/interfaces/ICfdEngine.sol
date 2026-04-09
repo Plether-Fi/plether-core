@@ -63,18 +63,6 @@ interface ICfdEngine {
     /// @notice Last mark price observed by the engine (8 decimals)
     function lastMarkPrice() external view returns (uint256);
 
-    /// @notice Settles funding and processes an open/close order at the given oracle price
-    /// @param order              Order to execute (contains accountId, market, direction, size)
-    /// @param currentOraclePrice Mark price from the oracle (8 decimals)
-    /// @param vaultDepthUsdc     Available vault liquidity, used for open-interest caps (6 decimals)
-    /// @param publishTime        Oracle publish timestamp, used for funding rate accrual
-    function processOrder(
-        CfdTypes.Order memory order,
-        uint256 currentOraclePrice,
-        uint256 vaultDepthUsdc,
-        uint64 publishTime
-    ) external;
-
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Reverts with `CfdEngine__TypedOrderFailure` for expected order invalidations so the
     ///      router can apply deterministic failed-order bounty policy without selector matching.

@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IPyth, PythStructs} from "../../src/interfaces/IPyth.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
+import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";

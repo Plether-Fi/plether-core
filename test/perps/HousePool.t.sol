@@ -2734,7 +2734,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: bytes32(uint256(uint160(carol))),
                 sizeDelta: 200_000e18,
@@ -2780,7 +2780,7 @@ contract HousePoolAuditTest is BasePerpTest {
 
         uint256 closeDepth = pool.totalAssets();
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: bytes32(uint256(uint160(carol))),
                 sizeDelta: 100_000e18,

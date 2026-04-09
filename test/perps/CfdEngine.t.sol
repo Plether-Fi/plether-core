@@ -210,7 +210,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
         vm.prank(address(router));
-        engine.processOrder(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         CfdTypes.Order memory order = CfdTypes.Order({
             accountId: accountId,
@@ -229,14 +229,14 @@ contract CfdEngineTest is BasePerpTest {
         juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
         vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, 0, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, 0, uint64(block.timestamp));
 
         // Re-deposit to allow the trade
         usdc.approve(address(juniorVault), 950_000 * 1e6);
         juniorVault.deposit(950_000 * 1e6, address(this));
 
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, 200_000 * 1e6, uint64(block.timestamp));
 
         (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
         assertEq(size, 100_000 * 1e18, "Size mismatch");
@@ -341,7 +341,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(retailLong, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(retailLong, 1e8, vaultDepth, uint64(block.timestamp));
 
         uint64 refreshTime = uint64(block.timestamp + 30 days);
         vm.warp(refreshTime);
@@ -364,7 +364,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(mmShort, 1e8, vaultDepth, accrualTime);
+        engine.processOrderTyped(mmShort, 1e8, vaultDepth, accrualTime);
 
         assertEq(_sideFundingIndex(CfdTypes.Side.BULL), 0);
         assertEq(_sideFundingIndex(CfdTypes.Side.BEAR), 0);
@@ -963,7 +963,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterOpen,,,,,,) = engine.positions(accountId);
         uint256 lockedAfterOpen = clearinghouse.lockedMarginUsdc(accountId);
@@ -985,7 +985,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(addOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(addOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         (, uint256 marginAfterAdd,,,,,,) = engine.positions(accountId);
         uint256 lockedAfterAdd = clearinghouse.lockedMarginUsdc(accountId);
@@ -1008,7 +1008,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         // 100k BULL at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
         uint256 fees = engine.accumulatedFeesUsdc();
@@ -2833,7 +2833,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         CfdTypes.Order memory bullOrder = CfdTypes.Order({
             accountId: accountId,
@@ -2848,7 +2848,7 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.expectRevert(CfdEngine.CfdEngine__MustCloseOpposingPosition.selector);
         vm.prank(address(router));
-        engine.processOrder(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_ProcessOrderTyped_UserInvalidFailureUsesTypedTaxonomy() public {
@@ -2867,7 +2867,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(bearOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         CfdTypes.Order memory bullOrder = CfdTypes.Order({
             accountId: accountId,
@@ -2909,7 +2909,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         uint64 refreshTime = uint64(block.timestamp + 365 days);
         vm.warp(refreshTime);
@@ -2932,7 +2932,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(addOrder, 1e8, vaultDepth, accrualTime);
+        engine.processOrderTyped(addOrder, 1e8, vaultDepth, accrualTime);
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 110_000 * 1e18, "Fresh mark checkpoint should not retroactively create a funding-driven revert");
@@ -2956,7 +2956,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(first, 0.8e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(first, 0.8e8, vaultDepth, uint64(block.timestamp));
 
         (,, uint256 entryAfterFirst,,,,,) = engine.positions(accountId);
         assertEq(entryAfterFirst, 0.8e8, "Entry should be $0.80");
@@ -2974,7 +2974,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(second, 1.2e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(second, 1.2e8, vaultDepth, uint64(block.timestamp));
 
         (uint256 totalSize,, uint256 avgEntry,,,,,) = engine.positions(accountId);
         assertEq(totalSize, 40_000 * 1e18, "Total size should be 40k");
@@ -2998,7 +2998,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         uint256 chBefore = clearinghouse.balanceUsdc(accountId);
 
@@ -3016,7 +3016,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrder(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         uint256 chAfter = clearinghouse.balanceUsdc(accountId);
         assertLt(chAfter, chBefore, "Funding drain should reduce clearinghouse balance on close");
@@ -3040,7 +3040,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 2500 * 1e6);
@@ -3088,7 +3088,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.prank(address(0xDEAD));
         vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
-        engine.processOrder(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         vm.prank(address(0xDEAD));
         vm.expectRevert(CfdEngine.CfdEngine__Unauthorized.selector);
@@ -3168,7 +3168,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             accountId: accountId,
@@ -3183,7 +3183,7 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.expectRevert(CfdEngine.CfdEngine__CloseSizeExceedsPosition.selector);
         vm.prank(address(router));
-        engine.processOrder(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
     function test_MarginDrained_ByFees_Reverts() public {
@@ -3204,7 +3204,7 @@ contract CfdEngineTest is BasePerpTest {
         });
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
     function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
@@ -3241,7 +3241,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
     function test_C5_CloseSucceeds_WhenFundingExceedsMargin_ButPositionProfitable() public {
@@ -3262,7 +3262,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         // Warp 365 days — funding will far exceed margin
         vm.warp(block.timestamp + 365 days);
@@ -3285,7 +3285,7 @@ contract CfdEngineTest is BasePerpTest {
 
         // This should NOT revert — the position is profitable despite funding > margin
         vm.prank(address(router));
-        engine.processOrder(closeOrder, 0.5e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 0.5e8, vaultDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
@@ -3317,7 +3317,7 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
         vm.prank(address(router));
-        engine.processOrder(order, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
 
     function test_H8_CloseAfterBlendedEntry_DoesNotUnderflow() public {
@@ -3338,7 +3338,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(first, 100_000_001, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(first, 100_000_001, vaultDepth, uint64(block.timestamp));
 
         // Open BEAR 200k tokens at price $1.00 — blends entry to 100_000_000 (truncated from .33)
         // Sum of individual maxProfits < maxProfit(blended) due to integer truncation
@@ -3354,7 +3354,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(second, 100_000_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(second, 100_000_000, vaultDepth, uint64(block.timestamp));
 
         // Close entire position — must not underflow in _reduceGlobalLiability
         CfdTypes.Order memory close = CfdTypes.Order({
@@ -3369,7 +3369,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrder(close, 100_000_000, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(close, 100_000_000, vaultDepth, uint64(block.timestamp));
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be fully closed");
@@ -3398,7 +3398,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
         CfdTypes.Order memory bobOpen = CfdTypes.Order({
             accountId: bobId,
@@ -3412,7 +3412,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 60_000 * 1e6);
@@ -3434,7 +3434,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrder(aliceClose, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceClose, 1e8, vaultDepth, uint64(block.timestamp));
 
         (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 0, "Close should succeed during insolvency");
@@ -3458,7 +3458,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, 46_000 * 1e6);
@@ -3504,7 +3504,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(aliceOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
         vm.prank(aliceTrader);
         clearinghouse.withdraw(aliceId, 28_000 * 1e6);
@@ -3521,7 +3521,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(bobOpen, 1e8, vaultDepth, uint64(block.timestamp));
 
         // Drain vault to simulate insolvency (pool has ~$1M + fees, maxLiab = $200k)
         vm.prank(address(engine));
@@ -3580,7 +3580,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, vaultDepth, uint64(block.timestamp));
 
         (, uint256 posMargin,,,,,,) = engine.positions(accountId);
 
@@ -3835,7 +3835,7 @@ contract CfdEngineTest is BasePerpTest {
         });
         uint256 chBeforeOpen = clearinghouse.balanceUsdc(accountId);
         vm.prank(address(router));
-        engine.processOrder(openOrder, 1e8, largeDepth, uint64(block.timestamp));
+        engine.processOrderTyped(openOrder, 1e8, largeDepth, uint64(block.timestamp));
 
         (,,,,,,, int256 storedVpi) = engine.positions(accountId);
         assertTrue(storedVpi != 0, "VPI should be tracked");
@@ -3852,7 +3852,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: true
         });
         vm.prank(address(router));
-        engine.processOrder(closeOrder, 1e8, smallDepth, uint64(block.timestamp));
+        engine.processOrderTyped(closeOrder, 1e8, smallDepth, uint64(block.timestamp));
 
         uint256 chAfterClose = clearinghouse.balanceUsdc(accountId);
 
@@ -3920,7 +3920,7 @@ contract CfdEngineFundingTest is BasePerpTest {
         uint256 closeSize = minSize - 1;
         vm.expectRevert(CfdEngine.CfdEngine__DustPosition.selector);
         vm.prank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: attackerId,
                 sizeDelta: closeSize,
@@ -5057,7 +5057,7 @@ contract VpiChunkingTest is Test {
         uint256 price,
         uint256 depth
     ) internal {
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: size,
@@ -5092,7 +5092,7 @@ contract VpiChunkingTest is Test {
         uint256 price,
         uint256 depth
     ) internal {
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: size,

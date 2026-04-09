@@ -848,7 +848,7 @@ contract NonUsdcCollateralTest is Test {
         uint256 price,
         uint256 depth
     ) internal {
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: size,

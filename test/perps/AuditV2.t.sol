@@ -401,7 +401,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
         uint256 vaultDepth = pool.totalAssets();
         vm.prank(address(router));
         vm.expectRevert();
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: bobId,
                 sizeDelta: 300_000e18,

@@ -495,7 +495,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
         _fundTrader(address(uint160(uint256(accountId))), 10_000e6);
 
         vm.startPrank(address(router));
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: 1000e18,
@@ -514,7 +514,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
 
         uint256 depth = pool.totalAssets();
         vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
-        engine.processOrder(
+        engine.processOrderTyped(
             CfdTypes.Order({
                 accountId: accountId,
                 sizeDelta: 1,
