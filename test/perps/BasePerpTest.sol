@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "../../src/perps/CfdEngineAccountLens.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
@@ -11,7 +12,6 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
