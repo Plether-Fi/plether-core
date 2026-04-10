@@ -26,7 +26,7 @@ jobs:
         run: forge fmt --check
 
       - name: Build
-        run: forge build --sizes
+        run: forge build --sizes --skip test
 
       - name: Run fuzz tests
         run: forge test -vvv --match-test "testFuzz_|invariant_" --no-match-path "test/fork/*"
