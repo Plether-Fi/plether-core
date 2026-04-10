@@ -139,7 +139,7 @@ contract OrderRouterTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         uint256 sizeDelta = 3334e18;
         uint256 marginDelta = 110e6;
-        uint256 executionBountyUsdc = router.quoteOpenOrderExecutionBountyUsdc(sizeDelta);
+        uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(sizeDelta);
 
         _fundTrader(trader, marginDelta + executionBountyUsdc);
         _open(accountId, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);

@@ -259,7 +259,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         );
         assertEq(
             usdc.balanceOf(keeper) - keeperUsdcBefore,
-            router.quoteCloseOrderExecutionBountyUsdc(),
+            1e6,
             "Illiquid close execution should still pay the keeper from router escrow"
         );
     }

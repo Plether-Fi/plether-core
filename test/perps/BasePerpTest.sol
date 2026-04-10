@@ -11,6 +11,7 @@ import {MarginClearinghouse} from "../../src/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {DecimalConstants} from "../../src/libraries/DecimalConstants.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
@@ -650,6 +651,21 @@ abstract contract BasePerpTest is Test {
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
         return (notionalUsdc * requiredBps) / 10_000;
+    }
+
+    function _quoteOpenOrderExecutionBountyUsdc(
+        uint256 sizeDelta
+    ) internal view returns (uint256) {
+        uint256 price = engine.lastMarkPrice();
+        if (price == 0) {
+            price = 1e8;
+        }
+        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        uint256 executionBountyUsdc = notionalUsdc / 10_000;
+        if (executionBountyUsdc < 50_000) {
+            executionBountyUsdc = 50_000;
+        }
+        return executionBountyUsdc > 1e6 ? 1e6 : executionBountyUsdc;
     }
 
     function _sideOpenInterest(

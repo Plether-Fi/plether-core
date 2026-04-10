@@ -379,22 +379,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         emit OrderCommitted(orderId, accountId, side);
     }
 
-    /// @notice Quotes the reserved USDC execution bounty for a new open order using the latest engine mark price.
-    /// @dev Falls back to 1.00 USD if the engine has not observed a mark yet. Result is floored at
-    ///      0.05 USDC and capped at 1 USDC for non-close intents.
-    /// @param sizeDelta Order size in 18-decimal notional units
-    /// @return executionBountyUsdc Reserved execution bounty in 6-decimal USDC units
-    function quoteOpenOrderExecutionBountyUsdc(
-        uint256 sizeDelta
-    ) external view returns (uint256 executionBountyUsdc) {
-        return _quoteOpenOrderExecutionBountyUsdc(sizeDelta, _commitReferencePrice());
-    }
-
-    /// @notice Quotes the flat reserved USDC execution bounty for a close order.
-    function quoteCloseOrderExecutionBountyUsdc() external pure returns (uint256 executionBountyUsdc) {
-        return _quoteCloseOrderExecutionBountyUsdc();
-    }
-
     /// @dev Legacy raw order-record getter kept for tests and migration only.
     function getOrderRecord(
         uint64 orderId

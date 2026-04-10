@@ -336,7 +336,7 @@ contract AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity is BasePerpT
 
         uint256 lockedBefore = clearinghouse.lockedMarginUsdc(accountId);
         uint256 freeBefore = clearinghouse.getFreeBuyingPowerUsdc(accountId);
-        uint256 closeBounty = router.quoteCloseOrderExecutionBountyUsdc();
+        uint256 closeBounty = 1e6;
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, freeBefore - closeBounty);

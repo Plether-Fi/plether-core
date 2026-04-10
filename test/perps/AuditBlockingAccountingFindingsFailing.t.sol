@@ -308,12 +308,12 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
 
         assertGe(
             reservedBounty + freeSettlement,
-            router.quoteCloseOrderExecutionBountyUsdc(),
+            1e6,
             "Head close order should be economically backed the moment it enters FIFO"
         );
         assertEq(
             _orderRecord(headOrderId).executionBountyUsdc,
-            router.quoteCloseOrderExecutionBountyUsdc(),
+            1e6,
             "Close orders should escrow the full bounty in router custody"
         );
     }
