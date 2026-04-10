@@ -26,4 +26,5 @@ interface ICfdEngineSettlementModule {
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
+
 }

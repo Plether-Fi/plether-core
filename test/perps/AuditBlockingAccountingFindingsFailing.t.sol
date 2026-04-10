@@ -268,9 +268,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
         _open(counterId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(
-            _freeSettlementUsdc(accountId), 0, "Trader should be fully utilized before commit"
-        );
+        assertEq(_freeSettlementUsdc(accountId), 0, "Trader should be fully utilized before commit");
     }
 
     function _setupCloseBountyBacked() internal returns (bytes32 accountId, bytes32 counterId) {
@@ -363,9 +361,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         assertEq(keeperBounty, 1e6, "Expired head close should still pay the keeper bounty");
 
         assertEq(
-            _freeSettlementUsdc(accountId),
-            0,
-            "Escrowed close bounty should be consumed from prefunded free settlement"
+            _freeSettlementUsdc(accountId), 0, "Escrowed close bounty should be consumed from prefunded free settlement"
         );
     }
 

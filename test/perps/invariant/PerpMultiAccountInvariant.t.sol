@@ -131,7 +131,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             (, uint256 margin,,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
 

@@ -70,9 +70,8 @@ library SolvencyAccountingLib {
 
         uint256 deferredLiabilitiesUsdc = deferredTraderPayoutUsdc + deferredClearerBountyUsdc;
         state.withdrawalReservedUsdc = maxLiabilityUsdc + protocolFeesUsdc + deferredLiabilitiesUsdc;
-        state.freeWithdrawableUsdc = physicalAssetsUsdc > state.withdrawalReservedUsdc
-            ? physicalAssetsUsdc - state.withdrawalReservedUsdc
-            : 0;
+        state.freeWithdrawableUsdc =
+            physicalAssetsUsdc > state.withdrawalReservedUsdc ? physicalAssetsUsdc - state.withdrawalReservedUsdc : 0;
         state.effectiveAssetsUsdc = state.netPhysicalAssetsUsdc > deferredLiabilitiesUsdc
             ? state.netPhysicalAssetsUsdc - deferredLiabilitiesUsdc
             : 0;

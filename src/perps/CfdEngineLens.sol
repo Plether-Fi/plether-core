@@ -78,7 +78,8 @@ contract CfdEngineLens is ICfdEngineLens {
             side: side,
             isClose: false
         });
-        CfdEnginePlanTypes.OpenDelta memory delta = engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
+        CfdEnginePlanTypes.OpenDelta memory delta =
+            engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
         return engineContract.planner().getOpenFailurePolicyCategory(delta.revertCode);
     }
 
@@ -228,10 +229,22 @@ contract CfdEngineLens is ICfdEngineLens {
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngine.SideState memory bull;
         ICfdEngine.SideState memory bear;
-        (bull.maxProfitUsdc, bull.openInterest, bull.entryNotional, bull.totalMargin, bull.fundingIndex, bull.entryFunding) =
-            engineContract.sides(uint8(CfdTypes.Side.BULL));
-        (bear.maxProfitUsdc, bear.openInterest, bear.entryNotional, bear.totalMargin, bear.fundingIndex, bear.entryFunding) =
-            engineContract.sides(uint8(CfdTypes.Side.BEAR));
+        (
+            bull.maxProfitUsdc,
+            bull.openInterest,
+            bull.entryNotional,
+            bull.totalMargin,
+            bull.fundingIndex,
+            bull.entryFunding
+        ) = engineContract.sides(uint8(CfdTypes.Side.BULL));
+        (
+            bear.maxProfitUsdc,
+            bear.openInterest,
+            bear.entryNotional,
+            bear.totalMargin,
+            bear.fundingIndex,
+            bear.entryFunding
+        ) = engineContract.sides(uint8(CfdTypes.Side.BEAR));
         uint256 lastMarkPrice = engineContract.lastMarkPrice();
         uint64 lastMarkTime = engineContract.lastMarkTime();
         uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;

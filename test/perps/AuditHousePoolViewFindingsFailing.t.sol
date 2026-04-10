@@ -5,8 +5,8 @@ import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
-import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {HousePoolAccountingLib} from "../../src/perps/libraries/HousePoolAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -168,7 +168,8 @@ contract AuditHousePoolViewFindingsFailing_ProjectedFundingViews is BasePerpTest
 
         vm.warp(block.timestamp + 30 days);
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 1e8);
 
         assertEq(snapshot.pendingFundingUsdc, preview.fundingUsdc, "Ledger snapshot should project pending funding");
@@ -241,7 +242,8 @@ contract AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction is BasePerp
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), burnAmount);
 
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot = harness.buildReconcile(snapshot);
 

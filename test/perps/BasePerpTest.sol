@@ -13,9 +13,9 @@ import {PerpsPublicLens} from "../../src/perps/PerpsPublicLens.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
-import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
+import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
@@ -347,7 +347,8 @@ abstract contract BasePerpTest is Test {
         bytes32 accountId,
         CloseParitySnapshot memory beforeSnapshot
     ) internal view returns (CloseParityObserved memory observed) {
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
+            engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize, observed.remainingMargin,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
@@ -445,7 +446,8 @@ abstract contract BasePerpTest is Test {
         address keeper,
         LiquidationParitySnapshot memory beforeSnapshot
     ) internal view returns (LiquidationParityObserved memory observed) {
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
+            engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize,,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
@@ -608,8 +610,14 @@ abstract contract BasePerpTest is Test {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngine.SideState memory state) {
-        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin, state.fundingIndex, state.entryFunding) =
-            engine.sides(uint8(side));
+        (
+            state.maxProfitUsdc,
+            state.openInterest,
+            state.entryNotional,
+            state.totalMargin,
+            state.fundingIndex,
+            state.entryFunding
+        ) = engine.sides(uint8(side));
     }
 
     function _maxLiability() internal view returns (uint256) {
@@ -624,7 +632,9 @@ abstract contract BasePerpTest is Test {
 
     function _unrealizedTraderPnl() internal view returns (int256) {
         uint256 price = engine.lastMarkPrice();
-        if (price == 0) return 0;
+        if (price == 0) {
+            return 0;
+        }
         ICfdEngine.SideState memory bull = _sideState(CfdTypes.Side.BULL);
         ICfdEngine.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
         int256 bullPnl = (int256(bull.entryNotional) - int256(bull.openInterest * price)) / int256(1e20);
@@ -632,7 +642,10 @@ abstract contract BasePerpTest is Test {
         return bullPnl + bearPnl;
     }
 
-    function _maintenanceMarginUsdc(uint256 size, uint256 price) internal view returns (uint256) {
+    function _maintenanceMarginUsdc(
+        uint256 size,
+        uint256 price
+    ) internal view returns (uint256) {
         (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;
@@ -719,8 +732,7 @@ abstract contract BasePerpTest is Test {
         return publicLens.getPosition(accountId);
     }
 
-    function _publicProtocolStatus(
-    ) internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
+    function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return publicLens.getProtocolStatus();
     }
 

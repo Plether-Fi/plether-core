@@ -55,7 +55,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         if (price == 0) {
             return 0;
         }
-        uint256 maxStaleness = engineContract.isOracleFrozen() ? engineContract.fadMaxStaleness() : engineContract.engineMarkStalenessLimit();
+        uint256 maxStaleness = engineContract.isOracleFrozen()
+            ? engineContract.fadMaxStaleness()
+            : engineContract.engineMarkStalenessLimit();
         if (block.timestamp > lastMarkTime + maxStaleness) {
             return 0;
         }
@@ -65,14 +67,16 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         );
         uint256 pendingCarryUsdc = 0;
         if (pos.size > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
-            uint256 lpBackedNotionalUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
+            uint256 lpBackedNotionalUsdc =
+                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableUsdc);
             pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
                 lpBackedNotionalUsdc, _riskParams().baseCarryBps, block.timestamp - pos.lastCarryTimestamp
             );
         }
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-            pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, _riskParams().initMarginBps
-        );
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                pos, price, engineContract.CAP_PRICE(), pendingCarryUsdc, reachableUsdc, _riskParams().initMarginBps
+            );
 
         uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * _riskParams().initMarginBps) / 10_000;
         if (riskState.equityUsdc <= int256(initialMarginRequirementUsdc)) {
@@ -172,4 +176,5 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             params.bountyBps
         ) = engineContract.riskParams();
     }
+
 }

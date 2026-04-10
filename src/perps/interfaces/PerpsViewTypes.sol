@@ -69,4 +69,5 @@ library PerpsViewTypes {
         bool tradingActive;
         bool withdrawalLive;
     }
+
 }

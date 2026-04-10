@@ -23,4 +23,5 @@ library DeferredEngineViewTypes {
         uint256 deferredClearerBountyUsdc;
         bool liquidationBountyClaimableNow;
     }
+
 }

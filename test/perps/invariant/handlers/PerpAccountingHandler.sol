@@ -188,7 +188,8 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 amount = bound(amountFuzz, 1e6, freeSettlement);
         WithdrawParityAttempt memory attempt;
         attempt.active = true;
@@ -339,7 +340,8 @@ contract PerpAccountingHandler is Test {
         uint256 expectedBadDebtDeltaUsdc;
         uint256 expectedFinalResidualUsdc;
         bool terminalClose;
-        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(address(uint160(uint256(accountId))));
         if (isClose && marginDelta == 0) {
             CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, sizeDelta, targetPrice);

@@ -21,4 +21,5 @@ interface IPerpsTraderViews {
     function isLiquidatable(
         bytes32 accountId
     ) external view returns (bool);
+
 }

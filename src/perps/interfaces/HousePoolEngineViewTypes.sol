@@ -21,4 +21,5 @@ library HousePoolEngineViewTypes {
         bool oracleFrozen;
         bool degradedMode;
     }
+
 }

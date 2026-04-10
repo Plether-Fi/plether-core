@@ -38,7 +38,8 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(accountId, address(handler));
+            DeferredEngineViewTypes.DeferredPayoutStatus memory status =
+                _deferredPayoutStatus(accountId, address(handler));
             uint256 deferredPayoutUsdc = engine.deferredPayoutUsdc(accountId);
             uint256 deferredClearerBountyUsdc = engine.deferredClearerBountyUsdc(address(handler));
 

@@ -50,7 +50,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
 
         assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
-        assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens");
+        assertEq(
+            viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens"
+        );
 
         vm.prank(trader);
         clearinghouse.withdraw(accountId, withdrawableUsdc);

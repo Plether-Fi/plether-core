@@ -117,8 +117,7 @@ abstract contract BasePerpInvariantTest is Test {
         return publicLens.getPosition(accountId);
     }
 
-    function _publicProtocolStatus(
-    ) internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
+    function _publicProtocolStatus() internal view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return publicLens.getProtocolStatus();
     }
 
@@ -134,7 +133,9 @@ abstract contract BasePerpInvariantTest is Test {
 
     function _unrealizedTraderPnl() internal view returns (int256) {
         uint256 price = engine.lastMarkPrice();
-        if (price == 0) return 0;
+        if (price == 0) {
+            return 0;
+        }
         (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
         bullMaxProfit;
         (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
@@ -144,7 +145,10 @@ abstract contract BasePerpInvariantTest is Test {
         return bullPnl + bearPnl;
     }
 
-    function _maintenanceMarginUsdc(uint256 size, uint256 price) internal view returns (uint256) {
+    function _maintenanceMarginUsdc(
+        uint256 size,
+        uint256 price
+    ) internal view returns (uint256) {
         (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
         uint256 notionalUsdc = (size * price) / 1e20;

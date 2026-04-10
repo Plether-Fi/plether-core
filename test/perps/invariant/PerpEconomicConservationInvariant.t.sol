@@ -4,12 +4,12 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
 import {OrderRouter} from "../../../src/perps/OrderRouter.sol";
-import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
-import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
+import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {IMarginClearinghouse} from "../../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {ProtocolLensViewTypes} from "../../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpGhostLedger} from "./ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -64,8 +64,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
+            + engine.totalDeferredClearerBountyUsdc();
 
         expectedReserved += uint256(0);
 
@@ -240,7 +240,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
             CfdEngine.AccountCollateralView memory collateralView =
                 engineAccountLens.getAccountCollateralView(accountId);
@@ -407,8 +408,10 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
-            AccountLensViewTypes.AccountLedgerView memory compactView = engineAccountLens.getAccountLedgerView(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerView memory compactView =
+                engineAccountLens.getAccountLedgerView(accountId);
             CfdEngine.AccountCollateralView memory collateralView =
                 engineAccountLens.getAccountCollateralView(accountId);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView = snapshot;
@@ -449,7 +452,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 vaultAssetsUsdc = vault.totalAssets();
@@ -523,7 +527,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
-        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot = engineProtocolLens.getHousePoolStatusSnapshot();
+        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolStatusSnapshot();
 
         assertEq(snapshot.lastMarkTime, engine.lastMarkTime(), "House-pool status last mark time mismatch");
         assertEq(snapshot.oracleFrozen, engine.isOracleFrozen(), "House-pool status oracle frozen mismatch");

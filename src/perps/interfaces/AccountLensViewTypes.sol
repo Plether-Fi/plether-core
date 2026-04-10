@@ -42,4 +42,5 @@ library AccountLensViewTypes {
         int256 netEquityUsdc;
         bool liquidatable;
     }
+
 }

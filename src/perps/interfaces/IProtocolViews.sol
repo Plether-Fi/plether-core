@@ -7,4 +7,5 @@ import {PerpsViewTypes} from "./PerpsViewTypes.sol";
 interface IProtocolViews {
 
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData);
+
 }

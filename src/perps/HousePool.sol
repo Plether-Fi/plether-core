@@ -2,9 +2,9 @@
 pragma solidity 0.8.33;
 
 import {CfdEngineProtocolLens} from "./CfdEngineProtocolLens.sol";
+import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
-import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IHousePool} from "./interfaces/IHousePool.sol";
 import {IPerpsLPActions} from "./interfaces/IPerpsLPActions.sol";
@@ -392,9 +392,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         address recipient,
         uint256 amount
     ) external {
-        if (
-            msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()
-        ) {
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         accountedAssets -= amount;
@@ -409,9 +407,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     function recordProtocolInflow(
         uint256 amount
     ) external {
-        if (
-            msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()
-        ) {
+        if (msg.sender != address(ENGINE) && msg.sender != orderRouter && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
         }
         if (amount == 0) {
@@ -1020,11 +1016,19 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         return pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
     }
 
-    function _getHousePoolInputSnapshot() internal view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
+    function _getHousePoolInputSnapshot()
+        internal
+        view
+        returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot)
+    {
         return ENGINE_PROTOCOL_LENS.getHousePoolInputSnapshot(markStalenessLimit);
     }
 
-    function _getHousePoolStatusSnapshot() internal view returns (HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot) {
+    function _getHousePoolStatusSnapshot()
+        internal
+        view
+        returns (HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot)
+    {
         return ENGINE_PROTOCOL_LENS.getHousePoolStatusSnapshot();
     }
 

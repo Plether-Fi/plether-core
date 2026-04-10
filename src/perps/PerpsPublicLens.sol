@@ -119,8 +119,13 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.marginUsdc = snapshot.margin;
         viewData.unrealizedPnlUsdc = snapshot.unrealizedPnlUsdc;
         viewData.liquidatable = snapshot.liquidatable;
-        (uint256 vpiFactor, uint256 maxSkewRatio, uint256 maintMarginBps, uint256 initMarginBps, uint256 fadMarginBps,,,) =
-            ENGINE.riskParams();
+        (
+            uint256 vpiFactor,
+            uint256 maxSkewRatio,
+            uint256 maintMarginBps,
+            uint256 initMarginBps,
+            uint256 fadMarginBps,,,
+        ) = ENGINE.riskParams();
         vpiFactor;
         maxSkewRatio;
         initMarginBps;

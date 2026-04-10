@@ -11,4 +11,5 @@ interface IPerpsLPViews {
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData);
 
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData);
+
 }

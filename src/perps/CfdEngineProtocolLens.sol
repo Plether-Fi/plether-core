@@ -4,9 +4,9 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "./CfdEngine.sol";
 import {CfdMath} from "./CfdMath.sol";
 import {CfdTypes} from "./CfdTypes.sol";
+import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "./interfaces/ICfdEngine.sol";
 import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
-import {HousePoolEngineViewTypes} from "./interfaces/HousePoolEngineViewTypes.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 
@@ -129,7 +129,14 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngine.SideState memory state) {
-        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin, state.fundingIndex, state.entryFunding) = engineContract.sides(uint8(side));
+        (
+            state.maxProfitUsdc,
+            state.openInterest,
+            state.entryNotional,
+            state.totalMargin,
+            state.fundingIndex,
+            state.entryFunding
+        ) = engineContract.sides(uint8(side));
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

@@ -9,7 +9,6 @@ interface ICfdEngineProtocolLens {
     /// @dev Legacy detailed protocol lens kept for internal tooling, tests, and migration.
     ///      Product-facing consumers should prefer `IPerpsTraderViews`, `IPerpsLPViews`, and
     ///      `IProtocolViews` via `PerpsPublicLens`.
-
     function getProtocolAccountingSnapshot()
         external
         view

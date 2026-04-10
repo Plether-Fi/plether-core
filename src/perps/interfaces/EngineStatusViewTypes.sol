@@ -11,4 +11,5 @@ library EngineStatusViewTypes {
         bool fadWindow;
         uint256 fadMaxStaleness;
     }
+
 }

@@ -105,7 +105,9 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         DeferredEngineViewTypes.DeferredPayoutStatus memory status = _deferredPayoutStatus(aliceId, keeper);
         assertTrue(status.traderPayoutClaimableNow, "Deferred trader payout should be claimable when liquidity exists");
-        assertTrue(status.liquidationBountyClaimableNow, "Deferred clearer bounty should also be claimable without FIFO gating");
+        assertTrue(
+            status.liquidationBountyClaimableNow, "Deferred clearer bounty should also be claimable without FIFO gating"
+        );
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(bytes32(uint256(uint160(keeper))));
         vm.prank(keeper);

@@ -800,9 +800,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         pos = _loadPosition(accountId);
         reachableUsdc = _physicalReachableCollateralUsdc(accountId);
         uint256 pendingCarryUsdc = _pendingCarryUsdc(pos, price, reachableUsdc, block.timestamp);
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
-            pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, riskParams.initMarginBps
-        );
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                pos, price, CAP_PRICE, pendingCarryUsdc, reachableUsdc, riskParams.initMarginBps
+            );
 
         uint256 initialMarginRequirementUsdc = (riskState.currentNotionalUsdc * riskParams.initMarginBps) / 10_000;
         if (riskState.equityUsdc < int256(initialMarginRequirementUsdc)) {
@@ -1194,7 +1195,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         lastMarkTime = newMarkTime;
     }
 
-    function settlementApplyFundingAndMark(uint256 newMarkPrice, uint64 newMarkTime) external onlySettlementModule {
+    function settlementApplyFundingAndMark(
+        uint256 newMarkPrice,
+        uint64 newMarkTime
+    ) external onlySettlementModule {
         _applyFundingAndMark(newMarkPrice, newMarkTime);
     }
 
@@ -1213,27 +1217,46 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         int256 entryNotionalDelta
     ) external onlySettlementModule {
         SideState storage sideState = _sideState(side);
-        if (maxProfitDelta >= 0) sideState.maxProfitUsdc += uint256(maxProfitDelta);
-        else sideState.maxProfitUsdc -= uint256(-maxProfitDelta);
-        if (openInterestDelta >= 0) sideState.openInterest += uint256(openInterestDelta);
-        else sideState.openInterest -= uint256(-openInterestDelta);
-        if (entryNotionalDelta >= 0) sideState.entryNotional += uint256(entryNotionalDelta);
-        else sideState.entryNotional -= uint256(-entryNotionalDelta);
+        if (maxProfitDelta >= 0) {
+            sideState.maxProfitUsdc += uint256(maxProfitDelta);
+        } else {
+            sideState.maxProfitUsdc -= uint256(-maxProfitDelta);
+        }
+        if (openInterestDelta >= 0) {
+            sideState.openInterest += uint256(openInterestDelta);
+        } else {
+            sideState.openInterest -= uint256(-openInterestDelta);
+        }
+        if (entryNotionalDelta >= 0) {
+            sideState.entryNotional += uint256(entryNotionalDelta);
+        } else {
+            sideState.entryNotional -= uint256(-entryNotionalDelta);
+        }
     }
 
-    function settlementConsumeDeferredTraderPayout(bytes32 accountId, uint256 amountUsdc) external onlySettlementModule {
+    function settlementConsumeDeferredTraderPayout(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlySettlementModule {
         _consumeDeferredTraderPayout(accountId, amountUsdc);
     }
 
-    function settlementRecordDeferredTraderPayout(bytes32 accountId, uint256 amountUsdc) external onlySettlementModule {
+    function settlementRecordDeferredTraderPayout(
+        bytes32 accountId,
+        uint256 amountUsdc
+    ) external onlySettlementModule {
         _payOrRecordDeferredTraderPayout(accountId, amountUsdc);
     }
 
-    function settlementAccumulateFees(uint256 amountUsdc) external onlySettlementModule {
+    function settlementAccumulateFees(
+        uint256 amountUsdc
+    ) external onlySettlementModule {
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    function settlementAccumulateBadDebt(uint256 amountUsdc) external onlySettlementModule {
+    function settlementAccumulateBadDebt(
+        uint256 amountUsdc
+    ) external onlySettlementModule {
         accumulatedBadDebtUsdc += amountUsdc;
     }
 
@@ -1251,7 +1274,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         pos.vpiAccrued = position.vpiAccrued;
     }
 
-    function settlementDeletePosition(bytes32 accountId) external onlySettlementModule {
+    function settlementDeletePosition(
+        bytes32 accountId
+    ) external onlySettlementModule {
         delete _positions[accountId];
     }
 
@@ -1262,7 +1287,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         StoredPosition storage pos = _positions[delta.accountId];
         CfdTypes.Position memory currentPosition = _loadPosition(delta.accountId);
         if (pos.size > 0) {
-            _realizeCarryFromSettlement(delta.accountId, pos, delta.price, _physicalReachableCollateralUsdc(delta.accountId));
+            _realizeCarryFromSettlement(
+                delta.accountId, pos, delta.price, _physicalReachableCollateralUsdc(delta.accountId)
+            );
             currentPosition = _loadPosition(delta.accountId);
         }
         settlementModule.executeOpen(ICfdEngineSettlementHost(address(this)), delta, currentPosition, publishTime);
@@ -1288,7 +1315,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         CfdEnginePlanTypes.LiquidationDelta memory delta,
         uint64 publishTime
     ) internal returns (uint256 keeperBountyUsdc) {
-        keeperBountyUsdc = settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
+        keeperBountyUsdc =
+            settlementModule.executeLiquidation(ICfdEngineSettlementHost(address(this)), delta, publishTime);
         emit PositionLiquidated(delta.accountId, delta.side, delta.posSize, delta.price, keeperBountyUsdc);
         _enterDegradedModeIfInsolvent(delta.accountId, keeperBountyUsdc);
     }
@@ -1344,9 +1372,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         if (pos.size == 0 || pos.lastCarryTimestamp == 0 || timestampNow <= pos.lastCarryTimestamp) {
             return 0;
         }
-        uint256 lpBackedNotionalUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            pos.size, price, reachableCollateralUsdc
-        );
+        uint256 lpBackedNotionalUsdc =
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, reachableCollateralUsdc);
         return PositionRiskAccountingLib.computePendingCarryUsdc(
             lpBackedNotionalUsdc, riskParams.baseCarryBps, timestampNow - pos.lastCarryTimestamp
         );

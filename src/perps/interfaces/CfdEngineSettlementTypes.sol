@@ -16,4 +16,5 @@ library CfdEngineSettlementTypes {
         int256 vpiAccrued;
         CfdTypes.Side side;
     }
+
 }

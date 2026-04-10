@@ -151,18 +151,14 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 }
             }
 
-            assertEq(
-                pending.length, escrow.pendingOrderCount, "Pending order count must match account escrow"
-            );
+            assertEq(pending.length, escrow.pendingOrderCount, "Pending order count must match account escrow");
             assertEq(
                 clearinghouse.getAccountReservationSummary(accountId).activeCommittedOrderMarginUsdc,
                 escrow.committedMarginUsdc,
                 "Committed margin summary must match account escrow"
             );
             assertEq(
-                escrow.executionBountyUsdc,
-                escrow.executionBountyUsdc,
-                "Execution bounty must remain self-consistent"
+                escrow.executionBountyUsdc, escrow.executionBountyUsdc, "Execution bounty must remain self-consistent"
             );
             assertEq(
                 router.pendingCloseSize(accountId),
@@ -345,7 +341,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function invariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             IMarginClearinghouse.AccountReservationSummary memory summary =
                 clearinghouse.getAccountReservationSummary(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);

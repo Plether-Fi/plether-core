@@ -2,8 +2,8 @@
 pragma solidity 0.8.33;
 
 import {CfdTypes} from "../../../src/perps/CfdTypes.sol";
-import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {AccountLensViewTypes} from "../../../src/perps/interfaces/AccountLensViewTypes.sol";
+import {HousePoolEngineViewTypes} from "../../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../../src/perps/interfaces/ICfdEngine.sol";
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpOracleHandler} from "./handlers/PerpOracleHandler.sol";
@@ -48,7 +48,8 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_HousePoolSnapshotUsesCorrectFreshnessLimit() public view {
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot = engineProtocolLens.getHousePoolInputSnapshot(300);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(300);
         if (!snapshot.markFreshnessRequired) {
             assertEq(snapshot.maxMarkStaleness, 0, "No live liability should imply no freshness bound");
             return;
@@ -64,7 +65,8 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     function invariant_PositionViewsRespectCurrentFadMode() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.actorAt(i))));
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             if (!snapshot.hasPosition) {
                 continue;
             }

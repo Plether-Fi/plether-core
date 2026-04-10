@@ -13,4 +13,5 @@ interface IPerpsTraderActions {
         uint256 acceptablePrice,
         bool isReduceOnly
     ) external;
+
 }

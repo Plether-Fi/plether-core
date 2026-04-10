@@ -7,4 +7,5 @@ interface IPerpsAdmin {
     function pause() external;
 
     function unpause() external;
+
 }
