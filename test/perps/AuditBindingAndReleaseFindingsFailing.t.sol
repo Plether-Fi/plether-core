@@ -13,17 +13,19 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
     function test_H1_ExecutionReleaseMustNotUnlockConsumedCommittedMargin() public {
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
 
-        _fundTrader(alice, 5000e6);
-        _open(aliceId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(aliceId, 500e6);
+        clearinghouse.consumeAccountOrderReservations(aliceId, 35_000e6);
 
         vm.prank(address(engine));
         router.syncMarginQueue(aliceId);
+
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), 700_000e6);
 
         assertEq(_remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself");
 

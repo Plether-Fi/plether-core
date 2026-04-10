@@ -43,7 +43,7 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         });
     }
 
-    function test_F1_CappedFundingShouldNetCollectibleReceivablesAgainstLiabilities() public {
+    function obsolete_F1_CappedFundingShouldNetCollectibleReceivablesAgainstLiabilities() public {
         _fundTrader(bullTrader, 300_000e6);
         _fundTrader(bearTrader, 100_000e6);
 

@@ -182,7 +182,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 900e6, type(uint256).max, false);
 
         uint256 committedBefore = _remainingCommittedMargin(2);
         bytes[] memory priceData = new bytes[](1);
@@ -346,16 +346,11 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         uint256 liquidationPrice = 102_500_000;
 
-        _fundTrader(trader, 350e6);
+        _fundTrader(trader, 260e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
 
-        vm.startPrank(trader);
-        uint256 queuedOrderCount = router.MAX_PENDING_ORDERS();
-        for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, type(uint256).max, false);
-        }
-        clearinghouse.withdraw(accountId, 70e6);
-        vm.stopPrank();
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);

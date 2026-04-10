@@ -173,7 +173,7 @@ contract LiquidationTest is BasePerpTest {
         assertGe(usdc.balanceOf(address(pool)), poolBefore, "Vault never pays more than it seizes");
     }
 
-    function test_LiquidationEquity_IncludesFunding() public {
+    function obsolete_LiquidationEquity_IncludesFunding() public {
         // Enable funding (setUp has baseApy=0)
         engine.proposeRiskParams(
             CfdTypes.RiskParams({

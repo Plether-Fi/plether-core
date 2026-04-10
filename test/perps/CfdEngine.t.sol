@@ -208,7 +208,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
         engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
@@ -227,7 +227,7 @@ contract CfdEngineTest is BasePerpTest {
         // Withdraw LP to reduce vault to $50k — solvency check should fail
         vm.warp(block.timestamp + 1 hours); // past deposit cooldown
         juniorVault.withdraw(950_000 * 1e6, address(this), address(this));
-        vm.expectRevert(CfdEngine.CfdEngine__VaultSolvencyExceeded.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 0, uint64(block.timestamp));
 
@@ -2846,7 +2846,7 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert(CfdEngine.CfdEngine__MustCloseOpposingPosition.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 1, false));
         vm.prank(address(router));
         engine.processOrderTyped(bullOrder, 0.8e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
@@ -3181,7 +3181,7 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: true
         });
-        vm.expectRevert(CfdEngine.CfdEngine__CloseSizeExceedsPosition.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 1, true));
         vm.prank(address(router));
         engine.processOrderTyped(closeOrder, 1e8, vaultDepth, uint64(block.timestamp));
     }
@@ -3202,7 +3202,7 @@ contract CfdEngineTest is BasePerpTest {
             side: CfdTypes.Side.BULL,
             isClose: false
         });
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
@@ -3239,7 +3239,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }
@@ -3315,7 +3315,7 @@ contract CfdEngineTest is BasePerpTest {
             isClose: false
         });
 
-        vm.expectRevert(CfdEngine.CfdEngine__InsufficientInitialMargin.selector);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngine.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, vaultDepth, uint64(block.timestamp));
     }

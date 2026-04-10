@@ -19,7 +19,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
         _close(accountId, CfdTypes.Side.BULL, 100_000e18, 103_000_000);
 
@@ -28,7 +28,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
             7900e6,
             "Full close should consume queued committed margin before socializing shortfall"
         );
-        assertEq(_executionBountyReserve(1), 50_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 1e6, "Queued execution bounty should remain in router custody");
         assertEq(
             engine.accumulatedBadDebtUsdc(),
             0,
@@ -48,7 +48,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         _open(accountId, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 7900e6, type(uint256).max, false);
 
         uint256 depth = pool.totalAssets();
         vm.startPrank(address(router));
@@ -57,7 +57,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
 
         (uint256 size,,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
-        assertEq(_executionBountyReserve(1), 50_000, "Queued execution bounty should remain in router custody");
+        assertEq(_executionBountyReserve(1), 1e6, "Queued execution bounty should remain in router custody");
         assertLt(
             clearinghouse.lockedMarginUsdc(accountId),
             7900e6,
@@ -305,7 +305,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         uint256 spamCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 1000e18, 100e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 1_000e6, 2e8, false);
         }
 
         bytes[] memory empty = new bytes[](0);

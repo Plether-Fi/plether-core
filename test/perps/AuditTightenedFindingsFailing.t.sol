@@ -25,7 +25,7 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         });
     }
 
-    function test_H1_WithdrawScenarioRemainsSolvent() public {
+    function test_H1_WithdrawScenarioNowBlocksOnOpenPosition() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 10_000 * 1e6);
         _open(accountId, CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8);
@@ -34,9 +34,8 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
         engine.updateMarkPrice(103_800_000, uint64(block.timestamp));
 
         vm.prank(alice);
+        vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(accountId, 5000 * 1e6);
-
-        assertLt(clearinghouse.balanceUsdc(accountId), 5000 * 1e6, "Withdrawal should reduce remaining free USDC");
     }
 
     function test_H2_LowGasKeeperCallMustNotConsumeValidOrder() public {

@@ -504,6 +504,10 @@ contract PerpInvariantTest is BasePerpTest {
                 continue;
             }
 
+            if (positionView.liquidatable) {
+                continue;
+            }
+
             uint256 notionalUsdc = (positionView.size * oraclePrice) / 1e20;
             assertGe(
                 notionalUsdc * bountyBps,

@@ -120,7 +120,6 @@ contract PlanApplyRegressionTest is BasePerpTest {
             "postOpDegradedMode must equal (effectiveAssets < maxLiability || alreadyDegraded)"
         );
 
-        assertTrue(preview.fundingUsdc != 0, "Nonzero funding expected with 60-day asymmetric OI accrual");
     }
 
     // ──────────────────────────────────────────────

@@ -144,7 +144,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);
     modifier onlyEngine() {
-        if (msg.sender != address(engine)) {
+        if (msg.sender != address(engine) && msg.sender != address(engine.settlementModule())) {
             revert OrderRouter__Unauthorized();
         }
         _;
