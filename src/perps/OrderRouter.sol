@@ -5,12 +5,12 @@ import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 import {DecimalConstants} from "../libraries/DecimalConstants.sol";
 import {CfdEnginePlanTypes} from "./CfdEnginePlanTypes.sol";
 import {CfdTypes} from "./CfdTypes.sol";
-import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {ICfdEngineCore} from "./interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "./interfaces/ICfdEngineLens.sol";
+import {ICfdVault} from "./interfaces/ICfdVault.sol";
+import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {IPerpsKeeper} from "./interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "./interfaces/IPerpsTraderActions.sol";
-import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "./libraries/CashPriorityLib.sol";
 import {MarketCalendarLib} from "./libraries/MarketCalendarLib.sol";
 import {OrderFailurePolicyLib} from "./libraries/OrderFailurePolicyLib.sol";
@@ -597,14 +597,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bool,
         bool,
         bool
-    )
-        internal
-        returns (
-            bool success,
-            OrderFailReason failureReason,
-            FailedOrderOutcome failureOutcome
-        )
-    {
+    ) internal returns (bool success, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) {
         try engine.processOrderTyped(order, executionPrice, vaultDepth, oraclePublishTime) {
             return (true, OrderFailReason.EngineRevert, FailedOrderOutcome.ClearerFull);
         } catch (bytes memory revertData) {
@@ -629,25 +622,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     ) internal returns (OrderExecutionStepResult result) {
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
-            _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                FailedOrderOutcome.ClearerFull,
-                revertOnBlockedExecution
-            );
+            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.ClearerFull, revertOnBlockedExecution);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
         if (executionContext.policy.closeOnly && !order.isClose) {
             emit OrderFailed(orderId, OrderFailReason.CloseOnly);
-            _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                FailedOrderOutcome.RefundUser,
-                revertOnBlockedExecution
-            );
+            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.RefundUser, revertOnBlockedExecution);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -660,13 +641,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
-            _finalizeOrCleanupOrder(
-                orderId,
-                pythFee,
-                false,
-                FailedOrderOutcome.RefundUser,
-                revertOnBlockedExecution
-            );
+            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.RefundUser, revertOnBlockedExecution);
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -681,11 +656,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         uint256 vaultDepth = vault.totalAssets();
         _releaseCommittedMarginForExecution(orderId);
 
-        (
-            bool executionSucceeded,
-            OrderFailReason failureReason,
-            FailedOrderOutcome failureOutcome
-        ) = _processTypedOrderExecution(
+        (bool executionSucceeded, OrderFailReason failureReason, FailedOrderOutcome failureOutcome) = _processTypedOrderExecution(
             order,
             executionPrice,
             vaultDepth,

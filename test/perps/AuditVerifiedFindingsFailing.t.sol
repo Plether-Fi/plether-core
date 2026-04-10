@@ -189,7 +189,16 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[0] = 1e8;
         bases[1] = 1e8;
 
-        router = new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            inversions
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

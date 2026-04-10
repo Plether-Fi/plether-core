@@ -153,11 +153,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
 
-        assertEq(
-            _freeSettlementUsdc(accountId),
-            0,
-            "commit should move the only free settlement into bounty escrow"
-        );
+        assertEq(_freeSettlementUsdc(accountId), 0, "commit should move the only free settlement into bounty escrow");
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
         bytes[] memory empty;
@@ -629,8 +625,7 @@ contract OrderRouterTest is BasePerpTest {
             "Margin queue tail should still point at the trailing positive-margin order"
         );
         assertFalse(
-            _isInMarginQueue(1),
-            "Drained order should be pruned from the margin queue once reservations are consumed"
+            _isInMarginQueue(1), "Drained order should be pruned from the margin queue once reservations are consumed"
         );
         assertFalse(_isInMarginQueue(2), "Close orders should remain outside the margin queue");
         assertTrue(_isInMarginQueue(3), "Residual positive-margin order should remain in the margin queue");
@@ -945,9 +940,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 gasUsed = gasBefore - gasleft();
 
         assertEq(
-            router.nextExecuteId(),
-            0,
-            "batch should clear adversarial failed heads and still execute the tail order"
+            router.nextExecuteId(), 0, "batch should clear adversarial failed heads and still execute the tail order"
         );
         (uint256 size,,,,,,,) = engine.positions(carolId);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
@@ -1131,8 +1124,16 @@ contract OrderRouterPythTest is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router =
-            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -1238,7 +1239,11 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        assertEq(clearinghouse.balanceUsdc(accountId), 9999 * 1e6, "Reserved execution bounty should remain charged on failure");
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            9999 * 1e6,
+            "Reserved execution bounty should remain charged on failure"
+        );
         assertEq(
             usdc.balanceOf(address(this)) - keeperUsdcBefore,
             0,
@@ -1718,15 +1723,11 @@ contract OrderRouterPythTest is BasePerpTest {
         IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
         assertEq(router.nextExecuteId(), 2, "Failed head should clear while a later blocked order remains pending");
         assertEq(
-            escrow.pendingOrderCount,
-            1,
-            "The later blocked order should remain pending after the failed head clears"
+            escrow.pendingOrderCount, 1, "The later blocked order should remain pending after the failed head clears"
         );
         assertEq(_executionBountyReserve(1), 0, "Failed head should clear its execution bounty escrow");
         assertEq(
-            _executionBountyReserve(2),
-            1e6,
-            "Later blocked order should retain its escrow after the failed head clears"
+            _executionBountyReserve(2), 1e6, "Later blocked order should retain its escrow after the failed head clears"
         );
     }
 
@@ -1856,9 +1857,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore,
-            0,
-            "Terminal close slippage miss should not pay keeper bounty"
+            usdc.balanceOf(address(this)) - keeperBefore, 0, "Terminal close slippage miss should not pay keeper bounty"
         );
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
@@ -2220,7 +2219,14 @@ contract NormalizePythHarness is OrderRouter {
 
     constructor()
         OrderRouter(
-            address(1), address(1), address(1), address(0), new bytes32[](0), new uint256[](0), new uint256[](0), new bool[](0)
+            address(1),
+            address(1),
+            address(1),
+            address(0),
+            new bytes32[](0),
+            new uint256[](0),
+            new uint256[](0),
+            new bool[](0)
         )
     {}
 
@@ -2364,7 +2370,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             "Queued open orders should remain pending before liquidation"
         );
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 150_000_000);
 
         bytes[] memory priceData = new bytes[](1);
@@ -2379,9 +2386,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             preview.badDebtUsdc,
             "Liquidation should not improve previewed bad debt by restoring execution escrow"
         );
-        assertEq(
-            router.getAccountEscrow(accountId).executionBountyUsdc, _executionBountyReserve(1) * queuedOrderCount
-        );
+        assertEq(router.getAccountEscrow(accountId).executionBountyUsdc, _executionBountyReserve(1) * queuedOrderCount);
         assertEq(
             preview.reachableCollateralUsdc,
             snapshotBefore.terminalReachableUsdc,
@@ -2465,7 +2470,8 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         assertEq(usdc.balanceOf(address(router)), 2e6, "Router should custody prefunded close-order bounty escrow");
 
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 vaultAssetsBefore = pool.totalAssets();
 
         bytes[] memory priceData = new bytes[](1);
@@ -2480,9 +2486,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         );
         assertEq(router.pendingOrderCounts(accountId), 0, "Liquidation should clear queued close orders");
         assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty escrow");
-        assertEq(
-            _executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty escrow"
-        );
+        assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty escrow");
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain close-order bounty escrow after liquidation"
         );
@@ -2586,8 +2590,16 @@ contract FadStalenessTest is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router =
-            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -3690,8 +3702,16 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router =
-            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -3775,8 +3795,16 @@ contract StalenessGriefTest is BasePerpTest {
         bases.push(1e8);
         bases.push(1e8);
 
-        router =
-            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 
@@ -4207,8 +4235,16 @@ contract WeekendArbitrageTest is Test {
         bases.push(1e8);
         bases.push(1e8);
 
-        router =
-            new OrderRouter(address(engine), address(new CfdEngineLens(address(engine))), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2));
+        router = new OrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(mockPyth),
+            feedIds,
+            weights,
+            bases,
+            new bool[](2)
+        );
         engine.setOrderRouter(address(router));
         pool.setOrderRouter(address(router));
 

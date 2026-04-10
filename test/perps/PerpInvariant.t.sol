@@ -388,7 +388,8 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            AccountLensViewTypes.AccountLedgerSnapshot memory positionView = engineAccountLens.getAccountLedgerSnapshot(accountId);
+            AccountLensViewTypes.AccountLedgerSnapshot memory positionView =
+                engineAccountLens.getAccountLedgerSnapshot(accountId);
             (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
 
             assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
@@ -583,7 +584,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_ProtocolAccountingViewMatchesAccessors() public view {
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
+            engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(protocolView.vaultAssetsUsdc, pool.totalAssets(), "Protocol view vault assets must match pool assets");
         assertEq(protocolView.maxLiabilityUsdc, _maxLiability(), "Protocol view liability must match accessor");
@@ -608,8 +610,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesDeferredLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc()
-            + engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
+        uint256 expectedReserved = _maxLiability() + engine.accumulatedFeesUsdc() + engine.totalDeferredPayoutUsdc()
+            + engine.totalDeferredClearerBountyUsdc();
 
         expectedReserved += uint256(0);
 
@@ -622,7 +624,8 @@ contract PerpInvariantTest is BasePerpTest {
 
     function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
+            engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on vault assets");
         assertEq(
@@ -1013,7 +1016,8 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AdversarialViewsStayConsistent() public view {
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
+            engineProtocolLens.getProtocolAccountingSnapshot();
         HousePool.VaultLiquidityView memory vaultView = pool.getVaultLiquidityView();
 
         assertEq(vaultView.totalAssetsUsdc, protocolView.vaultAssetsUsdc, "Pool and engine must agree on assets");
@@ -1035,7 +1039,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             uint8(IOrderRouterAccounting.OrderStatus.Failed),
             "Terminal slippage failure must mark the head order failed"
         );
-        assertEq(handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Terminal slippage failure must clear escrowed bounty");
+        assertEq(
+            handler.ghost_lastRetryableSlippageEscrowUsdc(), 0, "Terminal slippage failure must clear escrowed bounty"
+        );
         assertGe(
             handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
             handler.ghost_lastRetryableSlippageEscrowUsdc(),

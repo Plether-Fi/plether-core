@@ -4,8 +4,8 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
-import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ProtocolLensViewTypes} from "../../src/perps/interfaces/ProtocolLensViewTypes.sol";
 import {CfdEngineSnapshotsLib} from "../../src/perps/libraries/CfdEngineSnapshotsLib.sol";
 import {SolvencyAccountingLib} from "../../src/perps/libraries/SolvencyAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -119,7 +119,6 @@ contract PlanApplyRegressionTest is BasePerpTest {
             preview.effectiveAssetsAfterUsdc < preview.maxLiabilityAfterUsdc || engine.degradedMode(),
             "postOpDegradedMode must equal (effectiveAssets < maxLiability || alreadyDegraded)"
         );
-
     }
 
     // ──────────────────────────────────────────────
@@ -155,7 +154,8 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         assertEq(preview.maxLiabilityAfterUsdc, postMaxLiability, "Preview max liability must match post-close storage");
 
-        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snap = engineProtocolLens.getProtocolAccountingSnapshot();
+        ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snap =
+            engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
             preview.effectiveAssetsAfterUsdc > preview.maxLiabilityAfterUsdc,

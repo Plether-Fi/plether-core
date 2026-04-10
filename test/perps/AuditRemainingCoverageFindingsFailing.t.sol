@@ -305,7 +305,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         uint256 spamCount = router.MAX_PENDING_ORDERS();
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 1_000e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 1000e6, 2e8, false);
         }
 
         bytes[] memory empty = new bytes[](0);

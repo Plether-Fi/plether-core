@@ -39,9 +39,7 @@ contract LiquidationTest is BasePerpTest {
 
     function test_FridayAutoDeleverage() public {
         vm.warp(WEDNESDAY_NOON);
-        assertEq(
-            _maintenanceMarginUsdc(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday"
-        );
+        assertEq(_maintenanceMarginUsdc(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday");
 
         // Alice opens 50x BULL (Size $100k, Margin $2k)
         vm.prank(alice);
@@ -62,9 +60,7 @@ contract LiquidationTest is BasePerpTest {
         // FAD Window activates
         vm.warp(FRIDAY_EVENING);
         assertEq(
-            _maintenanceMarginUsdc(100_000 * 1e18, 1e8),
-            3000 * 1e6,
-            "MMR should jump to 3.0% ($3k) on Friday evening"
+            _maintenanceMarginUsdc(100_000 * 1e18, 1e8), 3000 * 1e6, "MMR should jump to 3.0% ($3k) on Friday evening"
         );
 
         // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.

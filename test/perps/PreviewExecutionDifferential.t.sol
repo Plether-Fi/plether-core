@@ -194,7 +194,9 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
-        assertEq(_remainingCommittedMargin(2), committedBefore, "Queued open-order committed margin must remain untouched");
+        assertEq(
+            _remainingCommittedMargin(2), committedBefore, "Queued open-order committed margin must remain untouched"
+        );
     }
 
     function testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault(
@@ -353,7 +355,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, liquidationPrice);
-        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore = engineAccountLens.getAccountLedgerSnapshot(accountId);
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
         uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
         uint256 deferredClearerBefore = engine.deferredClearerBountyUsdc(KEEPER);
         uint256 deferredBefore = engine.deferredPayoutUsdc(accountId);

@@ -27,7 +27,9 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
 
-        assertEq(_remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself");
+        assertEq(
+            _remainingCommittedMargin(1), 0, "Consumed committed margin should be charged to the queued order itself"
+        );
 
         uint256 lockedBeforeExecution = clearinghouse.lockedMarginUsdc(aliceId);
 
