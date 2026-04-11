@@ -329,10 +329,11 @@ library CfdEnginePlanLib {
             reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);
         }
 
-        riskState = PositionRiskAccountingLib.buildPositionRiskState(
+        riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
             projectedPosition,
             delta.price,
             snap.capPrice,
+            delta.pendingCarryUsdc,
             reachableCollateralUsdc,
             snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps
         );
@@ -631,20 +632,19 @@ library CfdEnginePlanLib {
 
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         uint256 settlementReachableUsdc = MarginClearinghouseAccountingLib.getTerminalReachableUsdc(snap.accountBuckets);
-        uint256 reachableCollateralUsdc = settlementReachableUsdc + snap.deferredPayoutForAccount;
-        delta.liquidationReachableCollateralUsdc = reachableCollateralUsdc;
+        delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
         uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
             && snap.currentTimestamp > snap.position.lastCarryTimestamp
             ? snap.currentTimestamp - snap.position.lastCarryTimestamp
             : 0;
         uint256 carryBaseUsdc =
-            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, reachableCollateralUsdc);
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(snap.position.size, price, settlementReachableUsdc);
         delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
             carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
         );
 
         delta.riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, snap.capPrice, reachableCollateralUsdc, maintMarginBps
+            pos, price, snap.capPrice, settlementReachableUsdc, maintMarginBps
         );
 
         if (!delta.riskState.liquidatable) {
@@ -655,7 +655,7 @@ library CfdEnginePlanLib {
         delta.liquidationState = LiquidationAccountingLib.buildLiquidationState(
             pos.size,
             price,
-            reachableCollateralUsdc,
+            settlementReachableUsdc,
             delta.riskState.unrealizedPnlUsdc,
             maintMarginBps,
             snap.riskParams.minBountyUsdc,
@@ -674,9 +674,7 @@ library CfdEnginePlanLib {
             MarginClearinghouseAccountingLib.planLiquidationResidual(snap.accountBuckets, delta.residualUsdc);
         delta.settlementRetainedUsdc = delta.residualPlan.settlementRetainedUsdc;
         (delta.existingDeferredConsumedUsdc, delta.existingDeferredRemainingUsdc, delta.badDebtUsdc) =
-            _planDeferredPayoutConsumption(
-                snap.deferredPayoutForAccount, delta.residualUsdc >= 0 ? 0 : delta.residualPlan.badDebtUsdc, true
-            );
+            _planDeferredPayoutConsumption(snap.deferredPayoutForAccount, delta.residualPlan.badDebtUsdc, false);
         delta.syncMarginQueueAmount = delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc;
 
         if (delta.residualPlan.freshTraderPayoutUsdc > 0) {

@@ -18,8 +18,11 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         uint256 executionBountyUsdc;
         uint64 nextGlobalOrderId;
         uint64 prevGlobalOrderId;
+        uint64 nextAccountOrderId;
+        uint64 prevAccountOrderId;
         uint64 nextMarginOrderId;
         uint64 prevMarginOrderId;
+        bool inAccountQueue;
         bool inMarginQueue;
     }
 
@@ -30,6 +33,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     mapping(uint64 => OrderRecord) internal orderRecords;
     mapping(bytes32 => uint256) public pendingOrderCounts;
     mapping(bytes32 => uint256) public pendingCloseSize;
+    mapping(bytes32 => uint64) internal accountHeadOrderId;
+    mapping(bytes32 => uint64) internal accountTailOrderId;
     mapping(bytes32 => uint64) public marginHeadOrderId;
     mapping(bytes32 => uint64) public marginTailOrderId;
     mapping(address => uint256) public claimableUsdc;
@@ -65,11 +70,9 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             bool hasTerminalCloseQueued
         )
     {
-        for (uint64 orderId = 1; orderId < _nextCommitId(); orderId++) {
+        uint64 orderId = accountHeadOrderId[accountId];
+        while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
-                continue;
-            }
             CfdTypes.Order memory order = record.core;
             pendingOrderCount++;
             executionBountyUsdc += record.executionBountyUsdc;
@@ -77,6 +80,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
                 pendingCloseSize_ += order.sizeDelta;
                 hasTerminalCloseQueued = true;
             }
+            orderId = record.nextAccountOrderId;
         }
     }
 
@@ -221,6 +225,63 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         record.inMarginQueue = true;
     }
 
+    function _linkAccountOrder(
+        bytes32 accountId,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (record.inAccountQueue) {
+            return;
+        }
+
+        uint64 tailOrderId = accountTailOrderId[accountId];
+        if (tailOrderId == 0) {
+            accountHeadOrderId[accountId] = orderId;
+            accountTailOrderId[accountId] = orderId;
+        } else {
+            orderRecords[tailOrderId].nextAccountOrderId = orderId;
+            record.prevAccountOrderId = tailOrderId;
+            accountTailOrderId[accountId] = orderId;
+        }
+
+        record.inAccountQueue = true;
+    }
+
+    function _unlinkAccountOrder(
+        bytes32 accountId,
+        uint64 orderId
+    ) internal {
+        OrderRecord storage record = _orderRecord(orderId);
+        if (!record.inAccountQueue) {
+            return;
+        }
+
+        uint64 prevOrderId = record.prevAccountOrderId;
+        uint64 nextOrderId = record.nextAccountOrderId;
+        uint64 headOrderId = accountHeadOrderId[accountId];
+        uint64 tailOrderId = accountTailOrderId[accountId];
+
+        if (headOrderId == orderId) {
+            accountHeadOrderId[accountId] = nextOrderId;
+        } else if (prevOrderId != 0) {
+            orderRecords[prevOrderId].nextAccountOrderId = nextOrderId;
+        } else if (tailOrderId != orderId) {
+            _revertPendingOrderLinkCorrupted();
+        }
+
+        if (tailOrderId == orderId) {
+            accountTailOrderId[accountId] = prevOrderId;
+        } else if (nextOrderId != 0) {
+            orderRecords[nextOrderId].prevAccountOrderId = prevOrderId;
+        } else if (headOrderId != orderId) {
+            _revertPendingOrderLinkCorrupted();
+        }
+
+        record.nextAccountOrderId = 0;
+        record.prevAccountOrderId = 0;
+        record.inAccountQueue = false;
+    }
+
     function _unlinkMarginOrder(
         bytes32 accountId,
         uint64 orderId
@@ -284,5 +345,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
     function _revertInsufficientFreeEquity() internal pure virtual;
 
     function _revertMarginOrderLinkCorrupted() internal pure virtual;
+
+    function _revertPendingOrderLinkCorrupted() internal pure virtual;
 
 }

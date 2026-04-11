@@ -307,7 +307,8 @@ Rules:
 - close intents may source their flat router-custodied bounty from active position margin when free settlement is exhausted,
 - this is an explicit bounded liveness tradeoff,
 - the amount parked in escrow is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
-- collateral reachability should treat that escrow as temporarily unavailable until the order resolves.
+- collateral reachability should treat that escrow as temporarily unavailable until the order resolves,
+- terminal-invalid close execution must not refund margin-backed bounty escrow to the external wallet.
 
 ### Open-order failure policy
 
@@ -449,7 +450,8 @@ Required transition rules:
 - user cancellation is disallowed once pending,
 - expiry resolves through the configured bounty and reservation policy,
 - stale or missing oracle data does not destroy a valid pending order,
-- slippage-invalid orders fail terminally and must not pin the FIFO head.
+- slippage-invalid orders fail terminally and must not pin the FIFO head,
+- live-market execution requires `oraclePublishTime > order.commitTime`; only genuine frozen-oracle close-only windows may relax that ordering.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 

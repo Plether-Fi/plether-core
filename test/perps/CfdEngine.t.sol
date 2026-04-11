@@ -602,7 +602,6 @@ contract CfdEngineTest is BasePerpTest {
             engineLens.simulateClose(bearId, 10_000e18, 1e8, canonicalDepth / 10);
 
         _assertClosePreviewEquals(canonicalPreview, matchedSimulation);
-
     }
 
     function test_CloseParity_ImmediateProfitMatchesPreview() public {
@@ -1518,7 +1517,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.ClosePreview memory preDrainPreview = engineLens.previewClose(bullId, bullSize, 1e8);
         assertTrue(preDrainPreview.valid, "Setup close preview should remain valid");
 
-        uint256 grossTargetAssets = _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc();
+        uint256 grossTargetAssets =
+            _maxLiabilityAfterClose(CfdTypes.Side.BULL, bullMaxProfit) + engine.accumulatedFeesUsdc();
         assertGt(
             grossTargetAssets,
             preDrainPreview.seizedCollateralUsdc + 1,
@@ -1708,15 +1708,23 @@ contract CfdEngineTest is BasePerpTest {
             harness.planLiquidation(0, 10e6, 2000e18, 99_600_000, 100_000_000);
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
-        assertEq(delta.keeperBountyUsdc, 5e6, "Setup should use the minimum bounty");
-        assertEq(delta.residualUsdc, 13e6, "Residual should include positive pnl above the deferred claim");
+        assertEq(delta.keeperBountyUsdc, 5e6, "Positive physical equity should still support the minimum bounty");
+        assertEq(delta.residualUsdc, 3e6, "Residual should be computed only from physically reachable collateral");
         assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
         assertEq(
-            delta.existingDeferredConsumedUsdc, 10e6, "Planner should consume the full pre-existing deferred claim"
+            delta.existingDeferredConsumedUsdc,
+            0,
+            "Positive physical residual should not consume legacy deferred payout"
         );
-        assertEq(delta.existingDeferredRemainingUsdc, 0, "Planner should not underflow while carrying deferred payout");
-        assertEq(delta.freshTraderPayoutUsdc, 13e6, "Excess positive residual should become a fresh trader payout");
-        assertEq(delta.residualPlan.freshTraderPayoutUsdc, 13e6, "Residual plan should expose the fresh trader payout");
+        assertEq(
+            delta.existingDeferredRemainingUsdc,
+            10e6,
+            "Legacy deferred payout should remain intact on positive residual"
+        );
+        assertEq(delta.freshTraderPayoutUsdc, 3e6, "Only physical residual should become a fresh trader payout");
+        assertEq(
+            delta.residualPlan.freshTraderPayoutUsdc, 3e6, "Residual plan should expose only the physical fresh payout"
+        );
         assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
@@ -1727,20 +1735,20 @@ contract CfdEngineTest is BasePerpTest {
             harness.planLiquidation(0, 10e6, 2000e18, 99_600_000, 99_000_000);
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
-        assertEq(delta.keeperBountyUsdc, 5e6, "Setup should use the minimum bounty");
-        assertEq(delta.residualUsdc, -7e6, "Residual should already include the legacy deferred payout");
+        assertEq(delta.keeperBountyUsdc, 0, "Zero physically reachable collateral should cap the bounty at zero");
+        assertEq(delta.residualUsdc, -12e6, "Residual should be computed before any deferred-payout netting");
         assertEq(
             delta.existingDeferredConsumedUsdc,
             10e6,
-            "Negative residual should fully consume the legacy deferred payout once it has already been priced into equity"
+            "Negative residual should consume legacy deferred payout only as terminal shortfall netting"
         );
         assertEq(
             delta.existingDeferredRemainingUsdc, 0, "No deferred payout should survive a negative residual wipeout"
         );
-        assertEq(delta.badDebtUsdc, 7e6, "Bad debt should remain the residual shortfall without a second offset");
+        assertEq(delta.badDebtUsdc, 2e6, "Bad debt should reflect only the shortfall left after deferred netting");
     }
 
-    function helper_PreviewLiquidation_ConsumesLegacyDeferredBeforeFreshCashGate() public {
+    function test_PreviewLiquidation_PreservesLegacyDeferredOnPositivePhysicalResidual() public {
         address trader = address(0xAB14002);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
         address keeper = address(0xAB14003);
@@ -1750,9 +1758,9 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
             .checked_write(uint256(0));
 
-        bytes32 deferredPayoutSlot = keccak256(abi.encode(accountId, uint256(31)));
-        vm.store(address(engine), deferredPayoutSlot, bytes32(uint256(10e6)));
-        vm.store(address(engine), bytes32(uint256(32)), bytes32(uint256(10e6)));
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(10e6));
+        stdstore.target(address(engine)).sig("totalDeferredPayoutUsdc()").checked_write(uint256(10e6));
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
@@ -1760,14 +1768,26 @@ contract CfdEngineTest is BasePerpTest {
 
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, 100_000_000);
 
-        assertTrue(preview.liquidatable, "Preview should not revert for positive residual above deferred claim");
+        assertTrue(preview.liquidatable, "Preview should not revert for positive physical residual");
         assertEq(preview.keeperBountyUsdc, 15e6, "Setup should use the percentage bounty");
         assertEq(preview.settlementRetainedUsdc, 0, "No settlement should remain when no settlement is reachable");
-        assertEq(preview.freshTraderPayoutUsdc, 25e6, "Preview should surface the fresh liquidation payout explicitly");
-        assertEq(preview.existingDeferredConsumedUsdc, 10e6, "Preview should show the consumed legacy deferred claim");
-        assertEq(preview.existingDeferredRemainingUsdc, 0, "Preview should show no leftover legacy deferred claim");
-        assertEq(preview.immediatePayoutUsdc, 25e6, "Consumed legacy deferred claim should reopen enough cash");
-        assertEq(preview.deferredPayoutUsdc, 0, "Fresh liquidation payout should no longer stay deferred");
+        assertEq(
+            preview.freshTraderPayoutUsdc, 15e6, "Preview should surface only the physical fresh liquidation payout"
+        );
+        assertEq(
+            preview.existingDeferredConsumedUsdc,
+            0,
+            "Positive physical residual should not consume legacy deferred payout"
+        );
+        assertEq(
+            preview.existingDeferredRemainingUsdc, 10e6, "Preview should keep the legacy deferred claim outstanding"
+        );
+        assertEq(
+            preview.immediatePayoutUsdc,
+            15e6,
+            "Fresh physical payout should be funded independently of the legacy claim"
+        );
+        assertEq(preview.deferredPayoutUsdc, 10e6, "Deferred payout should only reflect the untouched legacy claim");
         assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
@@ -1791,7 +1811,7 @@ contract CfdEngineTest is BasePerpTest {
             preview.immediatePayoutUsdc,
             "Live settlement credit should match preview"
         );
-        assertEq(engine.deferredPayoutUsdc(accountId), 0, "Live liquidation should consume the old deferred claim");
+        assertEq(engine.deferredPayoutUsdc(accountId), 10e6, "Live liquidation should preserve the old deferred claim");
         assertEq(
             preview.effectiveAssetsAfterUsdc,
             liveEffective,
@@ -1815,6 +1835,82 @@ contract CfdEngineTest is BasePerpTest {
             state.keeperBountyUsdc,
             state.reachableCollateralUsdc,
             "Keeper bounty should still cap at reachable collateral"
+        );
+    }
+
+    function testFuzz_PlanLiquidation_PositiveResidualPreservesDeferredAndUsesOnlyPhysicalReachability(
+        uint256 settlementReachableUsdc,
+        uint256 deferredPayoutUsdc
+    ) public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
+        deferredPayoutUsdc = bound(deferredPayoutUsdc, 1, 20e6);
+
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            harness.planLiquidation(settlementReachableUsdc, deferredPayoutUsdc, 2000e18, 99_600_000, 100_000_000);
+
+        vm.assume(delta.liquidatable);
+        vm.assume(delta.residualUsdc >= 0);
+
+        assertEq(
+            delta.liquidationReachableCollateralUsdc,
+            settlementReachableUsdc,
+            "Liquidation reachability must ignore legacy deferred payout"
+        );
+        assertEq(
+            delta.liquidationState.reachableCollateralUsdc,
+            settlementReachableUsdc,
+            "Keeper bounty state must use only physical reachability"
+        );
+        assertEq(
+            delta.existingDeferredConsumedUsdc, 0, "Positive physical residual must not consume legacy deferred payout"
+        );
+        assertEq(
+            delta.existingDeferredRemainingUsdc,
+            deferredPayoutUsdc,
+            "Positive physical residual must preserve the full legacy deferred payout"
+        );
+        assertEq(delta.badDebtUsdc, 0, "Positive residual must not create bad debt");
+    }
+
+    function testFuzz_PlanLiquidation_NegativeResidualNetsDeferredExactlyOnce(
+        uint256 settlementReachableUsdc,
+        uint256 deferredPayoutUsdc
+    ) public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        settlementReachableUsdc = bound(settlementReachableUsdc, 0, 20e6);
+        deferredPayoutUsdc = bound(deferredPayoutUsdc, 1, 20e6);
+
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            harness.planLiquidation(settlementReachableUsdc, deferredPayoutUsdc, 2000e18, 99_600_000, 99_000_000);
+
+        vm.assume(delta.liquidatable);
+        vm.assume(delta.residualUsdc < 0);
+
+        uint256 expectedConsumed =
+            deferredPayoutUsdc < delta.residualPlan.badDebtUsdc ? deferredPayoutUsdc : delta.residualPlan.badDebtUsdc;
+
+        assertEq(
+            delta.liquidationReachableCollateralUsdc,
+            settlementReachableUsdc,
+            "Liquidation reachability must ignore legacy deferred payout"
+        );
+        assertEq(
+            delta.existingDeferredConsumedUsdc,
+            expectedConsumed,
+            "Negative residual must net legacy deferred payout exactly once against terminal shortfall"
+        );
+        assertEq(
+            delta.existingDeferredRemainingUsdc,
+            deferredPayoutUsdc - expectedConsumed,
+            "Deferred remainder must equal the unconsumed legacy claim"
+        );
+        assertEq(
+            delta.badDebtUsdc,
+            delta.residualPlan.badDebtUsdc - expectedConsumed,
+            "Bad debt must only reflect the shortfall left after deferred netting"
         );
     }
 
@@ -1990,7 +2086,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(observed.badDebtUsdc, preview.badDebtUsdc, "Illiquid liquidation preview should match live bad debt");
     }
 
-    function test_LiquidationPreview_DeferredPayoutPreventsUnfairLiquidation() public {
+    function test_LiquidationPreview_DeferredPayout_DoesNotAffectLiquidationEligibility() public {
         uint256 vaultDepth = 1_000_000 * 1e6;
         bytes32 bullId = bytes32(uint256(0xD211));
         bytes32 bearId = bytes32(uint256(0xD212));
@@ -2017,12 +2113,14 @@ contract CfdEngineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
 
         CfdEngine.LiquidationPreview memory fundedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
-        assertFalse(fundedPreview.liquidatable, "Deferred payout should count toward liquidation equity");
+        assertTrue(fundedPreview.liquidatable, "Deferred payout should not count toward liquidation equity");
 
         stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(bearId).checked_write(uint256(0));
         CfdEngine.LiquidationPreview memory strippedPreview = engineLens.previewLiquidation(bearId, 85_000_000);
-        assertTrue(
-            strippedPreview.liquidatable, "Removing deferred payout should expose the same position to liquidation"
+        assertEq(
+            uint256(fundedPreview.liquidatable ? 1 : 0),
+            uint256(strippedPreview.liquidatable ? 1 : 0),
+            "Deferred payout should not change liquidation eligibility"
         );
     }
 
@@ -2148,8 +2246,8 @@ contract CfdEngineTest is BasePerpTest {
         CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(bearId, 50_000_000);
         assertTrue(preview.liquidatable, "Setup must produce a liquidatable position even after deferred payout credit");
 
-        int256 terminalResidual = int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc
-            - int256(preview.keeperBountyUsdc);
+        int256 terminalResidual =
+            int256(settlementReachableBefore + deferredBefore) + preview.pnlUsdc - int256(preview.keeperBountyUsdc);
 
         uint256 badDebtBefore = engine.accumulatedBadDebtUsdc();
         bytes[] memory priceData = new bytes[](1);
@@ -2588,8 +2686,7 @@ contract CfdEngineTest is BasePerpTest {
 
         usdc.mint(address(pool), deferredBounty);
 
-        DeferredEngineViewTypes.DeferredPayoutStatus memory statusAfterCarry =
-            _deferredPayoutStatus(bytes32(0), keeper);
+        DeferredEngineViewTypes.DeferredPayoutStatus memory statusAfterCarry = _deferredPayoutStatus(bytes32(0), keeper);
         assertTrue(
             statusAfterCarry.liquidationBountyClaimableNow,
             "Deferred clearer bounty should become claimable once vault liquidity returns"
@@ -4072,8 +4169,14 @@ contract CfdEngineAuditTest is BasePerpTest {
 
         (uint256 sizeAfter,,,,,,) = engine.positions(carolAccount);
 
-        assertGt(sizeAfter, sizeBefore, "Collectible legacy-spread receivables should no longer block legitimate increases");
-        assertLe(int256(0), 0, "Legacy-spread solvency accounting should not overstate trader liabilities once receivables are netted");
+        assertGt(
+            sizeAfter, sizeBefore, "Collectible legacy-spread receivables should no longer block legitimate increases"
+        );
+        assertLe(
+            int256(0),
+            0,
+            "Legacy-spread solvency accounting should not overstate trader liabilities once receivables are netted"
+        );
     }
 
     // Regression: C-01
@@ -5175,7 +5278,6 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         assertTrue(preview.valid, "Close preview must be valid");
 
         _close(bullIdA, CfdTypes.Side.BULL, sizeA, 1e8);
-
     }
 
 }

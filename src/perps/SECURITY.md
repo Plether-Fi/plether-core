@@ -195,7 +195,7 @@ The router uses delayed commit/execute semantics rather than same-tx market exec
 Security properties:
 
 - trader intent is committed before keeper execution,
-- publish-time ordering defends against live-market oracle latency arbitrage,
+- live-market execution requires `publishTime > commitTime`, which defends against oracle latency arbitrage,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - binding order semantics prevent traders from turning queued intents into free options.
 
@@ -206,6 +206,7 @@ Current policy is intentionally simple:
 - slippage-invalid orders fail terminally,
 - expired orders fail terminally,
 - typed engine failures route bounty according to semantic failure category,
+- terminal-invalid closes pay the clearer rather than refunding potentially margin-backed escrow to the trader wallet,
 - the router does not maintain a retry or requeue lane.
 
 ### Oracle regimes
@@ -316,6 +317,7 @@ Trade-off:
 - liquidation accounting is constrained by actually reachable collateral,
 - keeper bounty is proportional with a floor but capped by reachable value,
 - residual trader value is preserved when positive,
+- same-account deferred payout does not support liquidation reachability and is only netted once against terminal shortfall,
 - remaining deficit becomes bad debt socialized to LP capital.
 
 ### Queue interaction during liquidation
@@ -336,7 +338,7 @@ This preserves terminal liveness without requiring an unbounded global queue sca
 
 - users cannot manually cancel queued intents,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
-- per-account pending-order caps bound griefing but do not eliminate all queue externalities,
+- per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
 - failed orders remain terminal rather than retryable.
 
 ### LP accounting limitations

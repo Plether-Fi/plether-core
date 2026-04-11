@@ -979,7 +979,7 @@ contract OrderRouterTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "terminal slippage miss should not block later queued orders");
         (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
-        (uint256 carolSize, , , , , , ) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
         assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
         assertEq(carolSize, 5000 * 1e18, "tail order should execute once the failed head is cleared");
     }
@@ -1167,7 +1167,7 @@ contract OrderRouterPythTest is BasePerpTest {
         updateData[0] = "";
     }
 
-    function test_PublishTimeBeforeCommit_DoesNotTriggerMevRevert() public {
+    function test_PublishTimeBeforeCommit_Reverts() public {
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1178,9 +1178,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Order should execute once same-block MEV risk has passed");
+        assertEq(
+            router.nextExecuteId(), 1, "Live execution should keep the order pending when publish time predates commit"
+        );
     }
 
     function test_SameBlockExecution_Reverts() public {
@@ -2061,7 +2064,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(size, 15_000 * 1e18, "Both queued orders should execute once publish-time MEV is removed");
     }
 
-    function test_C1_PublishTimeBeforeCommit_NoLongerReverts() public {
+    function test_C1_PublishTimeBeforeCommit_Reverts() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
@@ -2075,9 +2078,26 @@ contract OrderRouterPythTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.prank(keeper);
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Order should execute when only publish-time freshness differs");
+        assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that predate commit");
+    }
+
+    function test_FreshPublishAfterCommit_Executes() public {
+        vm.warp(1000);
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
+        vm.warp(1006);
+
+        bytes[] memory empty = _pythUpdateData();
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(router.nextExecuteId(), 0, "Fresh post-commit publish should execute normally");
     }
 
     function test_BatchExecution_StalePrice_Reverts() public {
@@ -2526,6 +2546,43 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
             usdc.balanceOf(trader), traderUsdcBefore, "Liquidated trader should not recover escrow after liquidation"
         );
         assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no escrow for post-liquidation recovery");
+    }
+
+    function test_ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders() public {
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address otherTrader = address(0xC10B);
+        bytes32 otherId = bytes32(uint256(uint160(otherTrader)));
+
+        _fundTrader(trader, 900e6);
+        _fundTrader(otherTrader, 2000e6);
+
+        _open(traderId, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+
+        vm.startPrank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        clearinghouse.withdraw(traderId, 70e6);
+        vm.stopPrank();
+
+        vm.startPrank(otherTrader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
+        vm.stopPrank();
+
+        assertEq(router.pendingOrderCounts(traderId), 2, "Liquidated account should start with two queued orders");
+        assertEq(router.pendingOrderCounts(otherId), 2, "Unrelated account should start with its own queued orders");
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(150_000_000));
+        router.executeLiquidation(traderId, priceData);
+
+        assertEq(router.pendingOrderCounts(traderId), 0, "Liquidation should clear only the liquidated account queue");
+        assertEq(router.pendingOrderCounts(otherId), 2, "Unrelated account queue should remain intact");
+
+        IOrderRouterAccounting.PendingOrderView[] memory otherPending = router.getPendingOrdersForAccount(otherId);
+        assertEq(otherPending.length, 2, "Per-account traversal should still expose unrelated pending orders");
+        assertEq(otherPending[0].orderId, 3, "Unrelated account should retain FIFO order ids after cleanup");
+        assertEq(otherPending[1].orderId, 4, "Unrelated account queue should preserve its tail order");
     }
 
 }
@@ -3965,6 +4022,32 @@ contract VpiImrBypassTest is Test {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
     }
 
+    function test_TypedUserInvalidOpenPaysClearer() public {
+        address eve = address(0xE223);
+        bytes32 eveAccount = bytes32(uint256(uint160(eve)));
+
+        vm.startPrank(eve);
+        usdc.mint(eve, 1e6);
+        usdc.approve(address(clearinghouse), 1e6);
+        clearinghouse.deposit(eveAccount, 1e6);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        vm.stopPrank();
+
+        uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        assertEq(usdc.balanceOf(address(this)) - keeperBefore, 1e6, "Typed user-invalid open should pay the clearer");
+        assertEq(
+            uint256(router.getOrderRecord(1).status),
+            uint256(IOrderRouterAccounting.OrderStatus.Failed),
+            "Order should fail"
+        );
+        assertEq(usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty escrow");
+    }
+
 }
 
 // Regression: H-01
@@ -4108,6 +4191,42 @@ contract KeeperFeeRefundTest is Test {
             deferredClearerBefore,
             "Slippage failure should not leak failed-order bounty into deferred clearer liabilities"
         );
+    }
+
+    function test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked() public {
+        bytes32 accountId = bytes32(uint256(uint160(alice)));
+        usdc.mint(alice, 251_500_000);
+        vm.startPrank(alice);
+        usdc.approve(address(clearinghouse), 251_500_000);
+        clearinghouse.deposit(accountId, 251_500_000);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        bytes[] memory openPrice = new bytes[](1);
+        openPrice[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, openPrice);
+
+        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(accountId).freeSettlementUsdc;
+        assertEq(
+            freeSettlementBefore, 500_000, "Setup should leave only partial free settlement before the close commit"
+        );
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
+
+        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
+        bytes[] memory closePrice = new bytes[](1);
+        closePrice[0] = abi.encode(uint256(1e8));
+        vm.prank(keeper);
+        vm.roll(block.number + 1);
+        router.executeOrder(2, closePrice);
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, 10_000e18, "Terminal slippage failure should leave the position open");
+        assertEq(usdc.balanceOf(keeper) - keeperUsdcBefore, 1e6, "Terminal close slippage should pay the clearer");
+        assertEq(usdc.balanceOf(alice), 0, "Trader wallet should not receive margin-backed close bounty refunds");
     }
 
     // Regression: H-01

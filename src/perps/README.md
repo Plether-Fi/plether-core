@@ -105,7 +105,7 @@ The main runtime and read surfaces are:
 2. Submit an open or close intent through `OrderRouter.submitOrder(...)`.
 3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
 4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
-5. `OrderRouter` validates oracle freshness, publish-time ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+5. `OrderRouter` validates oracle freshness, live-market `publishTime > commitTime` ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
 6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
 Important details:
@@ -113,6 +113,7 @@ Important details:
 - `acceptablePrice == 0` behaves like a delayed market-style order.
 - Open orders are rejected during degraded mode and close-only windows.
 - Failed orders are finalized from router-custodied bounty escrow; they are not requeued.
+- Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 
 ### Deferred trader payouts
@@ -280,6 +281,7 @@ The router is configured with parallel arrays of Pyth feed ids, quantities, and 
 - `_computeBasketPrice()` normalizes each feed to 8 decimals.
 - The router computes the weighted basket price in the same shape as the spot basket oracle.
 - The minimum `publishTime` across feeds drives MEV checks, staleness validation, and `engine.lastMarkTime()` ordering.
+- Live order execution requires `publishTime > order.commitTime`; frozen-oracle close-only windows are the only regime that relaxes that ordering rule.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
 
 ### Frozen oracle behavior
@@ -320,6 +322,7 @@ This is a containment latch, not a pause. The protocol still allows transitions 
 - Liquidations are proportional and bounded by actually reachable collateral.
 - The keeper bounty is proportional with a floor.
 - Residual trader value is preserved when positive.
+- Same-account deferred payout is not treated as liquidation-reachable collateral; it is only netted once as terminal settlement bookkeeping.
 - Bad debt is socialized to LP capital if losses exceed reachable collateral.
 - Voluntary closes on underwater positions seize what is reachable and let the vault absorb the shortfall rather than trapping the user in an impossible state.
 

@@ -1060,5 +1060,29 @@ Review:
 Review:
 - Expanded `src/perps/libraries/CashPriorityLib.sol` into the canonical senior-cash reservation kernel, with one shared reservation struct covering total senior claims, reserved senior cash, fresh free cash, and queue-head claim serviceability.
 - Routed `src/perps/CfdEngine.sol`, `src/perps/OrderRouter.sol`, and `src/perps/libraries/CfdEnginePlanLib.sol` through that shared kernel so fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, deferred-claim servicing, and previews all answer the same cash-priority question.
+
+## Perps Order / Liquidation Hardening Plan (Apr 11 2026)
+
+- [x] Enforce live-market `publishTime > commitTime` ordering in `OrderRouter` while preserving frozen-window relaxations
+- [x] Replace liquidation account-order cleanup scans over `1..nextCommitId` with bounded per-account traversal
+- [x] Make post-open planner margin validation carry-aware to match live execution state
+- [x] Route typed `UserInvalid` execution failures to clearer-paid outcomes
+- [x] Prevent terminal-invalid close slippage from refunding margin-backed bounty escrow to trader wallets
+- [x] Add focused router/engine regressions and update perps docs for the tightened policy
+
+Review:
+- Updated `src/perps/OrderRouter.sol` and `src/perps/modules/OrderEscrowAccounting.sol` to keep a per-account pending-order queue, use that bounded traversal for liquidation cleanup, enforce live-market `oraclePublishTime > order.commitTime`, pay clearers on typed `UserInvalid` engine failures, and stop terminal close slippage from refunding potentially margin-backed escrow to trader wallets.
+- Updated `src/perps/libraries/CfdEnginePlanLib.sol` so post-open risk validation now uses carry-aware equity, matching the carry realization that already happens before live open settlement.
+- Updated `src/perps/README.md`, `src/perps/SECURITY.md`, and `src/perps/ACCOUNTING_SPEC.md` so the documented MEV ordering, close-failure escrow handling, and bounded liquidation cleanup model match the implementation.
+- Verified green: `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_(PublishTimeBeforeCommit_Reverts|FreshPublishAfterCommit_Executes|TypedUserInvalidOpenPaysClearer|CloseSlippageFailPaysClearerWhenBountyIsMarginBacked|ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders)"` and `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_ProcessOrderTyped_RevertsWhenTruePostTradeEquityFailsImr"`.
+- Full `forge build` in this workspace still exceeded the available tool timeout even after the targeted compile failures were cleared, so verification here is focused rather than repository-wide.
+
+### Follow-up review
+
+- Switched liquidation semantics in `src/perps/libraries/CfdEnginePlanLib.sol` to the `ACCOUNTING_SPEC.md` model: liquidation eligibility, equity, carry base, and keeper-bounty capping now use only physically reachable clearinghouse collateral, while same-account deferred payout is netted exactly once only against terminal liquidation shortfall.
+- Updated `test/perps/CfdEngine.t.sol` regressions to prove the new split across both positive and negative liquidation branches: positive physical residual preserves the legacy deferred claim, negative physical residual consumes deferred payout only as shortfall netting, and liquidation eligibility no longer changes when deferred payout is present.
+- Added planner-level fuzz regressions in `test/perps/CfdEngine.t.sol` covering nonzero deferred payout across a wide range of settlement reachability and legacy deferred balances in both positive-residual and negative-residual liquidation branches.
+- Updated `src/perps/README.md` and `src/perps/SECURITY.md` so the public docs explicitly state that deferred payout does not support liquidation reachability.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test(Fuzz)?_(PlanLiquidation_PositiveResidualPreservesDeferredAndUsesOnlyPhysicalReachability|PlanLiquidation_NegativeResidualNetsDeferredExactlyOnce|PlanLiquidation_PositiveResidualAboveDeferredDoesNotUnderflow|PlanLiquidation_NegativeResidualFullyConsumesLegacyDeferredWithoutReducingBadDebt|LiquidationPreview_DeferredPayout_DoesNotAffectLiquidationEligibility|PreviewLiquidation_PreservesLegacyDeferredOnPositivePhysicalResidual)"`.
 - Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
 - Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.

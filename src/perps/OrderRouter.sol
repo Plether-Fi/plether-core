@@ -382,6 +382,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             pendingCloseSize[accountId] += sizeDelta;
         }
         _linkGlobalOrder(orderId);
+        _linkAccountOrder(accountId, orderId);
         pendingOrderCounts[accountId]++;
         emit OrderCommitted(orderId, accountId, side);
     }
@@ -405,11 +406,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     ) external view returns (IOrderRouterAccounting.PendingOrderView[] memory pending) {
         pending = new IOrderRouterAccounting.PendingOrderView[](pendingOrderCounts[accountId]);
         uint256 index;
-        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+        for (
+            uint64 orderId = accountHeadOrderId[accountId];
+            orderId != 0;
+            orderId = orderRecords[orderId].nextAccountOrderId
+        ) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
-                continue;
-            }
             CfdTypes.Order memory order = record.core;
             pending[index] = IOrderRouterAccounting.PendingOrderView({
                 orderId: orderId,
@@ -629,9 +631,22 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             return OrderExecutionStepResult.Break;
         }
 
+        if (address(pyth) != address(0) && !executionContext.oracleFrozen && oraclePublishTime <= order.commitTime) {
+            if (revertOnBlockedExecution) {
+                revert OrderRouter__MevDetected();
+            }
+            return OrderExecutionStepResult.Break;
+        }
+
         if (!_checkSlippage(order, executionPrice)) {
             emit OrderFailed(orderId, OrderFailReason.SlippageExceeded);
-            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.RefundUser, revertOnBlockedExecution);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser,
+                revertOnBlockedExecution
+            );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -846,7 +861,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 return FailedOrderOutcome.RefundUser;
             }
             if (failureCategory == CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid) {
-                return FailedOrderOutcome.RefundUser;
+                return FailedOrderOutcome.ClearerFull;
             }
         }
 
@@ -918,11 +933,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         bytes32 accountId
     ) internal {
         uint256 forfeitedUsdc;
-        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+        for (
+            uint64 orderId = accountHeadOrderId[accountId];
+            orderId != 0;
+            orderId = orderRecords[orderId].nextAccountOrderId
+        ) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
-                continue;
-            }
             if (record.executionBountyUsdc > 0) {
                 forfeitedUsdc += record.executionBountyUsdc;
                 record.executionBountyUsdc = 0;
@@ -941,14 +957,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     function _clearLiquidatedAccountOrders(
         bytes32 accountId
     ) internal {
-        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+        uint64 orderId = accountHeadOrderId[accountId];
+        while (orderId != 0) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
-                continue;
-            }
+            uint64 nextOrderId = record.nextAccountOrderId;
             _releaseCommittedMargin(orderId);
             emit OrderFailed(orderId, OrderFailReason.AccountLiquidated);
             _deleteOrder(orderId, orderId == nextExecuteId, IOrderRouterAccounting.OrderStatus.Failed);
+            orderId = nextOrderId;
         }
     }
 
@@ -1071,6 +1087,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         OrderRecord storage record = _orderRecord(orderId);
         bytes32 accountId = record.core.accountId;
         if (accountId != bytes32(0)) {
+            _unlinkAccountOrder(accountId, orderId);
             _unlinkMarginOrder(accountId, orderId);
         }
         _unlinkGlobalOrder(orderId);
@@ -1280,6 +1297,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
     function _revertMarginOrderLinkCorrupted() internal pure override {
         revert OrderRouter__MarginOrderLinkCorrupted();
+    }
+
+    function _revertPendingOrderLinkCorrupted() internal pure override {
+        revert OrderRouter__PendingOrderLinkCorrupted();
     }
 
 }
