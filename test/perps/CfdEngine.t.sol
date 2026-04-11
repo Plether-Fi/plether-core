@@ -3985,7 +3985,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.reserveCloseOrderExecutionBounty(accountId, 1e6, address(router));
     }
 
-    function helper_ReserveCloseOrderExecutionBounty_NoCarryProjectionWithoutPriorSync() public {
+    function test_ReserveCloseOrderExecutionBounty_UsesCarryAwareProjectedRiskState() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 

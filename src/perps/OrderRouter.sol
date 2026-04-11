@@ -562,7 +562,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, FailedOrderOutcome.ClearerFull);
+            _cleanupOrder(headId, false, order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser);
             skipped++;
         }
     }
@@ -614,7 +614,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     ) internal returns (OrderExecutionStepResult result) {
         if (maxOrderAge > 0 && block.timestamp - order.commitTime > maxOrderAge) {
             emit OrderFailed(orderId, OrderFailReason.Expired);
-            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.ClearerFull, revertOnBlockedExecution);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser,
+                revertOnBlockedExecution
+            );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -725,7 +731,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, FailedOrderOutcome.ClearerFull);
+            _cleanupOrder(headId, false, order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser);
             pruned++;
         }
     }

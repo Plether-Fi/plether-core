@@ -3735,6 +3735,29 @@ contract StaleOrderExpiryTest is BasePerpTest {
         assertEq(router.claimableEth(keeper), 0, "Expired order should not pay an ETH execution fee");
     }
 
+    function test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper() public {
+        address localKeeper = address(0x999);
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(spammer, 10_000e6);
+
+        vm.prank(spammer);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        uint256 traderWalletBefore = usdc.balanceOf(spammer);
+        uint256 keeperWalletBefore = usdc.balanceOf(localKeeper);
+
+        vm.warp(block.timestamp + 301);
+        bytes[] memory empty;
+        vm.prank(localKeeper);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, empty);
+
+        assertEq(usdc.balanceOf(localKeeper) - keeperWalletBefore, 0, "Expired open order should not pay the keeper");
+        assertEq(
+            usdc.balanceOf(spammer) - traderWalletBefore, 1e6, "Expired open order should refund the trader bounty"
+        );
+    }
+
 }
 
 contract MarkPriceStalenessTest is BasePerpTest {

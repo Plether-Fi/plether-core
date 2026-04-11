@@ -748,15 +748,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
 
+        uint256 postReservationReachableUsdc = reachableUsdc - amountUsdc;
+
         CfdTypes.Position memory positionAfter = _loadPosition(accountId);
         positionAfter.margin = positionMarginUsdc - amountUsdc;
-        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildProjectedPositionRiskState(
-            accountId,
-            positionAfter,
-            price,
-            reachableUsdc > amountUsdc + pendingCarryUsdc ? reachableUsdc - amountUsdc - pendingCarryUsdc : 0,
-            isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
-        );
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                positionAfter,
+                price,
+                CAP_PRICE,
+                pendingCarryUsdc,
+                postReservationReachableUsdc,
+                isFadWindow() ? riskParams.fadMarginBps : riskParams.maintMarginBps
+            );
         if (riskState.liquidatable) {
             revert CfdEngine__InsufficientCloseOrderBountyBacking();
         }
