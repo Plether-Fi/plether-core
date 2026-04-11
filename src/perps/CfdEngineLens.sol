@@ -284,15 +284,9 @@ contract CfdEngineLens is ICfdEngineLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        (
-            pos.size,
-            pos.margin,
-            pos.entryPrice,
-            pos.maxProfitUsdc,
-            pos.side,
-            pos.lastUpdateTime,
-            pos.vpiAccrued
-        ) = engineContract.positions(accountId);
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+            engineContract.positions(accountId);
+        pos.lastCarryTimestamp = engineContract.getPositionLastCarryTimestamp(accountId);
     }
 
     function _sideSnapshot(

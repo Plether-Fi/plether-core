@@ -173,6 +173,11 @@ interface ICfdEngine {
         bytes32 accountId
     ) external view returns (CfdTypes.Side);
 
+    /// @notice Returns the timestamp through which carry has been realized for the position.
+    function getPositionLastCarryTimestamp(
+        bytes32 accountId
+    ) external view returns (uint64);
+
     /// @notice True when the engine has latched degraded mode after a close revealed insolvency.
     function degradedMode() external view returns (bool);
 

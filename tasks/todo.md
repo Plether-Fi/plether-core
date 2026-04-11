@@ -1115,5 +1115,17 @@ Review:
 - Added partial fee withdrawal support in `CfdEngine.withdrawFees(address,uint256)` while keeping the existing full-withdraw wrapper.
 - Updated `README.md`, `SECURITY.md`, and `ACCOUNTING_SPEC.md` to document bounded close projection, rebate-aware open validation, and partial fee withdrawal behavior.
 - Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(WithdrawFees_AllowsPartialWithdrawal|WithdrawFees_RespectsSeniorCashReservation)"`, `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateral"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitClose_UsesOnlyAccountLocalQueuedPositionProjection"`.
+
+### Broader verification follow-up
+
+- Fixed a preview/live parity leak in `CfdEngineLens` and `CfdEngineAccountLens`: both were rebuilding positions from `engine.positions(...)`, which omits `lastCarryTimestamp`, so carry-aware previews silently zeroed the carry clock while live execution used the real timestamp.
+- Added `getPositionLastCarryTimestamp(bytes32)` to `CfdEngine` / `ICfdEngine` and wired both lenses to use it, restoring carry-aware close/liquidation preview parity.
+- Updated stale `OrderRouter.t.sol` expectations to the current security model: publish-time MEV ordering remains enforced, terminal close slippage pays the clearer, batch execution stops at publish-time MEV violations, degraded-mode tests use a stable `stdstore` toggle, and rebate-aware open validation now allows rebate-backed commits.
+- Verified green broader slice:
+  - `forge test --match-path test/perps/CfdEngine.t.sol`
+  - `forge test --match-path test/perps/OrderRouter.t.sol`
+  - `forge test --match-path test/perps/MarginClearinghouse.t.sol`
+  - `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol`
+  - `forge test --match-path test/perps/invariant/PerpDeferredPayoutInvariant.t.sol`
 - Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
 - Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.

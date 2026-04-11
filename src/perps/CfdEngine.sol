@@ -1030,6 +1030,12 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         return _positions[accountId].side;
     }
 
+    function getPositionLastCarryTimestamp(
+        bytes32 accountId
+    ) external view returns (uint64) {
+        return _positions[accountId].lastCarryTimestamp;
+    }
+
     /// @notice Liquidates an undercollateralized position.
     ///         Surplus equity (after bounty) is returned to the user.
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.

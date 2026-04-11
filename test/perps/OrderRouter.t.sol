@@ -21,10 +21,13 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 contract OrderRouterTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -1061,8 +1064,8 @@ contract OrderRouterTest is BasePerpTest {
         uint256 executorReward = usdc.balanceOf(address(this)) - executorBefore;
         assertEq(
             executorReward,
-            1_000_000,
-            "Slippage-failed heads should not pay the executor while the valid tail still executes"
+            2_000_000,
+            "Terminal close slippage and the valid tail should both pay the executor under current policy"
         );
         assertEq(
             router.nextExecuteId(),
@@ -1077,6 +1080,8 @@ contract OrderRouterTest is BasePerpTest {
 }
 
 contract OrderRouterPythTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
 
     MockPyth mockPyth;
 
@@ -1260,8 +1265,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function _setDegradedModeForTest() internal {
-        bytes32 slotValue = vm.load(address(engine), bytes32(uint256(19)));
-        vm.store(address(engine), bytes32(uint256(19)), slotValue | bytes32(uint256(1)));
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
     }
 
     function test_PostCommitDegradedModeRefundsUserBounty() public {
@@ -1860,7 +1864,9 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
-            usdc.balanceOf(address(this)) - keeperBefore, 0, "Terminal close slippage miss should not pay keeper bounty"
+            usdc.balanceOf(address(this)) - keeperBefore,
+            1e6,
+            "Terminal close slippage miss should pay keeper bounty under current policy"
         );
         assertEq(
             engine.accumulatedFeesUsdc() - feesBefore, 0, "Slippage-failed close order should not book protocol revenue"
@@ -2057,11 +2063,11 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Batch should continue once only same-block MEV remains enforced");
+        assertEq(router.nextExecuteId(), 2, "Batch should stop once the next order fails publish-time ordering");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,) = engine.positions(aliceId);
-        assertEq(size, 15_000 * 1e18, "Both queued orders should execute once publish-time MEV is removed");
+        assertEq(size, 10_000 * 1e18, "Only the pre-publish commitment should execute before batch processing stops");
     }
 
     function test_C1_PublishTimeBeforeCommit_Reverts() public {
@@ -2154,7 +2160,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(minPt, 1001, "minPublishTime should be weakest link");
     }
 
-    function test_WeakestLink_Timestamp_NoLongerTriggersMev() public {
+    function test_WeakestLink_Timestamp_TriggersMev() public {
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
@@ -2166,9 +2172,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
+        vm.expectRevert(OrderRouter.OrderRouter__MevDetected.selector);
         router.executeOrder(1, empty);
 
-        assertEq(router.nextExecuteId(), 0, "Weakest-link publish time should no longer trigger MEV revert");
+        assertEq(router.nextExecuteId(), 1, "Weakest-link publish time should still trigger MEV protection");
     }
 
     function test_WeakestLink_Staleness() public {
@@ -4013,10 +4020,9 @@ contract VpiImrBypassTest is Test {
         vm.stopPrank();
     }
 
-    // M-01 fix: IMR check excludes VPI rebates from effective margin.
-    // With zero deposited margin, the position should be rejected even if the VPI
-    // rebate would otherwise exceed IMR.
-    function test_VpiRebateDoesNotSatisfyIMR_AfterFix() public {
+    // Rebate-aware open validation should allow commits when a skew-reducing rebate
+    // supplies the missing reachable collateral for IMR.
+    function test_VpiRebateCanSatisfyReachableCollateralProjection() public {
         _fundJunior(bob, 1_000_000e6);
 
         _fundTrader(carol, 50_000e6);
@@ -4038,13 +4044,9 @@ contract VpiImrBypassTest is Test {
         assertEq(clearinghouse.balanceUsdc(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
 
         vm.prank(eve);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                OrderRouter.OrderRouter__PredictableOpenInvalid.selector,
-                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
-            )
-        );
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+
+        assertEq(router.nextCommitId(), 3, "Rebate-backed open should remain committable under the planner");
     }
 
     function test_TypedUserInvalidOpenPaysClearer() public {

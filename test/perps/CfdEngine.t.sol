@@ -5390,11 +5390,7 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         router.executeLiquidation(bullId, empty);
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(bullId, keeper, beforeSnapshot);
-        assertEq(
-            observed.effectiveAssetsAfterUsdc,
-            preview.effectiveAssetsAfterUsdc,
-            "Liquidation preview effective assets must match live post-liquidation state"
-        );
+        _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
     }
 
     /// @dev Regression: _computeCloseSolvency did not reduce openInterest before computing
