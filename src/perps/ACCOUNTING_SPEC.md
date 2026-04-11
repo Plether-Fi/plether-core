@@ -15,7 +15,8 @@ Use it together with:
 
 - [`README.md`](README.md) for the system overview,
 - [`SECURITY.md`](SECURITY.md) for invariants and trust assumptions,
-- [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md) for the custody map.
+- [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md) for the custody map,
+- [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) for the consolidated policy tables, quantity ownership table, and transaction narratives.
 
 ## Accounting Model In One Page
 

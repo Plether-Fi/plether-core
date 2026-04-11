@@ -7,6 +7,7 @@ It is written as an audit-facing companion to:
 - [`README.md`](README.md) for the high-level product and architecture story
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md) for the canonical accounting model
 - [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md) for the custody and state-boundary map
+- [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) for the compact policy tables, liveness tradeoffs, and test map used during audit review
 
 ## Security Model In One Page
 

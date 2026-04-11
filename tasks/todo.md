@@ -1127,5 +1127,19 @@ Review:
   - `forge test --match-path test/perps/MarginClearinghouse.t.sol`
   - `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol`
   - `forge test --match-path test/perps/invariant/PerpDeferredPayoutInvariant.t.sol`
+
+## Pre-Audit Clarity Pass (Apr 11 2026)
+
+- [x] Draft one unified pre-audit guide with policy tables, quantity ownership table, liveness-vs-safety choices, read-surface rules, invariants, and test map
+- [x] Add explicit close and liquidation transaction narratives
+- [x] Cross-link existing perps docs to the pre-audit guide
+- [x] Annotate legacy-named shared test helpers so obsolete carry/spread terminology is clearly marked historical
+- [x] Improve audit readability of test intent through a grouped test map in docs
+
+Review:
+- Added `src/perps/PRE_AUDIT_GUIDE.md` consolidating the order lifecycle state machine, failure-policy table, bounty-flow table, oracle-regime table, quantity ownership table, liveness/safety tradeoffs, close and liquidation narratives, read-surface canonicality rules, invariants, and a high-signal test map.
+- Cross-linked `README.md`, `SECURITY.md`, `ACCOUNTING_SPEC.md`, `CANONICAL_ENTRYPOINTS.md`, and `INTERNAL_ARCHITECTURE_MAP.md` to the new pre-audit guide so auditors have one obvious starting point.
+- Added explicit historical-context comments to `test/perps/BasePerpTest.sol` legacy helper names so auditors do not mistake them for live accounting concepts.
+- This pass intentionally improved test readability through documentation and annotations rather than renaming or moving large test files immediately before audit.
 - Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
 - Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.

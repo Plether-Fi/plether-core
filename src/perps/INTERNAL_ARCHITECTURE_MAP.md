@@ -2,7 +2,7 @@
 
 This page is a compressed operational map of where value lives, who owns it, which contract may mutate it, which accounting view may read it, and which flows move it across protocol domains.
 
-For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For module-level overview, use [`README.md`](README.md).
+For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For module-level overview, use [`README.md`](README.md). For compact audit policy tables and transaction narratives, use [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md).
 
 ![Perps internal architecture map](../../assets/diagrams/perps-internal-architecture-map.svg)
 
