@@ -55,7 +55,8 @@ contract MockClearinghouseEngine {
     ) external pure {}
 
     function realizeCarryBeforeMarginChange(
-        bytes32
+        bytes32,
+        uint256
     ) external pure {}
 
     function syncLegacyPlaceholder() external {}

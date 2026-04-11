@@ -148,13 +148,24 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         }
 
         CfdTypes.RiskParams memory params = _riskParams();
-        PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos,
-            engineContract.lastMarkPrice(),
-            engineContract.CAP_PRICE(),
-            snapshot.terminalReachableUsdc,
-            engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
-        );
+        uint256 price = engineContract.lastMarkPrice();
+        uint256 pendingCarryUsdc = 0;
+        if (price > 0 && pos.lastCarryTimestamp > 0 && block.timestamp > pos.lastCarryTimestamp) {
+            uint256 lpBackedNotionalUsdc =
+                PositionRiskAccountingLib.computeLpBackedNotionalUsdc(pos.size, price, snapshot.terminalReachableUsdc);
+            pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
+                lpBackedNotionalUsdc, params.baseCarryBps, block.timestamp - pos.lastCarryTimestamp
+            );
+        }
+        PositionRiskAccountingLib.PositionRiskState memory riskState =
+            PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+                pos,
+                price,
+                engineContract.CAP_PRICE(),
+                pendingCarryUsdc,
+                snapshot.terminalReachableUsdc,
+                engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
+            );
 
         snapshot.hasPosition = true;
         snapshot.side = pos.side;

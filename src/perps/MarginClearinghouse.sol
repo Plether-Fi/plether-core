@@ -153,14 +153,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
             revert MarginClearinghouse__ZeroAmount();
         }
 
+        uint256 reachableCollateralBasisUsdc =
+            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(getAccountUsdcBuckets(accountId));
+
         IERC20(settlementAsset).safeTransferFrom(owner, address(this), amount);
+
+        settlementBalances[accountId] += amount;
 
         address engine_ = engine;
         if (engine_ != address(0)) {
-            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId);
+            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
         }
-
-        settlementBalances[accountId] += amount;
 
         emit Deposit(accountId, settlementAsset, amount);
     }
@@ -177,9 +180,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
             revert MarginClearinghouse__InsufficientBalance();
         }
 
+        uint256 reachableCollateralBasisUsdc =
+            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(getAccountUsdcBuckets(accountId));
+
         address engine_ = engine;
         if (engine_ != address(0)) {
-            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId);
+            ICfdEngineCore(engine_).realizeCarryBeforeMarginChange(accountId, reachableCollateralBasisUsdc);
         }
 
         if (settlementBalances[accountId] < amount) {

@@ -644,7 +644,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
     /// @dev Called only by the clearinghouse before user deposits and withdrawals.
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
     ) external nonReentrant {
         if (msg.sender != address(clearinghouse)) {
             revert CfdEngine__NotClearinghouse();
@@ -660,7 +661,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__MarkPriceStale();
         }
 
-        _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+        _realizeCarryFromSettlement(accountId, pos, price, reachableCollateralBasisUsdc);
     }
 
     /// @notice Claims deferred trader payout balance into the clearinghouse.

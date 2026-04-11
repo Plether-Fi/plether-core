@@ -109,7 +109,8 @@ interface ICfdEngine {
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
     function realizeCarryBeforeMarginChange(
-        bytes32 accountId
+        bytes32 accountId,
+        uint256 reachableCollateralBasisUsdc
     ) external;
 
     /// @notice Canonical liquidation preview using the vault's current accounted depth.

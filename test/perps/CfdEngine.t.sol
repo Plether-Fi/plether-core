@@ -1223,6 +1223,44 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_DepositMargin_CanRescueAccountWhenIncomingCashCoversCarry() public {
+        address trader = address(0xABD1);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 rescueDeposit = 50_000e6;
+        uint256 carryElapsed = 365 days * 3;
+
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+
+        usdc.mint(trader, rescueDeposit);
+
+        vm.warp(block.timestamp + carryElapsed);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            carryElapsed
+        );
+        assertGt(
+            expectedCarry, settlementBefore, "Setup must accrue more carry than the pre-deposit settlement balance"
+        );
+
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(rescueDeposit);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + rescueDeposit - expectedCarry,
+            "Rescue deposit should settle pre-basis carry from the incoming cash in the same tx"
+        );
+    }
+
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
         address trader = address(0xAB10);
         bytes32 accountId = bytes32(uint256(uint160(trader)));

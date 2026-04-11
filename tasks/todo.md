@@ -1141,5 +1141,18 @@ Review:
 - Cross-linked `README.md`, `SECURITY.md`, `ACCOUNTING_SPEC.md`, `CANONICAL_ENTRYPOINTS.md`, and `INTERNAL_ARCHITECTURE_MAP.md` to the new pre-audit guide so auditors have one obvious starting point.
 - Added explicit historical-context comments to `test/perps/BasePerpTest.sol` legacy helper names so auditors do not mistake them for live accounting concepts.
 - This pass intentionally improved test readability through documentation and annotations rather than renaming or moving large test files immediately before audit.
+
+### Carry rescue / public lens follow-up
+
+- Fixed clearinghouse deposit carry realization so rescue top-ups can fund pre-mutation carry in the same transaction: `MarginClearinghouse` now snapshots the pre-mutation reachable-collateral basis, credits the deposit, and then calls `realizeCarryBeforeMarginChange(accountId, basis)` so carry is computed from the old basis but settled from post-deposit cash.
+- Updated `CfdEngineAccountLens` to compute `pendingCarryUsdc` and use `buildPositionRiskStateWithCarry(...)`, which makes `PerpsPublicLens.getTraderAccount(...)`, `getPosition(...)`, and `isLiquidatable(...)` inherit carry-aware equity and liquidation state.
+- Added focused regressions:
+  - `test_DepositMargin_CanRescueAccountWhenIncomingCashCoversCarry`
+  - `test_GetTraderAccount_UsesCarryAwareNetEquity`
+  - `test_IsLiquidatable_UsesCarryAwareLensState`
+- Verified green:
+  - `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(DepositMargin_CanRescueAccountWhenIncomingCashCoversCarry|DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation)"`
+  - `forge test --match-path test/perps/PerpsPublicLens.t.sol`
+  - `forge test --match-path test/perps/MarginClearinghouse.t.sol`
 - Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
 - Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.

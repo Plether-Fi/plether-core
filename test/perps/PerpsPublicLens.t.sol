@@ -93,6 +93,52 @@ contract PerpsPublicLensTest is BasePerpTest {
         );
     }
 
+    function test_GetTraderAccount_UsesCarryAwareNetEquity() public {
+        address trader = address(0xB0B1);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 50_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 30 days);
+
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
+        PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(accountId);
+
+        assertLt(
+            snapshot.netEquityUsdc,
+            int256(snapshot.accountEquityUsdc),
+            "Carry-aware lens equity should be below raw settlement equity"
+        );
+        assertEq(
+            viewData.equityUsdc, uint256(snapshot.netEquityUsdc), "Public equity should inherit carry-aware net equity"
+        );
+    }
+
+    function test_IsLiquidatable_UsesCarryAwareLensState() public {
+        address trader = address(0xB0B2);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 820e6);
+        _open(accountId, CfdTypes.Side.BULL, 50_000e18, 800e6, 1e8);
+
+        assertFalse(publicLens.isLiquidatable(accountId), "Setup should start above maintenance before carry accrues");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.warp(block.timestamp + 100 days);
+
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
+        assertTrue(
+            snapshot.liquidatable, "Account lens should become liquidatable once carry erodes maintenance headroom"
+        );
+        assertTrue(publicLens.isLiquidatable(accountId), "Public lens should inherit carry-aware liquidatability");
+    }
+
     function test_GetLpStatus_UsesActualFrozenWindowFreshness() public {
         address trader = address(0xCAFE);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
