@@ -33,15 +33,14 @@ contract LiquidationAccountingLibHarness {
         uint256 size,
         uint256 oraclePrice,
         uint256 reachableCollateralUsdc,
-        int256 pnlUsdc,
+        int256 equityUsdc,
         uint256 maintMarginBps,
         uint256 minBountyUsdc,
         uint256 bountyBps,
         uint256 tokenScale
     ) external pure returns (LiquidationAccountingLib.LiquidationState memory) {
-        reachableCollateralUsdc = reachableCollateralUsdc;
         return LiquidationAccountingLib.buildLiquidationState(
-            size, oraclePrice, reachableCollateralUsdc, pnlUsdc, maintMarginBps, minBountyUsdc, bountyBps, tokenScale
+            size, oraclePrice, reachableCollateralUsdc, equityUsdc, maintMarginBps, minBountyUsdc, bountyBps, tokenScale
         );
     }
 
@@ -70,6 +69,56 @@ contract CfdEnginePlanLibHarness {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
+        snap.bearSide.openInterest = size;
+        snap.vaultAssetsUsdc = 1_000_000e6;
+        snap.vaultCashUsdc = 1;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: settlementReachableUsdc,
+            totalLockedMarginUsdc: 0,
+            activePositionMarginUsdc: 0,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: settlementReachableUsdc
+        });
+        snap.totalDeferredPayoutUsdc = deferredPayoutUsdc;
+        snap.deferredPayoutForAccount = deferredPayoutUsdc;
+        snap.capPrice = 2e8;
+        snap.riskParams = CfdTypes.RiskParams({
+            vpiFactor: 0,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 15
+        });
+
+        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
+    }
+
+    function planLiquidationWithCarry(
+        uint256 settlementReachableUsdc,
+        uint256 deferredPayoutUsdc,
+        uint256 size,
+        uint256 entryPrice,
+        uint256 oraclePrice,
+        uint64 currentTimestamp,
+        uint64 lastCarryTimestamp
+    ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.position = CfdTypes.Position({
+            size: size,
+            margin: 0,
+            entryPrice: entryPrice,
+            maxProfitUsdc: 0,
+            side: CfdTypes.Side.BEAR,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: lastCarryTimestamp,
+            vpiAccrued: 0
+        });
+        snap.currentTimestamp = currentTimestamp;
+        snap.lastMarkPrice = oraclePrice;
+        snap.lastMarkTime = currentTimestamp;
         snap.bearSide.openInterest = size;
         snap.vaultAssetsUsdc = 1_000_000e6;
         snap.vaultCashUsdc = 1;
@@ -1013,6 +1062,39 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_WithdrawFees_AllowsPartialWithdrawal() public {
+        address trader = address(0xFEE4A);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        address treasury = address(0xFEE5);
+        _fundTrader(trader, 10_000e6);
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 100_000e18,
+            marginDelta: 2000e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 1,
+            side: CfdTypes.Side.BULL,
+            isClose: false
+        });
+        vm.prank(address(router));
+        engine.processOrderTyped(order, 1e8, 1_000_000e6, uint64(block.timestamp));
+
+        uint256 feesBefore = engine.accumulatedFeesUsdc();
+        uint256 partialAmount = feesBefore / 2;
+
+        engine.withdrawFees(treasury, partialAmount);
+
+        assertEq(usdc.balanceOf(treasury), partialAmount, "Treasury should receive the requested partial fee amount");
+        assertEq(
+            engine.accumulatedFeesUsdc(),
+            feesBefore - partialAmount,
+            "Partial fee withdrawal should leave the remainder booked"
+        );
+    }
+
     function test_ClaimDeferredClearerBounty_UsesFeeOnlyLiquidityWhenAtQueueHead() public {
         bytes32 accountId = bytes32(uint256(0xFEE4));
         address keeper = address(0xFEE5);
@@ -1099,6 +1181,46 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
         engine.addMargin(accountId, 0);
+    }
+
+    function test_DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation() public {
+        address trader = address(0xABD0);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        uint256 depositAmount = 50_000e6;
+
+        _fundTrader(trader, 20_000e6);
+        usdc.mint(trader, depositAmount);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            1 days
+        );
+        assertGt(expectedCarry, 0, "Setup must accrue carry before the balance mutation");
+
+        vm.startPrank(trader);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.depositMargin(depositAmount);
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + depositAmount - expectedCarry,
+            "Deposit hook should realize carry before adding fresh settlement"
+        );
+
+        clearinghouse.withdrawMargin(depositAmount);
+        vm.stopPrank();
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore - expectedCarry,
+            "Deposit-withdraw roundtrip must not erase accrued carry"
+        );
     }
 
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {
@@ -1819,6 +1941,33 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_CloseExecution_UsesCarryAdjustedLossKernel() public {
+        address trader = address(0xAB14004);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(100_010_000, uint64(block.timestamp));
+
+        CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, 100_000e18, 100_010_000);
+        assertTrue(preview.valid, "Carry-adjusted full close should remain executable");
+        assertEq(preview.badDebtUsdc, 0, "Carry-adjusted close should remain fully covered in this setup");
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 100_010_000, true);
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(100_010_000));
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
+        assertEq(sizeAfter, 0, "Close should execute instead of reverting when carry flips the trade into a loss");
+    }
+
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterBountyCap() public {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
         LiquidationAccountingLib.LiquidationState memory state =
@@ -2122,6 +2271,19 @@ contract CfdEngineTest is BasePerpTest {
             uint256(strippedPreview.liquidatable ? 1 : 0),
             "Deferred payout should not change liquidation eligibility"
         );
+    }
+
+    function test_PlanLiquidation_PendingCarryCanTriggerLiquidation() public {
+        CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
+
+        CfdEnginePlanTypes.LiquidationDelta memory beforeCarry =
+            harness.planLiquidationWithCarry(820e6, 0, 50_000e18, 1e8, 1e8, 1, 1);
+        CfdEnginePlanTypes.LiquidationDelta memory afterCarry =
+            harness.planLiquidationWithCarry(820e6, 0, 50_000e18, 1e8, 1e8, uint64(100 days), 1);
+
+        assertFalse(beforeCarry.liquidatable, "Setup should start above maintenance before carry accrues");
+        assertGt(afterCarry.pendingCarryUsdc, 0, "Setup must accrue pending carry");
+        assertTrue(afterCarry.liquidatable, "Pending carry should reduce liquidation equity below maintenance");
     }
 
     function test_PreviewLiquidation_StagesForfeitureLikeLiveLiquidation() public {
@@ -5189,24 +5351,6 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         });
     }
 
-    function _liveEffectiveAssets(
-        uint256 pendingPayoutUsdc
-    ) internal view returns (uint256) {
-        uint256 vaultAssets = pool.totalAssets() + pendingPayoutUsdc;
-        uint256 fees = engine.accumulatedFeesUsdc();
-        int256 legacySpread = int256(0);
-        uint256 netPhysical = vaultAssets > fees ? vaultAssets - fees : 0;
-        uint256 effective;
-        if (legacySpread > 0) {
-            effective = netPhysical > uint256(legacySpread) ? netPhysical - uint256(legacySpread) : 0;
-        } else {
-            effective = netPhysical + uint256(-legacySpread);
-        }
-        uint256 deferred = engine.totalDeferredPayoutUsdc() + engine.totalDeferredClearerBountyUsdc();
-        effective = effective > deferred ? effective - deferred : 0;
-        return effective > pendingPayoutUsdc ? effective - pendingPayoutUsdc : 0;
-    }
-
     /// @dev Regression: planLiquidation must use post-liquidation side snapshots (OI and totalMargin).
     ///      for solvency computation. Now also uses previewPostOpSolvency with physicalAssetsDelta
     ///      to account for seized collateral flowing into the vault.
@@ -5240,14 +5384,15 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         assertTrue(preview.liquidatable, "BULL majority must be liquidatable after carry drain");
 
         address keeper = address(0x999);
+        LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(bullId, keeper);
         vm.prank(keeper);
         bytes[] memory empty;
         router.executeLiquidation(bullId, empty);
 
-        uint256 liveEffective = _liveEffectiveAssets(preview.keeperBountyUsdc);
+        LiquidationParityObserved memory observed = _observeLiquidationParity(bullId, keeper, beforeSnapshot);
         assertEq(
+            observed.effectiveAssetsAfterUsdc,
             preview.effectiveAssetsAfterUsdc,
-            liveEffective,
             "Liquidation preview effective assets must match live post-liquidation state"
         );
     }

@@ -54,6 +54,10 @@ contract MockClearinghouseEngine {
         bytes32
     ) external pure {}
 
+    function realizeCarryBeforeMarginChange(
+        bytes32
+    ) external pure {}
+
     function syncLegacyPlaceholder() external {}
 
 }

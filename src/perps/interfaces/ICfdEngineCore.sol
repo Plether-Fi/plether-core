@@ -86,6 +86,10 @@ interface ICfdEngineCore {
 
     function CAP_PRICE() external view returns (uint256);
 
+    function realizeCarryBeforeMarginChange(
+        bytes32 accountId
+    ) external;
+
     function isFadWindow() external view returns (bool);
 
     function fadMaxStaleness() external view returns (uint256);

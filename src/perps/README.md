@@ -115,6 +115,7 @@ Important details:
 - Failed orders are finalized from router-custodied bounty escrow; they are not requeued.
 - Execution-time user-invalid opens and terminal-invalid closes pay the clearer from escrow, while genuine protocol-state invalidations refund the trader.
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
+- Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
 ### Deferred trader payouts
 
@@ -213,9 +214,13 @@ Carry behavior:
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
 - Applies to whichever side is consuming LP capital.
-- Is realized on open, close, add-margin, and withdraw-margin paths.
+- Is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis.
 - Flows to LP trading revenue once realized.
 - Affects guard and risk checks before realization.
+
+Close and liquidation use the planner's canonical carry-adjusted settlement/equity outputs; the live executor does not recompute a separate carry-blind loss or liquidation kernel.
+
+Open-risk projection credits skew-reducing trade rebates into reachable collateral before the initial-margin check, so preview and execution do not conservatively reject rebate-backed but valid opens.
 
 ### Deferred liabilities
 

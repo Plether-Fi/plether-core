@@ -106,6 +106,12 @@ interface ICfdEngine {
         uint64 publishTime
     ) external returns (uint256 keeperBountyUsdc);
 
+    /// @notice Realizes accrued carry against the current reachable collateral before a user-level
+    ///         settlement balance mutation changes the carry basis.
+    function realizeCarryBeforeMarginChange(
+        bytes32 accountId
+    ) external;
+
     /// @notice Canonical liquidation preview using the vault's current accounted depth.
     function previewLiquidation(
         bytes32 accountId,

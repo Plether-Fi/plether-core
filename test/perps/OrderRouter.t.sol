@@ -2585,6 +2585,31 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         assertEq(otherPending[1].orderId, 4, "Unrelated account queue should preserve its tail order");
     }
 
+    function test_CommitClose_UsesOnlyAccountLocalQueuedPositionProjection() public {
+        bytes32 traderId = bytes32(uint256(uint160(trader)));
+        address otherTrader = address(0xC10C);
+
+        _fundTrader(trader, 2000e6);
+        _fundTrader(otherTrader, 2000e6);
+        _open(traderId, CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, type(uint256).max, true);
+
+        vm.startPrank(otherTrader);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 500e6, type(uint256).max, false);
+        vm.stopPrank();
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.BULL, 15_000e18, 0, type(uint256).max, true);
+
+        IOrderRouterAccounting.PendingOrderView[] memory traderPending = router.getPendingOrdersForAccount(traderId);
+        assertEq(traderPending.length, 2, "Trader should be able to queue closes using only its own pending orders");
+        assertEq(traderPending[0].sizeDelta, 5000e18, "First close should remain queued");
+        assertEq(traderPending[1].sizeDelta, 15_000e18, "Second close should consume only the trader's residual size");
+    }
+
 }
 
 contract FadStalenessTest is BasePerpTest {

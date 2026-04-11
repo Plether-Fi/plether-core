@@ -334,6 +334,60 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertGt(delta.pendingCarryUsdc, 0, "Open plan should report observational pending carry");
     }
 
+    function test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateral() public view {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.05e18;
+
+        bytes32 accountId = bytes32(uint256(0xB0B0));
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.accountId = accountId;
+        snap.position = CfdTypes.Position({
+            size: 0,
+            margin: 0,
+            entryPrice: 0,
+            maxProfitUsdc: 0,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 0,
+            vpiAccrued: 0
+        });
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 0, openInterest: 300_000e18, entryNotional: 300_000e6, totalMargin: 50_000e6
+        });
+        snap.bearSide =
+            CfdEnginePlanTypes.SideSnapshot({maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
+        snap.vaultAssetsUsdc = 2_000_000e6;
+        snap.vaultCashUsdc = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 4000e6,
+            totalLockedMarginUsdc: 0,
+            activePositionMarginUsdc: 0,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: 4000e6
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = params;
+
+        CfdTypes.Order memory order = CfdTypes.Order({
+            accountId: accountId,
+            sizeDelta: 300_000e18,
+            marginDelta: 4000e6,
+            targetPrice: 1e8,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: CfdTypes.Side.BEAR,
+            isClose: false
+        });
+
+        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, 1e8, 0);
+
+        assertLt(delta.tradeCostUsdc, 0, "Setup must produce a skew-reducing rebate");
+        assertLt(order.marginDelta, delta.openState.initialMarginRequirementUsdc, "Setup must rely on rebate credit");
+        assertEq(uint8(delta.revertCode), 0, "Rebate-backed reachable collateral should keep the open valid");
+        assertTrue(delta.valid, "Planner should accept opens whose IMR is satisfied only after rebate credit");
+    }
+
     function test_PlanClose_ReportsPendingCarry() public {
         bytes32 accountId = bytes32(uint256(uint160(freshBullTrader)));
         _fundTrader(freshBullTrader, 20_000e6);

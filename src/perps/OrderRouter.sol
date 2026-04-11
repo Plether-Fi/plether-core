@@ -805,11 +805,12 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             queuedPosition.size = engine.getPositionSize(accountId);
         }
 
-        for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
+        for (
+            uint64 orderId = accountHeadOrderId[accountId];
+            orderId != 0;
+            orderId = orderRecords[orderId].nextAccountOrderId
+        ) {
             OrderRecord storage record = orderRecords[orderId];
-            if (record.status != IOrderRouterAccounting.OrderStatus.Pending || record.core.accountId != accountId) {
-                continue;
-            }
             CfdTypes.Order memory order = record.core;
 
             if (order.isClose) {

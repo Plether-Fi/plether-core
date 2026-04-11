@@ -327,6 +327,8 @@ library CfdEnginePlanLib {
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
         if (delta.tradeCostUsdc > 0) {
             reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);
+        } else if (delta.tradeCostUsdc < 0) {
+            reachableCollateralUsdc += uint256(-delta.tradeCostUsdc);
         }
 
         riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
@@ -493,16 +495,16 @@ library CfdEnginePlanLib {
             delta.freshPayoutIsDeferred = !delta.freshPayoutIsImmediate;
         } else if (carryAdjustedSettlementUsdc < 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
-            uint256 lossUsdc = uint256(-carryAdjustedSettlementUsdc);
+            delta.lossUsdc = uint256(-carryAdjustedSettlementUsdc);
             bool includeOtherLockedMargin = remainingSize == 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory closeBuckets =
                 _buildCloseSettlementBuckets(snap, cs.marginToFreeUsdc, includeOtherLockedMargin);
             delta.lossConsumption = MarginClearinghouseAccountingLib.planTerminalLossConsumption(
-                closeBuckets, cs.remainingMarginUsdc, lossUsdc
+                closeBuckets, cs.remainingMarginUsdc, delta.lossUsdc
             );
             delta.lossResult = CfdEngineSettlementLib.closeSettlementResult(
-                delta.lossConsumption.totalConsumedUsdc, lossUsdc, cs.executionFeeUsdc
+                delta.lossConsumption.totalConsumedUsdc, delta.lossUsdc, cs.executionFeeUsdc
             );
             delta.syncMarginQueueAmount = delta.lossConsumption.otherLockedMarginConsumedUsdc;
             (
@@ -643,8 +645,8 @@ library CfdEnginePlanLib {
             carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
         );
 
-        delta.riskState = PositionRiskAccountingLib.buildPositionRiskState(
-            pos, price, snap.capPrice, settlementReachableUsdc, maintMarginBps
+        delta.riskState = PositionRiskAccountingLib.buildPositionRiskStateWithCarry(
+            pos, price, snap.capPrice, delta.pendingCarryUsdc, settlementReachableUsdc, maintMarginBps
         );
 
         if (!delta.riskState.liquidatable) {
@@ -656,7 +658,7 @@ library CfdEnginePlanLib {
             pos.size,
             price,
             settlementReachableUsdc,
-            delta.riskState.unrealizedPnlUsdc,
+            delta.riskState.equityUsdc,
             maintMarginBps,
             snap.riskParams.minBountyUsdc,
             snap.riskParams.bountyBps,

@@ -166,6 +166,7 @@ library CfdEnginePlanTypes {
         uint256 unlockMarginUsdc;
 
         SettlementType settlementType;
+        uint256 lossUsdc;
 
         uint256 freshTraderPayoutUsdc;
         bool freshPayoutIsImmediate;

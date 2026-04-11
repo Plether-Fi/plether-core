@@ -110,7 +110,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 .consumeCloseLoss(
                     delta.accountId,
                     reservationOrderIds,
-                    uint256(-delta.closeState.netSettlementUsdc),
+                    delta.lossUsdc,
                     delta.posMarginAfter,
                     delta.deletePosition,
                     host.vault()

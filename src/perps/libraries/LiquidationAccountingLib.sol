@@ -16,14 +16,14 @@ library LiquidationAccountingLib {
         uint256 size,
         uint256 oraclePrice,
         uint256 reachableCollateralUsdc,
-        int256 pnlUsdc,
+        int256 equityUsdc,
         uint256 maintMarginBps,
         uint256 minBountyUsdc,
         uint256 bountyBps,
         uint256 tokenScale
     ) internal pure returns (LiquidationState memory state) {
         state.reachableCollateralUsdc = reachableCollateralUsdc;
-        state.equityUsdc = int256(reachableCollateralUsdc) + pnlUsdc;
+        state.equityUsdc = equityUsdc;
 
         uint256 notionalUsdc = (size * oraclePrice) / tokenScale;
         state.maintenanceMarginUsdc = (notionalUsdc * maintMarginBps) / 10_000;

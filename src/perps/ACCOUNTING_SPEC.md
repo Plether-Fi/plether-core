@@ -256,7 +256,7 @@ Rules:
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they consume LP-backed capital,
 - pending carry reduces equity for guard and risk checks before realization,
-- carry is realized on open, close, add-margin, and withdraw-margin paths,
+- carry is realized on open, close, add-margin, and clearinghouse deposit/withdraw balance mutations before those mutations change the carry basis,
 - liquidation does not have its own separate carry-realization path,
 - realized carry is booked as LP trading revenue.
 
@@ -334,7 +334,19 @@ Required properties:
 
 - a user must not partially close, externalize realized losses to LPs, and keep a protected residual alive,
 - a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
+- carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
 - preview and live close paths should share one close-accounting kernel.
+
+### Open projection
+
+- skew-reducing rebates must count as reachable collateral for projected IMR checks,
+- open preview and execution should not reject a trade solely because the planner omitted a rebate that the live settlement would credit.
+
+### Fee withdrawals
+
+- protocol fee withdrawal may be partial,
+- withdrawing a safe subset of `accumulatedFeesUsdc` must not require the entire fee balance to be currently withdrawable,
+- post-withdraw solvency and deferred-liability reservations must still hold.
 
 ### Liquidation settlement
 
@@ -355,6 +367,7 @@ Keeper bounty rule:
 
 Required property:
 
+- liquidation eligibility, bounty caps, and residual planning must use carry-adjusted equity,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
 ### Three-bucket liquidation residual accounting

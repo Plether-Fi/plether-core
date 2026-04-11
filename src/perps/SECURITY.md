@@ -108,7 +108,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Binding intents | Users cannot cancel queued orders once committed |
 | Bounty conservation | Router-custodied execution bounty escrow is conserved across order lifecycle transitions until distributed or absorbed |
 | Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
-| Bounded cleanup | Queue cleanup and liquidation-time account cleanup are intentionally bounded |
+| Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 
 ### HousePool and LP accounting
 
@@ -239,8 +239,10 @@ The perps system uses LP-capital carry instead of side-to-side funding.
 - carry base: `max(positionNotionalUsdc - reachableCollateralUsdc, 0)`
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- realization points: open, close, add margin, withdraw margin
+- realization points: open, close, add margin, and clearinghouse deposit/withdraw mutations before they change reachable collateral
 - destination: realized carry becomes LP trading revenue
+
+Close and liquidation security depends on using the planner's canonical carry-adjusted settlement outputs directly in the live executor rather than recomputing a second carry-blind kernel.
 
 Security implication: oracle freshness still gates execution and LP accounting freshness, but not carry accrual.
 

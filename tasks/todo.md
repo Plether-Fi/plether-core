@@ -1091,5 +1091,29 @@ Review:
 - Found one stale assumption in `test/perps/invariant/PerpDeferredPayoutInvariant.t.sol`: liquidation payout gating treated legacy deferred balance as if it were part of the fresh liquidation payout decision.
 - Updated that invariant to gate only the fresh liquidation payout (`immediatePayoutUsdc + freshDeferredPayoutUsdc`), while allowing untouched legacy deferred payout to remain alongside an immediate fresh payout.
 - Verified green: `forge test --match-path test/perps/invariant/PerpDeferredPayoutInvariant.t.sol`.
+
+## Canonical Settlement / Carry Hook Refactor (Apr 11 2026)
+
+- [x] Make close execution consume the planner's canonical carry-adjusted loss amount instead of recomputing a raw close loss
+- [x] Make liquidation use carry-aware equity for liquidation eligibility, bounty capping, and residual planning
+- [x] Add clearinghouse-triggered carry realization hooks before user deposit/withdraw balance mutations
+- [x] Add focused regressions for close carry parity, liquidation carry eligibility, and anti-evasion deposit/withdraw carry realization
+- [x] Update accounting and security docs for the canonical kernels and clearinghouse carry hooks
+
+Review:
+- Added `lossUsdc` to `CloseDelta` and changed `CfdEngineSettlementModule.executeClose()` to consume the planner's canonical carry-adjusted close loss instead of recomputing from raw `closeState.netSettlementUsdc`.
+- Changed liquidation planning to use `buildPositionRiskStateWithCarry(...)` and to feed carry-adjusted equity directly into `LiquidationAccountingLib`, so liquidation eligibility, keeper bounty capping, and residual math now share one carry-aware kernel.
+- Added `realizeCarryBeforeMarginChange(bytes32)` to the engine core interface and wired `MarginClearinghouse` deposit/withdraw paths through it so user balance mutations realize carry before changing the reachable-collateral basis.
+- Updated `README.md`, `SECURITY.md`, and `ACCOUNTING_SPEC.md` to document the canonical close/liquidation kernels and the clearinghouse carry hook behavior.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation|CloseExecution_UsesCarryAdjustedLossKernel|PlanLiquidation_PendingCarryCanTriggerLiquidation|PlanLiquidation_PositiveResidualAboveDeferredDoesNotUnderflow|PlanLiquidation_NegativeResidualFullyConsumesLegacyDeferredWithoutReducingBadDebt|PreviewLiquidation_PreservesLegacyDeferredOnPositivePhysicalResidual)"` and `forge test --match-path test/perps/MarginClearinghouse.t.sol`.
+- Full `forge build` still exceeded the 300s tool timeout in this workspace, so repository-wide verification remains incomplete.
+
+### Follow-up cleanup
+
+- Rewrote `OrderRouter._getQueuedPositionView()` to traverse the per-account pending-order queue instead of scanning `1..nextCommitId`, so close-intent validation is now bounded and account-local like liquidation cleanup.
+- Updated `_buildPostOpenRiskState()` to credit skew-reducing negative `tradeCostUsdc` into reachable collateral before the IMR check, removing the conservative rebate omission.
+- Added partial fee withdrawal support in `CfdEngine.withdrawFees(address,uint256)` while keeping the existing full-withdraw wrapper.
+- Updated `README.md`, `SECURITY.md`, and `ACCOUNTING_SPEC.md` to document bounded close projection, rebate-aware open validation, and partial fee withdrawal behavior.
+- Verified green: `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(WithdrawFees_AllowsPartialWithdrawal|WithdrawFees_RespectsSeniorCashReservation)"`, `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateral"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_CommitClose_UsesOnlyAccountLocalQueuedPositionProjection"`.
 - Added regression coverage in `test/perps/CfdEngine.t.sol` and `test/perps/CashPriorityLib.t.sol` for fee-withdrawal reservation, queue-head priority under partial liquidity, and the pure reservation math.
 - Verified green: `forge fmt --check src/perps/CfdEngine.sol src/perps/OrderRouter.sol src/perps/libraries/CashPriorityLib.sol src/perps/libraries/CfdEnginePlanLib.sol src/perps/README.md src/perps/ACCOUNTING_SPEC.md test/perps/CfdEngine.t.sol test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CashPriorityLib.t.sol`, `forge test --match-path test/perps/CfdEngine.t.sol --match-test "test_(ClaimDeferredPayout_HeadConsumesPartialLiquidityBeforeLaterClaims|WithdrawFees_RespectsSeniorCashReservation|ClaimDeferredPayout_AllowsPartialHeadClaimWhenLiquidityReturnsGradually|DeferredClearerBounty_Lifecycle|GetDeferredPayoutStatus_OnlyExposesHeadClaim)"`, and `forge test --match-path test/perps/OrderRouter.t.sol --match-test "test_ExecuteLiquidation_ForfeitsEscrowedOpenBountiesWithoutCreditingTraderSettlement"`.

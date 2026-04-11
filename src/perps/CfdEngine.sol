@@ -234,6 +234,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     error CfdEngine__DustPosition();
     error CfdEngine__MarkPriceStale();
     error CfdEngine__MarkPriceOutOfOrder();
+    error CfdEngine__NotClearinghouse();
     error CfdEngine__NotAccountOwner();
     error CfdEngine__NoOpenPosition();
     error CfdEngine__TimelockNotReady();
@@ -556,19 +557,31 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         engineMarkStalenessActivationTime = 0;
     }
 
-    /// @notice Withdraws accumulated execution fees from the vault to a recipient
+    /// @notice Withdraws accumulated execution fees from the vault to a recipient.
     function withdrawFees(
         address recipient
     ) external onlyOwner {
+        withdrawFees(recipient, accumulatedFeesUsdc);
+    }
+
+    /// @notice Withdraws up to `amountUsdc` of accumulated execution fees from the vault to a recipient.
+    function withdrawFees(
+        address recipient,
+        uint256 amountUsdc
+    ) public onlyOwner {
         uint256 fees = accumulatedFeesUsdc;
         if (fees == 0) {
             revert CfdEngine__NoFeesToWithdraw();
         }
-        if (!_canWithdrawProtocolFees(fees)) {
+        if (amountUsdc == 0) {
+            revert CfdEngine__NoFeesToWithdraw();
+        }
+        uint256 withdrawalUsdc = amountUsdc < fees ? amountUsdc : fees;
+        if (!_canWithdrawProtocolFees(withdrawalUsdc)) {
             revert CfdEngine__InsufficientVaultLiquidity();
         }
-        accumulatedFeesUsdc = 0;
-        vault.payOut(recipient, fees);
+        accumulatedFeesUsdc = fees - withdrawalUsdc;
+        vault.payOut(recipient, withdrawalUsdc);
         _assertPostSolvency();
     }
 
@@ -626,6 +639,28 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         pos.lastCarryTimestamp = uint64(block.timestamp);
 
         emit MarginAdded(accountId, amount);
+    }
+
+    /// @notice Realizes accrued carry before a user-level clearinghouse balance mutation changes the carry basis.
+    /// @dev Called only by the clearinghouse before user deposits and withdrawals.
+    function realizeCarryBeforeMarginChange(
+        bytes32 accountId
+    ) external nonReentrant {
+        if (msg.sender != address(clearinghouse)) {
+            revert CfdEngine__NotClearinghouse();
+        }
+
+        StoredPosition storage pos = _positions[accountId];
+        if (pos.size == 0) {
+            return;
+        }
+
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
+            revert CfdEngine__MarkPriceStale();
+        }
+
+        _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
     }
 
     /// @notice Claims deferred trader payout balance into the clearinghouse.
