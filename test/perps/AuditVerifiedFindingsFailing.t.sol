@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+// Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
+// They are intentionally not statements about the live carry model or current accounting semantics.
+
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -73,9 +76,13 @@ contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
         assertLt(bullLegacySpread, 0, "Bull side should owe legacy spread in the obsolete skewed-market model");
         assertGt(bearLegacySpread, 0, "Bear side should be owed legacy spread in the obsolete skewed-market model");
         assertLt(
-            int256(0), 0, "Legacy-spread solvency should include collectible receivables instead of liability-only clipping"
+            int256(0),
+            0,
+            "Legacy-spread solvency should include collectible receivables instead of liability-only clipping"
         );
-        assertGt(uint256(0), 0, "Legacy-spread withdrawal reserve should remain conservative and reserve only liabilities");
+        assertGt(
+            uint256(0), 0, "Legacy-spread withdrawal reserve should remain conservative and reserve only liabilities"
+        );
     }
 
 }

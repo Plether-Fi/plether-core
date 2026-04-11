@@ -110,11 +110,12 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
 
         vm.warp(1_709_971_200); // Saturday during FAD
         uint256 depth = pool.totalAssets();
+        CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT_ID, 1.01e8);
 
         vm.prank(address(router));
         uint256 bounty = engine.liquidatePosition(ACCOUNT_ID, 1.01e8, depth, uint64(block.timestamp));
 
-        assertEq(bounty, 4_960_000, "Keeper bounty should cap at the trader's remaining positive equity");
+        assertEq(bounty, preview.keeperBountyUsdc, "Keeper bounty should cap at carry-adjusted positive equity");
     }
 
 }

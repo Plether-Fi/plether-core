@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+// Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
+// They are intentionally not statements about the live carry model or current accounting semantics.
+
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEngineLens} from "../../src/perps/CfdEngineLens.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
@@ -434,9 +437,10 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice, , CfdTypes.Side bullSide, ,) =
+        (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice,, CfdTypes.Side bullSide,,) =
             engine.positions(bullId);
-        (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice, , CfdTypes.Side bearSide, ,) = engine.positions(bearId);
+        (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice,, CfdTypes.Side bearSide,,) =
+            engine.positions(bearId);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: bullSize,
@@ -461,9 +465,7 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
         int256 bullLegacySpread = 0;
         int256 bearLegacySpread = 0;
-        assertLt(
-            bullLegacySpread, -int256(bullMargin), "Setup must make bull legacy-spread debt exceed backing margin"
-        );
+        assertLt(bullLegacySpread, -int256(bullMargin), "Setup must make bull legacy-spread debt exceed backing margin");
         assertGt(bearLegacySpread, 0, "Setup must leave the bear side owed legacy spread");
 
         int256 cappedLegacySpread = bearLegacySpread;

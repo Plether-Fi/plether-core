@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.33;
 
+// Audit-history file: tests prefixed with `obsolete_` preserve superseded findings for context only.
+// They are intentionally not statements about the live carry model or current accounting semantics.
+
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
