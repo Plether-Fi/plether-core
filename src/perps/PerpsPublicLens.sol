@@ -14,7 +14,10 @@ import {PerpsViewTypes} from "./interfaces/PerpsViewTypes.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Compact read facade that maps the current perps system onto the simplified product surface.
+/// @title PerpsPublicLens
+/// @notice Compact read facade for the simplified product-facing perps surface.
+/// @dev This intentionally presents a narrower, easier-to-consume view than the rich engine and
+///      accounting lenses used by tests, audits, and operator tooling.
 contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     ICfdEngineAccountLens public immutable ACCOUNT_LENS;
@@ -22,6 +25,10 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     IOrderRouterAccounting public immutable ORDER_ROUTER;
     HousePool public immutable HOUSE_POOL;
 
+    /// @param accountLens_ Rich account lens used to derive compact trader views.
+    /// @param engine_ Core engine used for runtime status and risk params.
+    /// @param orderRouter_ Router accounting surface used for pending-order summaries.
+    /// @param housePool_ HousePool used for tranche and protocol status views.
     constructor(
         address accountLens_,
         address engine_,
@@ -34,6 +41,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         HOUSE_POOL = HousePool(housePool_);
     }
 
+    /// @notice Returns the compact trader account summary for a canonical perps account.
     function getTraderAccount(
         bytes32 accountId
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
@@ -52,12 +60,16 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.liquidatable = position.liquidatable;
     }
 
+    /// @notice Returns the compact current-position view for an account.
     function getPosition(
         bytes32 accountId
     ) external view returns (PerpsViewTypes.PositionView memory viewData) {
         return _getPositionView(accountId);
     }
 
+    /// @notice Returns all currently pending orders for an account.
+    /// @dev The public surface only returns pending orders because executed and failed orders are not
+    ///      part of the compact product-facing queue summary.
     function getPendingOrders(
         bytes32 accountId
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending) {
@@ -77,20 +89,24 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
+    /// @notice Returns whether the account's current live position is liquidatable.
     function isLiquidatable(
         bytes32 accountId
     ) external view returns (bool) {
         return _getPositionView(accountId).liquidatable;
     }
 
+    /// @notice Returns the compact senior tranche view.
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.seniorVault(), true);
     }
 
+    /// @notice Returns the compact junior tranche view.
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.juniorVault(), false);
     }
 
+    /// @notice Returns high-level LP status flags.
     function getLpStatus() external view returns (PerpsViewTypes.LpStatusView memory viewData) {
         viewData.tradingActive = HOUSE_POOL.isTradingActive();
         viewData.withdrawalLive = HOUSE_POOL.isWithdrawalLive();
@@ -100,6 +116,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.oracleFresh = HOUSE_POOL.getVaultLiquidityView().markFresh;
     }
 
+    /// @notice Returns high-level protocol runtime status flags.
     function getProtocolStatus() external view returns (PerpsViewTypes.ProtocolStatusView memory viewData) {
         return _getProtocolStatusView();
     }

@@ -98,7 +98,7 @@ contract PerpHandler is Test {
         address trader = traders[traderIdx % 3];
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -120,7 +120,7 @@ contract PerpHandler is Test {
         address trader = traders[traderIdx % 3];
         bytes32 accountId = bytes32(uint256(uint160(trader)));
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -212,11 +212,12 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 fees = engine.accumulatedFeesUsdc();
         effectiveAssets = effectiveAssets > fees ? effectiveAssets - fees : 0;
 
-        int256 cappedFunding = int256(0);
-        if (cappedFunding < 0) {
-            effectiveAssets += uint256(-cappedFunding);
-        } else if (cappedFunding > 0) {
-            effectiveAssets = effectiveAssets > uint256(cappedFunding) ? effectiveAssets - uint256(cappedFunding) : 0;
+        int256 cappedLegacySpread = int256(0);
+        if (cappedLegacySpread < 0) {
+            effectiveAssets += uint256(-cappedLegacySpread);
+        } else if (cappedLegacySpread > 0) {
+            effectiveAssets =
+                effectiveAssets > uint256(cappedLegacySpread) ? effectiveAssets - uint256(cappedLegacySpread) : 0;
         }
 
         if (!engine.degradedMode()) {
@@ -248,10 +249,10 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_SymmetricalFunding() public view {
-        int256 bullIdx = _sideFundingIndex(CfdTypes.Side.BULL);
-        int256 bearIdx = _sideFundingIndex(CfdTypes.Side.BEAR);
-        assertEq(bullIdx + bearIdx, 0, "Funding must be zero-sum");
+    function invariant_NoLegacySideIndexState() public view {
+        int256 bullIdx = _legacySideIndexZero(CfdTypes.Side.BULL);
+        int256 bearIdx = _legacySideIndexZero(CfdTypes.Side.BEAR);
+        assertEq(bullIdx + bearIdx, 0, "Legacy side indices must stay zeroed");
     }
 
     function invariant_NoNegativePrincipal() public {
@@ -369,7 +370,7 @@ contract PerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
             if (size > 0) {
                 if (side == CfdTypes.Side.BULL) {
                     sumBullSize += size;
@@ -390,7 +391,7 @@ contract PerpInvariantTest is BasePerpTest {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView =
                 engineAccountLens.getAccountLedgerSnapshot(accountId);
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(accountId);
 
             assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
             if (size == 0) {
@@ -428,7 +429,7 @@ contract PerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size,, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(accountId);
             if (size > 0) {
                 if (side == CfdTypes.Side.BULL) {
                     sumBullNotional += size * entryPrice;
@@ -446,7 +447,7 @@ contract PerpInvariantTest is BasePerpTest {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             bytes32 accountId = bytes32(uint256(uint160(trader)));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             IOrderRouterAccounting.AccountEscrowView memory escrow = router.getAccountEscrow(accountId);
             uint256 locked = clearinghouse.lockedMarginUsdc(accountId);
 
@@ -468,7 +469,7 @@ contract PerpInvariantTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             bytes32 accountId = bytes32(uint256(uint160(handler.traders(i))));
-            (uint256 size, uint256 margin,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -796,7 +797,7 @@ contract AdversarialPerpHandler is Test {
     ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -838,7 +839,7 @@ contract AdversarialPerpHandler is Test {
         }
 
         CfdTypes.Side side = CfdTypes.Side.BULL;
-        (uint256 size,,,,, CfdTypes.Side existingSide,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side existingSide,,) = engine.positions(accountId);
         if (size > 0) {
             side = existingSide;
         }
@@ -926,7 +927,7 @@ contract AdversarialPerpHandler is Test {
     ) external {
         address actor = actors[actorIdx % actors.length];
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }

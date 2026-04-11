@@ -62,7 +62,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 physicalReachableCollateralUsdc;
         uint256 nettableDeferredPayoutUsdc;
         int256 unrealizedPnlUsdc;
-        int256 pendingFundingUsdc;
         int256 netEquityUsdc;
         uint256 maxProfitUsdc;
         bool liquidatable;
@@ -74,8 +73,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 withdrawalReservedUsdc;
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
-        int256 cappedFundingPnlUsdc;
-        uint256 liabilityOnlyFundingPnlUsdc;
         uint256 totalDeferredPayoutUsdc;
         uint256 totalDeferredClearerBountyUsdc;
         bool degradedMode;
@@ -88,7 +85,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 executionPrice;
         uint256 sizeDelta;
         int256 realizedPnlUsdc;
-        int256 fundingUsdc;
         int256 vpiDeltaUsdc;
         uint256 vpiUsdc;
         uint256 executionFeeUsdc;
@@ -105,7 +101,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
-        int256 solvencyFundingPnlUsdc;
     }
 
     struct LiquidationPreview {
@@ -113,7 +108,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 oraclePrice;
         int256 equityUsdc;
         int256 pnlUsdc;
-        int256 fundingUsdc;
         uint256 reachableCollateralUsdc;
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
@@ -128,7 +122,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
-        int256 solvencyFundingPnlUsdc;
     }
 
     struct DeferredPayoutStatus {
@@ -144,8 +137,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 entryNotional;
         // Cached aggregate of engine economic position margins for this side; not a custody bucket.
         uint256 totalMargin;
-        int256 fundingIndex;
-        int256 entryFunding;
     }
 
     struct VaultCashInflow {
@@ -158,7 +149,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         uint256 size;
         uint256 entryPrice;
         uint256 maxProfitUsdc;
-        int256 entryFundingIndex;
         CfdTypes.Side side;
         uint64 lastUpdateTime;
         uint64 lastCarryTimestamp;
@@ -184,12 +174,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     uint256 public accumulatedFeesUsdc;
     uint256 public accumulatedBadDebtUsdc;
     bool public degradedMode;
-
-    // ==========================================
-    // FUNDING ACCUMULATORS
-    // ==========================================
-
-    uint64 public lastFundingTime;
 
     CfdTypes.RiskParams public riskParams;
     mapping(bytes32 => StoredPosition) internal _positions;
@@ -355,7 +339,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     /// @param _usdc USDC token used as margin and settlement currency
     /// @param _clearinghouse Margin clearinghouse that custodies trader balances
     /// @param _capPrice Maximum oracle price — positions are clamped here (also determines BULL max profit)
-    /// @param _riskParams Initial risk parameters (margin requirements, funding curve, bounty config)
+    /// @param _riskParams Initial risk parameters (margin requirements, carry rate, bounty config)
     constructor(
         address _usdc,
         address _clearinghouse,
@@ -369,7 +353,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
         riskParams = _riskParams;
-        lastFundingTime = uint64(block.timestamp);
     }
 
     /// @notice One-time setter for the HousePool vault backing all positions
@@ -398,7 +381,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         orderRouter = _router;
     }
 
-    /// @notice Proposes new risk parameters (margin BPS, funding curve, bounty config) subject to timelock
+    /// @notice Proposes new risk parameters (margin BPS, carry rate, bounty config) subject to timelock.
     function proposeRiskParams(
         CfdTypes.RiskParams memory _riskParams
     ) external onlyOwner {
@@ -408,7 +391,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit RiskParamsProposed(riskParamsActivationTime);
     }
 
-    /// @notice Applies proposed risk parameters after timelock expires; settles funding first
+    /// @notice Applies proposed risk parameters after timelock expiry.
     function finalizeRiskParams() external onlyOwner {
         _requireTimelockReady(riskParamsActivationTime);
         riskParams = pendingRiskParams;
@@ -541,6 +524,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         fadRunwayActivationTime = 0;
     }
 
+    /// @notice Proposes a new mark staleness limit used by engine-side withdraw and close-bounty guards.
     function proposeEngineMarkStalenessLimit(
         uint256 newStaleness
     ) external onlyOwner {
@@ -552,6 +536,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit EngineMarkStalenessLimitProposed(newStaleness, engineMarkStalenessActivationTime);
     }
 
+    /// @notice Finalizes the pending engine mark staleness limit after the timelock expires.
     function finalizeEngineMarkStalenessLimit() external onlyOwner {
         if (engineMarkStalenessActivationTime == 0) {
             revert CfdEngine__NoProposal();
@@ -565,6 +550,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit EngineMarkStalenessLimitUpdated(engineMarkStalenessLimit);
     }
 
+    /// @notice Cancels a pending engine mark staleness limit proposal.
     function cancelEngineMarkStalenessLimitProposal() external onlyOwner {
         pendingEngineMarkStalenessLimit = 0;
         engineMarkStalenessActivationTime = 0;
@@ -599,7 +585,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already synced funding and funded the vault.
+    /// @notice Books router-delivered protocol-owned inflow as protocol fees after the router has already funded the vault.
     function recordRouterProtocolFee(
         uint256 amountUsdc
     ) external onlyRouter {
@@ -642,9 +628,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         emit MarginAdded(accountId, amount);
     }
 
-    /// @notice Claims a previously deferred profitable close payout into the clearinghouse.
-    /// @dev The payout remains subject to current vault cash availability. Funds are credited to the
-    ///      clearinghouse first, so traders access them through the normal account-balance path.
+    /// @notice Claims deferred trader payout balance into the clearinghouse.
+    /// @dev The claim can be partial if current vault cash is insufficient. Funds are credited to the
+    ///      clearinghouse first, so beneficiaries access them through the normal account-balance path.
     function claimDeferredPayout(
         bytes32 accountId
     ) external nonReentrant {
@@ -988,15 +974,13 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             uint256 margin,
             uint256 entryPrice,
             uint256 maxProfitUsdc,
-            int256 entryFundingIndex,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         )
     {
         CfdTypes.Position memory pos = _loadPosition(accountId);
-        return
-            (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, 0, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
+        return (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued);
     }
 
     function getPositionSize(
@@ -1016,7 +1000,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ///         In bad-debt cases (equity < bounty), all remaining margin is seized by the vault.
     /// @param accountId Clearinghouse account that owns the position
     /// @param currentOraclePrice Pyth oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param vaultDepthUsdc HousePool total assets — used to scale funding rate
+    /// @param vaultDepthUsdc HousePool total assets used for post-op solvency checks and payout affordability
     /// @param publishTime Pyth publish timestamp, stored as lastMarkTime
     /// @return keeperBountyUsdc Bounty paid to the liquidation keeper (USDC, 6 decimals)
     function liquidatePosition(
@@ -1081,7 +1065,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snapshot.protocolFees = state.protocolFeesUsdc;
         snapshot.netPhysicalAssets = state.netPhysicalAssetsUsdc;
         snapshot.maxLiability = state.maxLiabilityUsdc;
-        snapshot.solvencyFunding = 0;
         snapshot.effectiveSolvencyAssets = state.effectiveAssetsUsdc;
     }
 
@@ -1433,7 +1416,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
     }
 
-    /// @notice Updates the cached mark price without settling funding or processing trades
+    /// @notice Updates the cached mark price without processing a trade or liquidation.
+    /// @dev This does not itself realize carry; carry realization happens on execution and margin-mutating paths.
     /// @param price Oracle price (8 decimals), clamped to CAP_PRICE
     /// @param publishTime Pyth publish timestamp
     function updateMarkPrice(

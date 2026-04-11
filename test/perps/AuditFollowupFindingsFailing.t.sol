@@ -205,7 +205,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
 }
 
-contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
+contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
     address bullTraderA = address(0xB011);
     address bullTraderB = address(0xB012);
@@ -228,7 +228,7 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         return 0;
     }
 
-    function obsolete_H2_GetFreeUsdcMustReserveAllPositiveFundingWithoutNettingAgainstGlobalMargin() public {
+    function obsolete_H2_GetFreeUsdcMustReservePositiveLegacySpreadWithoutNettingAgainstGlobalMargin() public {
         _fundJunior(address(this), 1_000_000e6);
 
         _fundTrader(bullTraderA, 15_000e6);
@@ -251,44 +251,44 @@ contract AuditFollowupFindingsFailing_FundingReserve is BasePerpTest {
         CfdTypes.Position memory bullPosB;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdA);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullIdA);
             bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullIdB);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullIdB);
             bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearId);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
         int256 bullFundingA = 0;
         int256 bullFundingB = 0;
-        int256 bearFunding = 0;
+        int256 bearLegacySpread = 0;
         assertLt(
             bullFundingA,
             -int256(bullPosA.margin),
-            "Large undercollateralized bull should owe more funding than its own margin"
+            "Large undercollateralized bull should owe more legacy spread than its own margin in the obsolete model"
         );
         assertGt(
             bullFundingA + bullFundingB,
             -int256(bullPosA.margin + bullPosB.margin),
             "Global bull margin should mask the single-account deficit"
         );
-        assertGt(bearFunding, 0, "Setup must make the bear side owed funding");
+        assertGt(bearLegacySpread, 0, "Setup must make the bear side owed legacy spread");
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
-        uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearFunding)
-            ? bal - maxLiability - pendingFees - uint256(bearFunding)
+        uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearLegacySpread)
+            ? bal - maxLiability - pendingFees - uint256(bearLegacySpread)
             : 0;
 
         assertEq(
             pool.getFreeUSDC(),
             expectedFree,
-            "Free USDC should reserve all positive funding liabilities without netting them against global margin"
+            "Free USDC should reserve all positive legacy-spread liabilities without netting them against global margin"
         );
     }
 

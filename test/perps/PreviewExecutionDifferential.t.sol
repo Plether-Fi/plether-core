@@ -36,7 +36,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
         assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
         assertEq(
@@ -90,7 +90,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Illiquid close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Illiquid close preview remaining margin should match live execution"
@@ -117,7 +117,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         );
     }
 
-    function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveFundingAccrual() public {
+    function test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveCarryAccrual() public {
         address bullTrader = address(0xC103);
         address bearTrader = address(0xC104);
         bytes32 bullId = bytes32(uint256(uint160(bullTrader)));
@@ -140,7 +140,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
 
         _close(bearId, CfdTypes.Side.BEAR, 50_000e18, 1e8);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(bearId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bearId);
         assertEq(sizeAfter, preview.remainingSize, "Partial close preview remaining size should match live execution");
         assertEq(
             marginAfter, preview.remainingMargin, "Partial close preview remaining margin should match live execution"
@@ -191,7 +191,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, preview.remainingSize, "Queued-margin partial close size should match preview");
         assertEq(marginAfter, preview.remainingMargin, "Queued-margin partial close margin should match preview");
         assertEq(
@@ -226,7 +226,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Liquidation should fully clear the position");
         assertEq(
             (usdc.balanceOf(KEEPER) - keeperWalletBefore)
@@ -298,7 +298,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
         assertEq(
             (usdc.balanceOf(KEEPER) - keeperWalletBefore)

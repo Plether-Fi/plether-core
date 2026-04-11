@@ -70,7 +70,7 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(accountId, empty);
         vm.stopPrank();
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
@@ -110,7 +110,7 @@ contract LiquidationTest is BasePerpTest {
         uint256 bounty = usdc.balanceOf(keeper) - keeperBalBefore;
         assertTrue(bounty > 0, "Keeper should get bounty");
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should be wiped");
 
         // Ethical: user should retain equity - bounty
@@ -149,7 +149,7 @@ contract LiquidationTest is BasePerpTest {
         _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (, uint256 posMargin,,,,,,) = engine.positions(accountId);
+        (, uint256 posMargin,,,,,) = engine.positions(accountId);
 
         // BULL loses when price rises. At $1.06:
         // PnL = 4000 * $0.06 = -$240. equity = posMargin - $240 < 0 → liquidatable.
@@ -169,8 +169,8 @@ contract LiquidationTest is BasePerpTest {
         assertGe(usdc.balanceOf(address(pool)), poolBefore, "Vault never pays more than it seizes");
     }
 
-    function obsolete_LiquidationEquity_IncludesFunding() public {
-        // Enable funding (setUp has baseApy=0)
+    function obsolete_LiquidationEquity_IncludesLegacySpread() public {
+        // Enable nonzero carry (setUp has baseCarryBps=0)
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -188,7 +188,7 @@ contract LiquidationTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON);
 
-        // Alice opens a lone BULL — will accumulate negative funding
+        // Alice opens a lone BULL — will accumulate legacy negative spread
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
         bytes[] memory empty;
@@ -197,21 +197,21 @@ contract LiquidationTest is BasePerpTest {
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
 
-        // Without funding, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
+        // Without legacy-spread, $3k margin at same price is solvent (MMR = 1% of $100k = $1k)
         vm.expectRevert(CfdEngine.CfdEngine__PositionIsSolvent.selector);
         router.executeLiquidation(accountId, empty);
 
-        // Warp 180 days — massive negative funding drains equity below MMR
+        // Warp 180 days — massive negative carry drains equity below MMR
         vm.warp(WEDNESDAY_NOON + 180 days);
 
-        // Now liquidatable due to funding erosion (no price change needed)
+        // Now liquidatable due to carry erosion (no price change needed)
         uint256 keeperBal = usdc.balanceOf(keeper);
         vm.prank(keeper);
         router.executeLiquidation(accountId, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
-        assertEq(size, 0, "Position liquidated by funding drain alone");
-        // Funding drain pushes equity negative → bounty capped at remaining margin
+        (uint256 size,,,,,,) = engine.positions(accountId);
+        assertEq(size, 0, "Position liquidated by carry drain alone");
+        // Carry drain pushes equity negative -> bounty capped at remaining margin
         assertGe(usdc.balanceOf(keeper), keeperBal, "Keeper gets bounty from remaining margin");
     }
 
@@ -225,7 +225,7 @@ contract LiquidationTest is BasePerpTest {
         _withdrawFreeUsdc(alice, 0);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (, uint256 posMargin,,,,,,) = engine.positions(accountId);
+        (, uint256 posMargin,,,,,) = engine.positions(accountId);
 
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 chBefore = clearinghouse.balanceUsdc(accountId);

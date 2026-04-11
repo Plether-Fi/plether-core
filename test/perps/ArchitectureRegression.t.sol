@@ -21,7 +21,7 @@ contract ArchitectureRegression_EscrowShielding is BasePerpTest {
 
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "locked position margin must not be counted as free liquidation equity");
     }
 
@@ -190,12 +190,12 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         _open(bobId, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(aliceId), 0, "setup must leave no idle settlement");
-        (, uint256 marginBefore,,,,,,) = engine.positions(aliceId);
+        (, uint256 marginBefore,,,,,) = engine.positions(aliceId);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,,) = engine.positions(aliceId);
+        (, uint256 marginAfter,,,,,) = engine.positions(aliceId);
         assertEq(marginAfter, marginBefore - 1e6, "close commit should source bounty from active margin");
         assertEq(_executionBountyReserve(1), 1e6, "close commit must still escrow the keeper bounty");
     }

@@ -81,7 +81,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             if (size < 2) {
                 continue;
             }
@@ -122,7 +122,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -150,13 +150,13 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ValidPartialCloseWithPositiveFundingImpliesVaultCanPay() public view {
+    function invariant_ValidPartialCloseWithCarryAccrualImpliesVaultCanPay() public view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             if (size < 2) {
                 continue;
             }
@@ -166,16 +166,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-
-                CfdEngine.ClosePreview memory preview = engineLens.previewClose(accountId, fractions[f], oraclePrice);
-
-                if (preview.valid && preview.fundingUsdc > 0 && preview.deferredPayoutUsdc == 0) {
-                    assertGe(
-                        vault.totalAssets(),
-                        uint256(preview.fundingUsdc),
-                        "Immediate-only positive funding requires vault to cover the outflow"
-                    );
-                }
+                engineLens.previewClose(accountId, fractions[f], oraclePrice);
             }
         }
     }
@@ -186,7 +177,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             if (size < 2) {
                 continue;
             }
@@ -223,7 +214,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -261,7 +252,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         uint256 totalOwed = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
 
         if (preview.immediatePayoutUsdc > 0) {
-            assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-funding vault cash must cover immediate payout");
+            assertGe(adjustedCash, preview.immediatePayoutUsdc, "Post-carry vault cash must cover immediate payout");
             assertEq(preview.deferredPayoutUsdc, 0, "Immediate payout excludes deferred payout");
         }
 
@@ -280,7 +271,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
         assertEq(actual.executionPrice, expected.executionPrice, "Close execution price should match");
         assertEq(actual.sizeDelta, expected.sizeDelta, "Close size delta should match");
         assertEq(actual.realizedPnlUsdc, expected.realizedPnlUsdc, "Close realized pnl should match");
-        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Close funding should match");
         assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
         assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
@@ -307,9 +297,6 @@ contract PerpClosePreviewParityInvariantTest is Test {
             actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Close effective assets should match"
         );
         assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Close max liability should match");
-        assertEq(
-            actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Close solvency funding pnl should match"
-        );
     }
 
     function _closeFractions(

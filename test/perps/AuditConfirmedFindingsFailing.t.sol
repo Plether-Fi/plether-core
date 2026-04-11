@@ -396,7 +396,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
 }
 
-contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
+contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
     address bullTrader = address(0xB011);
     address bearTrader = address(0xBEA2);
@@ -418,7 +418,7 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         return 0;
     }
 
-    function obsolete_C2_GetFreeUsdcMustReserveCappedFundingLiability() public {
+    function obsolete_C2_GetFreeUsdcMustReserveCappedLegacySpreadLiability() public {
         _fundJunior(address(this), 1_000_000e6);
 
         _fundTrader(bullTrader, 20_000e6);
@@ -434,20 +434,9 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        (
-            uint256 bullSize,
-            uint256 bullMargin,
-            uint256 bullEntryPrice,,
-            int256 bullEntryFunding,
-            CfdTypes.Side bullSide,,
-        ) = engine.positions(bullId);
-        (
-            uint256 bearSize,
-            uint256 bearMargin,
-            uint256 bearEntryPrice,,
-            int256 bearEntryFunding,
-            CfdTypes.Side bearSide,,
-        ) = engine.positions(bearId);
+        (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice, , CfdTypes.Side bullSide, ,) =
+            engine.positions(bullId);
+        (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice, , CfdTypes.Side bearSide, ,) = engine.positions(bearId);
 
         CfdTypes.Position memory bullPos = CfdTypes.Position({
             size: bullSize,
@@ -470,24 +459,26 @@ contract AuditConfirmedFindingsFailing_FundingReserve is BasePerpTest {
             vpiAccrued: 0
         });
 
-        int256 bullFunding = 0;
-        int256 bearFunding = 0;
-        assertLt(bullFunding, -int256(bullMargin), "Setup must make bull funding debt exceed backing margin");
-        assertGt(bearFunding, 0, "Setup must leave the bear side owed funding");
+        int256 bullLegacySpread = 0;
+        int256 bearLegacySpread = 0;
+        assertLt(
+            bullLegacySpread, -int256(bullMargin), "Setup must make bull legacy-spread debt exceed backing margin"
+        );
+        assertGt(bearLegacySpread, 0, "Setup must leave the bear side owed legacy spread");
 
-        int256 cappedFunding = bearFunding;
-        assertGt(cappedFunding, 0, "Positive funding liabilities should be fully reserved");
+        int256 cappedLegacySpread = bearLegacySpread;
+        assertGt(cappedLegacySpread, 0, "Positive legacy-spread liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
         uint256 pendingFees = engine.accumulatedFeesUsdc();
-        uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedFunding);
+        uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedLegacySpread);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;
 
         assertEq(
             pool.getFreeUSDC(),
             expectedFree,
-            "Free USDC should reserve positive funding liabilities without netting against uncollectible debt"
+            "Free USDC should reserve positive legacy-spread liabilities without netting against uncollectible debt"
         );
     }
 
@@ -583,7 +574,7 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
 
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,,) = engine.positions(bullId);
+        (uint256 bullSize,,,,,,) = engine.positions(bullId);
         assertEq(bullSize, 200_000e18, "Open-path skew cap should use the intended post-trade skew");
     }
 

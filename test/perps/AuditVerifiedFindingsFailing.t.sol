@@ -25,7 +25,7 @@ contract CooldownBypassReceiver {
 
 }
 
-contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
+contract AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency is BasePerpTest {
 
     address bullTrader = address(0xCA01);
     address bearTrader = address(0xDA02);
@@ -43,7 +43,7 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         });
     }
 
-    function obsolete_F1_CappedFundingShouldNetCollectibleReceivablesAgainstLiabilities() public {
+    function obsolete_F1_CappedLegacySpreadShouldNetCollectibleReceivablesAgainstLiabilities() public {
         _fundTrader(bullTrader, 300_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
@@ -60,22 +60,22 @@ contract AuditVerifiedFindingsFailing_F1_FundingSolvency is BasePerpTest {
         CfdTypes.Position memory bullPos;
         CfdTypes.Position memory bearPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bullId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullId);
             bullPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,,, CfdTypes.Side side,,) = engine.positions(bearId);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearId);
             bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
-        int256 bullFunding = 0;
-        int256 bearFunding = 0;
-        assertLt(bullFunding, 0, "Bull side should owe funding in the skewed market");
-        assertGt(bearFunding, 0, "Bear side should be owed funding in the skewed market");
+        int256 bullLegacySpread = 0;
+        int256 bearLegacySpread = 0;
+        assertLt(bullLegacySpread, 0, "Bull side should owe legacy spread in the obsolete skewed-market model");
+        assertGt(bearLegacySpread, 0, "Bear side should be owed legacy spread in the obsolete skewed-market model");
         assertLt(
-            int256(0), 0, "Solvency funding should include collectible receivables instead of liability-only clipping"
+            int256(0), 0, "Legacy-spread solvency should include collectible receivables instead of liability-only clipping"
         );
-        assertGt(uint256(0), 0, "Withdrawal funding should remain conservative and reserve only liabilities");
+        assertGt(uint256(0), 0, "Legacy-spread withdrawal reserve should remain conservative and reserve only liabilities");
     }
 
 }
@@ -138,7 +138,7 @@ contract AuditVerifiedFindingsFailing_F2_SkewDoubleCount is BasePerpTest {
 
         _open(bullId, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,,) = engine.positions(bullId);
+        (uint256 bullSize,,,,,,) = engine.positions(bullId);
         assertEq(bullSize, 200_000e18, "Skew cap should evaluate the real post-trade open interest");
     }
 

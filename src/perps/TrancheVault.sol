@@ -78,11 +78,13 @@ contract TrancheVault is ERC4626 {
         super._update(from, to, amount);
     }
 
+    /// @notice Returns the tranche assets from the pending post-reconcile HousePool state.
     function totalAssets() public view override returns (uint256) {
         (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc,,) = POOL.getPendingTrancheState();
         return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
     }
 
+    /// @notice Deposits assets into the tranche after reconciling pool accounting and lifecycle gates.
     function deposit(
         uint256 assets,
         address receiver
@@ -93,6 +95,7 @@ contract TrancheVault is ERC4626 {
         return super.deposit(assets, receiver);
     }
 
+    /// @notice Mints tranche shares after reconciling pool accounting and lifecycle gates.
     function mint(
         uint256 shares,
         address receiver
@@ -103,6 +106,7 @@ contract TrancheVault is ERC4626 {
         return super.mint(shares, receiver);
     }
 
+    /// @notice Returns the current max deposit if lifecycle, freshness, and impairment gates allow deposits.
     function maxDeposit(
         address receiver
     ) public view override returns (uint256) {
@@ -112,6 +116,7 @@ contract TrancheVault is ERC4626 {
         return super.maxDeposit(receiver);
     }
 
+    /// @notice Returns the current max mint if lifecycle, freshness, and impairment gates allow deposits.
     function maxMint(
         address receiver
     ) public view override returns (uint256) {
@@ -121,6 +126,7 @@ contract TrancheVault is ERC4626 {
         return super.maxMint(receiver);
     }
 
+    /// @notice Withdraws tranche assets after reconciling pool accounting.
     function withdraw(
         uint256 assets,
         address receiver,
@@ -130,6 +136,7 @@ contract TrancheVault is ERC4626 {
         return super.withdraw(assets, receiver, _owner);
     }
 
+    /// @notice Redeems tranche shares after reconciling pool accounting.
     function redeem(
         uint256 shares,
         address receiver,
@@ -139,6 +146,7 @@ contract TrancheVault is ERC4626 {
         return super.redeem(shares, receiver, _owner);
     }
 
+    /// @notice Returns the withdrawable asset amount after cooldown and pool-level withdrawal gates.
     function maxWithdraw(
         address _owner
     ) public view override returns (uint256) {
@@ -155,6 +163,7 @@ contract TrancheVault is ERC4626 {
         return ownerAssets < poolMax ? ownerAssets : poolMax;
     }
 
+    /// @notice Returns the redeemable share amount after cooldown and pool-level withdrawal gates.
     function maxRedeem(
         address _owner
     ) public view override returns (uint256) {

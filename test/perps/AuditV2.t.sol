@@ -235,7 +235,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         // Open position directly via engine (bypass router oracle timing)
         _open(aliceId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should be open");
 
         // Warp to Saturday (oracle frozen per _isOracleFrozen: dayOfWeek==6)
@@ -253,7 +253,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         updateData[0] = "";
         router.executeOrder{value: 0.01 ether}(1, updateData);
 
-        (size,,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "C-03: close orders must execute during oracle freeze");
     }
 
@@ -476,7 +476,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         router.executeOrderBatch{value: 0.01 ether}(orderId, priceData);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
 
         // With enough gas, the order executes fine. The vulnerability is that
         // the same code path with insufficient gas silently cancels instead of

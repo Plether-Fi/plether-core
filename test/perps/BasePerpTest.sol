@@ -215,7 +215,7 @@ abstract contract BasePerpTest is Test {
         return address(this);
     }
 
-    // --- Funding helpers ---
+    // --- Legacy side-index placeholder helpers ---
 
     function _fundJunior(
         address lp,
@@ -350,7 +350,7 @@ abstract contract BasePerpTest is Test {
     ) internal view returns (CloseParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize, observed.remainingMargin,,,,,,) = engine.positions(accountId);
+        (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
@@ -399,7 +399,6 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.executionPrice, expected.executionPrice, "Close execution price should match");
         assertEq(actual.sizeDelta, expected.sizeDelta, "Close size delta should match");
         assertEq(actual.realizedPnlUsdc, expected.realizedPnlUsdc, "Close realized pnl should match");
-        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Close funding should match");
         assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
         assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
         assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
@@ -426,9 +425,6 @@ abstract contract BasePerpTest is Test {
             actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Close effective assets should match"
         );
         assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Close max liability should match");
-        assertEq(
-            actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Close solvency funding pnl should match"
-        );
     }
 
     function _captureLiquidationParitySnapshot(
@@ -449,7 +445,7 @@ abstract contract BasePerpTest is Test {
     ) internal view returns (LiquidationParityObserved memory observed) {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        (observed.remainingSize,,,,,,,) = engine.positions(accountId);
+        (observed.remainingSize,,,,,,) = engine.positions(accountId);
         uint256 settlementAfter = clearinghouse.balanceUsdc(accountId);
         observed.immediatePayoutUsdc =
             settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
@@ -517,7 +513,6 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
-        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Liquidation funding should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
@@ -540,7 +535,6 @@ abstract contract BasePerpTest is Test {
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
         assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
         assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
-        assertEq(actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Solvency funding pnl should match");
     }
 
     function _observeWithdrawParity(
@@ -611,14 +605,7 @@ abstract contract BasePerpTest is Test {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngine.SideState memory state) {
-        (
-            state.maxProfitUsdc,
-            state.openInterest,
-            state.entryNotional,
-            state.totalMargin,
-            state.fundingIndex,
-            state.entryFunding
-        ) = engine.sides(uint8(side));
+        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engine.sides(uint8(side));
     }
 
     function _maxLiability() internal view returns (uint256) {
@@ -686,14 +673,14 @@ abstract contract BasePerpTest is Test {
         return _sideState(side).totalMargin;
     }
 
-    function _sideFundingIndex(
+    function _legacySideIndexZero(
         CfdTypes.Side side
     ) internal view returns (int256) {
         side;
         return 0;
     }
 
-    function _sideEntryFunding(
+    function _legacySideEntryIndexZero(
         CfdTypes.Side side
     ) internal view returns (int256) {
         side;

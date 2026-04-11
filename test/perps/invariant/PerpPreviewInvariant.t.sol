@@ -76,7 +76,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size != 0) {
                 continue;
             }
@@ -107,7 +107,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -168,7 +168,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -194,7 +194,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 assertFalse(alreadyDegraded, "Liquidation preview trigger flag must be transition-only");
             }
 
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -219,7 +219,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 "Liquidation preview post-op degraded flag mismatch"
             );
 
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -299,7 +299,6 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
         assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
         assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
-        assertEq(actual.fundingUsdc, expected.fundingUsdc, "Liquidation funding should match");
         assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
         assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
@@ -322,7 +321,6 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
         assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
         assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
-        assertEq(actual.solvencyFundingPnlUsdc, expected.solvencyFundingPnlUsdc, "Solvency funding pnl should match");
     }
 
 }

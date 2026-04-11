@@ -64,7 +64,7 @@ contract PerpFeeHandler is Test {
     ) external {
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         if (size > 0) {
             return;
         }
@@ -84,7 +84,7 @@ contract PerpFeeHandler is Test {
     ) external {
         address actor = actors[actorIndex % actors.length];
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }

@@ -55,7 +55,7 @@ contract AuditRemainingCoverageFindingsFailing_EscrowShielding is BasePerpTest {
         engine.liquidatePosition(accountId, 110_000_000, depth, uint64(block.timestamp));
         vm.stopPrank();
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
         assertEq(_executionBountyReserve(1), 1e6, "Queued execution bounty should remain in router custody");
         assertLt(
@@ -210,7 +210,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "A profitable close should complete even when profit payout must be deferred");
     }
 
@@ -250,7 +250,7 @@ contract AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees is BasePerp
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
             engine.deferredClearerBountyUsdc(keeper),
@@ -287,7 +287,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         vm.prank(keeper);
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still succeed even when bounty cash is unavailable");
         assertGt(engine.deferredClearerBountyUsdc(keeper), 0, "Liquidation bounty should defer instead of reverting");
     }
@@ -313,7 +313,7 @@ contract AuditRemainingCoverageFindingsFailing_TerminalLiveness is BasePerpTest 
         uint64 closeOrderId = router.nextExecuteId();
         router.executeOrder(closeOrderId, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Terminal close should succeed even with the bounded foreign queued orders");
         assertEq(router.nextExecuteId(), closeOrderId + 1, "Queue head should advance after terminal close");
     }

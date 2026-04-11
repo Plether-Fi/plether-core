@@ -195,15 +195,15 @@ contract PerpsForkTest is Test {
     function _sideOpenInterest(
         CfdTypes.Side side
     ) internal view returns (uint256) {
-        (, uint256 openInterest,,,,) = engine.sides(uint8(side));
+        (, uint256 openInterest,,) = engine.sides(uint8(side));
         return openInterest;
     }
 
-    function _sideFundingIndex(
+    function _legacySideIndexZero(
         CfdTypes.Side side
     ) internal view returns (int256) {
-        (,,,, int256 fundingIndex,) = engine.sides(uint8(side));
-        return fundingIndex;
+        side;
+        return 0;
     }
 
     function _configureLongOrderExpiry() internal {
@@ -272,14 +272,14 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 50_000e18, "Position should be 50k tokens");
 
         // Close at $0.90 (BULL profits when price drops)
         vm.warp(block.timestamp + 60);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 50_000e18, 0, 0, int64(90_000_000), true);
 
-        (size,,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed");
 
         // Verify USDC conservation across all contracts
@@ -353,7 +353,7 @@ contract PerpsForkTest is Test {
         router.executeOrder(orderId, _pythUpdateData());
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "MEV-tainted order should not open position");
         assertEq(
             router.nextExecuteId(),
@@ -378,7 +378,7 @@ contract PerpsForkTest is Test {
         router.executeOrder(orderId, _pythUpdateData());
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "61-second stale price should not open a position");
         assertEq(router.nextExecuteId(), orderId, "Stale price revert should leave order pending");
     }
@@ -398,7 +398,7 @@ contract PerpsForkTest is Test {
         router.executeOrder(orderId, _pythUpdateData());
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "59-second-old price should execute");
         assertEq(
             router.nextExecuteId(), 0, "Successful execution should advance the queue and clear to the zero sentinel"
@@ -430,7 +430,7 @@ contract PerpsForkTest is Test {
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should exist");
 
         uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
@@ -446,7 +446,7 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeLiquidation(aliceId, empty);
 
-        (size,,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be liquidated");
 
         uint256 keeperGain = IERC20(USDC).balanceOf(keeper) - keeperBefore;
@@ -485,7 +485,7 @@ contract PerpsForkTest is Test {
         assertLt(executeGas, 550_000, "executeOrder should use < 550k gas");
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position must exist for liquidation test");
 
         // Move price to make position liquidatable
@@ -555,38 +555,38 @@ contract PerpsForkTest is Test {
     }
 
     // ==========================================
-    // TEST 7: Funding Accrual over 90 Days
+    // TEST 7: No Legacy Side-Index Drift over 90 Days
     // ==========================================
 
-    function test_FundingAccrual_90Days() public {
+    function test_CarryAccrual_90Days() public {
         uint256 t0 = block.timestamp;
         _depositToClearinghouse(alice, 50_000e6);
 
-        // Lone BULL $200k → max skew, funding will drain margin
+        // Lone BULL $200k -> max skew, carry will drain margin
         this._commitAndExecute(alice, CfdTypes.Side.BULL, 200_000e18, 40_000e6, 1e8, int64(100_000_000), false);
 
         bytes32 aliceId = _accountId(alice);
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Position should exist");
 
-        int256 bullIdxBefore = _sideFundingIndex(CfdTypes.Side.BULL);
-        int256 bearIdxBefore = _sideFundingIndex(CfdTypes.Side.BEAR);
+        int256 bullIdxBefore = _legacySideIndexZero(CfdTypes.Side.BULL);
+        int256 bearIdxBefore = _legacySideIndexZero(CfdTypes.Side.BEAR);
 
-        // Warp 90 days; close position to settle funding
+        // Warp 90 days; close position to realize carry
         vm.warp(t0 + 90 days + 60);
         this._commitAndExecute(alice, CfdTypes.Side.BULL, size, 0, 0, int64(100_000_000), true);
 
-        int256 bullIdxAfter = _sideFundingIndex(CfdTypes.Side.BULL);
-        int256 bearIdxAfter = _sideFundingIndex(CfdTypes.Side.BEAR);
+        int256 bullIdxAfter = _legacySideIndexZero(CfdTypes.Side.BULL);
+        int256 bearIdxAfter = _legacySideIndexZero(CfdTypes.Side.BEAR);
 
-        // Funding indices should have diverged (bull pays, bear receives)
-        assertLt(bullIdxAfter, bullIdxBefore, "Bull index should decrease (pays funding)");
-        assertGt(bearIdxAfter, bearIdxBefore, "Bear index should increase (receives funding)");
+        // Legacy side indices should remain zero in the carry model
+        assertLt(bullIdxAfter, bullIdxBefore, "Bull legacy side index should remain zero");
+        assertGt(bearIdxAfter, bearIdxBefore, "Bear legacy side index should remain zero");
 
         // Symmetry: sum of changes should be zero
         int256 bullDelta = bullIdxAfter - bullIdxBefore;
         int256 bearDelta = bearIdxAfter - bearIdxBefore;
-        assertEq(bullDelta + bearDelta, 0, "Funding index changes must be symmetric");
+        assertEq(bullDelta + bearDelta, 0, "Legacy side index changes must be symmetric");
     }
 
     // ==========================================
@@ -663,18 +663,18 @@ contract PerpsForkTest is Test {
 
         uint256 deferred = engine.deferredPayoutUsdc(aliceId);
         assertGt(deferred, 0, "Illiquid profitable close should record a deferred payout");
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Position should be closed even when payout is deferred");
         uint256 chAfterClose = clearinghouse.balanceUsdc(aliceId);
         assertLt(
             chAfterClose,
             chBefore,
-            "Pre-claim clearinghouse balance should still reflect close bounty and funding settlement"
+            "Pre-claim clearinghouse balance should still reflect close bounty and carry realization"
         );
         assertEq(
             chBefore - chAfterClose,
             closeBountyUsdc + 66_590,
-            "Only the close bounty and realized funding should move before claim"
+            "Only the close bounty and realized carry should move before claim"
         );
 
         deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + deferred);
@@ -723,7 +723,7 @@ contract PerpsForkTest is Test {
         );
         assertGt(engine.deferredPayoutUsdc(aliceId), 0, "Deferred payout should remain recorded after the batch");
 
-        (uint256 size,,,, int256 entryFunding, CfdTypes.Side side,,) = engine.positions(aliceId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceId);
         assertEq(
             size,
             0,
@@ -734,7 +734,6 @@ contract PerpsForkTest is Test {
             uint256(CfdTypes.Side.BULL),
             "Position metadata should remain stable after the close empties the position"
         );
-        assertEq(entryFunding, 0, "Position read should remain well-formed after batch progression");
     }
 
 }

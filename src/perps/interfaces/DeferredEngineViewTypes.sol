@@ -3,20 +3,7 @@ pragma solidity 0.8.33;
 
 library DeferredEngineViewTypes {
 
-    struct DeferredTraderStatus {
-        uint64 claimId;
-        uint256 deferredPayoutUsdc;
-        bool isHead;
-        bool claimableNow;
-    }
-
-    struct DeferredClearerStatus {
-        uint64 claimId;
-        uint256 deferredBountyUsdc;
-        bool isHead;
-        bool claimableNow;
-    }
-
+    /// @notice Aggregate deferred-claim status under the current beneficiary-balance model.
     struct DeferredPayoutStatus {
         uint256 deferredTraderPayoutUsdc;
         bool traderPayoutClaimableNow;

@@ -12,8 +12,6 @@ library ProtocolLensViewTypes {
         uint256 freeUsdc;
         uint256 accumulatedFeesUsdc;
         uint256 accumulatedBadDebtUsdc;
-        int256 cappedFundingPnlUsdc;
-        uint256 liabilityOnlyFundingPnlUsdc;
         uint256 totalDeferredPayoutUsdc;
         uint256 totalDeferredClearerBountyUsdc;
         bool degradedMode;

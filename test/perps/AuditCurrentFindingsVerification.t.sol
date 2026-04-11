@@ -223,7 +223,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         router.executeOrder(1, updateData);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Fresh price after commit should execute");
     }
 
@@ -293,7 +293,7 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(bobId);
+        (uint256 size,,,,,,) = engine.positions(bobId);
         assertEq(size, 0, "rebate-bearing open should not execute once vault cash is insufficient");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore, 0, "keeper should not be paid on typed solvency invalidation"

@@ -288,7 +288,7 @@ contract PerpAccountingHandler is Test {
         }
 
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -399,7 +399,7 @@ contract PerpAccountingHandler is Test {
         }
 
         bytes32 accountId = _accountId(actor);
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         if (size == 0) {
             return;
         }
@@ -464,7 +464,7 @@ contract PerpAccountingHandler is Test {
             return;
         }
 
-        (uint256 size,,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(accountId);
         if (size == 0) {
             _ensureFreeSettlement(actor, 25_000e6);
             uint64 openOrderId = router.nextCommitId();
@@ -487,7 +487,7 @@ contract PerpAccountingHandler is Test {
                 return;
             }
 
-            (size,,,,, side,,) = engine.positions(accountId);
+            (size,,,, side,,) = engine.positions(accountId);
             if (size == 0) {
                 return;
             }
@@ -1170,7 +1170,7 @@ contract PerpAccountingHandler is Test {
     function _freeSettlementUsdc(
         bytes32 accountId
     ) internal view returns (uint256) {
-        (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
         uint256 protectedMargin = size > 0 ? margin : 0;
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
         return buckets.freeSettlementUsdc;

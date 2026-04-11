@@ -142,7 +142,6 @@ contract CfdEngineLens is ICfdEngineLens {
         });
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, oraclePrice, 0);
 
-        preview.fundingUsdc = 0;
         preview.realizedPnlUsdc = delta.realizedPnlUsdc;
         preview.remainingMargin = delta.posMarginAfter;
         preview.remainingSize = pos.size - sizeDelta;
@@ -178,7 +177,6 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
-        preview.solvencyFundingPnlUsdc = 0;
     }
 
     function _previewLiquidation(
@@ -200,7 +198,6 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.liquidatable = delta.liquidatable;
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
         preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
-        preview.fundingUsdc = 0;
         preview.equityUsdc = delta.riskState.equityUsdc;
         preview.keeperBountyUsdc = delta.keeperBountyUsdc;
         preview.seizedCollateralUsdc = delta.residualPlan.settlementSeizedUsdc;
@@ -218,7 +215,6 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
-        preview.solvencyFundingPnlUsdc = 0;
     }
 
     function _buildRawSnapshot(
@@ -229,22 +225,10 @@ contract CfdEngineLens is ICfdEngineLens {
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngine.SideState memory bull;
         ICfdEngine.SideState memory bear;
-        (
-            bull.maxProfitUsdc,
-            bull.openInterest,
-            bull.entryNotional,
-            bull.totalMargin,
-            bull.fundingIndex,
-            bull.entryFunding
-        ) = engineContract.sides(uint8(CfdTypes.Side.BULL));
-        (
-            bear.maxProfitUsdc,
-            bear.openInterest,
-            bear.entryNotional,
-            bear.totalMargin,
-            bear.fundingIndex,
-            bear.entryFunding
-        ) = engineContract.sides(uint8(CfdTypes.Side.BEAR));
+        (bull.maxProfitUsdc, bull.openInterest, bull.entryNotional, bull.totalMargin) =
+            engineContract.sides(uint8(CfdTypes.Side.BULL));
+        (bear.maxProfitUsdc, bear.openInterest, bear.entryNotional, bear.totalMargin) =
+            engineContract.sides(uint8(CfdTypes.Side.BEAR));
         uint256 lastMarkPrice = engineContract.lastMarkPrice();
         uint64 lastMarkTime = engineContract.lastMarkTime();
         uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
@@ -300,18 +284,15 @@ contract CfdEngineLens is ICfdEngineLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        int256 ignoredEntryFundingIndex;
         (
             pos.size,
             pos.margin,
             pos.entryPrice,
             pos.maxProfitUsdc,
-            ignoredEntryFundingIndex,
             pos.side,
             pos.lastUpdateTime,
             pos.vpiAccrued
         ) = engineContract.positions(accountId);
-        ignoredEntryFundingIndex;
     }
 
     function _sideSnapshot(

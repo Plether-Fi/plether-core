@@ -7,7 +7,6 @@ import {CfdTypes} from "../CfdTypes.sol";
 import {IMarginClearinghouse} from "../interfaces/IMarginClearinghouse.sol";
 import {CashPriorityLib} from "./CashPriorityLib.sol";
 import {CfdEngineSettlementLib} from "./CfdEngineSettlementLib.sol";
-import {CfdEngineSnapshotsLib} from "./CfdEngineSnapshotsLib.sol";
 import {CloseAccountingLib} from "./CloseAccountingLib.sol";
 import {LiquidationAccountingLib} from "./LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "./MarginClearinghouseAccountingLib.sol";

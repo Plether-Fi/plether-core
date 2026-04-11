@@ -220,6 +220,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         maxOrderAgeActivationTime = 0;
     }
 
+    /// @notice Proposes the live-market staleness limit for normal order execution and mark refresh.
     function proposeOrderExecutionStalenessLimit(
         uint256 limit
     ) external onlyOwner {
@@ -230,6 +231,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         orderExecutionStalenessActivationTime = _timelockReadyAt();
     }
 
+    /// @notice Finalizes the pending live-market execution staleness limit after timelock expiry.
     function finalizeOrderExecutionStalenessLimit() external onlyOwner {
         _requireTimelockReady(orderExecutionStalenessActivationTime);
         orderExecutionStalenessLimit = pendingOrderExecutionStalenessLimit;
@@ -237,6 +239,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         orderExecutionStalenessActivationTime = 0;
     }
 
+    /// @notice Proposes the live-market staleness limit for liquidations.
     function proposeLiquidationStalenessLimit(
         uint256 limit
     ) external onlyOwner {
@@ -247,6 +250,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         liquidationStalenessActivationTime = _timelockReadyAt();
     }
 
+    /// @notice Finalizes the pending liquidation staleness limit after timelock expiry.
     function finalizeLiquidationStalenessLimit() external onlyOwner {
         _requireTimelockReady(liquidationStalenessActivationTime);
         liquidationStalenessLimit = pendingLiquidationStalenessLimit;
@@ -254,10 +258,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         liquidationStalenessActivationTime = 0;
     }
 
+    /// @notice Pauses new risk-increasing order commits.
+    /// @dev Keeper execution and liquidation remain available.
     function pause() external onlyOwner {
         _pause();
     }
 
+    /// @notice Unpauses new risk-increasing order commits.
     function unpause() external onlyOwner {
         _unpause();
     }
@@ -425,10 +432,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
     // ==========================================
 
     /// @notice Keeper executes the current global queue head.
-    ///         Validates oracle freshness and publish-time ordering against the order commit,
-    ///         checks slippage, then delegates to CfdEngine. Terminal invalid/expired orders pay from
-    ///         router-custodied execution bounty, while retryable slippage misses are requeued to the
-    ///         global tail with cooldown so keepers cannot burn out-of-market intents or pin the FIFO head.
+    /// @dev Validates oracle freshness, publish-time ordering, and slippage, then delegates to the
+    ///      engine. Invalid, expired, or out-of-slippage orders are finalized from router-custodied
+    ///      execution bounty escrow; the router does not maintain a retry/requeue lane.
     /// @param orderId Must equal the current global queue head (expired orders are auto-skipped)
     /// @param pythUpdateData Pyth price update blobs; attach ETH to cover the Pyth fee
     function executeOrder(
@@ -674,6 +680,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         _cleanupOrder(orderId, success, failedOutcome);
     }
 
+    /// @notice Prunes expired head-of-queue orders in bounded slices.
+    /// @dev This is a maintenance path for advancing the global FIFO without requiring a full execute call.
     function pruneExpiredOrders(
         uint64 upToId,
         uint256 maxPrunes

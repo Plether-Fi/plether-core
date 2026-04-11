@@ -471,7 +471,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         _unlockMargin(accountId, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
     }
 
-    /// @notice Adjusts USDC balance to settle funding, PnL, and VPI rebates.
+    /// @notice Adjusts settlement USDC for realized PnL, deferred servicing, and rebates.
     ///         Positive amounts credit the account; negative amounts debit it.
     /// @param accountId Account to settle
     /// @param amount Signed USDC delta: positive credits, negative debits (6 decimals)
@@ -530,9 +530,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step {
         }
     }
 
-    /// @notice Consumes a funding loss from free settlement first, then from the active position margin bucket.
+    /// @notice Consumes a realized settlement loss from free settlement first, then from active position margin.
     /// @dev Unrelated locked margin remains protected.
-    function consumeFundingLoss(
+    function consumeSettlementLoss(
         bytes32 accountId,
         uint256,
         uint256 lossUsdc,

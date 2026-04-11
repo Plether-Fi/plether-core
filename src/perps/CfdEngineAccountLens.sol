@@ -10,16 +10,21 @@ import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 import {MarginClearinghouseAccountingLib} from "./libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "./libraries/PositionRiskAccountingLib.sol";
 
+/// @title CfdEngineAccountLens
+/// @notice Rich per-account diagnostic lens for audits, tests, and operator tooling.
+/// @dev This is intentionally wider than the product-facing `PerpsPublicLens` surface.
 contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     CfdEngine public immutable engineContract;
 
+    /// @param engine_ Deployed `CfdEngine` instance to inspect.
     constructor(
         address engine_
     ) {
         engineContract = CfdEngine(engine_);
     }
 
+    /// @notice Returns detailed clearinghouse bucket and reachability state for an account.
     function getAccountCollateralView(
         bytes32 accountId
     ) external view returns (CfdEngine.AccountCollateralView memory viewData) {
@@ -37,6 +42,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.deferredPayoutUsdc = engineContract.deferredPayoutUsdc(accountId);
     }
 
+    /// @notice Returns the current withdrawable USDC for an account under engine-side guards.
+    /// @dev Open-position withdrawals are limited by free buying power, degraded mode, mark freshness,
+    ///      pending carry, and the post-withdraw initial margin requirement.
     function getWithdrawableUsdc(
         bytes32 accountId
     ) external view returns (uint256 withdrawableUsdc) {
@@ -87,6 +95,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         return imrHeadroomUsdc < withdrawableUsdc ? imrHeadroomUsdc : withdrawableUsdc;
     }
 
+    /// @notice Returns a compact accounting split for account custody, escrow, and deferred balances.
     function getAccountLedgerView(
         bytes32 accountId
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
@@ -101,6 +110,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
+    /// @notice Returns the full account ledger snapshot used by tests and richer read paths.
     function getAccountLedgerSnapshot(
         bytes32 accountId
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
@@ -152,7 +162,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.margin = lockedBuckets.positionMarginUsdc;
         snapshot.entryPrice = pos.entryPrice;
         snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
-        snapshot.pendingFundingUsdc = 0;
         snapshot.netEquityUsdc = riskState.equityUsdc;
         snapshot.liquidatable = riskState.liquidatable;
     }
@@ -160,7 +169,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc,, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(accountId);
     }
 

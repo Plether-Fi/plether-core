@@ -7,7 +7,7 @@ library HousePoolEngineViewTypes {
         uint256 physicalAssetsUsdc;
         uint256 netPhysicalAssetsUsdc;
         uint256 maxLiabilityUsdc;
-        uint256 withdrawalFundingLiabilityUsdc;
+        uint256 supplementalReservedUsdc;
         uint256 unrealizedMtmLiabilityUsdc;
         uint256 deferredTraderPayoutUsdc;
         uint256 deferredClearerBountyUsdc;

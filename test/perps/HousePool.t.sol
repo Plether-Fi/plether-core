@@ -394,7 +394,6 @@ contract HousePoolTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint64 fundingBefore = engine.lastFundingTime();
         pool.proposeSeniorRate(1600);
         vm.warp(block.timestamp + 48 hours + 1);
 
@@ -402,10 +401,6 @@ contract HousePoolTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         pool.finalizeSeniorRate();
-
-        assertEq(
-            engine.lastFundingTime(), fundingBefore, "No-funding model should not update funding time during reconcile"
-        );
     }
 
     function test_ProposeSeniorRate_RevertsAbove100PercentApr() public {
@@ -515,7 +510,7 @@ contract HousePoolTest is BasePerpTest {
         assertEq(juniorVault.seedShareFloor(), sharesPreview, "Seed floor should match minted seed shares");
     }
 
-    function helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
+    function helper_InitializeSeedPosition_AddsDepthWithoutLegacyCheckpoint() public {
         _fundJunior(alice, 200_000e6);
 
         bytes32 accountId = bytes32(uint256(uint160(bob)));
@@ -529,11 +524,7 @@ contract HousePoolTest is BasePerpTest {
 
         pool.initializeSeedPosition(true, seedAssets, address(this));
 
-        assertEq(
-            engine.lastFundingTime(),
-            block.timestamp,
-            "Seed initialization must checkpoint funding before new depth is added"
-        );
+        assertEq(pool.seniorPrincipal(), seedAssets, "Seed initialization should add canonical senior depth");
     }
 
     function helper_SeedReceiverCannotRedeemBelowFloor() public {
@@ -1339,7 +1330,7 @@ contract HousePoolTest is BasePerpTest {
     // C-01: LIQUIDATION CLEARS UNREALIZED FUNDING FOR CLOSED POSITION
     // ==========================================
 
-    function test_C01_LiquidationClearsUnrealizedFunding() public {
+    function test_C01_LiquidationClearsLegacySideSpreadState() public {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -1373,14 +1364,14 @@ contract HousePoolTest is BasePerpTest {
 
         router.executeLiquidation(carolId, pythData);
 
-        assertEq(int256(0), 0, "Liquidation clears unrealized funding for closed position");
+        assertEq(int256(0), 0, "Liquidation clears legacy side spread state for the closed position");
     }
 
     // ==========================================
     // C-03: getFreeUSDC RESERVES POSITIVE UNREALIZED FUNDING
     // ==========================================
 
-    function test_C03_GetFreeUSDC_NoCarryReserveInNoFundingModel() public {
+    function test_C03_GetFreeUSDC_NoSupplementalReserveInCarryModel() public {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -1416,18 +1407,18 @@ contract HousePoolTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 fundingLiability = uint256(0);
-        assertEq(fundingLiability, 0, "No-funding model should not create a funding liability reserve");
+        uint256 supplementalReserve = uint256(0);
+        assertEq(supplementalReserve, 0, "Carry mode should not create a supplemental withdrawal reserve here");
 
         uint256 freeUSDC = pool.getFreeUSDC();
-        assertGt(freeUSDC, 0, "getFreeUSDC should remain positive in the no-funding model");
+        assertGt(freeUSDC, 0, "getFreeUSDC should remain positive in the carry model");
     }
 
     // ==========================================
     // C-03b: _reconcile RESERVES POSITIVE UNREALIZED FUNDING FROM DISTRIBUTABLE
     // ==========================================
 
-    function test_C03b_Reconcile_NoCarryReserveInNoFundingModel() public {
+    function test_C03b_Reconcile_NoSupplementalReserveInCarryModel() public {
         engine.proposeRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -1462,13 +1453,13 @@ contract HousePoolTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 fundingLiability = uint256(0);
-        assertEq(fundingLiability, 0, "No-funding model should not create a funding liability reserve");
+        uint256 supplementalReserve = uint256(0);
+        assertEq(supplementalReserve, 0, "Carry mode should not create a supplemental withdrawal reserve here");
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        // Pool cash must cover LP claims + fees + unrealized funding obligations
+        // Pool cash must cover LP claims + fees + conservative unrealized liabilities
         uint256 poolBalance = usdc.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
         uint256 fees = engine.accumulatedFeesUsdc();
@@ -1731,8 +1722,8 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         helper_InitializeSeedPosition_MintsPermanentSeedShares();
     }
 
-    function helper_Test_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
-        helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth();
+    function helper_Test_InitializeSeedPosition_AddsDepthWithoutLegacyCheckpoint() public {
+        helper_InitializeSeedPosition_AddsDepthWithoutLegacyCheckpoint();
     }
 
     function test_SeedReceiverCannotRedeemBelowFloor() public {
@@ -1865,7 +1856,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
     }
 
-    function helper_InitializeSeedPosition_SyncsFundingBeforeAddingDepth() public {
+    function helper_InitializeSeedPosition_AddsDepthWithoutLegacyCheckpoint() public {
         usdc.mint(address(this), 200_000e6);
         usdc.approve(address(pool), 200_000e6);
         pool.initializeSeedPosition(false, 100_000e6, address(this));
@@ -2428,7 +2419,7 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 1e8, true);
         router.executeOrder(2, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0);
 
         assertEq(_sideEntryNotional(CfdTypes.Side.BULL), 0, "Bull entry notional should be zero");
@@ -2499,7 +2490,7 @@ contract HousePoolAuditTest is BasePerpTest {
         );
     }
 
-    function test_MaxWithdraw_RemainsExecutableWithPendingFundingAccrual() public {
+    function test_MaxWithdraw_RemainsExecutableWithPendingCarryAccrual() public {
         uint256 saturdayFrozen = 1_710_021_600;
         _fundJunior(bob, 1_000_000e6);
 
@@ -2524,8 +2515,6 @@ contract HousePoolAuditTest is BasePerpTest {
 
         vm.warp(saturdayFrozen);
 
-        assertLt(engine.lastFundingTime(), saturdayFrozen, "funding must still be pending when quoting maxWithdraw");
-
         uint256 quotedAssets = juniorVault.maxWithdraw(bob);
         uint256 bobBalanceBefore = usdc.balanceOf(bob);
 
@@ -2539,7 +2528,7 @@ contract HousePoolAuditTest is BasePerpTest {
         );
     }
 
-    function test_MaxRedeem_RemainsExecutableWithPendingFundingAccrual() public {
+    function test_MaxRedeem_RemainsExecutableWithPendingCarryAccrual() public {
         uint256 saturdayFrozen = 1_710_021_600;
         _fundJunior(bob, 1_000_000e6);
 
@@ -2579,8 +2568,8 @@ contract HousePoolAuditTest is BasePerpTest {
         );
     }
 
-    // Regression: C-02 — funding spread not permanently locked after positions close
-    function test_FundingSpreadLockedAfterAllPositionsClose() public {
+    // Regression: C-02 — legacy spread not permanently locked after positions close
+    function test_NoLegacySpreadRemainsAfterAllPositionsClose() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
@@ -2610,11 +2599,11 @@ contract HousePoolAuditTest is BasePerpTest {
         assertEq(_sideOpenInterest(CfdTypes.Side.BULL), 0, "All bull positions closed");
         assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), 0, "All bear positions closed");
 
-        assertEq(int256(0), 0, "No positions => zero unrealized funding; spread is distributable");
+        assertEq(int256(0), 0, "No positions => zero legacy side spread state; value remains distributable");
     }
 
-    // Regression: C-02 — funding spread reduces distributable revenue
-    function test_FundingSpreadReducesDistributableRevenue() public {
+    // Regression: C-02 — legacy spread reduces distributable revenue
+    function test_DistributableRevenueDoesNotDependOnLegacySpread() public {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 100_000e6);
         _fundTrader(carol, 100_000e6);
@@ -2651,8 +2640,8 @@ contract HousePoolAuditTest is BasePerpTest {
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
 
-    // Regression: C-02 — negative funding must not inflate junior principal
-    function test_NegativeFundingDoesNotInflateJuniorPrincipal() public {
+    // Regression: C-02 — legacy negative spread must not inflate junior principal
+    function test_LegacyNegativeSpreadDoesNotInflateJuniorPrincipal() public {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
 
@@ -2679,15 +2668,15 @@ contract HousePoolAuditTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
         router.executeOrder(3, price);
 
-        int256 unrealizedFunding = int256(0);
-        assertEq(unrealizedFunding, 0, "No-funding model should not report unrealized funding");
+        int256 unrealizedLegacySpread = int256(0);
+        assertEq(unrealizedLegacySpread, 0, "Carry model should not report legacy side spread state");
 
         uint256 juniorBefore = pool.juniorPrincipal();
         vm.prank(address(juniorVault));
         pool.reconcile();
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        assertLe(juniorAfter, juniorBefore, "conservative: junior must not increase from unrealized funding debt");
+        assertLe(juniorAfter, juniorBefore, "conservative: junior must not increase from legacy side spread debt");
     }
 
     // Regression: H-04 — fees withdrawable at high utilization

@@ -122,8 +122,8 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (uint256 bullMaxProfit,,,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfit,,,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
+        (uint256 bullMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
+        (uint256 bearMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
         return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
     }
 
@@ -136,9 +136,9 @@ abstract contract BasePerpInvariantTest is Test {
         if (price == 0) {
             return 0;
         }
-        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
+        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BULL));
         bullMaxProfit;
-        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
+        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BEAR));
         bearMaxProfit;
         int256 bullPnl = (int256(bullEntryNotional) - int256(bullOi * price)) / int256(1e20);
         int256 bearPnl = (int256(bearOi * price) - int256(bearEntryNotional)) / int256(1e20);

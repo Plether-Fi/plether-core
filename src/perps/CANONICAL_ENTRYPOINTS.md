@@ -5,7 +5,7 @@ This file defines the intended product-facing perps surface.
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Trade actions: `OrderRouter.submitOrder(CfdTypes.Side,uint256,uint256,uint256,bool)`
+- Trade actions: `OrderRouter.submitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDeltaUsdc, uint256 acceptablePrice, bool isReduceOnly)`
 - Compact reads: `PerpsPublicLens`
 
 Use these interfaces:

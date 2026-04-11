@@ -10,16 +10,21 @@ import {ICfdEngineProtocolLens} from "./interfaces/ICfdEngineProtocolLens.sol";
 import {ProtocolLensViewTypes} from "./interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "./libraries/SolvencyAccountingLib.sol";
 
+/// @title CfdEngineProtocolLens
+/// @notice Rich protocol-accounting lens for audits, tests, and HousePool integration.
+/// @dev Exposes conservative solvency and liability views rather than product-level summaries.
 contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     CfdEngine public immutable engineContract;
 
+    /// @param engine_ Deployed `CfdEngine` instance to inspect.
     constructor(
         address engine_
     ) {
         engineContract = CfdEngine(engine_);
     }
 
+    /// @notice Returns the canonical protocol-accounting snapshot used by diagnostics and audits.
     function getProtocolAccountingSnapshot()
         external
         view
@@ -28,6 +33,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         return _buildProtocolAccountingSnapshot();
     }
 
+    /// @notice Builds the HousePool accounting snapshot against a caller-supplied freshness limit.
+    /// @dev This packages the engine-side values HousePool needs for reconcile and withdrawal logic.
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
@@ -39,7 +46,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
             _sideState(CfdTypes.Side.BULL).maxProfitUsdc, _sideState(CfdTypes.Side.BEAR).maxProfitUsdc
         );
-        snapshot.withdrawalFundingLiabilityUsdc = 0;
+        snapshot.supplementalReservedUsdc = 0;
         snapshot.unrealizedMtmLiabilityUsdc = _getVaultMtmLiability();
         snapshot.deferredTraderPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.deferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
@@ -52,6 +59,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         }
     }
 
+    /// @notice Returns the current HousePool status flags sourced from engine runtime state.
     function getHousePoolStatusSnapshot()
         external
         view
@@ -104,8 +112,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
         snapshot.accumulatedFeesUsdc = engineContract.accumulatedFeesUsdc();
         snapshot.accumulatedBadDebtUsdc = engineContract.accumulatedBadDebtUsdc();
-        snapshot.cappedFundingPnlUsdc = 0;
-        snapshot.liabilityOnlyFundingPnlUsdc = 0;
         snapshot.totalDeferredPayoutUsdc = engineContract.totalDeferredPayoutUsdc();
         snapshot.totalDeferredClearerBountyUsdc = engineContract.totalDeferredClearerBountyUsdc();
         snapshot.degradedMode = engineContract.degradedMode();
@@ -129,14 +135,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngine.SideState memory state) {
-        (
-            state.maxProfitUsdc,
-            state.openInterest,
-            state.entryNotional,
-            state.totalMargin,
-            state.fundingIndex,
-            state.entryFunding
-        ) = engineContract.sides(uint8(side));
+        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engineContract.sides(uint8(side));
     }
 
     function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {

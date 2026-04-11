@@ -58,7 +58,7 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
         CfdTypes.RiskParams memory params
     ) CfdEngine(usdc, clearinghouse, capPrice, params) {}
 
-    function previewEffectiveAssetsAfterFundingWithoutMarginSync(
+    function previewEffectiveAssetsWithoutMarginSync(
         CfdTypes.Order memory order
     )
         external
@@ -155,7 +155,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
             uint256 syncedEffectiveAssets,
             uint256 staleBullMargin,
             uint256 syncedBullMargin
-        ) = harness.previewEffectiveAssetsAfterFundingWithoutMarginSync(
+        ) = harness.previewEffectiveAssetsWithoutMarginSync(
             CfdTypes.Order({
                 accountId: bullIdA,
                 sizeDelta: 390_000e18,
@@ -172,7 +172,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         assertEq(
             staleBullMargin,
             syncedBullMargin,
-            "Solvency/degraded checks must use the same side margins that would be committed after funding settlement"
+            "Solvency/degraded checks must use the same side margins that would be committed after carry realization"
         );
         assertEq(
             staleEffectiveAssets,
@@ -209,7 +209,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
         _close(accountId, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
     }
 
@@ -286,12 +286,12 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
     function test_H2_FullyUtilizedTraderCanSubmitCloseOrderAgainstPositionMargin() public {
         (bytes32 accountId,) = _setupFullyUtilized();
 
-        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(_executionBountyReserve(1), 1e6, "Close order should still escrow the keeper bounty");
         assertEq(marginAfter, marginBefore - 1e6, "Fully utilized close should source bounty from position margin");
     }
@@ -379,7 +379,7 @@ contract AuditBlockingAccountingFindingsFailing_DeferredBounty is BasePerpTest {
         vm.prank(KEEPER);
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Position should be liquidated");
 
         assertEq(

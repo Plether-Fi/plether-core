@@ -35,7 +35,7 @@ library HousePoolAccountingLib {
         snapshot.protocolFees = engineSnapshot.protocolFeesUsdc;
         snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.protocolFeesUsdc
             + engineSnapshot.deferredTraderPayoutUsdc + engineSnapshot.deferredClearerBountyUsdc
-            + engineSnapshot.withdrawalFundingLiabilityUsdc;
+            + engineSnapshot.supplementalReservedUsdc;
         snapshot.freeUsdc =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }

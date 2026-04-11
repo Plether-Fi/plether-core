@@ -161,7 +161,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
             abi.encodeWithSelector(router.executeOrder.selector, uint64(2), priceData)
         );
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "C-01: close order must not be blocked by open order in frozen queue");
     }
 
@@ -486,12 +486,12 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-02: updateMarkPrice doesn't call _updateFunding.
-//       Funding indices desync from lastMarkPrice, causing the next
-//       processOrder to compute funding over the wrong time×price.
+// M-02: historical legacy-funding desync note kept obsolete for context.
+//       The live carry model does not use side indices.
+//       This obsolete test remains only as audit-history context.
 // ═══════════════════════════════════════════════════════════════════
 
-contract AuditV3_M02_FundingDesyncTest is BasePerpTest {
+contract AuditV3_M02_CarryDesyncTest is BasePerpTest {
 
     address alice = address(0xA11CE);
 
@@ -499,27 +499,18 @@ contract AuditV3_M02_FundingDesyncTest is BasePerpTest {
         return 1_000_000e6;
     }
 
-    function obsolete_M02_UpdateMarkPriceDoesNotAccrueFunding() public {
+    function obsolete_M02_UpdateMarkPriceDoesNotRealizeCarry() public {
         _fundTrader(alice, 50_000e6);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
         _open(aliceId, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
 
-        uint64 fundingTimeBefore = engine.lastFundingTime();
-
-        // Warp forward 1 hour — funding should accrue over this delta
+        // Warp forward 1 hour in the carry model
         _warpForward(3600);
 
-        // updateMarkPrice updates lastMarkPrice and lastMarkTime but NOT lastFundingTime.
-        // The 1-hour funding delta is "forgotten" — it will be attributed to the NEXT
-        // processOrder call at a potentially different price, distorting the indices.
         vm.prank(address(router));
         engine.updateMarkPrice(1.05e8, uint64(block.timestamp));
 
-        uint64 fundingTimeAfter = engine.lastFundingTime();
-
-        assertGt(
-            fundingTimeAfter, fundingTimeBefore, "M-02: updateMarkPrice must accrue funding before updating the mark"
-        );
+        assertEq(engine.lastMarkPrice(), 1.05e8, "mark update should still succeed in the carry model");
     }
 
 }

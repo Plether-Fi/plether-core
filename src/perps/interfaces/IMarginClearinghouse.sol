@@ -143,7 +143,7 @@ interface IMarginClearinghouse {
         bytes32 accountId,
         uint256 amountUsdc
     ) external;
-    /// @notice Adjusts USDC balance for funding, PnL, or rebates (+credit, -debit)
+    /// @notice Adjusts settlement USDC for realized PnL, deferred-claim servicing, or rebates (+credit, -debit).
     function settleUsdc(
         bytes32 accountId,
         int256 amount
@@ -160,8 +160,8 @@ interface IMarginClearinghouse {
         int256 tradeCostUsdc,
         address recipient
     ) external returns (int256 netMarginChangeUsdc);
-    /// @notice Consumes funding loss from free settlement plus the active position margin bucket.
-    function consumeFundingLoss(
+    /// @notice Consumes a realized settlement loss from free settlement plus the active position margin bucket.
+    function consumeSettlementLoss(
         bytes32 accountId,
         uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,

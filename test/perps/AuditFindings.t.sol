@@ -357,7 +357,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         // Notional = $50k, IMR = max(1.5% * $50k, $5) = $750
         _open(aliceId, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0);
 
         uint256 balance = clearinghouse.balanceUsdc(aliceId);

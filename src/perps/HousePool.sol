@@ -212,8 +212,8 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit SeniorRateProposed(_rateBps, seniorRateActivationTime);
     }
 
-    /// @notice Finalize the proposed senior rate after timelock expires.
-    /// @dev Syncs funding first. If the mark is stale, the new rate is applied without accruing stale-window senior yield.
+    /// @notice Finalizes the proposed senior rate after the timelock expires.
+    /// @dev If the mark is stale, the new rate is applied without accruing stale-window senior yield.
     function finalizeSeniorRate() external onlyOwner {
         if (seniorRateActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -360,7 +360,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     /// @notice Explicitly converts unsolicited USDC into accounted protocol assets.
-    ///         Syncs funding first so the added depth applies only going forward.
+    /// @dev This admits previously quarantined excess into canonical pool accounting going forward.
     function accountExcess() external onlyOwner {
         uint256 amount = excessAssets();
         if (amount == 0) {
@@ -385,7 +385,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit ExcessSwept(recipient, amount);
     }
 
-    /// @notice Transfers USDC from the pool. Callable by CfdEngine (PnL/funding) or OrderRouter (keeper bounties).
+    /// @notice Transfers USDC from the pool for protocol-authorized settlement or keeper payments.
     /// @param recipient Address to receive USDC
     /// @param amount USDC amount to transfer (6 decimals)
     function payOut(
@@ -498,8 +498,7 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
     }
 
     /// @notice Seeds a tranche with a permanent minimum share supply backed by real USDC.
-    /// @dev Syncs funding first so the new seed depth only affects funding prospectively, then mints
-    ///      bootstrap shares to ensure a tranche never becomes ownerless in steady state.
+    /// @dev Mints bootstrap shares so a tranche never becomes ownerless in steady state.
     function initializeSeedPosition(
         bool toSenior,
         uint256 amount,

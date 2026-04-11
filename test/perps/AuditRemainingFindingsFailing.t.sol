@@ -23,11 +23,11 @@ contract AuditRemainingFindingsFailing is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(accountId, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
 
-        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
         vm.prank(alice);
         engine.addMargin(accountId, 500e6);
 
-        (, uint256 margin,,,,,,) = engine.positions(accountId);
+        (, uint256 margin,,,,,) = engine.positions(accountId);
         assertEq(margin, marginBefore + 500e6, "User should be able to add margin without changing size");
     }
 
@@ -261,7 +261,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
 
 }
 
-contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
+contract AuditRemainingFindingsFailing_CarryPathDependence is BasePerpTest {
 
     address alice = address(0xA11CE);
 
@@ -278,7 +278,7 @@ contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
         });
     }
 
-    function test_M4_FundingSettlementShouldBePathIndependent() public {
+    function test_M4_CarryRealizationShouldBePathIndependent() public {
         bytes32 accountId = bytes32(uint256(uint160(alice)));
         _fundTrader(alice, 150_000e6);
         _open(accountId, CfdTypes.Side.BULL, 200_000e18, 100_120e6, 1e8);
@@ -297,7 +297,7 @@ contract AuditRemainingFindingsFailing_FundingPathDependence is BasePerpTest {
         _close(accountId, CfdTypes.Side.BULL, 200_000e18, 120_000_000);
         uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(accountId);
 
-        assertEq(tradeOnlyBalance, markThenTradeBalance, "Funding accrual should not depend on update-vs-trade path");
+        assertEq(tradeOnlyBalance, markThenTradeBalance, "Carry realization should not depend on update-vs-trade path");
     }
 
 }

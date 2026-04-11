@@ -306,7 +306,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         router.executeLiquidation(accountId, pythData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0);
     }
 

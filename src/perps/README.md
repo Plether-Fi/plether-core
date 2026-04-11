@@ -1,388 +1,398 @@
-# Plether Perpetuals Engine
+# Plether Perps
 
-Bounded synthetic directional markets with zero-slippage execution. Traders take leveraged `plDXY-BULL` and `plDXY-BEAR` exposure against a tranched USDC House Pool.
+Plether Perps is a bounded, delayed-order perpetuals engine for synthetic USD-directional exposure.
 
-## Core Insight: Bounded Solvency
+Traders post USDC margin, submit delayed orders through `OrderRouter`, and take `BULL` or `BEAR` exposure against a tranched USDC `HousePool`. LP capital sits behind senior and junior tranche vaults. The system is designed so worst-case trader liability is bounded at entry because the market price is capped:
 
-Traditional perpetuals have unbounded upside tail risk. Plether constrains payout with a fixed Protocol CAP (`P_bull + P_bear = CAP`), so each trade has a deterministic worst-case liability at entry. Before opening risk, the engine proves that the House Pool can fund that bound even if the oracle jumps to either extreme. LP bad debt can still arise from realized settlement shortfalls or delayed liquidation, but it remains bounded, socialized, and contained through bad-debt accounting, degraded mode, and withdrawal reserves.
+```text
+0 <= markPrice <= CAP_PRICE
+```
 
-## Architecture
+If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). If you want the operational and trust assumptions, read [`SECURITY.md`](SECURITY.md). If you want a one-page system map, read [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
 
-Five contracts separate custody, execution, and ledger math.
+## Perps In 5 Minutes
 
-For the accounting model that governs the system, see [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For a one-page map of custody buckets, mutators, accounting readers, and cross-domain value flows, see [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md).
-For the intended product-facing integration surface, see [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md).
+### What traders are trading
 
-## Simplified Public API
+- There is one bounded directional market.
+- The mark is the Plether basket price, not a raw DXY index print.
+- `BEAR` profits when the basket price rises.
+- `BULL` profits when the basket price falls.
+- Payouts are bounded because the mark is clamped to `CAP_PRICE`.
 
-The product surface is smaller than the internal accounting surface.
+### Who does what
 
-- Traders use `MarginClearinghouse.depositMargin(...)`, `MarginClearinghouse.withdrawMargin(...)`, and `OrderRouter.submitOrder(...)`.
-- Keepers use `OrderRouter.executeOrder(...)`, `OrderRouter.executeOrderBatch(...)`, and `OrderRouter.executeLiquidation(...)`.
-- LPs use `HousePool.depositSenior(...)`, `HousePool.withdrawSenior(...)`, `HousePool.depositJunior(...)`, and `HousePool.withdrawJunior(...)`.
-- Read consumers use `PerpsPublicLens` for compact account, position, tranche, LP-status, and protocol-status views.
+- Traders deposit USDC into `MarginClearinghouse`, then submit delayed orders through `OrderRouter`.
+- Keepers execute queued orders and liquidations using Pyth update data.
+- LPs deposit USDC into `HousePool` through senior and junior `TrancheVault`s.
+- `CfdEngine` is the canonical ledger. It does the math but does not custody raw tokens.
 
-The supporting interfaces for this simplified surface live in `src/perps/interfaces/`:
+### Core product rules
 
+- Delayed orders only. There is no same-tx trader market-order path.
+- One live position per `accountId` at a time. Side flips must pass through a close.
+- Orders are binding once committed. Users cannot cancel queued orders.
+- Queue execution is FIFO from the global head.
+- LP-capital carry is used instead of side-to-side funding.
+- If the vault is short on cash, trader profits and liquidation bounties can become deferred balance claims instead of reverting the state transition.
+
+### Units and ids
+
+- USDC amounts and margin accounting use 6 decimals.
+- Prices use 8 decimals.
+- Position size uses 18 decimals.
+- The normal trader `accountId` is `bytes32(uint256(uint160(user)))`.
+
+## Canonical Entrypoints
+
+For the intended product-facing surface, see [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md).
+
+In practice, the compact public API is:
+
+- Traders:
+  - `MarginClearinghouse.depositMargin(uint256)`
+  - `MarginClearinghouse.withdrawMargin(uint256)`
+  - `OrderRouter.submitOrder(CfdTypes.Side side, uint256 sizeDelta, uint256 marginDeltaUsdc, uint256 acceptablePrice, bool isReduceOnly)`
+- Keepers:
+  - `OrderRouter.executeOrder(uint64,bytes[])`
+  - `OrderRouter.executeOrderBatch(uint64,bytes[])`
+  - `OrderRouter.executeLiquidation(bytes32,bytes[])`
+- LPs:
+  - `HousePool.depositSenior(uint256)` / `HousePool.withdrawSenior(uint256,address)`
+  - `HousePool.depositJunior(uint256)` / `HousePool.withdrawJunior(uint256,address)`
+- Readers:
+  - `PerpsPublicLens`
+
+The simplified public interfaces live in `src/perps/interfaces/`:
+
+- `IMarginAccount.sol`
 - `IPerpsTraderActions.sol`
 - `IPerpsTraderViews.sol`
 - `IPerpsLPActions.sol`
 - `IPerpsLPViews.sol`
 - `IPerpsKeeper.sol`
 - `IProtocolViews.sol`
-- `IMarginAccount.sol`
 - `PerpsViewTypes.sol`
 
-The existing engine, clearinghouse, router, and house-pool interfaces still expose deeper accounting and lifecycle machinery. Those richer interfaces remain useful for testing, admin operations, and internal integration, but they should not define the long-term product story.
+The wider engine, clearinghouse, router, and house-pool interfaces still exist for tests, admin tooling, and deep accounting inspection, but they are not the recommended product integration surface.
 
-## Intended Boundaries
+## Runtime Components
 
-- `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for protocol state, order execution, liquidation, and high-level protocol status.
-- `CfdEngineSettlementModule` is the externalized settlement path for close/liquidation runtime orchestration. `CfdEngine` remains the storage owner and applies core state through narrow settlement-host hooks.
-- `PerpsPublicLens` is the canonical product-facing read layer for traders, LPs, and simple protocol status consumers.
-- `MarginClearinghouse` is trader custody plumbing. The slim public surface is `IMarginAccount`; reservation buckets and settlement-path helpers are internal/operator-facing.
-- `OrderRouter` is delayed-order lifecycle and keeper-execution plumbing. Product consumers should use `submitOrder(...)` and compact pending-order views, not raw queue internals.
-- `HousePool` and `TrancheVault` remain the LP product surface. Senior/junior tranche actions are product-facing; bootstrap and seed-lifecycle mechanics are setup/admin concerns.
-- `CfdEngineAccountLens` is the rich account/accounting read layer. It is appropriate for tests, audits, and operator tooling, not the default product API.
-- `CfdEngineProtocolLens` is now a narrow protocol-accounting lens for protocol accounting snapshots and house-pool snapshots. It is not the default source for product status or position views.
+The main runtime and read surfaces are:
 
-## Type Modules
+- `MarginClearinghouse`: trader custody and typed margin buckets.
+- `OrderRouter`: delayed-order queue, Pyth validation, and keeper bounty escrow.
+- `CfdEngine`: canonical execution ledger and solvency boundary.
+- `CfdEngineSettlementModule`: externalized close/liquidation settlement orchestration used by the engine.
+- `HousePool`: LP capital, liabilities, reserves, and tranche waterfall.
+- `TrancheVault`: ERC-4626 LP vault wrappers for senior and junior capital.
+- `PerpsPublicLens`: compact product-facing read layer.
+- `CfdEngineAccountLens` / `CfdEngineProtocolLens`: richer audit and operator read layers.
 
-Focused type modules now carry accounting/debug snapshot shapes instead of embedding them in `ICfdEngine`:
+### Intended boundaries
 
-- `AccountLensViewTypes.sol`
-- `ProtocolLensViewTypes.sol`
-- `HousePoolEngineViewTypes.sol`
-- `DeferredEngineViewTypes.sol`
-- `EngineStatusViewTypes.sol`
+- `CfdEngine` and `ICfdEngineCore` are the canonical runtime truth for execution, liquidation, and protocol status.
+- `CfdEngineSettlementModule` executes close and liquidation choreography, while `CfdEngine` remains the storage owner.
+- `MarginClearinghouse` owns trader settlement balances and locked-margin custody buckets.
+- `OrderRouter` owns queued order records and router-custodied execution bounty escrow.
+- `HousePool` owns LP capital and pays protocol obligations that must leave the vault.
+- `PerpsPublicLens` is the default read surface for product consumers.
+- The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
 
-This keeps `ICfdEngine` from acting as a general-purpose type bucket and makes the intended boundaries easier to follow.
+## Trader Lifecycle
 
-### Accounting Domains
+1. Deposit USDC into `MarginClearinghouse`.
+2. Submit an open or close intent through `OrderRouter.submitOrder(...)`.
+3. The router records a FIFO order, reserves committed margin, and escrows a keeper execution bounty.
+4. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data.
+5. `OrderRouter` validates oracle freshness, publish-time ordering, slippage, and queue eligibility, then calls `CfdEngine.processOrderTyped(...)`.
+6. `CfdEngine` updates the position, realizes fees and carry, and settles through `MarginClearinghouse` and `HousePool`.
 
-- `CloseAccountingLib`: shared kernel for preview/live close settlement, including realized PnL, execution fees, and net trader settlement.
-- `LiquidationAccountingLib`: shared kernel for preview/live liquidation settlement, including reachable collateral, keeper bounty, residual payout, and bad debt.
-- `SolvencyAccountingLib`: canonical protocol cash-state builder used for max-liability checks, effective-asset construction, withdrawal reserves, and free withdrawable vault cash.
-- Planner previews follow the same staged transition model as live execution: router cash mutations happen before payout and solvency classification on the post-mutation state.
-- The engine uses LP-capital carry rather than side-to-side funding. Carry accrues continuously by wall-clock time on `lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)`, affects risk/guard checks before realization, and is realized on open, close, add-margin, and withdraw-margin paths. Realized carry flows to LP trading revenue.
+Important details:
 
-These domains answer different questions and must not silently share assumptions.
+- `acceptablePrice == 0` behaves like a delayed market-style order.
+- Open orders are rejected during degraded mode and close-only windows.
+- Failed orders are finalized from router-custodied bounty escrow; they are not requeued.
+- Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules.
 
-### Accounting Glossary
+### Deferred trader payouts
 
-- `raw assets`: the literal USDC token balance sitting in `HousePool`.
-- `accounted assets`: canonical protocol-owned USDC recognized by `HousePool` accounting; unsolicited positive transfers do not enter here until explicitly accounted.
-- `excess assets`: raw USDC held above `accountedAssets`; quarantined surplus that can be swept or explicitly admitted into protocol economics later.
-- `net physical assets`: the physically backed vault depth after applying the canonical accounting boundary, i.e. `min(rawAssets, accountedAssets)` before any higher-level solvency adjustments.
-- `effective solvency assets`: the conservative asset figure used by solvency checks after applying protocol-specific adjustments such as unpaid liabilities, withdrawal-reserve treatment, and "do not count unrealized trader losses as assets" policy.
-- `terminal reachable collateral`: the maximum collateral the protocol can actually seize and realize from a trader by following the close or liquidation path to completion, after applying margin-bucket access rules and free-settlement reachability constraints.
-- `physical reachable collateral`: the clearinghouse USDC the protocol can touch immediately for generic risk checks and views. This excludes deferred payout IOUs.
-- `same-account nettable deferred payout`: an existing deferred trader payout owed to the same account. This is not generic collateral and is only consumed where terminal settlement explicitly nets it.
+Profitable closes and some liquidation residuals can create deferred trader payouts if the vault cannot immediately fund them.
 
-### I. MarginClearinghouse — The Prime Broker
+- Deferred payouts are tracked by beneficiary balance: `deferredPayoutUsdc[accountId]`.
+- There is no FIFO deferred-claim queue.
+- `claimDeferredPayout(accountId)` is permissionless.
+- Claims can be partial if current vault cash is insufficient.
+- Claimed amounts are credited into `MarginClearinghouse`, not sent directly to the wallet.
 
-[`MarginClearinghouse.sol`](MarginClearinghouse.sol)
+### Deferred clearer balances
 
-USDC-only cross-margin portfolio manager and collateral custodian. It tracks settlement balances and typed locked-margin buckets in 6-decimal USDC.
+Liquidation bounties are fail-soft when the vault is illiquid.
 
-The execution engine never touches raw tokens. It operates through typed bucket and reservation APIs (`lockPositionMargin()`, `unlockPositionMargin()`, `reserveCommittedOrderMargin()`, `releaseOrderReservation()`, `consumeOrderReservation()`, `settleUsdc()`, `seizeUsdc()`), with the router authorized through the engine's configured `orderRouter()` boundary.
+- The liquidation still completes.
+- Any unpaid bounty is recorded in `deferredClearerBountyUsdc[keeper]`.
+- `claimDeferredClearerBounty()` is permissionless and settles to clearinghouse credit rather than direct wallet transfer.
+- Deferred trader payouts and deferred clearer balances are included in reserve and solvency accounting.
 
-### II. HousePool + TrancheVault — The House Pool & Firewall
+## LP Lifecycle
 
-[`HousePool.sol`](HousePool.sol) · [`TrancheVault.sol`](TrancheVault.sol)
+LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4626 tranche vaults.
 
-The House Pool is the USDC counterparty for trader payouts. It has senior and junior ERC-4626 tranche vaults (`TrancheVault`).
+- Senior gets fixed-rate yield and last-loss protection.
+- Junior absorbs first loss and receives residual upside.
+- LP withdrawals are gated by solvency, reserved liabilities, lifecycle state, mark freshness policy, and holder cooldown rules.
 
-**Withdrawal Firewall**: `maxWithdraw` / `maxRedeem` compute `freeUSDC = totalAssets() - maxSystemLiability`. LPs can withdraw only unencumbered capital. At 100% utilization, capital is locked to cover active trader payouts.
+The withdrawal firewall is the key LP safety mechanism:
 
-**Canonical Pool Depth**: `HousePool` distinguishes `rawAssets` (token balance), `accountedAssets` (canonical protocol-owned depth), `excessAssets` (unaccounted positive balance), and `totalAssets()` / physical assets (`min(rawAssets, accountedAssets)`). Unsolicited positive transfers stay quarantined as excess until explicitly accounted or swept. Raw-balance shortfalls reduce effective backing immediately. Solvency, reconcile, and withdrawal-firewall paths all consume this controlled depth source.
+```text
+freeUSDC = totalAssets - withdrawalReservedUsdc
+```
 
-**Senior High-Water Mark**: `seniorHighWaterMark` tracks peak senior principal. After senior impairment, revenue restores `seniorPrincipal` to that mark before any surplus flows to junior. The mark increases additively on deposits, scales proportionally on withdrawals (along with `unpaidSeniorYield`), and resets cleanly after a full wipeout and recapitalization. Deposits remain blocked while senior is partially impaired (`0 < seniorPrincipal < seniorHighWaterMark`).
+Only unencumbered USDC can leave the pool.
 
-**Seed Lifecycle Gate**: Once bootstrap seeding begins, risk-increasing order commits and ordinary tranche deposits stay blocked until both tranche seed positions exist on-chain and the owner explicitly activates trading. This prevents partially seeded live operation.
+### HousePool basics
 
-**ERC-4626 Deposit View Parity**: `TrancheVault.maxDeposit()` / `maxMint()` share the same `HousePool.canAcceptTrancheDeposits()` gate as the mutate path. They return zero during lifecycle or senior-impairment blocks, while tranche deposits are paused, while required mark freshness is stale, or while `unassignedAssets` indicates pending bootstrap assignment.
+- `rawAssets`: literal USDC balance held by `HousePool`.
+- `accountedAssets`: canonical protocol-owned assets recognized by pool accounting.
+- `excessAssets`: unsolicited positive transfers that have not been admitted into protocol economics.
+- `totalAssets()`: conservative physically backed depth derived from `min(rawAssets, accountedAssets)`.
 
-**Stale Reconcile Clocking**: HousePool separates the waterfall reconcile clock from the senior-yield checkpoint clock. If mark freshness is required but stale, it skips mark-dependent yield and waterfall math without resetting `lastReconcileTime`. Any stale-path mutation that changes senior principal first checkpoints `lastSeniorYieldCheckpointTime`, preventing later fresh reconciles from back-accruing yield across the pre-mutation interval. Pending recapitalization and trading-revenue buckets still apply.
+Operationally:
 
-**Projected Withdrawal Parity**: `getPendingTrancheState()` uses the same pending-bucket mapping as live reconcile and reserves projected assets exactly once. ERC-4626 preview consumers therefore see the same post-reconcile principals and withdrawal caps as the mutate-first path.
+- unsolicited donations stay quarantined as `excessAssets` until explicitly accounted or swept,
+- raw-balance shortfalls reduce effective backing immediately,
+- reconcile, solvency, and withdrawal logic all consume this canonical depth source rather than the raw token balance.
 
-### III. OrderRouter — The MEV Shield & Queue
+### Senior / junior waterfall
 
-[`OrderRouter.sol`](OrderRouter.sol)
+- Senior principal is restored before junior receives surplus if senior has been impaired.
+- `seniorHighWaterMark` prevents junior from extracting value while senior is still below its historical principal watermark.
+- The mark increases additively on deposits, scales proportionally on withdrawals, and resets cleanly after wipeout plus recapitalization.
+- Deposits remain blocked while senior is partially impaired.
 
-Two-step asynchronous **commit-reveal** pipeline:
+### Bootstrap and withdrawal gates
 
-1. **Commit** — The user submits intent (size, side, target price) and locks margin. The router assigns a strictly sequential `orderId` and records `block.timestamp`.
-2. **Reveal** — Keepers submit Pyth price payloads. The router aggregates the FX feeds into the basket price, enforces `publishTime > commitTimestamp` and `publishTime >= engine.lastMarkTime()` while the oracle is live, and supports batched multi-order execution. During genuine frozen-oracle windows, closes execute against the last valid oracle price rather than failing an impossible publish-time check.
+- Trading does not become live until both tranche seed positions exist and the owner activates trading.
+- Risk-increasing order commits and ordinary tranche deposits stay blocked during the seed lifecycle.
+- `TrancheVault.maxDeposit()` / `maxMint()` return zero while lifecycle, stale-mark, deposit-pause, senior-impairment, or pending-bootstrap-assignment gates block deposits.
+- `TrancheVault.maxWithdraw()` / `maxRedeem()` enforce cooldown plus pool-level withdrawal availability.
 
-**Basket Oracle**: The router is configured with parallel arrays of Pyth feed IDs, quantities (18-dec weights summing to `1e18`), and base prices (8-dec). `_computeBasketPrice()` normalizes each feed to 8 decimals and computes `Σ (price × quantity) / (basePrice × 1e10)`, matching the spot `BasketOracle`. The minimum `publishTime` across feeds drives MEV checks, action-specific staleness validation, and `engine.lastMarkTime()`.
+### Reconcile / freshness nuance
 
-**Slippage Protection**: The execution price is clamped to `CAP_PRICE` before the slippage check. Users therefore see the same price that `CfdEngine` executes.
+`HousePool` separates mark-dependent reconcile math from already-funded pending buckets.
 
-**Queue Economics**: Execution always starts from the global queue head, and the engine call is wrapped in `try/catch`. Retryable market-state misses such as slippage emit `OrderSkipped`, move the order to the global tail, and apply a short retry cooldown. Risk-increasing orders reserve an execution bounty quoted from `lastMarkPrice()` in the engine (falling back to `$1.00` before the first mark) and bounded to `[0.05 USDC, 1.00 USDC]`. Close intents reserve a flat `1.00 USDC` router-custodied bounty, sourced from free settlement first and then live position margin. Commit-time rejection is limited to `CommitTimeRejectable` opens; execution-time `UserInvalid` failures pay the clearer; execution-time `ProtocolStateInvalidated` opens refund the trader bounty; retryable market-state misses remain pending.
+- If mark freshness is required and stale, it skips mark-dependent yield and waterfall math.
+- That stale path does not back-accrue senior yield across the stale interval.
+- Already-funded pending recapitalization or trading-revenue buckets may still apply through the same settlement entrypoint.
 
-**Bounded Queue Cleanup**: Global queue cleanup is bounded. `executeOrder()` auto-skips only a fixed number of expired head orders per call, `executeOrderBatch()` uses a fixed global scan budget, and keepers can call `pruneExpiredOrders()` to advance expired queue heads in fixed-cost slices.
+This is why the LP docs distinguish freshness-gated repricing from already-funded cash movements.
 
-**Execution Bounty Custody**: At commit time the router seizes the reserved execution bounty into router custody. Opens always source it from free settlement. Closes source it from free settlement first and can fall back to active position margin so risk-reducing close intents remain committable without idle cash. Failed-order rewards therefore stay independent from vault liquidity.
+## Accounting Model
 
-**Order Escrow Accounting**: Order escrow flows through `OrderEscrowAccounting`. Router-held execution bounty reserves and margin-queue bookkeeping live there, while committed order margin remains clearinghouse-owned reservation state. Account-level escrow summaries adapt that reservation ledger rather than re-owning the economic amount inside the router.
+### Bounded solvency at entry
 
-**Freshness Buckets**: Live-market oracle freshness is split across four uses. `orderExecutionStalenessLimit` gates normal order execution and manual mark refresh. `liquidationStalenessLimit` separately gates live-market liquidations. `engineMarkStalenessLimit` gates engine-side mark-sensitive paths such as the trader withdraw guard and close-order bounty backing. `HousePool.markStalenessLimit` gates reconciliation and withdrawal safety. During genuine frozen-oracle windows, all four switch to `fadMaxStaleness`.
+Before increasing risk, the engine checks that the vault can cover the worst-case side payout after the trade.
 
-**Close Bounty Tradeoff**: Allowing close intents to source their flat keeper bounty from active position margin is a bounded liveness tradeoff. With the per-account pending-order cap, at most `5 USDC` of otherwise reachable margin can sit in router escrow awaiting close execution.
+```text
+vault total assets >= max(globalBullMaxProfit, globalBearMaxProfit)
+```
 
-**Typed Engine Failure Boundary**: `OrderRouter` executes through `CfdEngine.processOrderTyped()` and receives `CfdEngine__TypedOrderFailure(CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose)` instead of matching raw engine selectors. Combined with `previewOpenFailurePolicyCategory(...)`, this gives the router a stable semantic boundary for commit-time rejection and execution-time bounty routing.
+This does not mean LPs can never take loss. It means trader upside is bounded and the system can reason about the worst case without iterating positions.
 
-**Explicit Order Records**: Each `orderId` maps to one `OrderRecord` carrying the immutable `CfdTypes.Order`, lifecycle status, reserved execution bounty, and both intrusive queue link sets. Residual committed margin lives in clearinghouse-owned reservation records keyed by `orderId`; router/accounting helpers expose queue structure and derived summaries over that reservation ledger.
+### Carry instead of funding
 
-**Engine Margin vs Custody Margin**: `CfdEngine.positions[accountId].margin` is the canonical economic position-margin state used in risk, open/close planning, and side aggregate accounting. `MarginClearinghouse.positionMarginUsdc` / `activePositionMarginUsdc` is the canonical custody bucket holding the locked funds that back that state. `sides[*].totalMargin` is a cached aggregate of engine economic margin, not a custody owner.
+Plether Perps uses a fixed global carry rate on LP-backed exposure rather than side-to-side funding.
 
-**Stored vs Derived Order States**: Storage persists `None`, `Pending`, `Executed`, and `Failed`. `Executable` is derived (`Pending && orderId == nextExecuteId && oracle data / age checks pass`), not stored. `Expired` is represented as `Failed` plus the expiry failure path and reason.
+```text
+lpBackedNotionalUsdc = max(positionNotionalUsdc - reachableCollateralUsdc, 0)
+```
+
+Carry behavior:
+
+- Accrues continuously by wall-clock time.
+- Continues accruing even during stale or frozen oracle windows.
+- Applies to whichever side is consuming LP capital.
+- Is realized on open, close, add-margin, and withdraw-margin paths.
+- Flows to LP trading revenue once realized.
+- Affects guard and risk checks before realization.
+
+### Deferred liabilities
+
+The system can complete terminal transitions even when immediate vault cash is insufficient.
+
+- Trader gains can become deferred trader payouts.
+- Liquidation bounties can become deferred clearer balances.
+- Both are included in reserve and solvency accounting.
+- Deferred balances are beneficiary-based, not queue-based.
+
+### Conservative LP accounting
+
+LP accounting intentionally refuses to count unrealized trader losses as present vault assets.
+
+- Unrealized profitable trader PnL is treated as a liability.
+- Unrealized trader losses are not booked as instantly withdrawable LP assets.
+- Realized losses increase physical pool cash only when settlement actually happens.
+
+This keeps LP share pricing and withdrawal limits conservative.
+
+### Accounting domains
+
+The perps system intentionally splits accounting into separate kernels:
+
+- `CloseAccountingLib`: realized PnL, execution fee, trader settlement, and bad-debt handling for voluntary decreases.
+- `LiquidationAccountingLib`: reachable collateral, keeper bounty, residual payout, and bad debt for forced close.
+- `SolvencyAccountingLib`: effective assets, bounded max liability, withdrawal reserves, and free vault cash.
+- `OrderEscrowAccounting`: router-held execution bounty reserves and margin-queue bookkeeping.
+
+These domains answer different questions. They should not silently share assumptions just because the inputs look similar.
+
+## Order Routing and Oracle Model
+
+`OrderRouter` is a delayed-order FIFO queue with commit-now / execute-later semantics.
+
+### Commit rules
+
+- Opens are blocked while paused, degraded, or close-only.
+- The router may reject predictably invalid opens at commit time using engine-lens prechecks.
+- Each account may have at most `5` pending orders.
+- The router escrows the execution bounty at commit time.
+
+### Queue and bounty economics
+
+- Execution always starts from the global queue head.
+- Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.05 USDC, 1.00 USDC]`.
+- Close intents reserve a flat `1.00 USDC` bounty.
+- Open bounties come from free settlement.
+- Close bounties come from free settlement first and can fall back to active position margin so risk-reducing exits remain committable.
+- Failed-order rewards stay independent from vault liquidity because they are paid from router escrow rather than LP cash.
+
+### Execute rules
+
+- Keepers execute from the global queue head.
+- Pyth update data is required for live-market execution and the caller must attach ETH for the Pyth fee.
+- Publish-time ordering and staleness rules enforce MEV resistance when the oracle is live.
+- Slippage, expiry, and typed engine failures finalize the order; they do not create a retry queue.
+
+### Basket oracle and publish-time checks
+
+The router is configured with parallel arrays of Pyth feed ids, quantities, and base prices.
+
+- `_computeBasketPrice()` normalizes each feed to 8 decimals.
+- The router computes the weighted basket price in the same shape as the spot basket oracle.
+- The minimum `publishTime` across feeds drives MEV checks, staleness validation, and `engine.lastMarkTime()` ordering.
+- The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
+
+### Frozen oracle behavior
+
+The system distinguishes between:
+
+- `FAD window`: elevated margin and close-only risk policy while FX markets are approaching closure.
+- `Oracle frozen`: relaxed staleness and relaxed commit-time publish ordering once FX feeds are actually offline.
+
+This preserves close and liquidation liveness during real market closures without turning normal live trading into a free option.
+
+### Stored vs derived order state
+
+- Stored states are `None`, `Pending`, `Executed`, and `Failed`.
+- `Executable` is derived from head-of-queue status plus freshness/oracle checks.
+- `Expired` is represented by the failure path, not a separate persistent state bucket.
 
 ![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
 
-**Binding User Intents**: Open and close orders are binding once committed. Users cannot cancel queued intents, so keepers can rely on FIFO settlement without giving traders a free execution option. Open commits are rejected during degraded mode and close-only windows to prevent deterministic bounty loss on impossible orders.
+![Oracle regimes](../../assets/diagrams/perps-oracle-regimes.svg)
 
-**Per-Account Queue Cap**: Each account may hold at most `5` pending orders. This bounds account-local cleanup during liquidation and prevents one trader from bloating the FIFO.
+## Risk and Failure Containment
 
-**Terminal Settlement Liveness**: Full closes remain FIFO-local and do not scan later queued orders. Liquidations perform bounded account-local cleanup: when an account is liquidated, the router walks only that account's capped pending-order list, clears those orders, and forfeits their execution escrow to the vault. Liquidation preview and live accounting both include that forfeitable escrow in the same post-forfeiture vault-depth view.
+### Degraded mode
 
-### IV. CfdEngine — The Mathematical Ledger
+If a close or liquidation reveals post-op insolvency, the engine latches `degradedMode`.
 
-[`CfdEngine.sol`](CfdEngine.sol)
+While degraded:
 
-Core state machine. **Holds zero physical funds.** It receives validated intents, enforces O(1) solvency bounds, mutates positions, calculates PnL, and instructs the Clearinghouse and HousePool on settlement.
+- new opens are blocked,
+- position-backed withdrawals are blocked,
+- closes, liquidations, mark updates, and recapitalization remain available.
 
-**Degraded Mode**: If a profitable close pushes `effectiveAssets` below the remaining worst-case liability bound, the close succeeds and the engine latches `degradedMode`. While degraded, new opens and position-backed withdrawals are blocked. Closes, liquidations, mark updates, and recapitalization remain available until the owner clears the mode after solvency is restored.
+This is a containment latch, not a pause. The protocol still allows transitions that reduce risk or move the system back toward solvency.
 
-**Deferred Close Payouts**: A profitable close never fails solely because the House Pool is short on free cash. If the vault cannot immediately fund realized gain after reserving outstanding deferred liabilities and protocol-fee inventory, the position is destroyed and the unpaid profit is recorded in `deferredPayoutUsdc[accountId]`. Deferred payouts are outstanding protocol liabilities in reserve and solvency accounting. Claims are balance-based rather than queue-ordered: `claimDeferredPayout(accountId)` is permissionless and may service up to the currently available vault cash for that beneficiary without FIFO ordering.
+### Liquidations
 
-**Fail-Soft Keeper Bounties**: Liquidations are fail-soft if the House Pool cannot immediately fund the liquidation bounty after reserving outstanding deferred liabilities and protocol-fee inventory. The state transition completes and the unpaid amount becomes a deferred clearer-bounty balance for that keeper. Servicing is permissionless, settles into `MarginClearinghouse` credit rather than direct wallet transfer, and no longer relies on beneficiary FIFO ordering. Order-execution bounties remain router-custodied user escrow and do not depend on vault liquidity.
-
-**Deferred Liabilities in NAV/Reserves**: Deferred trader payouts and deferred clearer/liquidation bounty balances are included in withdrawal reserve, solvency, and HousePool reconciliation / NAV paths. A shared senior-cash reservation kernel gates fee withdrawal, fresh trader payouts, fresh liquidation bounty payments, and deferred-liability servicing.
-
-**Three-Bucket Liquidation Residuals**: Liquidation planning carries three trader-value buckets: `settlementRetainedUsdc` for reachable settlement left in the clearinghouse ledger, `existingDeferredRemainingUsdc` for pre-existing deferred payout that survives liquidation, and `freshTraderPayoutUsdc` for new trader payout created by liquidation equity in excess of reachable settlement after the keeper bounty. This keeps preview, execution, and solvency accounting aligned.
-
-**Accounting Domains**: `CfdEngine` uses explicit accounting kernels for close settlement (`CloseAccountingLib`), liquidation settlement (`LiquidationAccountingLib`), and a unified protocol cash-state / solvency builder (`SolvencyAccountingLib`). Runtime close/liquidation orchestration is further externalized through `CfdEngineSettlementModule` while `CfdEngine` retains storage ownership.
-
-**Preview Solvency Signals**: Canonical `previewClose()` / `previewLiquidation()` and hypothetical `simulateClose()` / `simulateLiquidation()` expose both the transition-only `triggersDegradedMode` flag and the raw post-op solvency result (`postOpDegradedMode`, `effectiveAssetsAfterUsdc`, `maxLiabilityAfterUsdc`). Integrators can therefore distinguish "this action newly latches degraded mode" from "the system remains degraded after this action."
-
-**Canonical vs Hypothetical Views**: Canonical `previewClose()` / `previewLiquidation()` read vault depth from `HousePool.totalAssets()` and answer live-state behavior. Hypothetical `simulateClose()` / `simulateLiquidation()` are explicit what-if APIs for caller-supplied depth assumptions.
-
-**Position View Semantics**: `getPositionView()` separates `physicalReachableCollateralUsdc` from `nettableDeferredPayoutUsdc`. Generic position-health and withdraw-facing views use only physically reachable clearinghouse collateral. Existing deferred payout is shown separately so UIs and audits can reason about same-account terminal netting without treating that IOU as instantly withdrawable collateral.
-
-**Withdraw Guard Policy**: Open-position withdrawals are blocked once post-withdraw equity would fall below `initMarginBps`, not only maintenance margin. `initMarginBps`, `maintMarginBps`, and `fadMarginBps` are separate configuration surfaces.
-
-**Key Invariants**:
-
-**Core Protocol**
-
-- Each `accountId` holds at most one live directional position at a time; side-flips must pass through a close.
-- FIFO execution is strict: `orderId == nextExecuteId`, so no later order can bypass an earlier pending order.
-- Router-custodied execution bounties are conserved across order lifecycle transitions until they are paid to a clearer or absorbed as protocol revenue.
-
-**Side-State / Engine Accounting**
-
-- `SideState` remains symmetric and conservative: side-local mirrors (`maxProfitUsdc`, `openInterest`, `entryNotional`, `totalMargin`) must stay consistent with the aggregate live position set.
-- `sides[BULL].totalMargin + sides[BEAR].totalMargin` must equal the sum of `pos.margin` across all live positions.
-- Preview/live parity must hold for the close and liquidation accounting kernels, including degraded-mode checks.
-- Terminal close and liquidation settlement must conserve value across trader payout, vault assets, protocol fees, deferred liabilities, and bad debt.
-
-**Router Queue / Margin Escrow**
-
-- `pendingOrderCounts` must match the actual pending FIFO queue per account.
-- Margin-queue membership must match orders whose clearinghouse reservation record has positive `remainingAmountUsdc`.
-- Clearinghouse reservation records are the sole source of truth for committed order margin; the router only maintains queue membership and execution-bounty escrow.
-- Locked margin attributable to queued opens must remain consistent with clearinghouse reservation state and only be released, consumed, or converted through explicit order lifecycle events.
-
-**Solvency / Containment**
-
-- Withdrawal reserve must move monotonically with deferred liabilities; adding deferred trader payouts or liquidation bounties cannot reduce reserves.
-- Effective solvency assets must never overstate realizable vault resources: unrealized trader losses do not count as assets, while deferred liabilities remain senior claims on liquidity.
-- After terminal transitions (close/liquidation) reveal insolvency, `degradedMode` must contain further risk expansion until recapitalization restores solvency.
-
-**HousePool / LP Accounting**
-
-- HousePool withdrawal limits can only expose unencumbered USDC after accounting for protocol fees, max liability, and deferred liabilities.
-- Senior high-water-mark accounting must prevent junior from extracting value while senior capital remains impaired.
-- HousePool reconciliation, NAV, and withdrawal-firewall paths must consume the same canonical engine snapshots for accounting inputs.
-
-**Solvency Invariant**: Before opening any trade, the engine proves:
-
-```
-vault.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)
-```
-
-Because prices cannot exceed CAP or drop below zero, this check bounds solvency at trade entry. Realized close payouts can reveal post-trade insolvency, which is why the engine latches `degradedMode` and blocks further risk expansion until recapitalized.
-
-### V. CfdMath — The Quantitative Library
-
-[`CfdMath.sol`](CfdMath.sol)
-
-Pure stateless math library for PnL limits and virtual price impact (VPI).
-
-## Market Balancing: The Economic Repulsion Engine
-
-The protocol takes no physical inventory risk and does not auto-hedge on AMMs. It uses path-independent math to repel toxic flow and reward market makers for healing skew.
-
-### Virtual Price Impact (VPI)
-
-Quadratic formula that charges toxic directional flow and rewards market makers with uncapped rebates:
-
-```
-C(S) = 0.5 · k · S² / D
-```
-
-`S` = Skew, `D` = Vault Depth, `k` = severity factor. Trade cost = `C(S_post) - C(S_pre)`.
-
-**Wash-Trade Immunity**: Opening and immediately closing yields exactly `$0` net VPI. Combined with the flat 4 bps execution fee, wash trading to farm rebates is a net loss.
-
-**Depth Manipulation Resistance**: Each position tracks `vpiAccrued`, the cumulative VPI charges and rebates across its lifetime. On close, the engine bounds VPI so the user cannot extract a net rebate greater than what they paid. Inflating or deflating depth between open and close therefore cannot produce VPI profit because the bound enforces `accruedVpi + closeVpi >= 0`.
-
-## Conservative Mark-to-Market
-
-The engine values LP equity with O(1) global accumulators (`globalBullEntryNotional`, `globalBearEntryNotional`) plus bounded payout accounting, giving real-time aggregate PnL without iterating positions.
-
-### Per-Side Zero Clamp
-
-The MtM function (`getVaultMtmAdjustment`) computes per-side unrealized `PnL`, then clamps each side at zero. The vault therefore never recognizes unrealized trader losses as assets:
-
-```
-bullTotal = bullPnl
-bearTotal = bearPnl
-
-if bullTotal < 0: bullTotal = 0
-if bearTotal < 0: bearTotal = 0
-
-return bullTotal + bearTotal
-```
-
-The return value is the vault's aggregate unrealized liability to profitable traders. When traders are losing on net, MtM returns zero rather than a positive vault asset. Realized losses flow through physical USDC transfers and naturally increase pool balance.
-
-**Trade-off**: The vault temporarily undercounts assets when traders have unrealized losses. This is conservative: junior principal may dip until traders close or are liquidated, at which point physical USDC transfers restore balance. That is preferable to letting paper profits inflate LP principal and be withdrawn as real USDC.
-
-### Layered Conservatism
-
-Different protocol functions use different conservatism levels:
-
-| Function | Purpose | Approach | Rationale |
-|----------|---------|----------|-----------|
-| `_reconcile()` | LP equity valuation | Zero-clamped MtM | Conservative share pricing — vault only counts liabilities, never unrealized gains |
-| `getFreeUSDC()` | LP withdrawal limits | Asymmetric (liabilities only) | Cash leaving the vault must exist physically — never offset reserves by paper claims |
-| `_getEffectiveAssets()` | Position solvency | Direct collateral + PnL | Solvency counts only economically real resources |
-
-The junior tranche absorbs realized bad debt through the reconciliation waterfall. No insurance fund or ADL is required.
-
-## Risk Management & Liquidations
-
-### Opposing Position Restriction
-
-An `accountId` can hold only one directional state per market. Opening the opposite side requires closing the existing position first, preventing capacity griefing through offsetting positions.
-
-### Minimum Position Size
-
-Positions must be large enough that their proportional keeper bounty (`notional × bountyBps`) meets the `minBountyUsdc` floor. This preserves liquidation incentive at all sizes. Partial closes that would leave `margin < minBountyUsdc` are rejected to prevent unliquidatable dust.
-
-### Proportional Liquidations
-
-- **Keeper Bounty**: 0.15% of notional size, bounded by a $5 floor. Capped at positive equity when available, otherwise capped by physically reachable liquidation collateral (vault never pays more than the liquidation path can actually seize)
-- **Residual Equity Preserved**: The protocol seizes only the exact mathematical loss + keeper bounty; remaining cross-margin equity is returned to the user
-- **Bad Debt Socialization**: If user equity is negative (extreme slippage), the House Pool absorbs the shortfall as a systemic insurance cost
-- **Graceful Self-Close**: Voluntary closes on underwater positions seize available balance and let the vault absorb any shortfall, rather than reverting
+- Liquidations are proportional and bounded by actually reachable collateral.
+- The keeper bounty is proportional with a floor.
+- Residual trader value is preserved when positive.
+- Bad debt is socialized to LP capital if losses exceed reachable collateral.
+- Voluntary closes on underwater positions seize what is reachable and let the vault absorb the shortfall rather than trapping the user in an impossible state.
 
 ### Friday Auto-Deleverage (FAD)
 
-FX markets close on weekends. Sunday reopens can gap through leverage buffers.
+The protocol raises margin requirements around FX market closure windows.
 
-| Window | MMR | Max Leverage |
-|--------|-----|-------------|
-| Normal | 1.0% | 100x |
-| FAD (Fri 19:00 UTC -> Sun 22:00 UTC) | 3.0% | 33x |
+| Window | Margin basis | Max leverage |
+|--------|--------------|--------------|
+| Normal | `maintMarginBps = 1%` | 100x |
+| FAD | `fadMarginBps = 3%` | 33x |
 
-Traders above 33x leverage must add margin before Friday evening or be liquidated while Friday oracle prices are active.
+The owner can also add admin FAD days for expected FX-market holidays.
 
-**Two-State Oracle Model**: The router separates risk management from oracle availability:
+### Position and side invariants
 
-1. **FAD window** (`isFadWindow()`, Friday 19:00 UTC+): enforces close-only mode and elevated margins. Open orders are rejected. MEV checks remain live and live-market staleness uses the normal execution and liquidation thresholds because Pyth FX feeds continue publishing until about 22:00 UTC.
-2. **Oracle frozen** (`isOracleFrozen()`, Friday 22:00 -> Sunday 21:00 UTC): relaxes staleness to `fadMaxStaleness` (default 3 days) and bypasses the MEV `commitTime` check because Pyth FX feeds have stopped. Close orders submitted during the freeze execute at the last valid oracle price instead of failing an impossible `publishTime > commitTime` requirement. Friday uses 22:00 UTC to avoid freezing while markets may still be open; Sunday uses 21:00 UTC to restore MEV protection as soon as markets could resume. In winter, the 21:00 unfreeze creates a safe 1-hour liveness drop because 60s staleness rejects the ~47h-old price.
+The important runtime invariants are:
 
-This prevents the Friday 19:00-22:00 interval from becoming an MEV gap while markets are still moving.
+- each account holds at most one live directional position,
+- side-local cached accounting remains symmetric and conservative,
+- `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across live positions,
+- preview/live parity must hold for close and liquidation accounting,
+- router-custodied execution bounties are conserved across the order lifecycle.
 
-![Oracle regimes](../../assets/diagrams/perps-oracle-regimes.svg)
+## Governance and Admin Controls
 
-**Admin FAD Days**: The owner can designate additional FAD days through `proposeAddFadDays()` / `proposeRemoveFadDays()` for FX market holidays such as Christmas or New Year. On those days the oracle is assumed offline, so staleness relaxes to `fadMaxStaleness` and MEV checks are bypassed to preserve close liveness at the last valid oracle price.
+Most risk-sensitive parameter changes are timelocked for 48 hours.
 
-**Deleverage Runway**: Admin holidays do not have the natural weekend runway (Friday 19:00-22:00). `fadRunwaySeconds` (default 3 hours, max 24 hours, configurable through `proposeFadRunway()`) triggers `isFadWindow()` before midnight when the next day is an admin FAD day. During the runway, close-only mode and elevated margins apply while the oracle remains live with normal staleness and MEV checks, giving keepers time to liquidate over-leveraged positions before midnight freeze.
+Timelocked surfaces include:
 
-## Fee Structure
+- `CfdEngine.riskParams`
+- `CfdEngine.fadMaxStaleness`
+- `CfdEngine.fadRunwaySeconds`
+- `CfdEngine.engineMarkStalenessLimit`
+- `HousePool.seniorRateBps`
+- `HousePool.markStalenessLimit`
+- `OrderRouter.maxOrderAge`
+- `OrderRouter.orderExecutionStalenessLimit`
+- `OrderRouter.liquidationStalenessLimit`
 
-| Fee | Rate | Source |
-|-----|------|--------|
-| Execution Fee | 4 bps (0.04%) | Charged on notional size at open/close |
+Instant controls remain for one-time wiring, emergency pause, and fee withdrawal.
 
-Open and close execution fees accrue to protocol revenue and are withdrawn by the owner via `withdrawFees()`. Keeper execution is compensated separately through reserved router order bounties.
+### Pause behavior
 
-## Governance
-
-### 48-Hour Timelock
-
-All admin parameter changes follow a **propose -> wait 48 hours -> finalize** pattern:
-
-1. **Propose**: Owner calls `proposeX(newValue)` — stores the pending value and sets `activationTime = now + 48h`
-2. **Wait**: The 48-hour delay gives users and monitoring systems time to react (exit positions, withdraw LP capital)
-3. **Finalize**: After 48 hours, owner calls `finalizeX()` — applies the pending value and clears the proposal
-4. **Cancel**: Owner can call `cancelXProposal()` at any time to abort a pending change
-
-Timelocked parameters:
-
-| Contract | Parameters |
-|----------|-----------|
-| CfdEngine | `riskParams`, `fadDayOverrides`, `fadMaxStaleness`, `fadRunwaySeconds`, `engineMarkStalenessLimit` |
-| HousePool | `seniorRateBps`, `markStalenessLimit` |
-| OrderRouter | `maxOrderAge`, `orderExecutionStalenessLimit`, `liquidationStalenessLimit` |
-| MarginClearinghouse | none after one-time `setEngine(address)` |
-
-**Not timelocked** (instant): one-time setters (`setVault`, `setOrderRouter`, `setEngine`, etc.), `withdrawFees`, `pause`/`unpause`, ownership transfer.
-
-### Emergency Pause
-
-The protocol includes an instant circuit breaker:
-
-| Contract | Paused Actions | Always Active |
-|----------|---------------|---------------|
-| OrderRouter | `commitOrder` | `executeOrder`, `executeLiquidation`, `updateMarkPrice` |
-| HousePool | `depositSenior`, `depositJunior` | `withdrawSenior`, `withdrawJunior`, `reconcile` |
-
-Only the owner can pause or unpause. Protective actions (closes, liquidations, withdrawals) are never blocked.
+- Pausing `OrderRouter` blocks new risk-increasing order commits.
+- Keeper execution, liquidation, and other protective paths remain available.
+- Pausing `HousePool` blocks new LP deposits but not protective withdrawals or reconcile.
 
 ## Key Constants
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `maintMarginBps` | 100 (1%) | Maintenance margin requirement |
-| `initMarginBps` | 150 (1.5%) | Initial margin requirement configured explicitly in risk params |
-| `fadMarginBps` | 300 (3%) | FAD window maintenance margin |
-| `baseCarryBps` | 500 (5%) | Fixed global annualized carry rate applied to LP-backed notional |
-| `bountyBps` | 15 (0.15%) | Liquidation keeper bounty |
-| `minBountyUsdc` | 5,000,000 ($5) | Keeper bounty floor |
-| `vpiFactor` | WAD-scaled | VPI severity `k` |
-| `maxSkewRatio` | 0.40e18 (40%) | Hard skew cap |
-| IMR | `initMarginBps` | Initial margin requirement |
-| Execution fee | 4 bps (0.04%) | Protocol fee charged on notional at open/close |
-| Open execution bounty | 0.05 USDC to 1.00 USDC | Reserved at commit based on notional |
-| Close execution bounty | 1.00 USDC | Reserved at commit as router-custodied escrow |
-| Normal oracle staleness | 60s | Max Pyth price age for execution and mark refresh |
-| Liquidation oracle staleness | 15s | Max Pyth price age for liquidations |
-| `engineMarkStalenessLimit` | 60s | Max mark age for engine-side withdraw guard and close bounty backing |
-| `markStalenessLimit` | 60s | Max mark age for HousePool reconciliation |
-| `DEPOSIT_COOLDOWN` | 1 hour | TrancheVault anti-flash-loan lockup; self-deposits reset cooldown, and meaningful third-party top-ups also reset the recipient cooldown |
-| `fadMaxStaleness` | 259,200 (3 days) | Max oracle age during frozen oracle windows |
-| `fadRunwaySeconds` | 10,800 (3 hours) | Lookahead for admin FAD day deleverage runway |
-| `seniorRateBps` | 800 (8% APY) | Fixed-rate senior tranche yield |
+| `initMarginBps` | 150 (1.5%) | Initial margin requirement |
+| `fadMarginBps` | 300 (3%) | FAD margin requirement |
+| `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
+| `bountyBps` | 15 (0.15%) | Liquidation bounty rate |
+| `minBountyUsdc` | 5,000,000 ($5) | Liquidation bounty floor |
+| `EXECUTION_FEE_BPS` | 4 (0.04%) | Protocol trading fee |
+| Open execution bounty | 0.05 to 1.00 USDC | Reserved at commit |
+| Close execution bounty | 1.00 USDC | Reserved at commit |
+| Normal execution staleness | 60s | Normal order execution freshness |
+| Liquidation staleness | 15s | Live-market liquidation freshness |
+| `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
+| `markStalenessLimit` | 60s | HousePool mark freshness |
+| `fadMaxStaleness` | 3 days | Frozen-market max staleness |
+| `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
+| `seniorRateBps` | 800 (8% APY) | Senior fixed-rate target |
+| `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
 
-## LP Withdrawal Availability
+## Further Reading
 
-LP withdrawal limits are a gated accounting flow, not a boolean switch. `TrancheVault.maxWithdraw()` and `maxRedeem()` first enforce holder cooldown and protocol-state gates, then `HousePool` computes reserved capital from protocol liabilities and exposes only tranche-prioritized free USDC that can safely leave the vault.
-
-![LP withdrawal flow](../../assets/diagrams/perps-lp-withdrawal-availability.svg)
+- [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md): full accounting and reserve model
+- [`SECURITY.md`](SECURITY.md): trust assumptions, liveness tradeoffs, and security posture
+- [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md): intended product-facing integration surface
+- [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md): one-page component and custody map

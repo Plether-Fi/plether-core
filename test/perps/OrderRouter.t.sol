@@ -93,7 +93,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Terminal engine reverts should clear the queue to the zero sentinel");
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
@@ -160,7 +160,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(
             size, sizeDelta * 2, "valid increase should execute even when free settlement is zero at execution time"
         );
@@ -269,7 +269,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (, uint256 posMargin,,,,,,) = engine.positions(accountId);
+        (, uint256 posMargin,,,,,) = engine.positions(accountId);
         assertEq(
             clearinghouse.lockedMarginUsdc(accountId),
             posMargin + 500 * 1e6,
@@ -280,7 +280,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (, uint256 posMarginAfter,,,,,,) = engine.positions(accountId);
+        (, uint256 posMarginAfter,,,,,) = engine.positions(accountId);
         assertEq(
             clearinghouse.lockedMarginUsdc(accountId),
             posMarginAfter,
@@ -388,12 +388,12 @@ contract OrderRouterTest is BasePerpTest {
         _open(counterpartyId, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
-        (, uint256 marginBefore,,,,,,) = engine.positions(accountId);
+        (, uint256 marginBefore,,,,,) = engine.positions(accountId);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
 
-        (, uint256 marginAfter,,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfter,,,,,) = engine.positions(accountId);
         assertEq(_executionBountyReserve(1), 1_000_000, "Close orders should still escrow full bounty");
         assertEq(marginAfter, marginBefore - 1_000_000, "Close bounty should fall back to active margin");
         assertEq(usdc.balanceOf(address(router)), 1_000_000, "Router should custody the close bounty after fallback");
@@ -435,13 +435,13 @@ contract OrderRouterTest is BasePerpTest {
         uint256 minSize = (minNotional * 1e20) / 1e8;
         _open(accountId, CfdTypes.Side.BULL, minSize, 50_000e6, 1e8, depth);
 
-        (, uint256 marginBeforeCommit,,,,,,) = engine.positions(accountId);
+        (, uint256 marginBeforeCommit,,,,,) = engine.positions(accountId);
         assertEq(_freeSettlementUsdc(accountId), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
 
-        (, uint256 marginAfterCommit,,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterCommit,,,,,) = engine.positions(accountId);
         assertEq(
             marginAfterCommit,
             marginBeforeCommit - 1e6,
@@ -453,7 +453,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (, uint256 marginAfterExecute,,,,,,) = engine.positions(accountId);
+        (, uint256 marginAfterExecute,,,,,) = engine.positions(accountId);
         assertEq(
             marginAfterExecute,
             marginBeforeCommit - 1e6,
@@ -487,7 +487,7 @@ contract OrderRouterTest is BasePerpTest {
 
         uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(accountId);
         assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
-        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after funding the clearinghouse");
+        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
@@ -824,11 +824,11 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Empty global queue should clear to zero sentinel after processing");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
         assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
 
         uint256 keeperAfter = usdc.balanceOf(address(this));
@@ -852,7 +852,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Batch should clear the terminal slippage middle order and drain the queue");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 15_000 * 1e18, "Orders 1 and 3 succeed, order 2 cancelled");
     }
 
@@ -942,7 +942,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(
             router.nextExecuteId(), 0, "batch should clear adversarial failed heads and still execute the tail order"
         );
-        (uint256 size,,,,,,,) = engine.positions(carolId);
+        (uint256 size,,,,,,) = engine.positions(carolId);
         assertEq(size, 10_000 * 1e18, "tail order should still execute after many failed head orders");
         assertLt(gasUsed, 40_000_000, "adversarial batch path gas budget regressed");
     }
@@ -978,8 +978,8 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrderBatch(3, empty);
 
         assertEq(router.nextExecuteId(), 0, "terminal slippage miss should not block later queued orders");
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
-        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 carolSize, , , , , , ) = engine.positions(carolId);
         assertEq(aliceSize, 10_000 * 1e18, "slippage-failed close must leave the live position intact");
         assertEq(carolSize, 5000 * 1e18, "tail order should execute once the failed head is cleared");
     }
@@ -1015,7 +1015,7 @@ contract OrderRouterTest is BasePerpTest {
         router.executeOrder(2, empty);
         uint256 gasUsed = gasBefore - gasleft();
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "terminal close should still succeed with a bounded foreign queue behind it");
         assertEq(router.nextExecuteId(), 3, "queue head should advance after the full close");
         assertLt(gasUsed, 40_000_000, "terminal close gas budget regressed");
@@ -1070,7 +1070,7 @@ contract OrderRouterTest is BasePerpTest {
             "mixed failed and successful heads should clear the failed head and drain the queue"
         );
 
-        (uint256 carolSize,,,,,,,) = engine.positions(carolId);
+        (uint256 carolSize,,,,,,) = engine.positions(carolId);
         assertEq(carolSize, 10_000 * 1e18, "valid tail order should still execute after mixed heads");
     }
 
@@ -1276,7 +1276,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once degraded mode latches");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
@@ -1417,7 +1417,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit skew exceeds the cap");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on skew invalidation"
@@ -1447,7 +1447,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once post-commit solvency is exceeded");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore, 0, "Keeper should not receive bounty on solvency invalidation"
@@ -1471,7 +1471,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Order should fail once post-commit margin is drained");
         assertEq(margin, 1e6, "Post-commit state mutation should leave the custody-backed margin state untouched");
         assertEq(
@@ -1498,7 +1498,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(1, empty);
 
-        (uint256 size, uint256 margin,,,,,,) = engine.positions(aliceId);
+        (uint256 size, uint256 margin,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000e18, "Batch execution should leave the original position untouched");
         assertEq(margin, 1e6, "Batch execution should preserve the drained custody-backed margin state");
         assertEq(
@@ -1526,7 +1526,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrderBatch(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Batch execution should leave invalidated order unopened");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
@@ -1616,7 +1616,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(accountId);
         assertEq(freeSettlementBeforeCommit, 5000e6, "setup must leave free settlement to back the bounty");
-        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after funding the clearinghouse");
+        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.BULL, minSize - 1, 0, 0, true);
@@ -1965,7 +1965,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "BULL open at favorable price should succeed");
 
         vm.warp(2000);
@@ -1978,7 +1978,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 trader2Id = bytes32(uint256(uint160(trader2)));
-        (size,,,,,,,) = engine.positions(trader2Id);
+        (size,,,,,,) = engine.positions(trader2Id);
         assertGt(size, 0, "BEAR open at favorable price should succeed");
 
         vm.warp(3000);
@@ -1990,7 +1990,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(20);
         router.executeOrder(3, empty);
 
-        (size,,,,,,,) = engine.positions(aliceId);
+        (size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
 
         vm.warp(4000);
@@ -2002,7 +2002,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(30);
         router.executeOrder(4, empty);
 
-        (size,,,,,,,) = engine.positions(trader2Id);
+        (size,,,,,,) = engine.positions(trader2Id);
         assertEq(size, 10_000 * 1e18, "BEAR open at adverse price should be rejected");
     }
 
@@ -2019,7 +2019,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertTrue(size > 0, "Position should exist");
 
         vm.warp(2000);
@@ -2032,7 +2032,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (size,,,,,,,) = engine.positions(accountId);
+        (size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Close should be rejected by slippage check");
     }
 
@@ -2057,7 +2057,7 @@ contract OrderRouterPythTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Batch should continue once only same-block MEV remains enforced");
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 15_000 * 1e18, "Both queued orders should execute once publish-time MEV is removed");
     }
 
@@ -2109,7 +2109,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertGt(size, 0, "Basket at $1.00 should pass slippage for target $1.00");
     }
 
@@ -2180,7 +2180,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "BULL position should exist");
 
         vm.warp(2000);
@@ -2193,7 +2193,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (size,,,,,,,) = engine.positions(accountId);
+        (size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "BULL close should succeed against clamped price");
     }
 
@@ -2379,7 +2379,7 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
 
         router.executeLiquidation(accountId, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
         assertEq(
             engine.accumulatedBadDebtUsdc(),
@@ -2427,7 +2427,6 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 25e6);
 
         vm.warp(block.timestamp + 60 days);
-        uint64 fundingBefore = engine.lastFundingTime();
         uint256 canonicalDepthBefore = pool.totalAssets();
 
         CfdEngine.LiquidationPreview memory expectedPreview =
@@ -2439,11 +2438,6 @@ contract OrderRouterLiquidationEscrowTest is BasePerpTest {
         uint256 keeperBefore = usdc.balanceOf(address(this));
         router.executeLiquidation(accountId, priceData);
 
-        assertEq(
-            engine.lastFundingTime(),
-            fundingBefore,
-            "No-funding model should not advance the funding clock during liquidation"
-        );
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
             expectedPreview.keeperBountyUsdc,
@@ -2632,7 +2626,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(1, setupPyth);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         require(size == 10_000 * 1e18, "setUp: position not opened");
 
         vm.warp(FRIDAY_18UTC);
@@ -2697,7 +2691,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close order should execute during frozen oracle");
     }
 
@@ -2725,13 +2719,13 @@ contract FadStalenessTest is BasePerpTest {
         uint256 keeperBefore = usdc.balanceOf(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 sizeBefore,,,,,,,) = engine.positions(aliceId);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
         vm.warp(SATURDAY_NOON + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(orderId, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
@@ -2759,13 +2753,13 @@ contract FadStalenessTest is BasePerpTest {
         uint256 keeperBefore = usdc.balanceOf(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 sizeBefore,,,,,,,) = engine.positions(aliceId);
+        (uint256 sizeBefore,,,,,,) = engine.positions(aliceId);
         vm.warp(SATURDAY_NOON + 1);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrderBatch(orderId, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, sizeBefore, "Open order should fail once the router enters close-only mode");
         assertEq(
             usdc.balanceOf(address(this)) - keeperBefore,
@@ -2794,7 +2788,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Frozen-window close should execute without MEV rejection");
     }
 
@@ -2824,7 +2818,7 @@ contract FadStalenessTest is BasePerpTest {
 
         router.executeLiquidation(aliceId, empty);
 
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Liquidation should succeed during FAD with stale price");
     }
 
@@ -2854,7 +2848,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrderBatch(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 5000 * 1e18, "Partial close should reduce position");
     }
 
@@ -2886,7 +2880,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "61s stale on weekday should leave the close order unexecuted");
     }
 
@@ -2910,7 +2904,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 carolId = bytes32(uint256(uint160(carol)));
-        (uint256 size,,,,,,,) = engine.positions(carolId);
+        (uint256 size,,,,,,) = engine.positions(carolId);
         assertGt(size, 0, "Weekday open orders should work normally");
     }
 
@@ -3009,7 +3003,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close with fresh price should succeed during Friday gap");
     }
 
@@ -3040,7 +3034,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 10_000 * 1e18, "60s staleness must apply during Friday gap");
     }
 
@@ -3070,7 +3064,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close should succeed at Sunday 21:00 with fresh price");
     }
 
@@ -3157,7 +3151,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrder(2, empty);
 
         bytes32 aliceId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceId);
+        (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Close with fresh price works during runway");
     }
 
@@ -3378,7 +3372,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.executeOrder(2, pythData);
 
         bytes32 carolAccount = bytes32(uint256(uint160(carol)));
-        (uint256 size,,,,,,,) = engine.positions(carolAccount);
+        (uint256 size,,,,,,) = engine.positions(carolAccount);
         assertGt(size, 0, "Close at bad price should have been rejected by slippage check");
     }
 
@@ -3420,7 +3414,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(commitId, priceData);
 
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertEq(size, 0, "Expired order must not execute via executeOrder");
     }
 
@@ -3446,7 +3440,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 accountId = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         assertGt(size, 0, "Position should be open");
 
         router.pause();
@@ -3462,7 +3456,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         vm.roll(10);
         router.executeOrder(2, empty);
 
-        (uint256 sizeAfter,,,,,,,) = engine.positions(accountId);
+        (uint256 sizeAfter,,,,,,) = engine.positions(accountId);
         assertEq(sizeAfter, 0, "Position should be fully closed");
     }
 
@@ -3837,7 +3831,7 @@ contract StalenessGriefTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "stale oracle should leave the order unexecuted when execution reverts");
     }
 
@@ -4271,7 +4265,7 @@ contract WeekendArbitrageTest is Test {
         router.executeOrder(1, updateData);
 
         bytes32 aliceAccount = bytes32(uint256(uint160(alice)));
-        (uint256 size,,,,,,,) = engine.positions(aliceAccount);
+        (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
 
         uint256 ts = block.timestamp;
@@ -4292,7 +4286,7 @@ contract WeekendArbitrageTest is Test {
         vm.roll(10);
         router.executeOrder(2, updateData);
 
-        (size,,,,,,,) = engine.positions(aliceAccount);
+        (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Frozen-window close should execute when only stale Friday price exists");
     }
 

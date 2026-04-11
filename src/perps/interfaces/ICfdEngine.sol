@@ -24,8 +24,6 @@ interface ICfdEngine {
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
-        int256 fundingIndex;
-        int256 entryFunding;
     }
 
     struct LiquidationPreview {
@@ -33,7 +31,6 @@ interface ICfdEngine {
         uint256 oraclePrice;
         int256 equityUsdc;
         int256 pnlUsdc;
-        int256 fundingUsdc;
         uint256 reachableCollateralUsdc;
         uint256 keeperBountyUsdc;
         uint256 seizedCollateralUsdc;
@@ -48,7 +45,6 @@ interface ICfdEngine {
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
-        int256 solvencyFundingPnlUsdc;
     }
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
@@ -126,7 +122,7 @@ interface ICfdEngine {
     /// @notice Accumulated execution fees awaiting withdrawal (6 decimals)
     function accumulatedFeesUsdc() external view returns (uint256);
 
-    /// @notice Deferred profitable-close payouts still owed to traders.
+    /// @notice Deferred trader payouts still owed to beneficiaries.
     function totalDeferredPayoutUsdc() external view returns (uint256);
 
     /// @notice Deferred liquidation bounties still owed after failed immediate payout.
@@ -135,8 +131,8 @@ interface ICfdEngine {
     /// @notice Timestamp of the last mark price update
     function lastMarkTime() external view returns (uint64);
 
-    /// @notice Materializes accrued funding into storage so subsequent reads reflect current state.
-    /// @notice Push a fresh mark price without processing an order
+    /// @notice Pushes a fresh mark price without processing an order.
+    /// @dev This updates the cached mark only; carry is realized on execution and margin-mutating paths.
     /// @param price       New mark price (8 decimals)
     /// @param publishTime Oracle publish timestamp for the price update
     function updateMarkPrice(

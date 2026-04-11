@@ -105,7 +105,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,, CfdTypes.Side side,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,, CfdTypes.Side side,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }
@@ -117,8 +117,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             }
         }
 
-        (,,, uint256 liveBullTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BULL));
-        (,,, uint256 liveBearTotalMargin,,) = engine.sides(uint256(CfdTypes.Side.BEAR));
+        (,,, uint256 liveBullTotalMargin) = engine.sides(uint256(CfdTypes.Side.BULL));
+        (,,, uint256 liveBearTotalMargin) = engine.sides(uint256(CfdTypes.Side.BEAR));
 
         assertEq(
             bullTotalMargin, liveBullTotalMargin, "Bull side totalMargin must match tracked engine position margins"
@@ -133,7 +133,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             bytes32 accountId = _accountId(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(accountId);
-            (, uint256 margin,,,,,,) = engine.positions(accountId);
+            (, uint256 margin,,,,,) = engine.positions(accountId);
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(accountId);
 
             assertEq(snapshot.margin, margin, "Account snapshot margin must match engine economic position margin");

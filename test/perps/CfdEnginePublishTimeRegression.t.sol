@@ -32,8 +32,8 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
         _closeAt(bobId, CfdTypes.Side.BEAR, 100_000e18, 1e8, depth, fridayPublishTime);
         assertEq(engine.lastMarkTime(), fridayPublishTime, "repeated frozen close should keep the same publish time");
 
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
-        (uint256 bobSize,,,,,,,) = engine.positions(bobId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 bobSize, , , , , , ) = engine.positions(bobId);
         assertEq(aliceSize, 0, "first frozen-window close should succeed");
         assertEq(bobSize, 0, "second frozen-window close should succeed with the same publish time");
     }
@@ -66,8 +66,8 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
             engine.lastMarkTime(), fridayPublishTime, "repeated frozen liquidation should keep the same publish time"
         );
 
-        (uint256 aliceSize,,,,,,,) = engine.positions(aliceId);
-        (uint256 bobSize,,,,,,,) = engine.positions(bobId);
+        (uint256 aliceSize,,,,,,) = engine.positions(aliceId);
+        (uint256 bobSize, , , , , , ) = engine.positions(bobId);
         assertEq(aliceSize, 0, "first frozen-window liquidation should succeed");
         assertEq(bobSize, 0, "second frozen-window liquidation should succeed with the same publish time");
     }

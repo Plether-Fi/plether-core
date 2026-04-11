@@ -90,7 +90,7 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size,,,,,,,) = engine.positions(accountId);
+            (uint256 size,,,,,,) = engine.positions(accountId);
             if (size == 0) {
                 continue;
             }

@@ -38,7 +38,6 @@ library AccountLensViewTypes {
         uint256 margin;
         uint256 entryPrice;
         int256 unrealizedPnlUsdc;
-        int256 pendingFundingUsdc;
         int256 netEquityUsdc;
         bool liquidatable;
     }

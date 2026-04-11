@@ -1,3 +1,16 @@
+- [x] Rewrite `src/perps/README.md` into a basics-first audit packet entry doc
+- [x] Sweep core perps NatSpec for stale funding / queue / deferred-claim language
+- [x] Add missing high-signal NatSpec on public lenses and settlement surfaces
+- [x] Review edited docs for consistency against current delayed-order + carry architecture
+
+Review:
+- Planned scope: make `src/perps/README.md` readable to a new auditor before they dive into the accounting docs, and clean up the highest-signal NatSpec drift left by the funding->carry and deferred-queue simplifications.
+- Rewrote `src/perps/README.md` into a basics-first document with: market model, actors, units, trader/LP lifecycles, runtime boundaries, carry/deferred-liability overview, router/oracle behavior, and links into the deeper specs.
+- Updated stale queue wording so the docs now describe terminal failed-order cleanup rather than a retry/requeue lane.
+- Cleaned up NatSpec drift across `src/perps/CfdEngine.sol`, `src/perps/HousePool.sol`, `src/perps/MarginClearinghouse.sol`, `src/perps/OrderRouter.sol`, `src/perps/CfdEngineSettlementModule.sol`, `src/perps/CfdEngineAccountLens.sol`, `src/perps/CfdEngineProtocolLens.sol`, `src/perps/PerpsPublicLens.sol`, and the main perps interfaces/type modules.
+- Removed stale deferred FIFO helper structs from `src/perps/interfaces/DeferredEngineViewTypes.sol` and dropped the unused `Cancelled` public order-status variant from `src/perps/interfaces/PerpsViewTypes.sol` so the public docs better match the current state machine.
+- Verified the edited source still compiles with `forge build --skip test`.
+
 - [x] Refactor perps accounting symmetry around legacy deferred payouts and pending HousePool waterfall updates
 - [x] Add regressions for close-path deferred payout seizure and pending-bucket yield checkpoint preservation
 

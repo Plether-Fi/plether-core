@@ -10,8 +10,7 @@ library PerpsViewTypes {
         None,
         Pending,
         Executed,
-        Failed,
-        Cancelled
+        Failed
     }
 
     struct TraderAccountView {

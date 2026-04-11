@@ -10,8 +10,15 @@ import {ICfdVault} from "./interfaces/ICfdVault.sol";
 import {IMarginClearinghouse} from "./interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 
+/// @title CfdEngineSettlementModule
+/// @notice Externalized settlement executor for `CfdEngine` close and liquidation flows.
+/// @dev `CfdEngine` remains the storage owner and grants this module access only through narrow
+///      settlement-host hooks. The module does not own independent protocol state.
 contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
+    /// @notice Applies the live open/increase settlement plan produced by the planner.
+    /// @dev Realizes carry, fee, and vault-flow side effects through the settlement host while keeping
+    ///      the engine as the canonical state owner.
     function executeOpen(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.OpenDelta calldata delta,
@@ -68,6 +75,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         );
     }
 
+    /// @notice Applies the live close/decrease settlement plan produced by the planner.
+    /// @dev Can record deferred trader payout, bad debt, and realized carry depending on the close result.
     function executeClose(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
@@ -155,6 +164,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         }
     }
 
+    /// @notice Applies the live liquidation settlement plan produced by the planner.
+    /// @return keeperBountyUsdc Liquidation bounty owed to the keeper after the state transition.
     function executeLiquidation(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,

@@ -126,7 +126,7 @@ contract PerpOracleHandler is Test {
         address actor
     ) internal {
         bytes32 accountId = bytes32(uint256(uint160(actor)));
-        (uint256 size,,,,,,,) = engine.positions(accountId);
+        (uint256 size,,,,,,) = engine.positions(accountId);
         if (size > 0) {
             return;
         }

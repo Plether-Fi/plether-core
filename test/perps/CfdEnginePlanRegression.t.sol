@@ -114,7 +114,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     function _position(
         bytes32 accountId
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc,, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engine.positions(accountId);
     }
 
@@ -142,15 +142,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 currentMargin,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) internal pure returns (bool drained, uint256 expectedMarginAfter) {
-        uint256 marginAfterFunding = _marginAfterFunding(currentMargin, delta);
-        int256 signedMarginAfter = int256(marginAfterFunding) + delta.netMarginChange;
+        uint256 marginAfterCarry = _marginAfterCarry(currentMargin, delta);
+        int256 signedMarginAfter = int256(marginAfterCarry) + delta.netMarginChange;
         if (signedMarginAfter < 0) {
             return (true, 0);
         }
         return (false, uint256(signedMarginAfter));
     }
 
-    function _marginAfterFunding(
+    function _marginAfterCarry(
         uint256 currentMargin,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) internal pure returns (uint256) {
@@ -275,7 +275,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 feesBefore = engine.accumulatedFeesUsdc();
         _open(accountId, CfdTypes.Side.BULL, order.sizeDelta, order.marginDelta, 1e8);
 
-        (uint256 size, uint256 margin, uint256 entryPrice,,,,,) = engine.positions(accountId);
+        (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(accountId);
         assertEq(size, delta.newPosSize, "Live open size should match planner delta");
         assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
         assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
@@ -455,7 +455,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(
             uint8(delta.revertCode),
             uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            "Planner should reject opens whose physical margin cannot cover the trade charges under the no-funding model"
+            "Planner should reject opens whose physical margin cannot cover the trade charges under the no-side-funding model"
         );
     }
 

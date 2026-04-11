@@ -26,11 +26,11 @@ contract PlanApplyRegressionTest is BasePerpTest {
     }
 
     // ──────────────────────────────────────────────
-    //  1. Partial close with accrued funding:
-    //     entry funding uses post-funding index
+    //  1. Partial close with accrued carry:
+    //     legacy side index remains zero in the carry model
     // ──────────────────────────────────────────────
 
-    function test_PartialClose_SideEntryFundingZeroesAfterAllClose() public {
+    function test_PartialClose_LegacySideIndexStaysZeroAfterAllClose() public {
         bytes32 bullId = bytes32(uint256(1));
         bytes32 bearId = bytes32(uint256(2));
         _fundTrader(address(uint160(uint256(bullId))), 50_000e6);
@@ -47,13 +47,17 @@ contract PlanApplyRegressionTest is BasePerpTest {
         vm.warp(closeTime + 2);
         this.doClose(bearId, CfdTypes.Side.BEAR, 50_000e18, 0.8e8);
 
-        int256 bullFunding = _computeGlobalFundingPnl(CfdTypes.Side.BULL);
-        int256 bearFunding = _computeGlobalFundingPnl(CfdTypes.Side.BEAR);
+        int256 bullLegacySpread = _computeGlobalLegacySpreadPnl(CfdTypes.Side.BULL);
+        int256 bearLegacySpread = _computeGlobalLegacySpreadPnl(CfdTypes.Side.BEAR);
 
-        assertEq(bullFunding + bearFunding, 0, "Global funding PnL must be zero when all positions are closed");
+        assertEq(
+            bullLegacySpread + bearLegacySpread,
+            0,
+            "Global legacy-spread PnL must stay zero when all positions are closed"
+        );
     }
 
-    function test_PartialClose_PreviewMatchesExecution_WithAccruedFunding() public {
+    function test_PartialClose_PreviewMatchesExecution_WithCarryAccrual() public {
         bytes32 bullId = bytes32(uint256(0xA1));
         bytes32 bearId = bytes32(uint256(0xA2));
         _fundTrader(address(uint160(uint256(bullId))), 30_000e6);
@@ -67,20 +71,17 @@ contract PlanApplyRegressionTest is BasePerpTest {
         uint256 vaultDepth = pool.totalAssets();
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(bullId, 40_000e18, 0.9e8);
         assertTrue(preview.valid, "Partial close preview should be valid");
-        int256 entryFundingBefore = 0;
 
         this.doClose(bullId, CfdTypes.Side.BULL, 40_000e18, 0.9e8);
 
-        (uint256 sizeAfter, uint256 marginAfter,,,,,,) = engine.positions(bullId);
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(bullId);
         assertEq(sizeAfter, preview.remainingSize, "Post-close size matches preview");
         assertEq(marginAfter, preview.remainingMargin, "Post-close margin matches preview");
 
-        int256 entryFundingAfter = 0;
-        assertEq(entryFundingAfter, entryFundingBefore);
     }
 
     // ──────────────────────────────────────────────
-    //  2. Liquidation preview with nonzero funding,
+    //  2. Liquidation preview with carry-adjusted state,
     //     asymmetric side state
     // ──────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
             return;
         }
 
-        (,,, uint256 posMaxProfit,,,,) = engine.positions(bullId);
+        (,,, uint256 posMaxProfit,,,) = engine.positions(bullId);
         uint256 bullMaxAfter = _sideMaxProfit(CfdTypes.Side.BULL) - posMaxProfit;
         uint256 bearMax = _sideMaxProfit(CfdTypes.Side.BEAR);
         uint256 expectedMaxLiability = bullMaxAfter > bearMax ? bullMaxAfter : bearMax;
@@ -163,11 +164,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
             "Preview solvency assessment must agree with post-close degraded mode"
         );
 
-        assertEq(
-            preview.solvencyFundingPnlUsdc,
-            snap.cappedFundingPnlUsdc,
-            "Preview solvency funding must match post-close capped funding PnL"
-        );
+        snap = snap;
     }
 
     function test_LiquidationSolvency_MatchesPostOpStorageState() public {
@@ -228,7 +225,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         _open(accountId, side, size, margin, price);
     }
 
-    function _computeGlobalFundingPnl(
+    function _computeGlobalLegacySpreadPnl(
         CfdTypes.Side side
     ) internal view returns (int256) {
         side;

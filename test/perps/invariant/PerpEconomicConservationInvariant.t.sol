@@ -79,7 +79,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_TrackedAccountBucketsReconcileSettlementBalances() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
 
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(accountId);
@@ -122,7 +122,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function invariant_AccountLedgerViewMatchesUnderlyingBuckets() public view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
-            (uint256 size, uint256 margin,,,,,,) = engine.positions(accountId);
+            (uint256 size, uint256 margin,,,,,) = engine.positions(accountId);
             uint256 protectedMargin = size > 0 ? margin : 0;
 
             AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(accountId);
@@ -332,11 +332,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 snapshot.unrealizedPnlUsdc, positionView.unrealizedPnlUsdc, "Account snapshot unrealized pnl mismatch"
             );
-            assertEq(
-                snapshot.pendingFundingUsdc,
-                positionView.pendingFundingUsdc,
-                "Account snapshot pending funding mismatch"
-            );
             assertEq(snapshot.netEquityUsdc, positionView.netEquityUsdc, "Account snapshot net equity mismatch");
             assertEq(snapshot.liquidatable, positionView.liquidatable, "Account snapshot liquidatable mismatch");
         }
@@ -399,7 +394,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(snapshot.margin, 0, "Orphaned accounts must have zero margin");
             assertEq(snapshot.entryPrice, 0, "Orphaned accounts must have zero entry price");
             assertEq(snapshot.unrealizedPnlUsdc, 0, "Orphaned accounts must have zero unrealized pnl");
-            assertEq(snapshot.pendingFundingUsdc, 0, "Orphaned accounts must have zero pending funding");
             assertEq(snapshot.netEquityUsdc, 0, "Orphaned accounts must have zero net equity");
             assertFalse(snapshot.liquidatable, "Orphaned accounts must not be liquidatable");
         }
@@ -489,9 +483,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
         assertEq(
-            snapshot.withdrawalFundingLiabilityUsdc,
+            snapshot.supplementalReservedUsdc,
             uint256(0),
-            "House-pool snapshot withdrawal funding liability mismatch"
+            "House-pool snapshot supplemental reserved amount mismatch"
         );
         assertEq(
             snapshot.physicalAssetsUsdc,
