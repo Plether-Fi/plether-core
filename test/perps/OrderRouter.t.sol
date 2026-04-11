@@ -4103,6 +4103,14 @@ contract VpiImrBypassTest is Test {
 // Regression: H-01
 contract KeeperFeeRefundTest is Test {
 
+    // Policy matrix coverage in this contract/file:
+    // - expired open -> trader refunded: test_ExpiredOrderFeeRefundedToUser, test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper
+    // - expired close -> clearer paid: test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty
+    // - slippage open -> trader refunded: test_SlippageFailFeeRefundedToUser
+    // - slippage close -> clearer paid: test_CloseSlippageFailPaysClearerWhenBountyIsMarginBacked
+    // - protocol invalidation -> trader refunded: test_PostCommitDegradedModeRefundsUserBounty
+    // - user invalid -> clearer paid: test_TypedUserInvalidOpenPaysClearer
+
     MockUSDC usdc;
     CfdEngine engine;
     HousePool pool;

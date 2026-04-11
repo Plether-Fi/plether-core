@@ -93,6 +93,38 @@ contract PerpsPublicLensTest is BasePerpTest {
         );
     }
 
+    function test_GetPosition_MirrorsAccountLensPositionState() public {
+        address trader = address(0xB0B3);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
+        vm.warp(block.timestamp + 14 days);
+
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+            engineAccountLens.getAccountLedgerSnapshot(accountId);
+        PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(accountId);
+
+        assertEq(viewData.exists, snapshot.hasPosition, "Public position existence should match account lens");
+        assertEq(uint8(viewData.side), uint8(snapshot.side), "Public position side should match account lens");
+        assertEq(viewData.size, snapshot.size, "Public position size should match account lens");
+        assertEq(viewData.entryPrice, snapshot.entryPrice, "Public position entry price should match account lens");
+        assertEq(viewData.marginUsdc, snapshot.margin, "Public position margin should match account lens");
+        assertEq(
+            viewData.unrealizedPnlUsdc,
+            snapshot.unrealizedPnlUsdc,
+            "Public unrealized pnl should match carry-aware account lens state"
+        );
+        assertEq(
+            viewData.liquidatable,
+            snapshot.liquidatable,
+            "Public liquidatable flag should match carry-aware account lens state"
+        );
+    }
+
     function test_GetTraderAccount_UsesCarryAwareNetEquity() public {
         address trader = address(0xB0B1);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
