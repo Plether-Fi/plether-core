@@ -132,21 +132,32 @@ contract PerpDeferredPayoutInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             bytes32 accountId = _accountId(handler.actorAt(i));
             CfdEngine.LiquidationPreview memory preview = engineLens.previewLiquidation(accountId, oraclePrice);
-            uint256 totalPayoutUsdc = preview.immediatePayoutUsdc + preview.deferredPayoutUsdc;
+            uint256 freshDeferredPayoutUsdc = preview.deferredPayoutUsdc > preview.existingDeferredRemainingUsdc
+                ? preview.deferredPayoutUsdc - preview.existingDeferredRemainingUsdc
+                : 0;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshDeferredPayoutUsdc;
 
-            if (totalPayoutUsdc == 0) {
+            if (totalFreshPayoutUsdc == 0) {
                 continue;
             }
 
             assertEq(
                 preview.immediatePayoutUsdc == 0,
-                preview.deferredPayoutUsdc > 0,
-                "Liquidation preview must choose immediate or deferred payout"
+                freshDeferredPayoutUsdc > 0,
+                "Fresh liquidation payout must choose immediate or deferred settlement"
             );
-            if (vault.totalAssets() >= totalPayoutUsdc) {
-                assertEq(preview.deferredPayoutUsdc, 0, "Liquidation preview must not defer when vault is liquid");
+            if (vault.totalAssets() >= totalFreshPayoutUsdc) {
+                assertEq(
+                    freshDeferredPayoutUsdc,
+                    0,
+                    "Liquidation preview must not defer the fresh payout when vault liquidity is sufficient"
+                );
             } else {
-                assertEq(preview.immediatePayoutUsdc, 0, "Liquidation preview must fully defer when vault is illiquid");
+                assertEq(
+                    preview.immediatePayoutUsdc,
+                    0,
+                    "Liquidation preview must fully defer the fresh payout when vault is illiquid"
+                );
             }
         }
     }
