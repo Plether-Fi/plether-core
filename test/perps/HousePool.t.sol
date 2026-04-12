@@ -6,6 +6,7 @@ import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
 import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
+import {ICfdVault} from "../../src/perps/interfaces/ICfdVault.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -727,7 +728,7 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7000e6);
+        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
 
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingJunior, 7000e6, "Pending state should reflect queued trading revenue immediately");
@@ -740,7 +741,7 @@ contract HousePoolTest is BasePerpTest {
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7000e6);
+        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -765,7 +766,7 @@ contract HousePoolTest is BasePerpTest {
 
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(35_000e6);
+        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
 
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 30_000e6, "Pending state should restore seeded senior to its HWM first");
@@ -2030,7 +2031,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertGt(juniorVault.totalSupply(), 0);
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7000e6);
+        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
         (, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingJunior, 7000e6);
         vm.prank(address(juniorVault));
@@ -2093,7 +2094,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
     function helper_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {
         usdc.mint(address(pool), 7000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(7000e6);
+        pool.routeLpValue(7000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 0);
@@ -2113,7 +2114,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         pool.reconcile();
         usdc.mint(address(pool), 35_000e6);
         vm.prank(address(engine));
-        pool.recordTradingRevenueInflow(35_000e6);
+        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ExplicitCashInflow);
         (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
         assertEq(pendingSenior, 30_000e6);
         assertEq(pendingJunior, 5000e6);
@@ -2138,7 +2139,7 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         usdc.mint(address(pool), 35_000e6);
         uint256 accountedBefore = pool.accountedAssets();
         vm.prank(address(engine));
-        pool.recordImplicitTradingRevenue(35_000e6);
+        pool.routeLpValue(35_000e6, ICfdVault.LpValueMode.ImplicitRetainedValue);
 
         assertEq(
             pool.accountedAssets(), accountedBefore, "Implicit retained revenue must not increment accounted assets"

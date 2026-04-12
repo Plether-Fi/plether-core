@@ -4,6 +4,11 @@ pragma solidity 0.8.33;
 /// @notice Vault that custodies USDC backing the CFD trading system.
 interface ICfdVault {
 
+    enum LpValueMode {
+        ExplicitCashInflow,
+        ImplicitRetainedValue
+    }
+
     /// @notice Canonical economic USDC backing recognized by the vault (6 decimals).
     ///         Ignores unsolicited positive token transfers until explicitly accounted, but
     ///         still reflects raw-balance shortfalls if assets leave the vault unexpectedly.
@@ -31,15 +36,12 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
-    /// @notice Records LP-owned trading revenue and directly attaches it to seeded claimants when both tranches are otherwise at zero principal.
-    function recordTradingRevenueInflow(
-        uint256 amount
-    ) external;
-
-    /// @notice Routes LP-owned trading revenue that has already been retained physically by the vault
-    ///         without incrementing canonical accounted assets a second time.
-    function recordImplicitTradingRevenue(
-        uint256 amount
+    /// @notice Routes LP-owned value into the tranche claimant path.
+    /// @dev `ExplicitCashInflow` increments canonical accounted assets because raw USDC arrived in this flow.
+    ///      `ImplicitRetainedValue` only routes ownership for value already retained by the vault.
+    function routeLpValue(
+        uint256 amount,
+        LpValueMode mode
     ) external;
 
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)

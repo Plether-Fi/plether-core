@@ -90,16 +90,9 @@ contract MockInvariantVault is ICfdVault {
         }
     }
 
-    function recordTradingRevenueInflow(
-        uint256
-    ) external view {
-        if (msg.sender != engine) {
-            revert("unauthorized");
-        }
-    }
-
-    function recordImplicitTradingRevenue(
-        uint256
+    function routeLpValue(
+        uint256,
+        ICfdVault.LpValueMode
     ) external view {
         if (msg.sender != engine) {
             revert("unauthorized");

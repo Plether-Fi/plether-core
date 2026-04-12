@@ -384,7 +384,7 @@ library CfdEnginePlanLib {
             projectedPosition,
             delta.price,
             snap.capPrice,
-            delta.pendingCarryUsdc,
+            0,
             reachableCollateralUsdc,
             snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps
         );

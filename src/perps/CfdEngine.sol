@@ -609,6 +609,30 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         accumulatedFeesUsdc += amountUsdc;
     }
 
+    /// @notice Credits a router-collected keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @dev Realizes carry first when the beneficiary currently has an open position because the
+    ///      clearinghouse settlement credit changes the carry basis.
+    function creditKeeperExecutionBounty(
+        address beneficiary,
+        uint256 amountUsdc
+    ) external onlyRouter nonReentrant {
+        if (amountUsdc == 0) {
+            return;
+        }
+
+        bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
+        StoredPosition storage pos = _positions[accountId];
+        if (pos.size > 0) {
+            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+            if (!priceFresh) {
+                revert CfdEngine__MarkPriceStale();
+            }
+            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+        }
+
+        clearinghouse.settleUsdc(accountId, int256(amountUsdc));
+    }
+
     /// @notice Adds isolated margin to an existing open position without changing size.
     function addMargin(
         bytes32 accountId,
@@ -975,7 +999,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             vault.recordProtocolInflow(inflow.protocolOwnedUsdc);
         }
         if (inflow.lpOwnedUsdc > 0) {
-            vault.recordTradingRevenueInflow(inflow.lpOwnedUsdc);
+            vault.routeLpValue(inflow.lpOwnedUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
         }
     }
 
@@ -1446,7 +1470,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         }
 
         USDC.safeTransfer(address(vault), realizedCarryUsdc);
-        vault.recordTradingRevenueInflow(realizedCarryUsdc);
+        vault.routeLpValue(realizedCarryUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
 

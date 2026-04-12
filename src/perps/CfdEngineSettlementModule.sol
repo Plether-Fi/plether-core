@@ -61,7 +61,10 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
             }
             if (uint256(delta.tradeCostUsdc) > protocolFeeInflowUsdc) {
-                ICfdVault(host.vault()).recordTradingRevenueInflow(uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc);
+                ICfdVault(host.vault())
+                    .routeLpValue(
+                        uint256(delta.tradeCostUsdc) - protocolFeeInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow
+                    );
             }
         }
 
@@ -118,7 +121,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
             }
             if (delta.pendingCarryUsdc > 0) {
-                ICfdVault(host.vault()).recordImplicitTradingRevenue(delta.pendingCarryUsdc);
+                ICfdVault(host.vault())
+                    .routeLpValue(delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue);
             }
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
@@ -142,7 +146,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                     ICfdVault(host.vault()).recordProtocolInflow(protocolFeeInflowUsdc);
                 }
                 if (seizedUsdc > protocolFeeInflowUsdc) {
-                    ICfdVault(host.vault()).recordTradingRevenueInflow(seizedUsdc - protocolFeeInflowUsdc);
+                    ICfdVault(host.vault())
+                        .routeLpValue(seizedUsdc - protocolFeeInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
                 }
             }
             if (delta.syncMarginQueueAmount > 0) {
@@ -155,7 +160,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
             }
         } else if (delta.pendingCarryUsdc > 0) {
-            ICfdVault(host.vault()).recordImplicitTradingRevenue(delta.pendingCarryUsdc);
+            ICfdVault(host.vault()).routeLpValue(delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue);
         }
 
         if (delta.executionFeeUsdc > 0) {
@@ -217,7 +222,8 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
                 ICfdVault(host.vault()).recordProtocolInflow(keeperBountyInflowUsdc);
             }
             if (seizedUsdc > keeperBountyInflowUsdc) {
-                ICfdVault(host.vault()).recordTradingRevenueInflow(seizedUsdc - keeperBountyInflowUsdc);
+                ICfdVault(host.vault())
+                    .routeLpValue(seizedUsdc - keeperBountyInflowUsdc, ICfdVault.LpValueMode.ExplicitCashInflow);
             }
         }
         if (delta.syncMarginQueueAmount > 0) {

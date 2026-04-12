@@ -434,10 +434,12 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit RecapitalizationInflowAccounted(msg.sender, amount, 0);
     }
 
-    /// @notice Accounts LP-owned trading revenue and directly attaches it to seeded claimants when no live principal exists.
-    /// @dev Used for realized trader losses / spread capture paths whose economic owner is LP equity rather than protocol fees.
-    function recordTradingRevenueInflow(
-        uint256 amount
+    /// @notice Routes LP-owned value into the tranche claimant path.
+    /// @dev `ExplicitCashInflow` increments `accountedAssets` because raw USDC arrived in this flow.
+    ///      `ImplicitRetainedValue` only routes ownership for value already retained by the vault.
+    function routeLpValue(
+        uint256 amount,
+        ICfdVault.LpValueMode mode
     ) external {
         if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
             revert HousePool__Unauthorized();
@@ -446,23 +448,9 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
             return;
         }
 
-        accountedAssets += amount;
-        if (seniorPrincipal + juniorPrincipal == 0) {
-            pendingTradingRevenueUsdc += amount;
-        }
-        emit TradingRevenueInflowAccounted(msg.sender, amount, 0, 0);
-    }
-
-    /// @notice Routes LP-owned trading revenue that has already been retained physically by the vault
-    ///         without incrementing `accountedAssets` a second time.
-    function recordImplicitTradingRevenue(
-        uint256 amount
-    ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
-            revert HousePool__Unauthorized();
-        }
-        if (amount == 0) {
-            return;
+        if (mode == ICfdVault.LpValueMode.ExplicitCashInflow) {
+            accountedAssets += amount;
+            emit TradingRevenueInflowAccounted(msg.sender, amount, 0, 0);
         }
 
         if (seniorPrincipal + juniorPrincipal == 0) {

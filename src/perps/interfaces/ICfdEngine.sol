@@ -93,6 +93,14 @@ interface ICfdEngine {
         uint256 amountUsdc
     ) external;
 
+    /// @notice Credits a keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @dev Realizes carry first when the beneficiary account currently has an open position so the
+    ///      settlement-balance credit cannot retroactively dilute carry owed over the elapsed interval.
+    function creditKeeperExecutionBounty(
+        address beneficiary,
+        uint256 amountUsdc
+    ) external;
+
     /// @notice Liquidates an undercollateralized position, returns keeper bounty in USDC
     /// @param accountId          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
