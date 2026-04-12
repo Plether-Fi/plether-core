@@ -1199,6 +1199,9 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 poolRawBefore = pool.rawAssets();
+        uint256 poolAccountedBefore = pool.accountedAssets();
+        uint256 clearinghouseRawBefore = usdc.balanceOf(address(clearinghouse));
         uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
             PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
             _riskParams().baseCarryBps,
@@ -1213,6 +1216,17 @@ contract CfdEngineTest is BasePerpTest {
             clearinghouse.balanceUsdc(accountId),
             settlementBefore + depositAmount - expectedCarry,
             "Deposit hook should realize carry before adding fresh settlement"
+        );
+        assertEq(pool.rawAssets(), poolRawBefore + expectedCarry, "Carry realization should physically fund the vault");
+        assertEq(
+            pool.accountedAssets(),
+            poolAccountedBefore + expectedCarry,
+            "Carry realization should increase accounted assets only with matching cash"
+        );
+        assertEq(
+            usdc.balanceOf(address(clearinghouse)),
+            clearinghouseRawBefore + depositAmount - expectedCarry,
+            "Carry realization should transfer realized cash out of clearinghouse custody"
         );
 
         clearinghouse.withdrawMargin(depositAmount);
@@ -1260,6 +1274,26 @@ contract CfdEngineTest is BasePerpTest {
             clearinghouse.balanceUsdc(accountId),
             settlementBefore + rescueDeposit - expectedCarry,
             "Rescue deposit should settle pre-basis carry from the incoming cash in the same tx"
+        );
+    }
+
+    function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {
+        address trader = address(0xABD2);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+
+        _fundTrader(trader, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
+
+        _close(accountId, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+
+        assertEq(
+            pool.accountedAssets(),
+            pool.rawAssets(),
+            "Profitable close carry should not create accounted-assets overhang"
         );
     }
 

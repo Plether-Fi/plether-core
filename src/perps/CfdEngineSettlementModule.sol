@@ -117,9 +117,6 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             if (delta.freshTraderPayoutUsdc > 0) {
                 host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
             }
-            if (delta.pendingCarryUsdc > 0) {
-                ICfdVault(host.vault()).recordTradingRevenueInflow(delta.pendingCarryUsdc);
-            }
         } else if (delta.settlementType == CfdEnginePlanTypes.SettlementType.LOSS) {
             uint64[] memory reservationOrderIds =
                 IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.accountId);

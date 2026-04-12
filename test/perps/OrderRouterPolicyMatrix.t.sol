@@ -149,4 +149,26 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
+    function test_UntypedEngineRevertRefundsTrader() public {
+        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
+        _fundTrader(ALICE, 10_000e6);
+
+        vm.prank(ALICE);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(0));
+
+        uint256 traderWalletBefore = usdc.balanceOf(ALICE);
+        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.roll(block.number + 1);
+        vm.prank(KEEPER);
+        router.executeOrder(1, priceData);
+
+        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Untyped engine revert should not pay the clearer");
+        assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 1e6, "Untyped engine revert should refund the trader");
+    }
+
 }

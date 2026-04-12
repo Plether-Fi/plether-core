@@ -1410,7 +1410,19 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             return 0;
         }
 
-        clearinghouse.settleUsdc(accountId, -int256(realizedCarryUsdc));
+        uint256 marginBefore = _positionMarginBucketUsdc(accountId);
+        (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) =
+            clearinghouse.consumeSettlementLoss(accountId, marginBefore, realizedCarryUsdc, address(this));
+        freeSettlementConsumedUsdc;
+        if (uncoveredUsdc > 0) {
+            revert CfdEngine__FundingExceedsMargin();
+        }
+
+        if (marginConsumedUsdc > 0) {
+            _syncTotalSideMargin(pos.side, marginBefore, marginBefore - marginConsumedUsdc);
+        }
+
+        USDC.safeTransfer(address(vault), realizedCarryUsdc);
         vault.recordTradingRevenueInflow(realizedCarryUsdc);
         pos.lastCarryTimestamp = uint64(block.timestamp);
     }
