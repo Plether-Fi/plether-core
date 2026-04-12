@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "../../src/perps/CfdEnginePlanTypes.sol";
+import {CfdEngineSettlementModule} from "../../src/perps/CfdEngineSettlementModule.sol";
 import {CfdMath} from "../../src/perps/CfdMath.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {HousePool} from "../../src/perps/HousePool.sol";
@@ -13,6 +14,7 @@ import {AccountLensViewTypes} from "../../src/perps/interfaces/AccountLensViewTy
 import {DeferredEngineViewTypes} from "../../src/perps/interfaces/DeferredEngineViewTypes.sol";
 import {HousePoolEngineViewTypes} from "../../src/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngine} from "../../src/perps/interfaces/ICfdEngine.sol";
+import {ICfdEngineSettlementHost} from "../../src/perps/interfaces/ICfdEngineSettlementHost.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "../../src/perps/interfaces/PerpsViewTypes.sol";
@@ -1259,6 +1261,15 @@ contract CfdEngineTest is BasePerpTest {
             settlementBefore + rescueDeposit - expectedCarry,
             "Rescue deposit should settle pre-basis carry from the incoming cash in the same tx"
         );
+    }
+
+    function test_SettlementModule_RevertsWhenCalledDirectly() public {
+        CfdEngineSettlementModule module = CfdEngineSettlementModule(address(engine.settlementModule()));
+        CfdEnginePlanTypes.CloseDelta memory delta;
+        CfdTypes.Position memory position;
+
+        vm.expectRevert(CfdEngineSettlementModule.CfdEngineSettlementModule__Unauthorized.selector);
+        module.executeClose(ICfdEngineSettlementHost(address(engine)), delta, position, uint64(block.timestamp));
     }
 
     function test_GetAccountCollateralView_ReturnsCurrentBuckets() public {

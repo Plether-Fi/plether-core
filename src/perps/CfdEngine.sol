@@ -349,7 +349,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ) Ownable(msg.sender) {
         _validateRiskParams(_riskParams);
         planner = new CfdEnginePlanner();
-        settlementModule = new CfdEngineSettlementModule();
+        settlementModule = new CfdEngineSettlementModule(address(this));
         USDC = IERC20(_usdc);
         clearinghouse = IMarginClearinghouse(_clearinghouse);
         CAP_PRICE = _capPrice;
@@ -1161,17 +1161,6 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         snap.openInterest = state.openInterest;
         snap.entryNotional = state.entryNotional;
         snap.totalMargin = state.totalMargin;
-    }
-
-    function _buildProjectedPositionRiskState(
-        bytes32 accountId,
-        CfdTypes.Position memory pos,
-        uint256 price,
-        uint256 reachableUsdc,
-        uint256 riskBps
-    ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory riskState) {
-        accountId;
-        riskState = PositionRiskAccountingLib.buildPositionRiskState(pos, price, CAP_PRICE, reachableUsdc, riskBps);
     }
 
     function _tryGetFreshLiveMarkPrice() internal view returns (bool fresh, uint256 price) {

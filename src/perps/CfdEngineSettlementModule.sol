@@ -16,6 +16,23 @@ import {IOrderRouterAccounting} from "./interfaces/IOrderRouterAccounting.sol";
 ///      settlement-host hooks. The module does not own independent protocol state.
 contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
 
+    address public immutable ENGINE;
+
+    error CfdEngineSettlementModule__Unauthorized();
+
+    constructor(
+        address engine_
+    ) {
+        ENGINE = engine_;
+    }
+
+    modifier onlyEngine() {
+        if (msg.sender != ENGINE) {
+            revert CfdEngineSettlementModule__Unauthorized();
+        }
+        _;
+    }
+
     /// @notice Applies the live open/increase settlement plan produced by the planner.
     /// @dev Realizes carry, fee, and vault-flow side effects through the settlement host while keeping
     ///      the engine as the canonical state owner.
@@ -24,7 +41,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdEnginePlanTypes.OpenDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
-    ) external {
+    ) external onlyEngine {
         host.settlementApplyFundingAndMark(delta.price, publishTime);
         CfdTypes.Side marginSide = currentPosition.size > 0 ? currentPosition.side : delta.posSide;
         uint256 marginBefore =
@@ -82,7 +99,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
         uint64 publishTime
-    ) external {
+    ) external onlyEngine {
         host.settlementApplyFundingAndMark(delta.price, publishTime);
         uint256 marginBefore =
             IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.accountId).positionMarginUsdc;
@@ -170,7 +187,7 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         uint64 publishTime
-    ) external returns (uint256 keeperBountyUsdc) {
+    ) external onlyEngine returns (uint256 keeperBountyUsdc) {
         host.settlementApplyFundingAndMark(delta.price, publishTime);
         host.settlementApplySideDelta(
             delta.side,
