@@ -198,33 +198,39 @@ library CfdEnginePlanLib {
         uint64 publishTime
     ) internal pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         uint256 price = executionPrice > snap.capPrice ? snap.capPrice : executionPrice;
+        CfdEnginePlanTypes.RawSnapshot memory effectiveSnap = snap;
         delta.accountId = order.accountId;
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         delta.posSide = order.side;
-        uint256 carryTimeDelta = snap.position.lastCarryTimestamp > 0
-            && snap.currentTimestamp > snap.position.lastCarryTimestamp
-            ? snap.currentTimestamp - snap.position.lastCarryTimestamp
+        uint256 carryTimeDelta = effectiveSnap.position.lastCarryTimestamp > 0
+            && effectiveSnap.currentTimestamp > effectiveSnap.position.lastCarryTimestamp
+            ? effectiveSnap.currentTimestamp - effectiveSnap.position.lastCarryTimestamp
             : 0;
         uint256 carryBaseUsdc = PositionRiskAccountingLib.computeLpBackedNotionalUsdc(
-            snap.position.size, price, snap.accountBuckets.settlementBalanceUsdc
+            effectiveSnap.position.size, price, effectiveSnap.accountBuckets.settlementBalanceUsdc
         );
         delta.pendingCarryUsdc = PositionRiskAccountingLib.computePendingCarryUsdc(
-            carryBaseUsdc, snap.riskParams.baseCarryBps, carryTimeDelta
+            carryBaseUsdc, effectiveSnap.riskParams.baseCarryBps, carryTimeDelta
         );
 
-        if (snap.position.size > 0 && snap.position.side != order.side) {
+        if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
+            return delta;
+        }
+
+        if (effectiveSnap.position.size > 0 && effectiveSnap.position.side != order.side) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING;
             return delta;
         }
 
-        if (snap.degradedMode) {
+        if (effectiveSnap.degradedMode) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE;
             return delta;
         }
 
-        CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
-        CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
+        CfdEnginePlanTypes.SideSnapshot memory bull = effectiveSnap.bullSide;
+        CfdEnginePlanTypes.SideSnapshot memory bear = effectiveSnap.bearSide;
         delta.sideTotalMarginBefore = order.side == CfdTypes.Side.BULL ? bull.totalMargin : bear.totalMargin;
 
         uint256 preSkewUsdc = _absSkewUsdc(bull, bear, price);
@@ -237,17 +243,20 @@ library CfdEnginePlanLib {
                 side: order.side,
                 sizeDelta: order.sizeDelta,
                 price: price,
-                capPrice: snap.capPrice,
+                capPrice: effectiveSnap.capPrice,
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
-                vaultDepthUsdc: snap.vaultAssetsUsdc,
+                vaultDepthUsdc: effectiveSnap.vaultAssetsUsdc,
                 executionFeeBps: EXECUTION_FEE_BPS,
-                riskParams: snap.riskParams
+                riskParams: effectiveSnap.riskParams
             })
         );
         delta.openState = openState;
 
-        if (openState.notionalUsdc * snap.riskParams.bountyBps < snap.riskParams.minBountyUsdc * 10_000) {
+        if (
+            openState.notionalUsdc * effectiveSnap.riskParams.bountyBps
+                < effectiveSnap.riskParams.minBountyUsdc * 10_000
+        ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
             return delta;
         }
@@ -258,12 +267,12 @@ library CfdEnginePlanLib {
         delta.vaultRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
 
         (bool marginDrained, uint256 computedMarginAfter) =
-            computeOpenMarginAfter(snap.position.margin, delta.netMarginChange);
+            computeOpenMarginAfter(effectiveSnap.position.margin, delta.netMarginChange);
         if (marginDrained) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
             return delta;
         }
-        if (delta.netMarginChange < 0 && uint256(-delta.netMarginChange) > snap.position.margin) {
+        if (delta.netMarginChange < 0 && uint256(-delta.netMarginChange) > effectiveSnap.position.margin) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return delta;
         }
@@ -285,15 +294,16 @@ library CfdEnginePlanLib {
 
         delta.executionFeeUsdc = openState.executionFeeUsdc;
         delta.sideTotalMarginAfterOpen = computeSideTotalMarginAfterOpen(
-            delta.sideTotalMarginBefore, snap.position.margin, delta.positionMarginAfterOpen
+            delta.sideTotalMarginBefore, effectiveSnap.position.margin, delta.positionMarginAfterOpen
         );
 
-        if (_isOpenInsolventAfterPlan(snap, order.side, delta, bull, bear)) {
+        if (_isOpenInsolventAfterPlan(effectiveSnap, order.side, delta, bull, bear)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return delta;
         }
 
-        PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState = _buildPostOpenRiskState(snap, delta);
+        PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState =
+            _buildPostOpenRiskState(effectiveSnap, delta);
         if (
             computedMarginAfter < openState.initialMarginRequirementUsdc || postOpenRiskState.liquidatable
                 || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
@@ -303,14 +313,51 @@ library CfdEnginePlanLib {
         }
 
         if (
-            snap.vaultAssetsUsdc > 0
-                && ((postSkewUsdc * CfdMath.WAD) / snap.vaultAssetsUsdc) > snap.riskParams.maxSkewRatio
+            effectiveSnap.vaultAssetsUsdc > 0
+                && ((postSkewUsdc * CfdMath.WAD) / effectiveSnap.vaultAssetsUsdc)
+                    > effectiveSnap.riskParams.maxSkewRatio
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
             return delta;
         }
 
         delta.valid = true;
+    }
+
+    function _applyPendingCarryRealizationToOpenSnapshot(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 pendingCarryUsdc
+    ) private pure returns (bool hasShortfall) {
+        if (pendingCarryUsdc == 0 || snap.position.size == 0) {
+            return false;
+        }
+
+        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
+            MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, pendingCarryUsdc);
+        if (consumption.uncoveredUsdc > 0) {
+            return true;
+        }
+
+        snap.accountBuckets.settlementBalanceUsdc -= consumption.totalConsumedUsdc;
+        snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
+        snap.position.margin -= consumption.activeMarginConsumedUsdc;
+        snap.vaultAssetsUsdc += pendingCarryUsdc;
+        snap.vaultCashUsdc += pendingCarryUsdc;
+
+        snap.accountBuckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
+            snap.accountBuckets.settlementBalanceUsdc,
+            snap.lockedBuckets.positionMarginUsdc,
+            snap.lockedBuckets.committedOrderMarginUsdc,
+            snap.lockedBuckets.reservedSettlementUsdc
+        );
+
+        if (snap.position.side == CfdTypes.Side.BULL) {
+            snap.bullSide.totalMargin -= consumption.activeMarginConsumedUsdc;
+        } else {
+            snap.bearSide.totalMargin -= consumption.activeMarginConsumedUsdc;
+        }
+
+        return false;
     }
 
     function _buildPostOpenRiskState(
@@ -326,7 +373,9 @@ library CfdEnginePlanLib {
 
         uint256 reachableCollateralUsdc = snap.accountBuckets.settlementBalanceUsdc;
         if (delta.tradeCostUsdc > 0) {
-            reachableCollateralUsdc -= uint256(delta.tradeCostUsdc);
+            uint256 tradeCostUsdc = uint256(delta.tradeCostUsdc);
+            reachableCollateralUsdc =
+                reachableCollateralUsdc > tradeCostUsdc ? reachableCollateralUsdc - tradeCostUsdc : 0;
         } else if (delta.tradeCostUsdc < 0) {
             reachableCollateralUsdc += uint256(-delta.tradeCostUsdc);
         }

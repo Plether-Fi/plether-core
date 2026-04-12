@@ -318,6 +318,7 @@ contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));
 
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(aliceId);
 
         vm.prank(address(juniorVault));

@@ -159,26 +159,34 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
-    function test_UntypedEngineRevertRefundsTrader() public {
+    function test_UntypedCloseRevertPaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
-        _fundTrader(ALICE, 10_000e6);
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+        _fundTrader(ALICE, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(bytes32)").with_key(accountId)
-            .checked_write(uint256(0));
+        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Untyped engine revert should not pay the clearer");
-        assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 1e6, "Untyped engine revert should refund the trader");
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "Untyped close revert should keep the clearer-paid fallback"
+        );
+        assertEq(
+            usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Untyped close revert should not refund the trader wallet"
+        );
     }
 
 }

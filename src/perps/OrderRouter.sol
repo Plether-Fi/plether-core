@@ -872,7 +872,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             }
         }
 
-        return FailedOrderOutcome.RefundUser;
+        return order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser;
     }
 
     function _cleanupOrder(

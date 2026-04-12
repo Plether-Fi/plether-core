@@ -542,6 +542,7 @@ abstract contract BasePerpTest is Test {
         address trader,
         uint256 amountUsdc
     ) internal returns (WithdrawParityState memory state) {
+        vm.prank(address(clearinghouse));
         try engine.checkWithdraw(accountId) {
             state.checkWithdrawPasses = true;
         } catch (bytes memory err) {

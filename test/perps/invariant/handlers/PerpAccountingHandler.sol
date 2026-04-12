@@ -194,6 +194,7 @@ contract PerpAccountingHandler is Test {
         WithdrawParityAttempt memory attempt;
         attempt.active = true;
         attempt.accountId = accountId;
+        vm.prank(address(clearinghouse));
         try engine.checkWithdraw(accountId) {
             attempt.checkWithdrawPasses = true;
         } catch (bytes memory err) {

@@ -1287,6 +1287,15 @@ contract CfdEngineTest is BasePerpTest {
         engine.addMargin(accountId, 100e6);
     }
 
+    function test_CheckWithdraw_RevertsForNonClearinghouseCaller() public {
+        bytes32 accountId = bytes32(uint256(0x51582));
+        _fundTrader(address(uint160(uint256(accountId))), 5000e6);
+        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 2000e6, 1e8);
+
+        vm.expectRevert(CfdEngine.CfdEngine__NotClearinghouse.selector);
+        engine.checkWithdraw(accountId);
+    }
+
     function test_DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation() public {
         address trader = address(0xABD0);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -3971,11 +3980,13 @@ contract CfdEngineTest is BasePerpTest {
 
         vm.warp(block.timestamp + 31);
 
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
 
         vm.warp(block.timestamp + 270);
 
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
 
         engine.proposeEngineMarkStalenessLimit(300);
@@ -3985,6 +3996,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
     }
 
@@ -4032,6 +4044,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(0, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
     }
 
@@ -4047,6 +4060,7 @@ contract CfdEngineTest is BasePerpTest {
             .checked_write(uint256(200e6));
 
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
     }
 
@@ -4656,6 +4670,7 @@ contract CfdEngineAuditTest is BasePerpTest {
             .checked_write(uint256(100 * 1e6));
 
         vm.expectRevert(CfdEngine.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        vm.prank(address(clearinghouse));
         engine.checkWithdraw(accountId);
     }
 

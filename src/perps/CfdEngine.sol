@@ -826,6 +826,10 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function checkWithdraw(
         bytes32 accountId
     ) external override {
+        if (msg.sender != address(clearinghouse)) {
+            revert CfdEngine__NotClearinghouse();
+        }
+
         CfdTypes.Position memory pos = _loadPosition(accountId);
         if (pos.size == 0) {
             return;
