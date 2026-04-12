@@ -453,6 +453,23 @@ contract HousePool is ICfdVault, IHousePool, IPerpsLPActions, Ownable2Step, Paus
         emit TradingRevenueInflowAccounted(msg.sender, amount, 0, 0);
     }
 
+    /// @notice Routes LP-owned trading revenue that has already been retained physically by the vault
+    ///         without incrementing `accountedAssets` a second time.
+    function recordImplicitTradingRevenue(
+        uint256 amount
+    ) external {
+        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementModule()) {
+            revert HousePool__Unauthorized();
+        }
+        if (amount == 0) {
+            return;
+        }
+
+        if (seniorPrincipal + juniorPrincipal == 0) {
+            pendingTradingRevenueUsdc += amount;
+        }
+    }
+
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche by minting matching shares.
     /// @dev Prevents later LPs from implicitly capturing value that arrived while no claimant shares existed.
     function assignUnassignedAssets(

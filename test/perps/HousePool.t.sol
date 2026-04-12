@@ -2124,6 +2124,37 @@ contract HousePoolUnseededBootstrapTest is BasePerpTest {
         assertEq(pool.unassignedAssets(), 0);
     }
 
+    function test_RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
+        usdc.mint(address(this), 30_000e6);
+        usdc.approve(address(pool), 30_000e6);
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
+        usdc.mint(address(this), 10_000e6);
+        usdc.approve(address(pool), 10_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 35_000e6);
+        uint256 accountedBefore = pool.accountedAssets();
+        vm.prank(address(engine));
+        pool.recordImplicitTradingRevenue(35_000e6);
+
+        assertEq(
+            pool.accountedAssets(), accountedBefore, "Implicit retained revenue must not increment accounted assets"
+        );
+
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, 30_000e6, "Pending state should restore seeded senior to its HWM first");
+        assertEq(pendingJunior, 5000e6, "Pending state should route residual retained carry to seeded junior");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 30_000e6, "Implicit retained revenue should restore seeded senior first");
+        assertEq(pool.juniorPrincipal(), 5000e6, "Residual implicit retained revenue should attach to seeded junior");
+        assertEq(pool.unassignedAssets(), 0, "Seeded implicit retained revenue should avoid quarantine");
+    }
+
     function helper_UnassignedAssets_AreReservedFromWithdrawalLiquidity() public {
         usdc.mint(address(pool), 100_000e6);
         vm.prank(address(engine));

@@ -1277,12 +1277,13 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + 6);
 
         uint256 keeperBefore = usdc.balanceOf(address(this));
+        bytes32 aliceId = bytes32(uint256(uint160(alice)));
+        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceId);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        bytes32 aliceId = bytes32(uint256(uint160(alice)));
         (uint256 size,,,,,,) = engine.positions(aliceId);
         assertEq(size, 0, "Order should fail once degraded mode latches");
         assertEq(
@@ -1290,11 +1291,16 @@ contract OrderRouterPythTest is BasePerpTest {
             0,
             "Keeper should not receive bounty on protocol-state failure"
         );
-        assertEq(usdc.balanceOf(alice), 1e6, "Trader should receive bounty refund on degraded-mode failure");
+        assertEq(
+            clearinghouse.balanceUsdc(aliceId) - aliceSettlementBefore,
+            1e6,
+            "Trader should receive bounty refund into clearinghouse custody on degraded-mode failure"
+        );
     }
 
-    function test_PostCommitDegradedModeRefundFallbackDoesNotBrickHead() public {
+    function test_PostCommitDegradedModeRefundCreditsClearinghouseAndDoesNotBrickHead() public {
         _fundTrader(bob, 10_000e6);
+        bytes32 aliceAccountId = bytes32(uint256(uint160(alice)));
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
@@ -1304,11 +1310,7 @@ contract OrderRouterPythTest is BasePerpTest {
         _setDegradedModeForTest();
         vm.warp(block.timestamp + 6);
 
-        vm.mockCallRevert(
-            address(usdc),
-            abi.encodeWithSelector(usdc.transfer.selector, alice, 1e6),
-            abi.encodeWithSignature("Error(string)", "blacklisted")
-        );
+        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccountId);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
@@ -1316,14 +1318,12 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 2, "Failed refund transfer must not brick the FIFO head");
-        assertEq(router.claimableUsdc(alice), 1e6, "Failed refund transfer should fall back to claimable USDC");
-        assertEq(usdc.balanceOf(alice), 0, "User should not receive direct USDC when refund fallback is used");
-
-        vm.clearMockedCalls();
-        vm.prank(alice);
-        router.claimUsdc();
-        assertEq(router.claimableUsdc(alice), 0, "Claimable USDC should clear after claim");
-        assertEq(usdc.balanceOf(alice), 1e6, "User should recover the failed refund via claimUsdc");
+        assertEq(router.claimableUsdc(alice), 0, "Clearinghouse refund path should not use claimable USDC fallback");
+        assertEq(
+            clearinghouse.balanceUsdc(aliceAccountId),
+            aliceSettlementBefore + 1e6,
+            "Refund should credit the trader clearinghouse balance directly"
+        );
     }
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {

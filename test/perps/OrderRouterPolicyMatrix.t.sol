@@ -17,11 +17,12 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_ExpiredOpenRefundsTrader() public {
         _fundTrader(ALICE, 10_000e6);
+        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
 
-        uint256 traderWalletBefore = usdc.balanceOf(ALICE);
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
         uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
@@ -31,7 +32,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Expired open should not pay the clearer");
-        assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 1e6, "Expired open should refund the trader bounty");
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
+            1e6,
+            "Expired open should refund the trader into clearinghouse custody"
+        );
     }
 
     function test_ExpiredClosePaysClearer() public {
@@ -63,11 +68,12 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     function test_SlippageOpenRefundsTrader() public {
         _fundJunior(BOB, 1_000_000e6);
         _fundTrader(ALICE, 50_000e6);
+        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
 
-        uint256 traderEthBefore = ALICE.balance;
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
         uint256 keeperEthBefore = KEEPER.balance;
 
         bytes[] memory priceData = new bytes[](1);
@@ -78,7 +84,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(KEEPER.balance - keeperEthBefore, 0, "Open slippage miss should not pay the clearer");
-        assertEq(ALICE.balance, traderEthBefore + 1 ether, "Open slippage miss should refund the trader ETH bounty");
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId) - traderSettlementBefore,
+            1e6,
+            "Open slippage miss should refund the trader into clearinghouse custody"
+        );
     }
 
     function test_SlippageClosePaysClearer() public {
@@ -116,6 +126,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_ProtocolInvalidationRefundsTrader() public {
         _fundTrader(ALICE, 10_000e6);
+        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
 
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
@@ -130,12 +141,17 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 0, "Protocol invalidation should not pay the clearer");
-        assertEq(usdc.balanceOf(ALICE), 1e6, "Protocol invalidation should refund the trader bounty");
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId),
+            10_000e6,
+            "Protocol invalidation should restore the trader bounty inside clearinghouse custody"
+        );
     }
 
     function test_UserInvalidPaysClearer() public {
         address eve = address(0xE223);
         bytes32 eveAccount = bytes32(uint256(uint160(eve)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
 
         vm.startPrank(eve);
         usdc.mint(eve, 1e6);
@@ -144,14 +160,18 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
 
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 1e6, "User-invalid open should pay the clearer");
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "User-invalid open should pay the clearer into clearinghouse custody"
+        );
         assertEq(
             uint256(router.getOrderRecord(1).status),
             uint256(IOrderRouterAccounting.OrderStatus.Failed),

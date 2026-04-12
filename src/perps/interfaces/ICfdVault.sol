@@ -36,6 +36,12 @@ interface ICfdVault {
         uint256 amount
     ) external;
 
+    /// @notice Routes LP-owned trading revenue that has already been retained physically by the vault
+    ///         without incrementing canonical accounted assets a second time.
+    function recordImplicitTradingRevenue(
+        uint256 amount
+    ) external;
+
     /// @notice Maximum age for mark price freshness checks outside FAD mode (seconds)
     function markStalenessLimit() external view returns (uint256);
 

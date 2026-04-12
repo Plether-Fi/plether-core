@@ -166,14 +166,10 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
-        if (record.core.isClose) {
-            bytes32 keeperAccountId = bytes32(uint256(uint160(msg.sender)));
-            USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
-            clearinghouse.settleUsdc(keeperAccountId, int256(executionBountyUsdc));
-            return executionBountyUsdc;
-        }
-
-        USDC.safeTransfer(msg.sender, executionBountyUsdc);
+        bytes32 keeperAccountId = bytes32(uint256(uint160(msg.sender)));
+        USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
+        clearinghouse.settleUsdc(keeperAccountId, int256(executionBountyUsdc));
+        return executionBountyUsdc;
     }
 
     function _refundExecutionBounty(
@@ -186,22 +182,8 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
         }
 
         record.executionBountyUsdc = 0;
-        address trader = address(uint160(uint256(record.core.accountId)));
-        if (!_tryTransferUsdc(trader, bounty)) {
-            claimableUsdc[trader] += bounty;
-        }
-    }
-
-    function _tryTransferUsdc(
-        address to,
-        uint256 amount
-    ) internal returns (bool success) {
-        if (amount == 0) {
-            return true;
-        }
-
-        (bool callSuccess, bytes memory returnData) = address(USDC).call(abi.encodeCall(IERC20.transfer, (to, amount)));
-        return callSuccess && (returnData.length == 0 || abi.decode(returnData, (bool)));
+        USDC.safeTransfer(address(clearinghouse), bounty);
+        clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
     }
 
     function _releaseCommittedMargin(
