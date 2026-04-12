@@ -182,7 +182,7 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
 
         record.executionBountyUsdc = 0;
         USDC.safeTransfer(address(clearinghouse), bounty);
-        clearinghouse.settleUsdc(record.core.accountId, int256(bounty));
+        engine.creditKeeperExecutionBounty(address(uint160(uint256(record.core.accountId))), bounty);
     }
 
     function _releaseCommittedMargin(

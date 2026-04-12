@@ -609,9 +609,11 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         accumulatedFeesUsdc += amountUsdc;
     }
 
-    /// @notice Credits a router-collected keeper execution bounty into the beneficiary's clearinghouse account.
+    /// @notice Credits a router-collected execution bounty into the beneficiary's clearinghouse account.
     /// @dev Realizes carry first when the beneficiary currently has an open position because the
-    ///      clearinghouse settlement credit changes the carry basis.
+    ///      clearinghouse settlement credit changes the carry basis. This helper intentionally uses
+    ///      the current cached mark instead of requiring a fresh mark so failed-order cleanup does not
+    ///      depend on the clearer's or trader's own mark-freshness state.
     function creditKeeperExecutionBounty(
         address beneficiary,
         uint256 amountUsdc
@@ -624,10 +626,9 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         StoredPosition storage pos = _positions[accountId];
         if (pos.size > 0) {
             (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
-            if (!priceFresh) {
-                revert CfdEngine__MarkPriceStale();
+            if (priceFresh) {
+                _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
             }
-            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
         }
 
         clearinghouse.settleUsdc(accountId, int256(amountUsdc));

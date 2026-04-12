@@ -58,6 +58,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
         RefundUser
     }
 
+    enum TerminalFailureKind {
+        Expired,
+        CloseOnly,
+        Slippage,
+        EngineRevert
+    }
+
     ICfdVault internal immutable vault;
     ICfdEngineLens internal immutable engineLens;
     IPyth public pyth;
@@ -562,7 +569,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser);
+            _cleanupOrder(headId, false, _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired));
             skipped++;
         }
     }
@@ -618,7 +625,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 orderId,
                 pythFee,
                 false,
-                order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser,
+                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired),
                 revertOnBlockedExecution
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
@@ -626,7 +633,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
 
         if (executionContext.policy.closeOnly && !order.isClose) {
             emit OrderFailed(orderId, OrderFailReason.CloseOnly);
-            _finalizeOrCleanupOrder(orderId, pythFee, false, FailedOrderOutcome.RefundUser, revertOnBlockedExecution);
+            _finalizeOrCleanupOrder(
+                orderId,
+                pythFee,
+                false,
+                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.CloseOnly),
+                revertOnBlockedExecution
+            );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
         }
 
@@ -650,7 +663,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 orderId,
                 pythFee,
                 false,
-                order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser,
+                _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Slippage),
                 revertOnBlockedExecution
             );
             return revertOnBlockedExecution ? OrderExecutionStepResult.Return : OrderExecutionStepResult.Continue;
@@ -731,7 +744,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
                 break;
             }
             emit OrderFailed(headId, OrderFailReason.Expired);
-            _cleanupOrder(headId, false, order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser);
+            _cleanupOrder(headId, false, _failedOutcomeForTerminalFailure(order, TerminalFailureKind.Expired));
             pruned++;
         }
     }
@@ -872,7 +885,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, Ownable2Step, Pausabl
             }
         }
 
-        return order.isClose ? FailedOrderOutcome.ClearerFull : FailedOrderOutcome.RefundUser;
+        return _failedOutcomeForTerminalFailure(order, TerminalFailureKind.EngineRevert);
+    }
+
+    function _failedOutcomeForTerminalFailure(
+        CfdTypes.Order memory order,
+        TerminalFailureKind failureKind
+    ) internal pure returns (FailedOrderOutcome outcome) {
+        if (order.isClose) {
+            return FailedOrderOutcome.ClearerFull;
+        }
+
+        failureKind;
+        return FailedOrderOutcome.RefundUser;
     }
 
     function _cleanupOrder(

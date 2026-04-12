@@ -92,6 +92,40 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         );
     }
 
+    function test_OpenRefundRealizesTraderCarryBeforeCreditingSettlement() public {
+        bytes32 traderAccountId = bytes32(uint256(uint160(ALICE)));
+
+        _fundTrader(ALICE, 20_000e6);
+        _open(traderAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 warpedTime = block.timestamp + 30 days;
+        vm.warp(warpedTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(warpedTime));
+
+        vm.prank(ALICE);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
+
+        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, traderSettlementBefore),
+            _riskParams().baseCarryBps,
+            30 days
+        );
+
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.prank(KEEPER);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        assertEq(
+            clearinghouse.balanceUsdc(traderAccountId),
+            traderSettlementBefore + 1e6 - expectedCarry,
+            "Open-order refund should realize carry before crediting settlement"
+        );
+    }
+
     function test_SlippageClosePaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
         bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
@@ -151,6 +185,38 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             clearinghouse.balanceUsdc(keeperAccountId),
             keeperSettlementBefore + 1e6 - expectedCarry,
             "Keeper execution bounty credit should realize carry before crediting settlement"
+        );
+    }
+
+    function test_UntypedCloseRevertPaysClearerEvenWhenKeeperMarkIsStale() public {
+        bytes32 accountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+
+        _fundTrader(KEEPER, 20_000e6);
+        _open(keeperAccountId, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+
+        _fundTrader(ALICE, 20_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(ALICE);
+        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+
+        bytes32 positionMarginSlot = keccak256(abi.encode(accountId, uint256(1)));
+        vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        bytes[] memory priceData = new bytes[](1);
+        priceData[0] = abi.encode(uint256(1e8));
+        vm.prank(KEEPER);
+        vm.roll(block.number + 1);
+        router.executeOrder(1, priceData);
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "Failed-order clearer payout should not depend on the keeper having a fresh cached mark"
         );
     }
 

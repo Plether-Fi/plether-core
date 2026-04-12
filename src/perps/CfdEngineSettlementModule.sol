@@ -234,6 +234,11 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
         }
         if (delta.freshTraderPayoutUsdc > 0) {
             host.settlementRecordDeferredTraderPayout(delta.accountId, delta.freshTraderPayoutUsdc);
+            if (delta.pendingCarryUsdc > 0) {
+                ICfdVault(host.vault()).routeLpValue(
+                    delta.pendingCarryUsdc, ICfdVault.LpValueMode.ImplicitRetainedValue
+                );
+            }
         }
         if (delta.badDebtUsdc > 0) {
             host.settlementAccumulateBadDebt(delta.badDebtUsdc);
