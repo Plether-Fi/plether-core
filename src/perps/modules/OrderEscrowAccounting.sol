@@ -166,6 +166,13 @@ abstract contract OrderEscrowAccounting is IOrderRouterAccounting {
             return 0;
         }
         record.executionBountyUsdc = 0;
+        if (record.core.isClose) {
+            bytes32 keeperAccountId = bytes32(uint256(uint160(msg.sender)));
+            USDC.safeTransfer(address(clearinghouse), executionBountyUsdc);
+            clearinghouse.settleUsdc(keeperAccountId, int256(executionBountyUsdc));
+            return executionBountyUsdc;
+        }
+
         USDC.safeTransfer(msg.sender, executionBountyUsdc);
     }
 

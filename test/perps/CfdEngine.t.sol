@@ -747,6 +747,51 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
+    function test_ClaimDeferredPayout_RealizesCarryBeforeCreditingSettlement() public {
+        address trader = address(0xD30B);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 20_000e6);
+
+        _open(accountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        stdstore.target(address(engine)).sig("deferredPayoutUsdc(bytes32)").with_key(accountId)
+            .checked_write(uint256(5000e6));
+        stdstore.target(address(engine)).sig("totalDeferredPayoutUsdc()").checked_write(uint256(5000e6));
+
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(accountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            30 days
+        );
+
+        usdc.mint(address(pool), 5000e6);
+        uint256 poolRawBefore = pool.rawAssets();
+        uint256 poolAccountedBefore = pool.accountedAssets();
+
+        vm.prank(trader);
+        engine.claimDeferredPayout(accountId);
+
+        assertEq(
+            clearinghouse.balanceUsdc(accountId),
+            settlementBefore + 5000e6 - expectedCarry,
+            "Deferred payout claim should realize carry before crediting settlement"
+        );
+        assertEq(
+            pool.rawAssets(),
+            poolRawBefore + expectedCarry - 5000e6,
+            "Claim should net payout against realized carry cash flow"
+        );
+        assertEq(
+            pool.accountedAssets(),
+            poolAccountedBefore + expectedCarry - 5000e6,
+            "Claim should keep accounted assets aligned with net physical cash after carry realization"
+        );
+    }
+
     function test_ClaimDeferredPayout_AllowsPermissionlessHeadService() public {
         address trader = address(0xD307);
         address relayer = address(0xD308);
@@ -1130,6 +1175,50 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.accumulatedFeesUsdc(), feesBefore, "Servicing deferred claims must not burn fee accounting");
     }
 
+    function test_ClaimDeferredClearerBounty_RealizesCarryBeforeCreditingSettlement() public {
+        address keeper = address(0xFEE6);
+        bytes32 keeperAccountId = bytes32(uint256(uint160(keeper)));
+        _fundTrader(keeper, 20_000e6);
+
+        _open(keeperAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        vm.prank(address(router));
+        engine.recordDeferredClearerBounty(keeper, 5000e6);
+
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, settlementBefore),
+            _riskParams().baseCarryBps,
+            30 days
+        );
+
+        usdc.mint(address(pool), 5000e6);
+        uint256 poolRawBefore = pool.rawAssets();
+        uint256 poolAccountedBefore = pool.accountedAssets();
+
+        vm.prank(keeper);
+        engine.claimDeferredClearerBounty();
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId),
+            settlementBefore + 5000e6 - expectedCarry,
+            "Deferred clearer bounty claim should realize carry before crediting settlement"
+        );
+        assertEq(
+            pool.rawAssets(),
+            poolRawBefore + expectedCarry - 5000e6,
+            "Clearer claim should net payout against realized carry cash flow"
+        );
+        assertEq(
+            pool.accountedAssets(),
+            poolAccountedBefore + expectedCarry - 5000e6,
+            "Clearer claim should keep accounted assets aligned with net physical cash after carry realization"
+        );
+    }
+
     function test_AddMargin_UpdatesPositionAndSideTotals() public {
         address trader = address(0xABCD);
         bytes32 accountId = bytes32(uint256(uint160(trader)));
@@ -1183,6 +1272,19 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         vm.expectRevert(CfdEngine.CfdEngine__PositionTooSmall.selector);
         engine.addMargin(accountId, 0);
+    }
+
+    function test_AddMargin_RevertsOnStaleMark() public {
+        address trader = address(0xABD3);
+        bytes32 accountId = bytes32(uint256(uint160(trader)));
+        _fundTrader(trader, 10_000e6);
+        _open(accountId, CfdTypes.Side.BULL, 20_000e18, 2000e6, 1e8);
+
+        vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+
+        vm.prank(trader);
+        vm.expectRevert(CfdEngine.CfdEngine__MarkPriceStale.selector);
+        engine.addMargin(accountId, 100e6);
     }
 
     function test_DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation() public {

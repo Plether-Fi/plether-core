@@ -36,6 +36,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_ExpiredClosePaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
         _fundTrader(ALICE, 20_000e6);
         _open(accountId, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
 
@@ -43,7 +44,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
         bytes[] memory empty;
@@ -51,7 +52,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 1e6, "Expired close should pay the clearer");
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "Expired close should credit the clearer clearinghouse balance"
+        );
         assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Expired close should not refund the trader wallet");
     }
 
@@ -78,6 +83,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_SlippageClosePaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
         usdc.mint(ALICE, 251_500_000);
         vm.startPrank(ALICE);
         usdc.approve(address(clearinghouse), 251_500_000);
@@ -94,14 +100,18 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
 
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
         bytes[] memory closePrice = new bytes[](1);
         closePrice[0] = abi.encode(uint256(1e8));
         vm.prank(KEEPER);
         vm.roll(block.number + 1);
         router.executeOrder(2, closePrice);
 
-        assertEq(usdc.balanceOf(KEEPER) - keeperWalletBefore, 1e6, "Close slippage miss should pay the clearer");
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
+            1e6,
+            "Close slippage miss should credit the clearer clearinghouse balance"
+        );
     }
 
     function test_ProtocolInvalidationRefundsTrader() public {

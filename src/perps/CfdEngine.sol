@@ -626,8 +626,8 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
             revert CfdEngine__NoOpenPosition();
         }
 
-        uint256 price = lastMarkPrice;
-        if (price == 0) {
+        (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+        if (!priceFresh) {
             revert CfdEngine__MarkPriceStale();
         }
         _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
@@ -670,6 +670,15 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     function claimDeferredPayout(
         bytes32 accountId
     ) external nonReentrant {
+        StoredPosition storage pos = _positions[accountId];
+        if (pos.size > 0) {
+            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+            if (!priceFresh) {
+                revert CfdEngine__MarkPriceStale();
+            }
+            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+        }
+
         uint256 amount = deferredPayoutUsdc[accountId];
         if (amount == 0) {
             revert CfdEngine__NoDeferredPayout();
@@ -692,6 +701,16 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
     ///      rather than attempting a direct USDC wallet transfer.
     function claimDeferredClearerBounty() external nonReentrant {
         address beneficiary = msg.sender;
+        bytes32 accountId = bytes32(uint256(uint160(beneficiary)));
+        StoredPosition storage pos = _positions[accountId];
+        if (pos.size > 0) {
+            (bool priceFresh, uint256 price) = _tryGetFreshLiveMarkPrice();
+            if (!priceFresh) {
+                revert CfdEngine__MarkPriceStale();
+            }
+            _realizeCarryFromSettlement(accountId, pos, price, _physicalReachableCollateralUsdc(accountId));
+        }
+
         uint256 amount = deferredClearerBountyUsdc[beneficiary];
         if (amount == 0) {
             revert CfdEngine__NoDeferredClearerBounty();
@@ -705,7 +724,7 @@ contract CfdEngine is IWithdrawGuard, Ownable2Step, ReentrancyGuardTransient {
         deferredClearerBountyUsdc[beneficiary] -= claimAmountUsdc;
         totalDeferredClearerBountyUsdc -= claimAmountUsdc;
         vault.payOut(address(clearinghouse), claimAmountUsdc);
-        clearinghouse.settleUsdc(bytes32(uint256(uint160(beneficiary))), int256(claimAmountUsdc));
+        clearinghouse.settleUsdc(accountId, int256(claimAmountUsdc));
 
         emit DeferredClearerBountyClaimed(beneficiary, claimAmountUsdc);
     }

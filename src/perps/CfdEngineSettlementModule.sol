@@ -151,8 +151,6 @@ contract CfdEngineSettlementModule is ICfdEngineSettlementModule {
             if (delta.badDebtUsdc > 0) {
                 host.settlementAccumulateBadDebt(delta.badDebtUsdc);
             }
-        } else if (delta.pendingCarryUsdc > 0) {
-            ICfdVault(host.vault()).recordTradingRevenueInflow(delta.pendingCarryUsdc);
         }
 
         if (delta.executionFeeUsdc > 0) {
