@@ -1,3 +1,13 @@
+- [x] Fix open-path post-realization risk check so pending carry is not double-counted
+- [x] Add a carry-aware keeper bounty credit path for clearinghouse settlement credits
+- [x] Add regressions covering both verified findings and run targeted Forge verification
+
+Review:
+- Updated `src/perps/libraries/CfdEnginePlanLib.sol` so the post-open projected risk state now treats the snapshot as already carry-realized after `_applyPendingCarryRealizationToOpenSnapshot(...)` and no longer subtracts `pendingCarryUsdc` a second time during the projected equity check.
+- Added `creditKeeperExecutionBounty(...)` to `src/perps/CfdEngine.sol` plus the engine interfaces, and routed `src/perps/modules/OrderEscrowAccounting.sol` through that helper so keeper bounty credits realize carry first when the beneficiary account has an open position before settlement balance is increased.
+- Added a planner regression in `test/perps/CfdEnginePlanRegression.t.sol` proving an open in the old double-count window now stays valid, and added a keeper-bounty regression in `test/perps/OrderRouterPolicyMatrix.t.sol` proving the new helper debits accrued carry before crediting settlement.
+- Verified green with `forge test --match-path test/perps/CfdEnginePlanRegression.t.sol --match-test "test_PlanOpen_DoesNotDoubleCountRealizedCarryInProjectedRisk|test_PlanOpen_ReportsPendingCarry"` and `forge test --match-path test/perps/OrderRouterPolicyMatrix.t.sol --match-test "test_ExpiredClosePaysClearer|test_SlippageClosePaysClearer|test_UserInvalidPaysClearer|test_CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement"`.
+
 - [x] Rewrite `src/perps/README.md` into a basics-first audit packet entry doc
 - [x] Sweep core perps NatSpec for stale funding / queue / deferred-claim language
 - [x] Add missing high-signal NatSpec on public lenses and settlement surfaces

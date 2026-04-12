@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CfdEngine} from "../../src/perps/CfdEngine.sol";
 import {CfdTypes} from "../../src/perps/CfdTypes.sol";
 import {IOrderRouterAccounting} from "../../src/perps/interfaces/IOrderRouterAccounting.sol";
+import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -94,10 +95,10 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     function test_SlippageClosePaysClearer() public {
         bytes32 accountId = bytes32(uint256(uint160(ALICE)));
         bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
-        usdc.mint(ALICE, 251_500_000);
+        usdc.mint(ALICE, 400_500_000);
         vm.startPrank(ALICE);
-        usdc.approve(address(clearinghouse), 251_500_000);
-        clearinghouse.deposit(accountId, 251_500_000);
+        usdc.approve(address(clearinghouse), 400_500_000);
+        clearinghouse.deposit(accountId, 400_500_000);
         vm.stopPrank();
 
         vm.prank(ALICE);
@@ -121,6 +122,35 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
             clearinghouse.balanceUsdc(keeperAccountId) - keeperSettlementBefore,
             1e6,
             "Close slippage miss should credit the clearer clearinghouse balance"
+        );
+    }
+
+    function test_CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement() public {
+        bytes32 keeperAccountId = bytes32(uint256(uint160(KEEPER)));
+
+        _fundTrader(KEEPER, 20_000e6);
+        _open(keeperAccountId, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+
+        uint256 warpedTime = block.timestamp + 30 days;
+        vm.warp(warpedTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(warpedTime));
+
+        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccountId);
+        uint256 expectedCarry = PositionRiskAccountingLib.computePendingCarryUsdc(
+            PositionRiskAccountingLib.computeLpBackedNotionalUsdc(100_000e18, 1e8, keeperSettlementBefore),
+            _riskParams().baseCarryBps,
+            30 days
+        );
+
+        usdc.mint(address(clearinghouse), 1e6);
+        vm.prank(address(router));
+        engine.creditKeeperExecutionBounty(KEEPER, 1e6);
+
+        assertEq(
+            clearinghouse.balanceUsdc(keeperAccountId),
+            keeperSettlementBefore + 1e6 - expectedCarry,
+            "Keeper execution bounty credit should realize carry before crediting settlement"
         );
     }
 

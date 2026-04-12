@@ -11,6 +11,7 @@ import {OrderRouter} from "../../src/perps/OrderRouter.sol";
 import {TrancheVault} from "../../src/perps/TrancheVault.sol";
 import {IMarginClearinghouse} from "../../src/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "../../src/perps/libraries/CfdEnginePlanLib.sol";
+import {MarginClearinghouseAccountingLib} from "../../src/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "../../src/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockUSDC} from "../mocks/MockUSDC.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
@@ -332,6 +333,76 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
 
         assertGt(delta.pendingCarryUsdc, 0, "Open plan should report observational pending carry");
+    }
+
+    function test_PlanOpen_DoesNotDoubleCountRealizedCarryInProjectedRisk() public {
+        bytes32 accountId = bytes32(uint256(0xC411));
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.accountId = accountId;
+        snap.position = CfdTypes.Position({
+            size: 100_000e18,
+            margin: 2_500e6,
+            entryPrice: 1e8,
+            maxProfitUsdc: 100_000e6,
+            side: CfdTypes.Side.BULL,
+            lastUpdateTime: 0,
+            lastCarryTimestamp: 1,
+            vpiAccrued: 0
+        });
+        snap.currentTimestamp = uint64(30 days + 1);
+        snap.lastMarkPrice = 1e8;
+        snap.lastMarkTime = uint64(block.timestamp);
+        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e6,
+            totalMargin: 2_500e6
+        });
+        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+            maxProfitUsdc: 100_000e6,
+            openInterest: 100_000e18,
+            entryNotional: 100_000e6,
+            totalMargin: 2_500e6
+        });
+        snap.vaultAssetsUsdc = 2_000_000e6;
+        snap.vaultCashUsdc = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 2_500e6,
+            totalLockedMarginUsdc: 2_500e6,
+            activePositionMarginUsdc: 2_500e6,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: 0
+        });
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
+            positionMarginUsdc: 2_500e6,
+            committedOrderMarginUsdc: 0,
+            reservedSettlementUsdc: 0,
+            totalLockedMarginUsdc: 2_500e6
+        });
+        snap.capPrice = CAP_PRICE;
+        snap.riskParams = _riskParams();
+
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
+            snap, _openOrder(accountId, CfdTypes.Side.BULL, 5_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
+        );
+
+        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
+            MarginClearinghouseAccountingLib.planFundingLossConsumption(snap.accountBuckets, delta.pendingCarryUsdc);
+        uint256 reachableCollateralAfterCarry = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
+        uint256 reachableCollateralAfterTrade = reachableCollateralAfterCarry - uint256(delta.tradeCostUsdc);
+
+        assertTrue(delta.valid, "Planner should accept opens once the carry-realized snapshot still clears IMR");
+        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
+        assertGe(
+            reachableCollateralAfterTrade,
+            delta.openState.initialMarginRequirementUsdc,
+            "Carry-realized collateral should satisfy IMR without subtracting carry again"
+        );
+        assertLt(
+            reachableCollateralAfterTrade - delta.pendingCarryUsdc,
+            delta.openState.initialMarginRequirementUsdc,
+            "Old double-counted carry would have rejected this otherwise-valid open"
+        );
     }
 
     function test_PlanOpen_CreditsNegativeTradeCostIntoReachableCollateral() public view {
